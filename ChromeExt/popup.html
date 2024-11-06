@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <img src="icon.png" alt="ScenePlay">
+</head>
+<body>
+  <input type="text" id="websiteUrl" placeholder="Enter your website URL">
+  <button id="saveUrlButton">Save URL</button> <!-- New Button to Save URL -->
+  <input type="text" id="name" placeholder="Name of video">
+  <button id="fetchTitleButton">Fetch Video Title</button> <!-- Button to Fetch Title -->
+
+  <div id="mediaTypeContainer">
+    <label for="mediaType-dropdown">Select a Media Type:</label>
+    <div id="mediaType-dropdown"></div>
+  </div>
+
+  <div id="dropdownContainer">
+    <label for="scene-dropdown">Select a Scene:</label>
+    <div id="scene-dropdown"></div>
+  </div>
+
+  <button id="refreshScenesButton">Refresh Scenes</button> <!-- Button to Refresh Scenes -->
+  <br>
+
+  <button id="shareButton">Send</button>
+  <div id="status-message"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

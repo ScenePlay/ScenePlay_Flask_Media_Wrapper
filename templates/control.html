@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+        <div id="container">
+            <div class="title">
+                <h1>Queue Music Controls</h1>
+            </div>
+            <div id="content">
+                <form method="post" action="{{ url_for('controls') }}">
+                  <label for="song">Enter Name of Song</label>
+                  <input type="text" name="song" /><br />
+                  <input type="submit" name="submit" value="Play By Name"/><br /><br />
+				  <input type="submit" name="submit" value="Home"/><br /><br />
+				  <input type="submit" name="submit" value="Kill Queue"><br /><br />
+				  <input type="submit" name="submit" value="Show All Songs"><br /><br />
+				  <input type="submit" name="submit" value="Text to Speech">
+				  <br /><br /><br /><br /><br /><br />
+				  <input type="submit" name="submit" value="Find and Store All Songs">
+				  <input type="password" name="password" />
+                </form>
+            </div>
+        </div>
+
+{% endblock %}

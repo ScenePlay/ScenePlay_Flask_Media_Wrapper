@@ -1,0 +1,24 @@
+Setup
+    Step 1
+    open Terminal
+        Enter 
+            sudo visudo
+        At the end of the file paste 
+            username ALL=(ALL) NOPASSWD:ALL
+        Save and exit 
+
+    Step 2  (** Info Creates a Virtual Environment venv)
+    Open Terminal
+        From the /ScenePlay directory
+        Enter
+            ./requirements.sh
+        
+    Step 3  (** Info Command Activates the Virtual Environment venv)
+        Enter
+            ./startApp.sh
+         
+    Step 4
+        In Browser 
+            type http://<serverIP>:8086
+
+    repeat Step3-4 for the future app use.

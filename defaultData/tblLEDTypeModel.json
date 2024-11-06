@@ -1,0 +1,82 @@
+[
+  {
+    "modelName": "Sparkle",
+    "ledJSON": "{\"type\": \"sparkle\", \"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 1000000}"
+  },
+  {
+    "modelName": "Rainbow Wave",
+    "ledJSON": "{\"type\": \"rainbow_wave\",\"iterations\":1000000}"
+  },
+  {
+    "modelName": "Beam",
+    "ledJSON": "{\"type\": \"beam\",\"color\": [0,0,0],\"wait_ms\": 2,\"iterations\": 2,\"direction\":1}"
+  },
+  {
+    "modelName": "Color Wipe",
+    "ledJSON": "{\"type\": \"color_wipe\",\"color\": [0,0,0],\"wait_ms\": 10,\"direction\": 1}"
+  },
+  {
+    "modelName": "Rainbow Rotate",
+    "ledJSON": "{\"type\": \"rainbow_rotate\",\"color\": [0,0,0],\"wait_ms\": 1,\"iterations\": 1000000}"
+  },
+  {
+    "modelName": "Eye Search",
+    "ledJSON": "{\"type\": \"eye\",\"color\": [0,0,0],\"wait_ms\": 15,\"iterations\": 1000000}"
+  },
+  {
+    "modelName": "Solid",
+    "ledJSON": "{\"type\": \"solid\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "lightning strike",
+    "ledJSON": "{\"type\": \"lightning_strike\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "fireworks_simulation",
+    "ledJSON": "{\"type\": \"fireworks_simulation\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "fireworks finale",
+    "ledJSON": "{\"type\": \"fireworks_finale\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "shimmer sine wave",
+    "ledJSON": "{\"type\": \"shimmer_sine_wave\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "shimmer effect",
+    "ledJSON": "{\"type\": \"shimmer_effect\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "marquee effect",
+    "ledJSON": "{\"type\": \"marquee_effect\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "aurora drift",
+    "ledJSON": "{\"type\": \"aurora_drift\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "cosmic vortex",
+    "ledJSON": "{\"type\": \"cosmic_vortex\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "serenity flow",
+    "ledJSON": "{\"type\": \"serenity_flow\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "tranquil drift",
+    "ledJSON": "{\"type\": \"tranquil_drift\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "digital dreamscape",
+    "ledJSON": "{\"type\": \"digital_dreamscape\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "thunderstorm",
+    "ledJSON": "{\"type\": \"thunderstorm\",\"color\": [0,0,0]}"
+  },
+  {
+    "modelName": "joyful celebration",
+    "ledJSON": "{\"type\": \"joyful_celebration\",\"color\": [0,0,0]}"
+  }
+]

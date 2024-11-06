@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dropdown Example</title>
+</head>
+<body>
+    <select id="myDropdown"></select>
+    <script>
+    
+    
+    class Dropdown {
+          constructor() {
+              this.items = [];
+          }
+
+          // Method to add an item with an ID to the dropdown list
+          addItem(id, item) {
+              this.items.push({ id, item });
+          }
+
+          // Method to retrieve the list of items in the dropdown
+          getItems() {
+              return this.items;
+          }
+
+          // Method to populate the dropdown element
+          populateDropdown(dropdownElementId) {
+              const dropdownElement = document.getElementById(dropdownElementId);
+              if (!dropdownElement) {
+                  console.error(`Element with id ${dropdownElementId} not found.`);
+                  return;
+              }
+
+              // Clear existing options
+              dropdownElement.innerHTML = '';
+
+              // Add new options
+              this.items.forEach(({ id, item }) => {
+                  const option = document.createElement('option');
+                  option.value = id;
+                  option.textContent = item;
+                  dropdownElement.appendChild(option);
+              });
+          }
+      }
+
+// Example usage
+const dropdown = new Dropdown();
+dropdown.addItem(1, "Option 1");
+dropdown.addItem(2, "Option 2");
+dropdown.addItem(3, "Option 3");
+dropdown.addItem(3, "Option 4");
+// Populate the HTML dropdown
+dropdown.populateDropdown('myDropdown');
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=sceneplay.desktop
+Exec=/something.sh

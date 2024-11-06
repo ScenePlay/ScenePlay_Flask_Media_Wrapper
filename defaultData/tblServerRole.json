@@ -1,0 +1,22 @@
+[
+  {
+    "name": "None",
+    "active": 1,
+    "orderBy": 10
+  },
+  {
+    "name": "Main",
+    "active": 1,
+    "orderBy": 20
+  },
+  {
+    "name": "Remote",
+    "active": 1,
+    "orderBy": 30
+  },
+  {
+    "name": "WLED",
+    "active": 1,
+    "orderBy": 40
+  }
+]

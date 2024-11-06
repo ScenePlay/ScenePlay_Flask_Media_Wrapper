@@ -1,0 +1,12 @@
+[
+  {
+    "campaign_name": "Main",
+    "active": 1,
+    "order_by": "10"
+  },
+  {
+    "campaign_name": "FreeWill",
+    "active": 1,
+    "order_by": "20"
+  }
+]

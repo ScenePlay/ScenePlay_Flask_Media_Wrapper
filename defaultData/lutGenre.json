@@ -1,0 +1,14 @@
+[
+  {
+    "genre": "",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 10
+  },
+  {
+    "genre": "D&D",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 20
+  }
+]

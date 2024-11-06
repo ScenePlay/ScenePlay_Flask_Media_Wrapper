@@ -1,0 +1,15 @@
+<html>
+    <head>
+        <title>All Songs</title>
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='style.css') }}">    
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='bootstrap.min.css') }}" />
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='sqlbrowse.css') }}" />
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='syntax-highlight.css') }}" />
+    </head>
+<div id="content">
+<form method="post"  action="{{ url_for('controls') }}">
+<h1>{{pk}}</h1>
+<input type="submit" name="submit" value="Show All Songs"><br /><br />
+</form>
+</div>
+</html>
