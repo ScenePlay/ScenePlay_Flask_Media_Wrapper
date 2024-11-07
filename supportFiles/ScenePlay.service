@@ -6,9 +6,8 @@ After=network.target
 Type=simple
 Restart=always
 RestartSec=1
-#User=
-WorkingDirectory=/home/eric/ScenePlay
-ExecStart=/home/eric/ScenePlay/startApp.sh
+WorkingDirectory=/home/userName/ScenePlay
+ExecStart=/home/userName/ScenePlay/startApp.sh
 
 [Install]
 WantedBy=multi-user.target
