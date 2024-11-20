@@ -164,6 +164,8 @@ def activatescene():
         for row in data:
             #print(row.effect)
             setWledEffect(row.effect,row.pallette,row.color1, row.color2, row.color3, row.speed, row.brightness, row.server_ID)
+    if len(data) == 0:
+        wled_Off()
         
     if ledMdl is not None and len(ledMdl) > 0:
             ledPattern = prepJsonRemote(ledMdl, scnPat)
@@ -174,19 +176,27 @@ def activatescene():
             if is_raspberry_pi() == True:
                 insert_LEDJSON(ledPattern)
                 threaderLED()
-                
-    #added for the Kill Queue Command
-    if id == "-1":
+    else:
         ledPattern = f'{{"patterns\": [{{"type": "solid", "color": [0,0,0]}}]}}'
         ledPattern = json.dumps(str(ledPattern))
         ledPattern = json.loads(ledPattern)
         remoteSend(ledPattern)
-        #TEST
-        wled_Off()
-        #TEST
         if is_raspberry_pi() == True:
             insert_LEDJSON(ledPattern)
             threaderLED()
+                
+    #added for the Kill Queue Command
+    # if id == "-1":
+    #     ledPattern = f'{{"patterns\": [{{"type": "solid", "color": [0,0,0]}}]}}'
+    #     ledPattern = json.dumps(str(ledPattern))
+    #     ledPattern = json.loads(ledPattern)
+    #     remoteSend(ledPattern)
+    #     #TEST
+    #     wled_Off()
+    #     #TEST
+    #     if is_raspberry_pi() == True:
+    #         insert_LEDJSON(ledPattern)
+    #         threaderLED()
         
     #time.sleep(1)
     appsettingAudioPlayFlagUpdate(1)
