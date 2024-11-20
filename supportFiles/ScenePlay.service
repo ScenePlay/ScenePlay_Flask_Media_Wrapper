@@ -1,0 +1,15 @@
+[Unit]
+Description=sceneplay
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+WorkingDirectory=/home/userName/ScenePlay
+ExecStart=/home/userName/ScenePlay/startApp.sh
+
+[Install]
+WantedBy=multi-user.target
+
+

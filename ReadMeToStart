@@ -1,0 +1,53 @@
+ScenePlay is a WebServer to be hosted on Mint OS and/or Raspberry Pi OS (Flask Application With Sqlite3 Database).
+Control your Music, Video and WLED or RPiLED through any Web Browser (phone, tablet, computer)
+
+Ideal usage for ScenePlay is to set the atmosphere for board games and/or dungeon masters to play music, video and control WLED or RPiLED.. 
+Having access to youtube.com is a must for this application. Access your content using the chrome extension located in the /ChromeExt folder.
+Goto chrome://extensions/ and set your browerser in Developer Mode. Then click on "Load Unpacked" and select the /ChromeExt folder.
+The extension only will work on YouTube pages.
+
+
+Setup   
+    Clone Repository
+    open ssh Terminal 
+    Step 1 
+        #make sure you are in /home/<username>. ScenePlay will create a directory in this user space.
+        #this will check your directory. If you are logged in as sammy it will say /home/sammy
+            pwd  
+        #upgrade 
+            sudo apt-get update && sudo apt-get -y upgrade
+        #clone
+            git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
+    Step 2
+    open ssh Terminal
+        #Enter 
+            sudo visudo
+        #After root user entry paste ex. sammy   ALL=(ALL) NOPASSWD:ALL
+            <username>  ALL=(ALL) NOPASSWD:ALL
+        #Save and exit 
+
+    Step 3  (** Info Creates a Virtual Environment venv)
+    Open ssh Terminal
+        #From the /ScenePlay directory
+        #Enter
+            cd ~/ScenePlay
+            sudo chmod +x requirements.sh
+            ./requirements.sh
+        #Reboot if needed
+            sudo reboot
+    Step 4
+        In Browser Type
+            http://<serverIP>
+            or
+            http://<serverIP>:8086
+    Step 5 Optional 
+        Install vnc using the 
+                sudo raspi-config
+            #toggle down to 
+                Interface Options
+            #toggle down to 
+                VNC 
+                #enable then exit
+    Step 6 Optional
+        https://www.realvnc.com/en/connect/download/viewer
+        download your OS's version of the viewer

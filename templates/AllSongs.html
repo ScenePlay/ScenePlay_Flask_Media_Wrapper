@@ -1,0 +1,42 @@
+ <html>
+    <head>
+        <title>All Songs</title>
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='style.css') }}">    
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='bootstrap.min.css') }}" />
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='sqlbrowse.css') }}" />
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='syntax-highlight.css') }}" />
+
+    </head>
+    <body>
+        <div id="container">
+            <div class="title">
+                <h1>All Song</h1>
+            </div>
+            <div id="content">
+                <form method="post" action="{{ url_for('controls') }}" >
+				     <label for="form">All Songs</label>
+					 <input type="submit" name="submit" value="Add to Queue">
+				     <input type="submit" name="submit" value="Go to Controls"> 
+					 </br>
+					 <label for="form">Songs</label>
+					 <table class="table table-striped small cell-content">
+						{% for item in items %}
+                        <tr>
+                            <td>
+							<input type="checkbox" id="id_{{item[0]}}" name="songs" value="{{item[0]}}">{{item[1]}}</input></br>
+                            </td>
+                            <td>
+                                {% set pk = item[0] %}
+                                <a class="small" href="{{ url_for('music_update', pk=pk)}}">Edit</a>
+                                <a class="small" href="{{ url_for('controls')}}">Delete</a>
+                             </td>
+                        </tr>
+						{% endfor %}
+					</table>
+					<input type="submit" name="submit" value="Delete Selected">
+					<input type="password" name="password" />
+                </form>
+            </div>
+        </div>
+    </body>
+</html>

@@ -1,0 +1,17 @@
+[
+  {
+    "campaign_name": "Default",
+    "active": 1,
+    "order_by": "10"
+  },
+  {
+    "campaign_name": "Campaign 1",
+    "active": 1,
+    "order_by": "20"
+  },
+  {
+    "campaign_name": "Campaign 2",
+    "active": 1,
+    "order_by": "30"
+  }
+]

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+		<script>
+			setTimeout(function() { window.location=window.location;},120000);
+		</script>
+        <div id="container">
+            <div id="content">
+                <form method="post" action="{{ url_for('main.home') }}">
+					<h1 style="display: inline-block;">Scenes</h1>
+                    <h2><label style="display: inline-block; margin-left: 10px;" for="campaignDropdown">Select By Campaign:</label>
+						<select id="campaignDropdown" onchange="campaignChange()" style="display: inline-block; margin-left: 10px;">
+							<option value="0">All</option>
+							{% for campaign in Campaigns %}
+								{% if campaign[0] == campaignSelected %}
+									<option selected value="{{campaign[0]}}">{{campaign[1]}}</option>
+								{% 	else %}
+									<option value="{{campaign[0]}}">{{campaign[1]}}</option>
+								{% endif %}
+							{% endfor %}
+						</select>
+					</h2>
+					<div class="flex-container" style="border: 4px solid black;">
+						{% for item in Scenes %}
+							{% if item.get('effectName') is not none and item.get('modelName') is not none %}
+									<div class="card text" 
+										style="background: linear-gradient(to bottom, 
+											rgb(255, 255, 255) 0% 10%,
+											rgb({{ item.get('color') if item.get('color') is not none else '255,255,255' }}) {{'40%'  }} {{'57%'}},
+											rgb({{'0, 0, 0' if item.get('effectName') is not none or item.get('modelName' is not none ) else '125, 145, 200'}}) 57% 58%,
+											rgb({{ item.get('color1') if item.get('color1') is not none else '255,255,255' }}) {{'58%' }} {{'85%' }},
+											rgb(255,255,255) 115%
+											); 
+											border: 4px solid black;">
+											<a href="/activatescenes/?id={{item['scene_ID']}}" class="btn btn-primary" style="border: 4px solid black;">{{item['sceneName']}}</a>
+											<strong><label style="mix-blend-mode: difference; color:white;" >{{'R:'+item['modelName'] if item.get('modelName') is not none else '...'}}</label></strong>
+											<strong><label style="mix-blend-mode: difference; color:white;" >{{'W:'+item['effectName'] if item.get('effectName') is not none else '...'}}</label></strong>
+									</div>
+							{% elif item.get('effectName') is none  and item.get('modelName') is not none %}
+									<div class="card text" 
+										style="background: linear-gradient(to bottom, 
+											rgb(255, 255, 255) 0% 10%,
+											rgb({{ item.get('color') if item.get('color') is not none else '255,255,255' }}) {{'40%' if item.get('modelName') is not none else '0%' }} {{'85%'}},
+											rgb(255,255,255) 110%
+											); 
+											border: 4px solid black;">
+											<a href="/activatescenes/?id={{item['scene_ID']}}" class="btn btn-primary" style="border: 4px solid black;">{{item['sceneName']}}</a>
+											<strong><label style="mix-blend-mode: difference; color:white;padding-top: 1.5em;" >{{'R:'+item['modelName'] if item.get('modelName') is not none else '...'}}</label></strong>
+									</div> 
+							{% elif item.get('modelName') is none and item.get('effectName') is not none%}
+									<div class="card text"  
+										style="background: linear-gradient(to bottom, 
+											rgb(255, 255, 255) 0% 10%,
+											rgb({{ item.get('color1') if item.get('color1') is not none else '255,255,255' }}) {{'40%' if item.get('effectName') is not none else '109%' }} {{'85%' }},
+											rgb(255,255,255) 110%
+											); 
+											border: 4px solid black;">
+											<a href="/activatescenes/?id={{item['scene_ID']}}" class="btn btn-primary" style="border: 4px solid black;">{{item['sceneName']}}</a>
+											<strong><label style="mix-blend-mode: difference; color:white; padding-top: 1.5em;" >{{'W:'+item['effectName'] if item.get('effectName') is not none else '...'}}</label></strong>
+									</div>
+							{% else %}
+									<div class="card text" 
+									style="background: linear-gradient(to bottom, 
+											rgb(0, 0, 0) 0% 10%,
+											rgb({{ item.get('color') if item.get('color') is not none else '255,255,255' }}) {{'10%' if item.get('modelName') is not none else '0%' }} {{'47%' if item.get('modelName') is not none else '0%' }},
+											rgb({{'130, 144, 234' if item.get('effectName') is not none or item.get('modelName' is not none ) else '125, 145, 200'}}) 57% 58%,
+											rgb({{ item.get('color1') if item.get('color1') is not none else '255,255,255' }}) {{'70%' if item.get('effectName') is not none else '109%' }} {{'90%' if item.get('effectName') is not none else '111%' }}
+											); 
+											border: 4px solid black;">
+											<a href="/activatescenes/?id={{item['scene_ID']}}" class="btn btn-primary" style="border: 4px solid black;">{{item['sceneName']}}</a>
+									</div>
+							{% endif %}
+						{% endfor %}
+					</div>
+                </form>
+            </div>
+        </div>
+{% endblock %}

@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+{% block content %}
+  <body onload="addButton()">
+    <div>
+      <h1>WLED Pattern Table</h1>
+      <hr>
+      <div id="table"></div>
+    </div>
+    <script>
+      const tableDiv = document.getElementById('table');
+      function addButton() {
+      // Select the element next to which the button should be added
+          var element = document.querySelector("div.gridjs-search");
+
+      // Create a new button element
+          var button = document.createElement("input");
+          button.textContent = "Click me";
+          button.className = "btn btn-primary";
+          button.setAttribute("type","submit") 
+          button.setAttribute("value","Add New Row")
+          button.style = "float: right; margin-right: 100px";
+          button.onclick = function() {
+              //alert("Button clicked!");
+              fetch('/api/wledpatternaddrow', {
+              method: 'GET',
+              headers: {'Content-Type': 'application/json'},
+              });
+              window.location.reload();
+          }
+          element.parentNode.insertBefore(button, element.nextSibling);
+      }
+      class Dropdown {
+          constructor() {
+              this.items = [];
+          }
+          // Method to add an item with an ID to the dropdown list
+          addItem(id, item) {
+              this.items.push({ id, item });
+          }
+          // Method to retrieve the list of items in the dropdown
+          getItems() {
+              return this.items;
+          }
+          //Method to populate the dropdown element
+          populateDropdown(dropdownElement) {
+              //const dropdownElement = document.getElementById(dropdownElementId);
+              if (!dropdownElement) {
+                  console.error(`Element with id ${dropdownElementId} not found.`);
+                  return;
+              }
+
+              // Clear existing options
+              dropdownElement.innerHTML = '';
+
+              // Add new options
+              this.items.forEach(({ id, item }) => {
+                  const option = document.createElement('option');
+                  option.value = id;
+                  option.textContent = item;
+                  dropdownElement.appendChild(option);
+              });
+          }
+      }
+      const directionDD = [
+        { value: "1", label: "clockwise" },
+        { value: "-1", label: "counter" }
+      ];
+      const sceneDD = new Dropdown
+      fetch('/api/scenes')
+      .then(response => response.json())
+      .then(data => {
+        sceneDD.addItem(0, '')
+        for (const item of data.data) {
+          sceneDD.addItem(item.scene_ID, item.sceneName)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+      const serverDD = new Dropdown
+      fetch('/api/serverIP')
+      .then(response => response.json())
+      .then(data => {
+        serverDD.addItem(0, '')
+        for (const item of data.data) {
+          if (item.serverroleid == 4) // 4 = WLED
+          serverDD.addItem(item.ServerIP_ID, item.serverName)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+      const effectDD = new Dropdown
+      fetch('/api/effects')
+      .then(response => response.json())
+      .then(data => {
+        effectDD.addItem(0, '')
+        for (const item of data.data) {
+          effectDD.addItem(item.ef_ID, item.effectName.split('@')[0])
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+      const palletteDD = new Dropdown
+      fetch('/api/pallettes')
+      .then(response => response.json())
+      .then(data => {
+        palletteDD.addItem(0, '')
+        for (const item of data.data) {
+          palletteDD.addItem(item.pa_ID, item.palletteName)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+      const updateUrl = (prev, query) => {
+        return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
+      };
+
+      const editableCellAttributes = (data, row, col) => {
+          if (row) {
+            return {contentEditable: 'true', 'data-element-id': row.cells[0].data};
+          }
+          else {
+            return {};
+          }
+      };
+      // cid  name            type     notnull  dflt_value  pk
+      // ---  --------------  -------  -------  ----------  --
+      // 0    wledPattern_ID  INTEGER  0                    1 
+      // 1    scene_ID        INT      0                    0 
+      // 2    server_ID       INT      0                    0 
+      // 3    effect          INT      0                    0 
+      // 4    pallette        INT      0                    0 
+      // 5    color1          TEXT     0                    0 
+      // 6    color2          TEXT     0                    0 
+      // 7    color3          TEXT     0                    0 
+      // 8    speed           INT      0                    0 
+      // 9    brightness      INT      0                    0 
+      // 10   orderBy         INT      0                    0
+
+      tblColumns = ['wledPattern_ID', 'scene_ID','server_ID', 'effect', 'pallette', 'color1', 'color2', 'color3', 'speed', 'brightness', 'orderBy']
+      primeKey = tblColumns[0]
+      new gridjs.Grid({
+        columns: [
+          { id: tblColumns[0], name: 'wledPattern_ID', 'hidden': true },
+          { id: tblColumns[1], name: 'Scenes', sort: false,
+            formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const select = document.createElement("select");
+              sceneDD.populateDropdown(select)
+              select.name = "scenes"
+              select.id = "selectOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              select.setAttribute("onchange","sceneChange()")
+              select.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[1].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(select.outerHTML);
+              } 
+           },
+           { id: tblColumns[2], name: 'Server', sort: false,
+            formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const select = document.createElement("select");
+              serverDD.populateDropdown(select)
+              select.name = "server"
+              select.id = "selectOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              select.setAttribute("onchange","serverChange()")
+              select.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[2].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(select.outerHTML);
+              } 
+           },
+           { id: tblColumns[3], name: 'Effect' , sort: false,
+            formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const selectModel = document.createElement("select");
+              effectDD.populateDropdown(selectModel)
+              selectModel.name = "effectModel"
+              selectModel.id = "selectOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              //console.log(row.cells[1].data.toString())
+              selectModel.setAttribute("onchange","effectChange()")
+              selectModel.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[3].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(selectModel.outerHTML);
+              } 
+          },          
+          { id: tblColumns[4], name: 'Pallette' , sort: false,
+            formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const selectModel = document.createElement("select");
+              palletteDD.populateDropdown(selectModel)
+              selectModel.name = "pallette"
+              selectModel.id = "selectOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              //console.log(row.cells[1].data.toString())
+              selectModel.setAttribute("onchange","palletteChange()")
+              selectModel.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[4].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(selectModel.outerHTML);
+              } 
+          },
+          { id: tblColumns[5], name: 'color1',
+          formatter: function (cellData, row) {
+            const colr = document.createElement("input")            
+            colr.name = "colr1"
+            colr.id =  "colr1_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
+            colr.setAttribute("type","color")
+            rgb = row.cells[5].data.toString().replace("[","").replace("]","").split(",")
+            colr.setAttribute("value",rgbToHex(rgb[0],rgb[1],rgb[2]))
+            colr.setAttribute("onchange","clickColor(0,-1,-1,5,'color1')")
+            return gridjs.html(colr.outerHTML)
+           }
+          },
+          { id: tblColumns[6], name: 'color2',
+          formatter: function (cellData, row) {
+            const colr = document.createElement("input")            
+            colr.name = "colr2"
+            colr.id =  "colr2_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
+            colr.setAttribute("type","color")
+            rgb = row.cells[6].data.toString().replace("[","").replace("]","").split(",")
+            colr.setAttribute("value",rgbToHex(rgb[0],rgb[1],rgb[2]))
+            colr.setAttribute("onchange","clickColor(0,-1,-1,5,'color2')")
+            return gridjs.html(colr.outerHTML)
+           }
+          },
+          { id: tblColumns[7], name: 'color3',
+          formatter: function (cellData, row) {
+            const colr = document.createElement("input")            
+            colr.name = "colr3"
+            colr.id =  "colr3_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
+            colr.setAttribute("type","color")
+            rgb = row.cells[7].data.toString().replace("[","").replace("]","").split(",")
+            colr.setAttribute("value",rgbToHex(rgb[0],rgb[1],rgb[2]))
+            colr.setAttribute("onchange","clickColor(0,-1,-1,5,'color3')")
+            return gridjs.html(colr.outerHTML)
+           }
+          },
+          { id: tblColumns[8], name: 'Speed', sort: false,'attributes': editableCellAttributes  },
+          { id: tblColumns[9], name: 'Brightness', sort: false ,'attributes': editableCellAttributes  },
+          { id: tblColumns[10], name: 'OrderBy', sort: false ,'attributes': editableCellAttributes  },
+          {id: 'sendTest', name: 'WLED Test' , sort: false,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const sTest = document.createElement("input");
+              sTest.name = "sTest"
+              sTest.id = "sTest"+ "_ID_" + row.cells[0].data.toString()
+              sTest.setAttribute("type","submit")           
+              sTest.setAttribute("onclick","sTest()")
+              sTest.setAttribute("value","Test")
+              sTest.className = "btn btn-primary";
+              return gridjs.html(sTest.outerHTML);
+              } 
+          },
+          {id: 'dlete', name: 'Delete' , sort: false,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const dlete = document.createElement("input");
+              dlete.name = "Dlete"
+              dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
+              dlete.setAttribute("type","submit")           
+              dlete.setAttribute("onclick","dlete()")
+              dlete.setAttribute("value","Delete")
+              dlete.className = "btn btn-primary";
+              return gridjs.html(dlete.outerHTML);
+              } 
+          },
+        ],
+        server: {
+          url: '/api/wledPattern',
+          then: results => results.data,
+          total: results => results.total,
+        },
+        search: {
+          enabled: true,
+          server: {
+            url: (prev, search) => {
+              return updateUrl(prev, {search});
+            },
+          },
+        },
+        sort: {
+          enabled: true,
+          multiColumn: true,
+          server: {
+            url: (prev, columns) => {
+              const columnIds = tblColumns;
+              const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + columnIds[col.index]);
+              return updateUrl(prev, {sort});
+            },
+          },
+        },
+        pagination: {
+          enabled: true,
+          server: {
+            url: (prev, page, limit) => {
+              return updateUrl(prev, {start: page * limit, length: limit});
+            },
+          },
+        },
+      }).render(tableDiv);
+
+      let savedValue;
+
+      tableDiv.addEventListener('focusin', ev => {
+        if (ev.target.tagName === 'TD') {
+          savedValue = ev.target.textContent;
+        }
+      });
+
+      tableDiv.addEventListener('focusout', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (savedValue !== ev.target.textContent) {
+            saveChange(JSON.stringify({[primeKey]: ev.target.dataset.elementId,[ev.target.dataset.columnId]: ev.target.textContent
+              }))
+          }
+          savedValue = undefined;
+        }
+      });
+
+      function saveChange(json){
+        //console.log(json)
+        fetch('/api/wledPattern', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: json,
+            });
+      }
+
+      function sceneChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("selectOpt_")){
+          jsn = {[primeKey]:id[1],scene_ID:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      function serverChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("selectOpt_")){
+          jsn = {[primeKey]:id[1],server_ID:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      function effectChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        //console.log(elnt)
+        if(ev.id.toString().includes("selectOpt_")){
+          jsn = {[primeKey]:id[1],effect:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+      function palletteChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        //console.log(elnt)
+        if(ev.id.toString().includes("selectOpt_")){
+          jsn = {[primeKey]:id[1],pallette:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      function directionChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("dirOpt_")){
+          jsn = {[primeKey]:id[1],direction:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      tableDiv.addEventListener('keydown', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (ev.key === 'Escape') {
+            ev.target.textContent = savedValue;
+            ev.target.blur();
+          }
+          else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            ev.target.blur();
+          }
+        }
+      });
+
+      function sTest(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("sTest_")){
+          jsn = {[primeKey]:id[1]}
+          console.log(JSON.stringify(jsn))
+            fetch('/api/WLEDTest', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(jsn),
+            });
+        }
+      }
+      
+      function dlete(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("Dlete_")){
+          jsn = {[primeKey]:id[1]}
+          console.log(JSON.stringify(jsn))
+        if (confirm('Are you sure you want to DELETE?')) {
+            jsn = {[primeKey]:id[1]}
+            console.log(JSON.stringify(jsn))
+            fetch('/api/wledpatterndelrow', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(jsn),
+            });
+            window.location.reload();
+        } else {
+          // Do nothing!
+          console.log('Thing was not saved to the database.');
+        }
+          //saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + jsn);
+        }
+      }
+
+    </script>
+  </body>
+  {% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+        <div id="container">
+            <div>
+                <h1>Utilities</h1>
+            </div>
+            <div id="content" align="left">
+                <form method="post" action="{{ url_for('ut.main') }}" class="form">
+                    <div  style="border: 3px solid black;"> 
+                    <h3>Youtube Import</h3>
+					 <input type="text" placeholder="URL Link" name="URLLink" class="form-control mb-3" />
+					 <input type="text" placeholder="File Name" name="FileName" class="form-control mb-3" />
+                     <div style="display: flex; align-items: center;">
+                        <label for="lblmedia" style="margin-right: 10px;">Choose Media:</label>
+                        <select name="Media" id="mediaType">
+                            <optgroup label="Music">
+                                <option value="mp3">MP3</option>
+                            </optgroup>
+                            <optgroup label="Video">
+                                <option value="mp4">MP4</option>
+                                <!-- <option value="webm">WEBM</option> -->
+                            </optgroup>
+                        </select>
+                        <label for="lblscene" style="margin-right: 10px;">Choose Scene:</label>
+                        <select name="Scene" id="sceneType">
+                            {% for scene in Scenes %}
+                                <option value="{{ scene.scene_ID }}">{{ scene.sceneName }}</option>
+                            {% endfor %}
+                        </select>
+
+                    </div>
+                     <br />
+                     <input type="submit" name="submit" value="Process Youtube"/>
+                     <br />
+                     <br />
+                     <br />
+                     </div>
+                     <!-- <label for="form">Load Test Data</label>
+                     <input type="submit" name="submit" value="loadtestdata"/> -->
+                     <br />
+                     <div style="border: 3px solid black;">
+                     <label for="form"><h3 >Find Servers</h3></label>
+                     <input type="submit" name="submit" value="Ping Network"/>
+                     <br />
+                     <br />
+                     </div>
+                     <br />
+                     <div style="border: 3px solid black;">
+                     <label for="form"><h3 >This Server</h3></label>
+                     <input type="submit" name="submit" value="Restart Computer"/>
+                     <br />
+                     <br />
+                     </div>
+                </form>
+            </div>
+        </div>
+{% endblock %}

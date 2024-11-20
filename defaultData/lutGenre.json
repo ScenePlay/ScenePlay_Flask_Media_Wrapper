@@ -1,0 +1,26 @@
+[
+  {
+    "genre": "",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 10
+  },
+  {
+    "genre": "Classical",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 20
+  },
+  {
+    "genre": "Rock",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 30
+  },
+  {
+    "genre": "HipHop",
+    "directory": "//music",
+    "active": 1,
+    "orderBY": 40
+  }
+]

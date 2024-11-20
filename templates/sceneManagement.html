@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scene Management</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+</head>
+<body>
+    <div class="container mt-3">
+        <h1>Scene Management</h1>
+        <table class="table table-bordered table-hover">
+            <thead>
+                <tr>
+                    <th>Scene Name</th>
+                    <th>Active</th>
+                    <th>Order By</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+        <hr>
+        <h3>Add New Scene</h3>
+        <form id="addSceneForm">
+            <div class="mb-3">
+                <label for="sceneName" class="form-label">Scene Name</label>
+                <input type="text" class="form-control" id="sceneName" name="sceneName" required>
+            </div>
+            <div class="mb-3">
+                <label for="isActive" class="form-label">Active</label>
+                <select class="form-select" id="isActive" name="isActive">
+                    <option value="1">Yes</option>
+                    <option value="0">No</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="orderBy" class="form-label">Order By</label>
+                <input type="number" class="form-control" id="orderBy" name="orderBy" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Scene</button>
+        </form>
+
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+        <script>
+            $(document).ready(function() {
+                // Function to fetch and display all scenes
+                function fetchScenes() {
+                    $.ajax({
+                        url: "/scenes", // Replace with your Flask endpoint to get all scenes
+                        dataType: "json",
+                        success: function(data) {
+                            $("tbody").empty(); // Clear existing table content
+                            $.each(data, function(index, scene) {
+                                var tableRow = "<tr>" +
+                                                "<td>" + scene.sceneName + "</td>" +
+                                                "<td>" + (scene.isActive == 1 ? "Yes" : "No") + "</td>" +
+                                                "<td>" + scene.orderBy + "</td>" +
+                                                "<td>" +
+                                                    "<button class='btn btn-sm btn-warning editScene' data-scene-id='" + scene.scene_ID + "'>Edit</button>" +
+                                                    "<button class='btn btn-sm btn-danger deleteScene' data-scene-id='" + scene.scene_ID + "'>Delete</button>" +
+                                                "</td>" +
+                                                "</tr>";
+                                $("tbody").append(tableRow);
+                            });
+                        }
+                    });
+                }
+
+                // Fetch scenes on page load
+                fetchScenes();
+
+                // Add scene form submission handler
+                $("#addSceneForm").submit(function(event) {
+                    event.preventDefault(); // Prevent default form submission
+
+                    var sceneName = $("#sceneName").val();
+                    var isActive = $("#isActive").val();
+                    var orderBy = $("#orderBy").val();
+
+                    $.ajax({
+                        url: "/scenes", // Replace with your Flask endpoint to add a scene
+                        method: "POST",
+                        data: {
+                            sceneName: sceneName,
+                            isActive: isActive,
+                            orderBy: orderBy
+                        },
+                        success: function(data) {
+                            fetchScenes(); // Refresh table after adding a scene
+                            $("#addSceneForm")[0].reset(); // Reset form after successful submission
+                        }
+                    });
+                });
+
+                // Edit scene button click handler (implementation

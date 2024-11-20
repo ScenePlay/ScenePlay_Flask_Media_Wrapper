@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block content %}
+  <body onload="addButton()">
+    <div>
+      <h1>Server IP Table</h1>
+      <hr>
+      <div id="table"></div>
+    </div>
+    <script>
+      const tableDiv = document.getElementById('table');
+      function addButton() {
+      // Select the element next to which the button should be added
+          var element = document.querySelector("div.gridjs-search");
+
+      // Create a new button element
+          var button = document.createElement("input");
+          button.textContent = "Click me";
+          button.className = "btn btn-primary";
+          button.setAttribute("type","submit") 
+          button.setAttribute("value","Add New Row")
+          button.style = "float: right; margin-right: 100px";
+          button.onclick = function() {
+              //alert("Button clicked!");
+              fetch('/api/serveripaddrow', {
+              method: 'GET',
+              headers: {'Content-Type': 'application/json'},
+              });
+              window.location.reload();
+          }
+          element.parentNode.insertBefore(button, element.nextSibling);
+      }
+      class Dropdown {
+          constructor() {
+              this.items = [];
+          }
+          // Method to add an item with an ID to the dropdown list
+          addItem(id, item) {
+              this.items.push({ id, item });
+          }
+          // Method to retrieve the list of items in the dropdown
+          getItems() {
+              return this.items;
+          }
+          //Method to populate the dropdown element
+          populateDropdown(dropdownElement) {
+              //const dropdownElement = document.getElementById(dropdownElementId);
+              if (!dropdownElement) {
+                  console.error(`Element with id ${dropdownElementId} not found.`);
+                  return;
+              }
+
+              // Clear existing options
+              dropdownElement.innerHTML = '';
+
+              // Add new options
+              this.items.forEach(({ id, item }) => {
+                  const option = document.createElement('option');
+                  option.value = id;
+                  option.textContent = item;
+                  dropdownElement.appendChild(option);
+              });
+          }
+      }      
+      
+      const activeDD = [
+        { value: "1", label: "Yes" },
+        { value: "0", label: "No" }
+      ];
+
+ 
+      const serverRoleDD = new Dropdown
+      fetch('/api/serverrole')
+      .then(response => response.json())
+      .then(data => {
+        for (const item of data.data) {
+          serverRoleDD.addItem(item.ID, item.name)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+      const ledmodeltypeDD = new Dropdown
+      fetch('/api/ledtypemodel')
+      .then(response => response.json())
+      .then(data => {
+        for (const item of data.data) {
+          ledmodeltypeDD.addItem(item.ledTypeModel_ID, item.modelName)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+      const updateUrl = (prev, query) => {
+        return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
+      };
+
+      const editableCellAttributes = (data, row, col) => {
+          if (row) {
+            return {contentEditable: 'true', 'data-element-id': row.cells[0].data};
+          }
+          else {
+            return {};
+          }
+      };
+
+      // # 0    ServerIP_ID   INTEGER  0                    1 
+      // # 1    serverName    TEXT     0                    0 
+      // # 2    ipAddress     TEXT     0                    0 
+      // # 3    ports         TEXT     0                    0 
+      // # 4    active        INT      0                    0 
+      // # 5    PingTime      TEXT     0                    0 
+      // # 6    serverroleid  INT      0                    0 
+      const tblColumns = ['ServerIP_ID','serverName', 'ipAddress', 'ports','active','PingTime','serverroleid']
+      const primeKey = tblColumns[0]
+      new gridjs.Grid({
+        columns: [
+          { id: tblColumns[0], name: 'ServerIP_ID', 'hidden': true },
+          { id: tblColumns[1], name: 'Server Name', sort: true, 'attributes': editableCellAttributes },
+          { id: tblColumns[2], name: 'IP Address' , sort: true, 'attributes': editableCellAttributes  },
+          { id: tblColumns[3], name: 'Ports', sort: false },
+          { id: tblColumns[4], name: 'active', sort: false,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const active = document.createElement("select");
+              activeDD.forEach((data) => {
+                var el = document.createElement("option");
+                el.textContent = data.label
+                el.value = data.value
+                active.appendChild(el)
+              })
+              active.name = "active"
+              active.id = "activeOpt_" + row.cells[4].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              active.setAttribute("onchange","activeChange()")
+              active.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[4].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(active.outerHTML);
+              } 
+          },
+          { id: tblColumns[5], name: 'PingTime', sort: true },
+          { id: tblColumns[6], name: 'serverroleid', sort: false
+            ,
+            formatter: function (cellData, row) {
+              const selectedValue = cellData
+              const serverrole = document.createElement("select");
+              serverRoleDD.populateDropdown(serverrole)
+              serverrole.name = "serverrole"
+              serverrole.id = "serverroleOpt_" + row.cells[6].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              serverrole.setAttribute("onchange","serverRoleChange()")
+              serverrole.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[6].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(serverrole.outerHTML);
+              } 
+          },
+          {id: 'dlete', name: 'Delete' , sort: false,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const dlete = document.createElement("input");
+              dlete.name = "Dlete"
+              dlete.id = "Dlete"+ "_ID_"  + row.cells[0].data.toString()
+              dlete.setAttribute("type","submit")           
+              dlete.setAttribute("onclick","dlete()")
+              dlete.setAttribute("value","Delete")
+              dlete.className = "btn btn-primary";
+              return gridjs.html(dlete.outerHTML);
+              } 
+          },
+        ],
+        server: {
+          url: '/api/serverIP',
+          then: results => results.data,
+          total: results => results.total,
+        },
+        search: {
+          enabled: true,
+          server: {
+            url: (prev, search) => {
+              return updateUrl(prev, {search});
+            },
+          },
+        },
+        sort: {
+          enabled: true,
+          multiColumn: true,
+          server: {
+            url: (prev, columns) => {
+              const columnIds = tblColumns;
+              const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + columnIds[col.index]);
+              return updateUrl(prev, {sort});
+            },
+          },
+        },
+        pagination: {
+          enabled: true,
+          server: {
+            url: (prev, page, limit) => {
+              return updateUrl(prev, {start: page * limit, length: limit});
+            },
+          },
+        },
+      }).render(tableDiv);
+
+      let savedValue;
+
+      tableDiv.addEventListener('focusin', ev => {
+        if (ev.target.tagName === 'TD') {
+          savedValue = ev.target.textContent;
+        }
+      });
+
+      tableDiv.addEventListener('focusout', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (savedValue !== ev.target.textContent) {
+            saveChange(JSON.stringify({[primeKey]: ev.target.dataset.elementId,[ev.target.dataset.columnId]: ev.target.textContent
+              }))
+          }
+          savedValue = undefined;
+        }
+      });
+
+      function saveChange(json){
+        //console.log(json)
+        fetch('/api/serverIP', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: json,
+            });
+      }
+
+      function serverRoleChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("serverroleOpt_")){
+          jsn = {[primeKey]:id[1],[tblColumns[6]]:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          if (ev.value == "4") { //4 = WLED Server
+            if (confirm('Update the Support tables?')) {
+              json = JSON.stringify({[primeKey]:id[1]})
+              console.log(json)
+
+              fetch('/updateWLEDSupport', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: json,
+              });
+            }
+          }
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      function modelChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        //console.log(elnt)
+        if(ev.id.toString().includes("selectModelOpt_")){
+          jsn = {[primeKey]:id[1],ledTypeModel_ID:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+
+      function activeChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("activeOpt_")){
+          jsn = {[primeKey]:id[1],active:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+    
+      tableDiv.addEventListener('keydown', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (ev.key === 'Escape') {
+            ev.target.textContent = savedValue;
+            ev.target.blur();
+          }
+          else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            ev.target.blur();
+          }
+        }
+      });
+      function dlete(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("Dlete_")){
+          jsn = {[primeKey]:id[1]}
+          console.log(JSON.stringify(jsn))
+        if (confirm('Are you sure you want to DELETE?')) {
+            jsn = {[primeKey]:id[1]}
+            console.log(JSON.stringify(jsn))
+            fetch('/api/serveripdelrow', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(jsn),
+            });
+            window.location.reload();
+        } else {
+          // Do nothing!
+          console.log('Thing was not saved to the database.');
+        }
+          //saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + jsn);
+        }
+      }
+
+    </script>
+  </body>
+  {% endblock %}

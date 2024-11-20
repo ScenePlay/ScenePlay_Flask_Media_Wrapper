@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch Service to monitor and restart application if down
+After=network.target
+
+[Service]
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/userName/.Xauthority
+Type = simple
+ExecStart = python3 /home/userName/ScenePlay/supportFiles/sceneplay_watchdog_service.py
+Restart=always
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,289 @@
+
+{% extends "base.html" %}
+{% block content %}
+  <body onload="addButton()">
+    <div>
+      <h1>Scenes Table</h1>
+      <hr>
+      <div id="table"></div>
+    </div>
+    <script>
+      const tableDiv = document.getElementById('table');
+      function addButton() {
+      // Select the element next to which the button should be added
+          var element = document.querySelector("div.gridjs-search");
+
+      // Create a new button element
+          var button = document.createElement("input");
+          button.textContent = "Click me";
+          button.className = "btn btn-primary";
+          button.setAttribute("type","submit") 
+          button.setAttribute("value","Add New Row")
+          button.style = "float: right; margin-right: 100px";
+
+          button.onclick = function() {
+              //alert("Button clicked!");
+              fetch('/api/scenesaddrow', {
+              method: 'GET',
+              headers: {'Content-Type': 'application/json'},
+              });
+              window.location.reload();
+          }
+
+          element.parentNode.insertBefore(button, element.nextSibling);
+      }
+      class Dropdown {
+          constructor() {
+              this.items = [];
+          }
+          // Method to add an item with an ID to the dropdown list
+          addItem(id, item) {
+              this.items.push({ id, item });
+          }
+          // Method to retrieve the list of items in the dropdown
+          getItems() {
+              return this.items;
+          }
+          //Method to populate the dropdown element
+          populateDropdown(dropdownElement) {
+              //const dropdownElement = document.getElementById(dropdownElementId);
+              if (!dropdownElement) {
+                  console.error(`Element with id ${dropdownElementId} not found.`);
+                  return;
+              }
+
+              // Clear existing options
+              dropdownElement.innerHTML = '';
+
+              // Add new options
+              this.items.forEach(({ id, item }) => {
+                  const option = document.createElement('option');
+                  option.value = id;
+                  option.textContent = item;
+                  dropdownElement.appendChild(option);
+              });
+          }
+      }
+
+      const activeDD = [
+        { value: "1", label: "Yes" },
+        { value: "0", label: "No" }
+      ];
+
+      const campaignsDD = new Dropdown
+      fetch('/api/campaigns')
+      .then(response => response.json())
+      .then(data => {
+        for (const item of data.data) {
+          campaignsDD.addItem(item.campaign_id, item.campaign_name)
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching data:', error);
+      });
+
+
+      const updateUrl = (prev, query) => {
+        return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
+      };
+
+      const editableCellAttributes = (data, row, col) => {
+          if (row) {row
+            return {contentEditable: 'true', 'data-element-id': row.cells[0].data};
+          }
+          else {
+            return {};
+          }
+      };
+      // cid  name         type     notnull  dflt_value  pk
+      // ---  -----------  -------  -------  ----------  --
+      // 0    scene_ID     INTEGER  0                    1 
+      // 1    sceneName    TEXT     0                    0 
+      // 2    active       INT      0                    0 
+      // 3    orderBy      INT      0                    0 
+      // 4    campaign_id  INTEGER  0                    0 
+
+      tblColumns = ['scene_ID','sceneName', 'active','orderBy','campaign_id']
+      primeKey = tblColumns[0]
+      gd = new gridjs.Grid({
+        columns: [
+          { id: tblColumns[0], name: 'scene_ID', 'hidden': true },
+          { id: tblColumns[1], name: 'Scene Name', sort: true, 'attributes': editableCellAttributes  }, 
+          { id: tblColumns[2], name: 'isActive' , sort: true,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const active = document.createElement("select");
+              activeDD.forEach((data) => {
+                var el = document.createElement("option");
+                el.textContent = data.label
+                el.value = data.value
+                active.appendChild(el)
+              })
+              active.name = "active"
+              active.id = "activeOpt_" + row.cells[2].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              active.setAttribute("onchange","activeChange()")
+              active.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[2].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(active.outerHTML);
+              } 
+          },
+          { id: tblColumns[3], name: 'Order', sort: true, 'attributes': editableCellAttributes},
+          { id: tblColumns[4], name: 'Campaign' , sort: true,
+          formatter: function (cellData, row) {
+              const selectedValue = cellData
+              const camp = document.createElement("select");
+              campaignsDD.populateDropdown(camp)
+              camp.name = "campaign"
+              camp.id = "campaignOpt_" + row.cells[4].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              camp.setAttribute("onchange","campaignChange()")
+              camp.childNodes.forEach((node) => { 
+                if(parseInt(node.value)===parseInt(row.cells[4].data)){
+                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
+                }
+              });
+              return gridjs.html(camp.outerHTML);
+              } 
+          },
+          {id: 'dlete', name: 'Delete' , sort: false,
+          formatter: function (cellData, row) { 
+              const selectedValue = cellData
+              const dlete = document.createElement("input");
+              dlete.name = "Dlete"
+              dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
+              dlete.setAttribute("type","submit")           
+              dlete.setAttribute("onclick","dlete()")
+              dlete.setAttribute("value","Delete")
+              dlete.className = "btn btn-primary";
+              return gridjs.html(dlete.outerHTML);
+              } 
+          },
+        ],
+        server: {
+          url: '/api/scenes',
+          then: results => results.data,
+          total: results => results.total,
+        },
+        search: {
+          enabled: true,
+          server: {
+            url: (prev, search) => {
+              return updateUrl(prev, {search});
+            },
+          },
+        },
+        sort: {
+          enabled: true,
+          multiColumn: true,
+          server: {
+            url: (prev, columns) => {
+              const columnIds = tblColumns;
+              const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + columnIds[col.index]);
+              
+              return updateUrl(prev, {sort});
+            },
+          },
+        },
+        pagination: {
+          enabled: true,
+          server: {
+            url: (prev, page, limit) => {
+              return updateUrl(prev, {start: page * limit, length: limit});
+            },
+          },
+        },
+      }).render(tableDiv);
+
+      let savedValue;
+
+      tableDiv.addEventListener('focusin', ev => {
+        if (ev.target.tagName === 'TD') {
+          savedValue = ev.target.textContent;
+        }
+      });
+
+      tableDiv.addEventListener('focusout', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (savedValue !== ev.target.textContent) {
+            saveChange(JSON.stringify({[primeKey]: ev.target.dataset.elementId,[ev.target.dataset.columnId]: ev.target.textContent
+              }))
+          }
+          savedValue = undefined;
+        }
+      });
+
+      function saveChange(json){
+        //console.log(json)
+        fetch('/api/scenes', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: json,
+            });
+      }
+
+      function activeChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        if(ev.id.toString().includes("activeOpt_")){
+          jsn = {[primeKey]:id[1],active:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+      function dlete(){
+        if (confirm('Are you sure you want to DELETE?')) {
+          // Save it!
+          var ev = event.target;
+          id = ev.id.split("_ID_")
+          if(ev.id.toString().includes("Dlete_")){
+            jsn = {[primeKey]:id[1]}
+            console.log(JSON.stringify(jsn))
+            fetch('/api/scenesdelrow', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(jsn),
+            });
+            window.location.reload();
+            //console.log('Thing was saved to the database.');
+        } else {
+          // Do nothing!
+          console.log('Nothing Done.');
+        }
+          //saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + jsn);
+        }
+      }
+
+      function campaignChange(){
+        var ev = event.target;
+        id = ev.id.split("_ID_")
+        //console.log(ev)
+        if(ev.id.toString().includes("campaignOpt_")){
+          jsn = {[primeKey]:id[1],campaign_id:ev.value}
+          console.log(JSON.stringify(jsn))
+          saveChange(JSON.stringify(jsn))
+          //console.log("Selected " + ev.value);
+        }
+      }
+
+
+      tableDiv.addEventListener('keydown', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (ev.key === 'Escape') {
+            ev.target.textContent = savedValue;
+            ev.target.blur();
+          }
+          else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            ev.target.blur();
+          }
+        }
+      });
+
+    </script>
+  </body>
+  {% endblock %}

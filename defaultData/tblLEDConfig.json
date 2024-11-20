@@ -1,0 +1,12 @@
+[
+  {
+    "pin": 18,
+    "ledCount": 100,
+    "active": 0
+  },
+  {
+    "pin": 21,
+    "ledCount": 100,
+    "active": 1
+  }
+]

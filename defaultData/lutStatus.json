@@ -1,0 +1,18 @@
+[
+  {
+    "status_ID": 1,
+    "status": "Queued"
+  },
+  {
+    "status_ID": 2,
+    "status": "Processing"
+  },
+  {
+    "status_ID": 3,
+    "status": "Finished"
+  },
+  {
+    "status_ID": 4,
+    "status": "Failed"
+  }
+]
