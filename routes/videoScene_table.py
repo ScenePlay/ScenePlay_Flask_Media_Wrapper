@@ -30,7 +30,7 @@ def edittbl():
 
 @vs.route('/api/videoScene', methods=['GET'])
 def data():
-    query = tbl.query
+    query = tbl.query.order_by(tbl.scene_ID)
     # search filter
     search = request.args.get('search')
     if search:

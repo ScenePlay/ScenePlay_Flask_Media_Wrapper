@@ -37,7 +37,7 @@ def edittbl():
 
 @ltm.route('/api/ledtypemodelcl')
 def data():
-    query = tbl.query
+    query = tbl.query.order_by(tbl.modelName)
 
     search = request.args.get('search')
     
