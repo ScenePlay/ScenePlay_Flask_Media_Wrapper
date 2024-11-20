@@ -37,7 +37,7 @@ Clone or copy the ScenePlay project files to your Raspberry Pi. Make sure when c
     git -C ScenePlay pull
 
 Step 3: Install Dependencies
-1. Navigate to the directory containing `requirements.sh` and make the script executable:
+1. Navigate to the directory (cd ~/ScenePlay)containing `requirements.sh` and make the script executable:
    chmod +x requirements.sh
 2. Run the script to install required packages and set up the Python virtual environment:
    ./requirements.sh
