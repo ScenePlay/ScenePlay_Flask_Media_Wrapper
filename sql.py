@@ -148,6 +148,40 @@ def appsettingGetCampaignSelected():
     #   row = r
     return data
 
+
+def appsettingGetCampaignSelected():
+    conn = sqlite3.connect(database)
+    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
+    c = conn.cursor()
+    c.execute("select value from tblAppSettings where name = 'ShowCampaign'")
+    data = c.fetchall()
+    conn.commit()
+    c.close()
+    conn.close()
+    #for r in data:
+    #   row = r
+    return data
+
+def appsettingGetSceneFilter():
+    conn = sqlite3.connect(database)
+    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
+    c = conn.cursor()
+    c.execute("select value from tblAppSettings where name = 'SceneFilter'")
+    data = c.fetchall()
+    conn.commit()
+    c.close()
+    conn.close()
+    return data
+
+def appsettingSetSceneFilter(val):
+    conn = sqlite3.connect(database)
+    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
+    c = conn.cursor()
+    c.execute("Update tblAppSettings set value = ?  where name =  'SceneFilter'",(val,))    
+    conn.commit()
+    c.close()
+    conn.close()
+
 def appsettingGetNotCampaignSelected():
     conn = sqlite3.connect(database)
     #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
@@ -160,6 +194,9 @@ def appsettingGetNotCampaignSelected():
     #for r in data:
     #   row = r
     return data
+
+
+
 
 def CRUD_tblCampaigns(row,CRUD):
     conn = sqlite3.connect(database)

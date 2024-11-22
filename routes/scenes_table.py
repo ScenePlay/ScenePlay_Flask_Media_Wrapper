@@ -72,8 +72,6 @@ def data():
         'total': total,
     }
 
-
-
 @sn.route('/api/scenes', methods=['POST'])
 def update():
     data = request.get_json()
@@ -102,3 +100,10 @@ def scenesdelrow():
     row = [data[primeKey]]
     CRUD_tblScenes(row,"D")
     return 'tblScenes row ' + data[primeKey] + ' has been deleted'
+
+@sn.route('/api/sceneFilter', methods=['POST'])
+def sceneFilter():
+    data = request.get_json()
+    appsettingSetSceneFilter(int(data['scene_id']))
+    return '', 204
+    

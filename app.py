@@ -90,7 +90,7 @@ arr[9] = 1  #YT_QuePID
 arr[10] = 1  #WatchManage
 arr[11] = 0  #Show Campaign DropDown
 arr[12] = 0  #Current Campaign in Play
-arr[13] = 0  #Empty
+arr[13] = 0  #Show Scene to Filter
 arr[14] = 0  #Empty
 
 
@@ -118,7 +118,7 @@ apparray = [
     ["WatchManage",int(arr[10]),"int"],
     ["ShowCampaign",int(arr[11]),"int"],
     ["CurrentCampaignPlaying",int(arr[12]),"int"],
-    ["Empty1",int(arr[13]),"int"],
+    ["SceneFilter",int(arr[13]),"int"],
     ["Empty2",int(arr[14]),"int"]
 ]
 

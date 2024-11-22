@@ -25,11 +25,17 @@ def edittbl():
     data = select_data_stats()#arr)
     mixer = alsaaudio.Mixer("Master")
     volume = mixer.getvolume()[0]
-    return render_template('musicScene_table.html',items=data,volume=volume)
+    scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
+    sceneFilter = appsettingGetSceneFilter()
+    return render_template('musicScene_table.html',items=data,volume=volume,scenes=scenes,sceneFilter=int(sceneFilter[0][0]))
 
 @ms.route('/api/musicScene', methods=['GET'])
 def data():
-    query = tbl.query.order_by(tbl.scene_ID)
+    sceneFilter = appsettingGetSceneFilter()
+    if int(sceneFilter[0][0]) != 0:
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.orderBy)
+    else:
+        query = tbl.query.order_by(tbl.scene_ID)
     
     # search filter
     search = request.args.get('search')

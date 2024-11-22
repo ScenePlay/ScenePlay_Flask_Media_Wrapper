@@ -25,6 +25,25 @@ function saveCampaignChange(json) {
   });
 }
 
+function sceneFilterChange(){
+  var ev = event.target;
+  jsn = {scene_id:ev.value}
+  // console.log(JSON.stringify(jsn))
+  saveSceneFilter(JSON.stringify(jsn))
+} 
+
+function saveSceneFilter(json) {
+  fetch('/api/sceneFilter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: json
+  }).then(() => {
+    location.reload();
+  }).catch(error => {
+    console.error('Error:', error);
+  });
+}
+
 
 function volumeChange(){
   const slideClick = function(volume){
