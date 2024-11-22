@@ -71,7 +71,10 @@ def data():
                 col = col.desc()
             order.append(col)
         if order:
-            query = tbl.query.order_by(*order)
+            if int(sceneFilter[0][0]) != 0:
+                query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(*order)
+            else:
+                query = tbl.query.order_by(*order)
 
     # pagination
     start = request.args.get('start', type=int, default=-1)

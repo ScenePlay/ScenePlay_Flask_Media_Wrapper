@@ -47,7 +47,7 @@ def data():
         scene_dis_list = [rows.scene_ID for rows in querysc.all()]
         
         #print(scene_dis_list)
-        query = tbl.query.filter(db.or_(
+        query = query.filter(db.or_(
             tbl.scene_ID.in_(scene_dis_list)
         )).order_by(tbl.orderBy)
         #///
@@ -67,7 +67,10 @@ def data():
                 col = col.desc()
             order.append(col)
         if order:
-            query = tbl.query.order_by(*order)
+            if int(sceneFilter[0][0]) != 0:
+                query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(*order)
+            else:
+                query = tbl.query.order_by(*order)
 
     # pagination
     start = request.args.get('start', type=int, default=-1)
