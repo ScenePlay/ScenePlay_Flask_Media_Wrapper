@@ -51,7 +51,7 @@ def WLEDTest():
 def data():
     sceneFilter = appsettingGetSceneFilter()
     if int(sceneFilter[0][0]) != 0:
-        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.orderBy)
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.wledPattern_ID.desc())
     else:
         query = tbl.query.order_by(tbl.scene_ID)
  
@@ -113,7 +113,8 @@ def update():
 
 @wl.route('/api/wledpatternaddrow')
 def wledaddrow():
-    newrow = tbl(scene_ID=0, server_ID=0, effect=0, pallette=0, color1='[0,0,0]', color2='[0,0,0]', color3='[0,0,0]', speed=125, brightness=125, orderBy=1)
+    sceneFilter = appsettingGetSceneFilter()
+    newrow = tbl(scene_ID=int(sceneFilter[0][0]), server_ID=0, effect=0, pallette=0, color1='[0,0,0]', color2='[0,0,0]', color3='[0,0,0]', speed=125, brightness=125, orderBy=1)
     db.session.add(newrow)
     db.session.commit()
     return 'tblwledPattern has a new row'

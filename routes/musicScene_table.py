@@ -33,7 +33,7 @@ def edittbl():
 def data():
     sceneFilter = appsettingGetSceneFilter()
     if int(sceneFilter[0][0]) != 0:
-        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.orderBy)
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.song_ID)
     else:
         query = tbl.query.order_by(tbl.scene_ID)
     
@@ -97,7 +97,8 @@ def update():
 
 @ms.route('/api/musicSceneaddrow')
 def scenesaddrow():
-    row = [0,0,1,100]
+    sceneFilter = appsettingGetSceneFilter()
+    row = [int(sceneFilter[0][0]),0,1,100]
     CRUD_tblMusicScene(row,"C")
     return 'tblmusicScene has a new row'
 

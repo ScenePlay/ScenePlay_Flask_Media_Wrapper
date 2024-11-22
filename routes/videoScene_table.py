@@ -34,7 +34,7 @@ def edittbl():
 def data():
     sceneFilter = appsettingGetSceneFilter()
     if int(sceneFilter[0][0]) != 0:
-        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.orderBy)
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.videoScene_ID.desc())
     else:
         query = tbl.query.order_by(tbl.scene_ID)
     # search filter
@@ -97,7 +97,8 @@ def update():
 
 @vs.route('/api/videoSceneaddrow')
 def videoSceneaddrow():
-    row = [0,0,0,1,100,0]
+    sceneFilter = appsettingGetSceneFilter()
+    row = [int(sceneFilter[0][0]),0,0,1,100,0]
     CRUD_tblVideoScene(row,"C")
     return 'tblvideoScene has a new row'
 

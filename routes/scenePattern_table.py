@@ -38,7 +38,7 @@ def edittbl():
 def data():
     sceneFilter = appsettingGetSceneFilter()
     if int(sceneFilter[0][0]) != 0:
-        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0]))
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.scenePattern_ID.desc())
     else:
         query = tbl.query.order_by(tbl.scene_ID)
 
@@ -100,7 +100,8 @@ def update():
 
 @sp.route('/api/scenepatternaddrow')
 def scenesaddrow():
-    row = [0,0,'[0,0,0]',10,10000,1,'[0,0,0]']
+    sceneFilter = appsettingGetSceneFilter()
+    row = [int(sceneFilter[0][0]),0,'[0,0,0]',10,10000,1,'[0,0,0]']
     CRUD_tblScenePattern(row,"C")
     return 'tblScenePattern has a new row'
 
