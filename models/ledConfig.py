@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class tblledconfig(db.Model):
     ledConfig_ID = db.Column(db.Integer, primary_key=True)

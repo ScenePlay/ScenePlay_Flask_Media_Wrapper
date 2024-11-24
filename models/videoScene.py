@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 # cid  name              type     notnull  dflt_value  pk
 # ---  ----------------  -------  -------  ----------  --

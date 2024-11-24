@@ -5,8 +5,8 @@ from models.serverIP import tblserversip as tblServerIP
 from models.serverRole import tblserverrole as tblServerRole
 from models.wledPattern import tbleffect as ef
 from models.wledPattern import tblpallette as pt
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 
 def wled_Off():
     try:

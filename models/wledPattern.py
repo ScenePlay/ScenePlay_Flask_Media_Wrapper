@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class tblwledpattern(db.Model):
     wledPattern_ID = db.Column(db.Integer, primary_key=True)

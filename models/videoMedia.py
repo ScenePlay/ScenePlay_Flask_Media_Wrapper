@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 # ---  ------------  -------  -------  ----------  --
 # 0    video_ID      INTEGER  0                    1 

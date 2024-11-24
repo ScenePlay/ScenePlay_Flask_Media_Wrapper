@@ -2,8 +2,8 @@
 
 import requests
 import json
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 from sql import *
 from models.serverIP import tblserversip as IP
 from models.serverRole import tblserverrole as Role

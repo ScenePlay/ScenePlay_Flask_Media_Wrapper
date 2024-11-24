@@ -5,8 +5,8 @@ from models.wledPattern import tbleffect as ef
 from models.wledPattern import tblpallette as pt
 
 import alsaaudio
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 from sql import *
 from wLed.wledCommand import setWledEffect
 

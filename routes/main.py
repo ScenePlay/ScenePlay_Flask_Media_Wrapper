@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template,redirect,url_for,  request, abort, jsonify, json
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 from sql import *
 import alsaaudio
 from multiprocessing import Process, Value, Array

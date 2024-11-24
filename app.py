@@ -1,6 +1,5 @@
 from flask import Flask 
-from extensions import db, migrate
-from extensions2 import databaseDir
+from extensions import *
 from routes.main import main
 from routes.scenePattern_table import sp
 from routes.scenes_table import sn

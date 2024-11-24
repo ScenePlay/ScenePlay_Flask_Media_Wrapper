@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class tblcampaigns(db.Model):
     campaign_id = db.Column(db.Integer, primary_key=True)

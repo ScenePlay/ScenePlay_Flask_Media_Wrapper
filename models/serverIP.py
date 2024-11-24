@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 # 0    ServerIP_ID   INTEGER  0                    1 
 # 1    serverName    TEXT     0                    0 

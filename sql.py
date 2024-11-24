@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import logging
 import unicodedata
 from unittest import case
-from extensions2 import databaseDir
+from extensions import *
 from collections import defaultdict
 
 #logging.basicConfig(filename='myapp.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s %(message)s')

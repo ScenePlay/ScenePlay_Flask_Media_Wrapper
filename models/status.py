@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class lutstatus(db.Model):
     pkey = db.Column(db.Integer, primary_key=True)

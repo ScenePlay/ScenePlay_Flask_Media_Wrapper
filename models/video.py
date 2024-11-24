@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)

@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class tblscenepattern(db.Model):
     scenePattern_ID = db.Column(db.Integer, primary_key=True)

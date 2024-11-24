@@ -1,4 +1,4 @@
-from extensions import db
+from extensions import *
 
 class lutgenre(db.Model):
     genre_id = db.Column(db.Integer, primary_key=True)

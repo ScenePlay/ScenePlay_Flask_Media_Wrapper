@@ -3,8 +3,8 @@ from flask import Blueprint, render_template, request, abort, jsonify, json, red
 from models.scenePattern import  tblscenepattern as tbl
 from models.scenes import tblscenes as sc
 import alsaaudio
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 from sql import *
 from remotes import *
 from routes.main import is_raspberry_pi

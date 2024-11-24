@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 from models.music import tblmusic as tbl
 
 from sql import *

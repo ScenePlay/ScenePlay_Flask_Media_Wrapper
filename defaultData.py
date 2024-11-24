@@ -1,5 +1,5 @@
-from extensions import db
-from extensions2 import *
+from extensions import *
+
 import os
 import json
 from sqlalchemy import create_engine
