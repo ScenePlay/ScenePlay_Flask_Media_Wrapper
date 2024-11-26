@@ -13,6 +13,8 @@ Ensure you have the following before starting:
 - Optional Set your IP4 to a static IP address. 
 - A stable internet connection.
 - Basic familiarity with the Linux command line.
+- Setup your PI https://youtu.be/aG3hmzW03cs?si=4im_tgTbxHoVPVMD
+
 
 2. Installation Steps
 ---------------------
