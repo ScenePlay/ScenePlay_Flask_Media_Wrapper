@@ -9,7 +9,7 @@ Ensure you have the following before starting:
 - A Raspberry Pi with a fresh Raspberry Pi OS installation, or an old computer running Mint OS.
 - Make sure SSH is enabled
 - Optional VNC Server (Makes it much easier to manage)
-- Optional Disable IP V6 (not needed)
+- Optional Disable IP V6 
 - Optional Set your IP4 to a static IP address. 
 - A stable internet connection.
 - Basic familiarity with the Linux command line.
