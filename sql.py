@@ -363,11 +363,11 @@ def get_Scenes():
     
     c.row_factory = dict_factory
     
-    c.execute("select s.scene_ID, SUBSTRING(s.sceneName,0,16) AS sceneName, dt.scenePattern_ID,  dt.color, UPPER(SUBSTRING(dt.modelName,0,16)) as modelName , dt.wledPattern_ID,  dt.color1, UPPER(substring(dt.effectName,0,16)) as effectName,  dt.musicScene_ID,  dt.videoScene_ID, s.orderby from ( \
-                    select sp.scene_ID , sp.scenePattern_ID, SUBSTRING(sp.color, 2, LENGTH(sp.color)-2) as color, l.modelName, NULL as wledPattern_ID, null as color1, NULL as effectName, NULL as musicScene_ID, NULL as videoScene_ID  from tblScenePattern sp \
+    c.execute("select s.scene_ID, substr(s.sceneName,0,16) AS sceneName, dt.scenePattern_ID,  dt.color, UPPER(substr(dt.modelName,0,16)) as modelName , dt.wledPattern_ID,  dt.color1, UPPER(substr(dt.effectName,0,16)) as effectName,  dt.musicScene_ID,  dt.videoScene_ID, s.orderby from ( \
+                    select sp.scene_ID , sp.scenePattern_ID, substr(sp.color, 2, LENGTH(sp.color)-2) as color, l.modelName, NULL as wledPattern_ID, null as color1, NULL as effectName, NULL as musicScene_ID, NULL as videoScene_ID  from tblScenePattern sp \
                         join tblLEDTypeModel l on SP.ledTypeModel_ID = l.ledTYpeMOdel_ID where sp.scene_ID <> 0 \
                 union \
-                    select  wl.scene_ID, NULL as scenePattern_ID,null as color, NULL as modelName, wl.wledPattern_ID, SUBSTRING(wl.color1, 2, LENGTH(wl.color1)-2) as color1, case when instr(effectName, '@') = 0 THEN effectName ELSE substring(effectName,1, instr(effectName, '@')-1) END  as effectName, NULL as musicScene_ID, NULL as videoScene_ID from tblwledPattern wl \
+                    select  wl.scene_ID, NULL as scenePattern_ID,null as color, NULL as modelName, wl.wledPattern_ID, substr(wl.color1, 2, LENGTH(wl.color1)-2) as color1, case when instr(effectName, '@') = 0 THEN effectName ELSE substr(effectName,1, instr(effectName, '@')-1) END  as effectName, NULL as musicScene_ID, NULL as videoScene_ID from tblwledPattern wl \
                         join tblEffect e on e.ef_ID = wl.effect where wl.scene_ID <> 0 \
                 union \
                     select  ms.scene_ID, NULL as scenePattern_ID,null as color, NULL as modelName, NULL as wledPattern_ID, null as color1, NULL as effectName, ms.musicScene_ID, NULL as videoScene_ID from tblMusicScene ms where ms.scene_ID <> 0 \
