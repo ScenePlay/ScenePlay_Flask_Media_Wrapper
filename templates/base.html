@@ -71,11 +71,16 @@
                     <h2 id="volume">Master Volume: {{ volume }}</h2>
                     <input  style="width:500px; margin:0 auto;" type="range" min="0" max="100" id="volume_slider" value="{{ volume }}" onchange="volumeChange()">
                 </td>  
+                <td>
+                </td>
                   <td style="vertical-align: middle;">
                     <input type="submit" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
                   <br>
                   <br>
-                    <input type="submit" onclick="nextVideo()" class="btn btn-primary" value="Next MP4">
+                    <input type="button" onclick="videoSeek(-30)" class="btn btn-secondary" value="<" style="display: inline;">
+                    <input type="button" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display: inline;">
+                    <input type="button" onclick="videoSeek(30)" class="btn btn-secondary" value=">" style="display: inline;">
+                    <input type="submit" onclick="nextVideo()" class="btn btn-primary" value="Next">
                   </td>
               
                     <td>
@@ -101,4 +106,4 @@
         {% block content %}
         {% endblock %}
     </body>
-</html>`
+</html>

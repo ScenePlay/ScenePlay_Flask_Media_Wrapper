@@ -248,3 +248,19 @@ def isAlive():
 
     rowWatchManage = CRUD_tblAppSettings(['WatchManage'],"byName")
     return jsonify({'isAlive': 'true', 'pid': arr[0], 'WatchManage': rowWatchManage[0][2]})
+
+
+
+
+@main.route('/video_seek', methods=['POST'])
+def video_seek():
+    value = request.json['value']
+    command = f"echo seek {value} | socat - /tmp/mpvsocket"
+    os.system(command)
+    return jsonify({'success': True})
+
+@main.route('/video_stopstart', methods=['POST'])
+def video_stopstart():
+    command = f"echo cycle pause | socat - /tmp/mpvsocket"
+    os.system(command)
+    return jsonify({'success': True})

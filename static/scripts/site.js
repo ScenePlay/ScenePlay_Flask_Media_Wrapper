@@ -471,3 +471,26 @@ function submitOnEnter(e) {
 }
 
 
+function videoStartStop() {
+  fetch('/video_stopstart', {
+    method: 'POST',
+  })
+  .then(response => response.json())
+  .then(result => {
+    console.log('Start/stop request successful:', result);
+  })
+  .catch(error => console.error('Error in start/stop request:', error));
+}
+
+function videoSeek(value) {
+  fetch('/video_seek', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: value })
+  })
+  .then(response => response.json())
+  .then(result => {
+    console.log('Seek request successful:', result);
+  })
+  .catch(error => console.error('Error in seek request:', error));
+}
