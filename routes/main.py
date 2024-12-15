@@ -60,6 +60,7 @@ def set_volume():
     mixer.setvolume(new_volume)
     return "Volume set successfully!"
 
+
 def is_raspberry_pi() -> bool:
     CPUINFO_PATH = Path("/proc/cpuinfo")
     if not CPUINFO_PATH.exists():
@@ -67,7 +68,7 @@ def is_raspberry_pi() -> bool:
     with open(CPUINFO_PATH) as file:
         content = file.read()
         if 'Raspberry Pi 5' in content:
-            print('Raspberry Pi 5 LED not supported')
+            #print('Raspberry Pi 5 LED not supported')
             return False
     return platform.machine() in('armv7l', 'armv6l', 'aarch64')
 
