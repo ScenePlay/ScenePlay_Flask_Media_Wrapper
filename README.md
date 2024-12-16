@@ -34,9 +34,9 @@ Clone or copy the ScenePlay project files to your Raspberry Pi. Make sure when c
     
     git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
 
-    Later use this to get upgrades:
-    (If you have made changes to the files) git -C ScenePlay stash 
-    git -C ScenePlay pull
+Later use this to get upgrades:
+(If you have made changes to the files) git -C ScenePlay stash 
+git -C ScenePlay pull
 
 Step 3: Install Dependencies
 1. Navigate to the directory (cd ~/ScenePlay)containing `requirements.sh` and make the script executable:
