@@ -705,7 +705,7 @@ def CRUD_tblScenes(row,CRUD):
         _active = row[2]
         _orderBY = row[3]
         _campaign_ID = row[4]
-        c.execute("UPDATE tblScenes SET  sceneName = ?, active = ?, orderBY = ?, campaign_id = ? where scene_ID = ?" ,( _sceneName, _active, _orderBY,campaign_ID, _Scene_ID))
+        c.execute("UPDATE tblScenes SET  sceneName = ?, active = ?, orderBY = ?, campaign_id = ? where scene_ID = ?" ,( _sceneName, _active, _orderBY,_campaign_ID, _Scene_ID))
         conn.commit()
     elif CRUD == "D":
         _Scene_ID = row[0]
@@ -1303,7 +1303,7 @@ def addSongToDB(fi):
         c.execute("INSERT INTO tblMusic(path, song, pTimes, playedDTTM, active, genre, que) VALUES(?, ?, ?, ?, ?, ?, ?)",(_path, _song, _pTimes, _playedDTTM, _active, _genre, _que))
         conn.commit()
     except Exception as err:
-        logger.error(err)
+        #logger.error(err)
         pass
     c.close()
     conn.close()
@@ -1348,7 +1348,7 @@ def find_store_files():
                 c.execute("INSERT INTO tblMusic(path, song, pTimes, playedDTTM, active, genre, que) VALUES(?, ?, ?, ?, ?, ?, ?)",(_path, _song, _pTimes, _playedDTTM, _active, _genre, _que))
                 conn.commit()
             except Exception as err:
-                logger.error(err)
+                #logger.error(err)
                 pass
     else:
         for file in fileslocal:
@@ -1362,7 +1362,7 @@ def find_store_files():
                 c.execute("INSERT INTO tblMusic(path, song, pTimes, playedDTTM, active, genre, que) VALUES(?, ?, ?, ?, ?, ?, ?)",(_path, _song, _pTimes, _playedDTTM, _active, _genre, _que))
                 conn.commit()
             except Exception as err:
-                logger.error(err)
+                #logger.error(err)
                 pass
 
     c.close()

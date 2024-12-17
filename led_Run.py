@@ -2,14 +2,43 @@ import time
 import board
 import neopixel
 import json
-from sql import *
 import json
 import random
 import math
-
+import sqlite3
+import os
+#Runs as a stand alone file. 
+database = 'ScenePlay.db'
+databaseDir = os.path.dirname(os.path.realpath(__file__)) + '/' + database
 
 num_pixels = 0
 pixel_pin = None
+
+
+def getLEDOutPIN():
+    conn = sqlite3.connect(databaseDir)
+    c = conn.cursor()
+    c.execute("SELECT * FROM tblLEDConfig where active = 1")    
+    data = c.fetchall()
+    conn.commit()
+    c.close()
+    conn.close()
+    return data
+
+def get_LEDJSON():
+    conn = sqlite3.connect(databaseDir)
+    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
+    c = conn.cursor()
+    c.execute("SELECT ledJSON FROM tblLED")
+    data = c.fetchall()
+    c.execute("DELETE FROM tblLED")
+    conn.commit()
+    c.close()
+    conn.close()
+    for r in data:
+        row = r[0]
+    return row
+
 
 LedPins = getLEDOutPIN()
 
