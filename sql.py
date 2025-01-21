@@ -1411,8 +1411,8 @@ def select_data_stats():#a):
             #  )
     c.execute( #"SELECT 'Songs Stored' as T, Count(*) as C FROM tblMusic "
               #+ "UNION 
-              "SELECT 'Songs Queued' as T, Count(*) as C FROM tblMusic where que <> 0 "
-              + "UNION SELECT 'Videos Queued' as T, Count(*) as C FROM tblvideoMedia where que <> 0"
+              "SELECT 'songQCnt' as T, Count(*) as C FROM tblMusic where que <> 0 "
+              + "UNION SELECT 'videoQCnt' as T, Count(*) as C FROM tblvideoMedia where que <> 0"
              # + "UNION SELECT 'Total Songs Played' as T, SUM(pTimes) as C FROM tblMusic "
              # + "UNION SELECT 'Song Current' as T, song as c FROM tblMusic where song_id = " + str(a[2]) + " "
              # + "UNION SELECT 'Song Last' as T, song as c FROM tblMusic where song_id = " + str(a[3]) + " "

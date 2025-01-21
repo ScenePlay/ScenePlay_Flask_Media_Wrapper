@@ -60,6 +60,15 @@ def set_volume():
     mixer.setvolume(new_volume)
     return "Volume set successfully!"
 
+@main.route("/api/songandvideocount", methods=["GET"])
+def songandvideocount():
+    data = select_data_stats()#arr)
+    dataDict = []
+    for item in data:
+        dataDict.append({item[0]: item[1]})
+    print(dataDict)
+    return jsonify(dataDict)
+
 
 def is_raspberry_pi() -> bool:
     CPUINFO_PATH = Path("/proc/cpuinfo")

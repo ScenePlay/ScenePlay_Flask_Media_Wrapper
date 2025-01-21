@@ -74,25 +74,28 @@
                 <td>
                 </td>
                   <td style="vertical-align: middle;">
-                    <input type="submit" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
+                    <input type="button" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
                   <br>
                   <br>
                     <input type="button" onclick="videoSeek(-30)" class="btn btn-secondary" value="<" style="display: inline;">
                     <input type="button" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display: inline;">
                     <input type="button" onclick="videoSeek(30)" class="btn btn-secondary" value=">" style="display: inline;">
-                    <input type="submit" onclick="nextVideo()" class="btn btn-primary" value="Next">
+                    <input type="button" onclick="nextVideo()" class="btn btn-primary" value="Next">
                   </td>
-              
                     <td>
                       <table >
-                        {% for item in items %}
                         <tr>
-                          <td style="height: 50px;">
-                            {{item[0]}}
-                            {{item[1]}}
-                          </td>
+                          <td  id="songQueueCount">Songs Q: {{songQueueCount or 0}}</td>
                         </tr>
-                        {% endfor %}
+                        <tr>
+                          <td <br> <br> </td>
+                        </tr> 
+                        <tr>
+                          <td id="videoQueueCount">Video Q: {{videoQueueCount or 0}}</td>
+                        </tr>
+                        <script>
+                          setInterval(songAndVideoCount, 5000);
+                        </script>
                       </table> 
                     </td> 
                     <td>

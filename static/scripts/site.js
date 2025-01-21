@@ -74,9 +74,27 @@ function nextSong(){
       }).then(response => response.text()).then(data => console.log(data));
   }
   Click()
-  sleep(2000).then(() => window.location.reload());
+  sleep(2000)//.then(() => window.location.reload());
 }
 
+function songAndVideoCount(){
+  const Click = function(){
+      fetch("/api/songandvideocount", {
+          method: "GET",
+          headers: {
+          "Content-Type": "application/json" 
+      }
+      })
+      .then(response => response.text())
+      .then(data => {
+         const dataObj = JSON.parse(data);
+         console.log(dataObj);
+         document.getElementById("songQueueCount").textContent = "Songs Q: " + dataObj[0].songQCnt || 0;
+         document.getElementById("videoQueueCount").textContent = "Video Q: " + dataObj[1].videoQCnt || 0;
+       });
+  }
+  Click()
+}
 
 function nextVideo(){
 
@@ -90,7 +108,7 @@ function nextVideo(){
       }).then(response => response.text()).then(data => console.log(data));
   }
   Click()
-  sleep(2000).then(() => window.location.reload());
+  sleep(2000)//.then(() => window.location.reload());
 }
 
 function killQueue(){
@@ -116,7 +134,7 @@ function killQueue(){
   Click()
   sleep(2000)
   Click2()
-  sleep(2000).then(() => window.location.reload());
+  //sleep(2000).then(() => window.location.reload());
 }
 
 function mouseOverColor(hex) {
