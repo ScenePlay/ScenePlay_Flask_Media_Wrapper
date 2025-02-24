@@ -88,9 +88,9 @@ function songAndVideoCount(){
       .then(response => response.text())
       .then(data => {
          const dataObj = JSON.parse(data);
-         console.log(dataObj);
-         document.getElementById("songQueueCount").textContent = "Songs Q: " + dataObj[0].songQCnt || 0;
-         document.getElementById("videoQueueCount").textContent = "Video Q: " + dataObj[1].videoQCnt || 0;
+         //console.log(dataObj);
+         document.getElementById("songQueueCount").textContent =  "Songs: " + dataObj[0].songQCnt || 0;
+         document.getElementById("videoQueueCount").textContent = "Video: " + dataObj[1].videoQCnt || 0;
        });
   }
   Click()

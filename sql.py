@@ -1237,6 +1237,7 @@ def queue_kill():
     c.close()
     conn.close()
     
+    
 def queue_next(): 
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")

@@ -66,7 +66,7 @@ def songandvideocount():
     dataDict = []
     for item in data:
         dataDict.append({item[0]: item[1]})
-    print(dataDict)
+    #print(dataDict)
     return jsonify(dataDict)
 
 
@@ -250,6 +250,7 @@ def nextvideo():
 @main.route('/killqueue', methods=["GET","POST"])
 def killqueue():
     queue_kill()
+    time.sleep(2)
     return "'message': 'queue killed'"
 
 
@@ -258,8 +259,6 @@ def isAlive():
 
     rowWatchManage = CRUD_tblAppSettings(['WatchManage'],"byName")
     return jsonify({'isAlive': 'true', 'pid': arr[0], 'WatchManage': rowWatchManage[0][2]})
-
-
 
 
 @main.route('/video_seek', methods=['POST'])

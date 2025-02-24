@@ -8,6 +8,7 @@ sudo apt-get -y install python3-pip
 sudo apt-get -y install mpv 
 sudo apt-get -y install sqlite3 
 sudo apt-get -y install libasound2-dev
+sudo apt-get -y install socat
 
 is_raspberry_pi() {
     local CPUINFO_PATH="/proc/cpuinfo"

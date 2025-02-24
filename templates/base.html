@@ -26,7 +26,7 @@
             border: 2px solid black;
             }
         </style>
-
+                  
     </head>
     <body>
         <nav class="navbar navbar-expand-sm">
@@ -85,13 +85,13 @@
                     <td>
                       <table >
                         <tr>
-                          <td  id="songQueueCount">Songs Q: {{songQueueCount or 0}}</td>
+                          <td  id="songQueueCount">Songs: {{songQueueCount or items[0][1]}}</td>
                         </tr>
                         <tr>
                           <td <br> <br> </td>
                         </tr> 
                         <tr>
-                          <td id="videoQueueCount">Video Q: {{videoQueueCount or 0}}</td>
+                          <td id="videoQueueCount">Video: {{videoQueueCount or items[1][1]}}</td>
                         </tr>
                         <script>
                           setInterval(songAndVideoCount, 5000);
