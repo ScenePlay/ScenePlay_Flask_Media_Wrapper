@@ -35,7 +35,7 @@ def reap_child(signum, frame):
             pid, status = os.waitpid(-1, os.WNOHANG)
             if pid == 0:
                 break
-            print(f"Reaped child process {pid} with exit status {status}")
+            #print(f"Reaped child process {pid} with exit status {status}")
             reaped_processes.append(pid)
         except ChildProcessError:
             break

@@ -250,7 +250,7 @@ def nextvideo():
 @main.route('/killqueue', methods=["GET","POST"])
 def killqueue():
     queue_kill()
-    time.sleep(2)
+    time.sleep(5)
     return "'message': 'queue killed'"
 
 
