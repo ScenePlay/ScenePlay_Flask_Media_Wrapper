@@ -12,7 +12,9 @@ from remotes import *
 from pathlib import Path
 from wLed.wledCommand import *
 from routes.wledPattern_table import getWledPatternBySceneID
+from flask import send_from_directory     
 import re
+import os
 
 main = Blueprint('main', __name__)
 #db.create_all()
@@ -25,6 +27,9 @@ arr[2] = 0  #current song
 arr[3] = 0  #previous song
 
 
+@main.route('/favicon.ico',methods=['GET'])
+def favicon():
+    return send_from_directory(os.path.join('static/image'), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 @main.route('/', methods=['GET', 'POST'])
 def home():

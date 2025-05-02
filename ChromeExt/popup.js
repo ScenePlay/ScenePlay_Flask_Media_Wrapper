@@ -69,6 +69,9 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     document.body.appendChild(alertDiv);
     setTimeout(() => {
       alertDiv.remove();
+      // Open a new tab to YouTube
+      chrome.tabs.create({ url: 'https://www.youtube.com' });
+      // Close the popup immediately
       window.close();
     }, 2000);
   }

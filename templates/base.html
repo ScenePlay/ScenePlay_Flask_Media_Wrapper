@@ -78,7 +78,7 @@
                   <br>
                   <br>
                     <input type="button" onclick="videoSeek(-30)" class="btn btn-secondary" value="<" style="display: inline;">
-                    <input type="button" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display: inline;">
+                    <input type="button" id="playPauseButton" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display: inline;">
                     <input type="button" onclick="videoSeek(30)" class="btn btn-secondary" value=">" style="display: inline;">
                     <input type="button" onclick="nextVideo()" class="btn btn-primary" value="Next">
                   </td>
@@ -99,7 +99,7 @@
                       </table> 
                     </td> 
                     <td>
-                      <input type="submit" onclick="killQueue()"  class="btn btn-primary fill-cell" value="All Stop" >
+                      <input type="submit" onclick="killQueue()"  class="btn btn-danger mt-2" value="All Stop" >
                     </td>
                 </td>
               </tr>

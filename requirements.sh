@@ -44,7 +44,7 @@ pip3 install gtts $BREAK_SYSTEM_PACKAGES
 pip3 install psutil $BREAK_SYSTEM_PACKAGES
 sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel $BREAK_SYSTEM_PACKAGES
 sudo python3 -m pip install --force-reinstall adafruit-blinka $BREAK_SYSTEM_PACKAGES
-deactivatede
+deactivated
 
 chmod +x *.sh
 chmod +x ~/ScenePlay/supportFiles/*.sh

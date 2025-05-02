@@ -1,5 +1,3 @@
-
-
 var colorhex = "#FF0000";
 var color = "#FF0000";
 //var colorObj = w3color(color);
@@ -490,12 +488,22 @@ function submitOnEnter(e) {
 
 
 function videoStartStop() {
+  const button = document.getElementById("playPauseButton");
+
+  // Make the API call to toggle video play/pause
   fetch('/video_stopstart', {
     method: 'POST',
   })
   .then(response => response.json())
   .then(result => {
     console.log('Start/stop request successful:', result);
+
+    // Toggle the button's value based on the current state
+    if (button.value === "||") {
+      button.value = "▶"; // Change to play icon
+    } else {
+      button.value = "||"; // Change to pause icon
+    }
   })
   .catch(error => console.error('Error in start/stop request:', error));
 }
