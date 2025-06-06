@@ -13,6 +13,7 @@ databaseDir = os.path.dirname(os.path.realpath(__file__)) + '/' + database
 
 num_pixels = 0
 pixel_pin = None
+_brightness = 0
 
 
 def getLEDOutPIN():
@@ -24,6 +25,21 @@ def getLEDOutPIN():
     c.close()
     conn.close()
     return data
+
+
+LedPins = getLEDOutPIN()
+
+if LedPins is not None:
+    for item in LedPins:
+        if item[1] == 21:
+            pixel_pin = board.D21
+            num_pixels = item[2]
+            _brightness = item[3]
+        elif item[1] == 18:
+            pixel_pin = board.D18
+            num_pixels = item[2]
+            _brightness = item[3]
+
 
 def get_LEDJSON():
     conn = sqlite3.connect(databaseDir)
@@ -40,16 +56,6 @@ def get_LEDJSON():
     return row
 
 
-LedPins = getLEDOutPIN()
-
-if LedPins is not None:
-    for item in LedPins:
-        if item[1] == 21:
-            pixel_pin = board.D21
-            num_pixels = item[2]
-        elif item[1] == 18:
-            pixel_pin = board.D18
-            num_pixels = item[2]
 
 
 #print(pixel_pin, num_pixels)
@@ -58,7 +64,7 @@ if LedPins is not None:
 
 ORDER = neopixel.GRB
 # Create NeoPixel object
-pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=0.5, auto_write=False, pixel_order=ORDER)
+pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=_brightness, auto_write=False, pixel_order=ORDER)
 
 def solid_color(color):
     pixels.fill(color)
@@ -904,8 +910,22 @@ def marquee(color=(255, 255, 255),cdiff=(0,0,0),  wait_ms=5, iterations=5):
 
 def run():
     jFromData = get_LEDJSON()
+    #print(jFromData)
     json_data = json.loads(jFromData)
+    
     for pattern in json_data["patterns"]:
+        ModifyBrightness = pattern.get("brightness") # Safely get brightness
+        #print(ModifyBrightness)
+        if ModifyBrightness is not None:
+            try:
+                # Convert to float and ensure it's within the valid range (0.0 to 1.0)
+                new_brightness_value = float(ModifyBrightness)
+                if 0.0 <= new_brightness_value <= 1.0:
+                    pixels.brightness = new_brightness_value # Set brightness on the existing object
+                else:
+                    print(f"Warning: Brightness value {new_brightness_value} is out of range (0.0-1.0). Using previous brightness.")
+            except ValueError:
+                print(f"Warning: Invalid brightness value '{ModifyBrightness}'. Using previous brightness.")
         pattern_type = pattern["type"]
         #print(pattern_type)
         if str(pattern_type) == "solid":

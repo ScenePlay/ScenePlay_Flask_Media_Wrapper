@@ -27,11 +27,8 @@ def remoteSend(LEDPattern):
     except Exception as err: 
         print(err)
         
-def prepJsonRemote(ledMdl, scnPat) -> str:
-
+def prepJsonRemote(ledMdl, scnPat, isLocal=False) -> str:
     i=0
-    
-    #ledPattern = f'{{"patterns\": [{{\"type\": \"{str(ledMdl[0][1])}\"'
     ledPattern = f'{{"patterns\": '
     tester = ""
     for row in ledMdl:
@@ -49,6 +46,10 @@ def prepJsonRemote(ledMdl, scnPat) -> str:
             ledPattern += ', \"direction\": ' + str(scnPat[i][6])
         if tester.find("cdiff")>0:
             ledPattern += ', \"cdiff\": ' + str(scnPat[i][7])
+        #allow local settings to activate
+        if isLocal:
+            ledPattern += ', \"outPinID\": ' + str(scnPat[i][9])
+            ledPattern += ', \"brightness\": ' + str(scnPat[i][10])
         i+=1
         if i < len(ledMdl):
             ledPattern += ","

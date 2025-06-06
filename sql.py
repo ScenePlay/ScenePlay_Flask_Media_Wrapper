@@ -26,11 +26,11 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblGlobalVar (  globalVar_id INTEGER PRIMARY KEY AUTOINCREMENT,  varName TEXT,  varType TEXT,  varValue TEXT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblHours (  hours_id INTEGER PRIMARY KEY AUTOINCREMENT,  startDTTM TEXT,  endDTTM TEXT,  startTime TEXT,  endTime TEXT,  gmt INT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLED (  led_ID INTEGER PRIMARY KEY AUTOINCREMENT,  ledJSON TEXT,  active INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT,  active INT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT, brightness Real,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDTypeModel (  ledTypeModel_ID INTEGER PRIMARY KEY AUTOINCREMENT,  modelName TEXT,  ledJSON TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT,  cdiff TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
@@ -732,7 +732,10 @@ def CRUD_tblScenePattern(row,CRUD):
         _iterations = row[4]
         _direction = row[5]
         _cdiff = row[6]
-        c.execute("Insert INTO tblScenePattern(scene_ID, ledTypeModel_ID, color, wait_ms, iterations, direction, cdiff) VALUES (?, ?, ?, ?, ?, ?, ?)",(_scene_ID, _ledTypeModel_ID, _color, _wait_ms, _iterations, _direction, _cdiff))
+        _OrderBy = row[7]
+        _OutPin = row[8]
+        _brightness = row[9]
+        c.execute("Insert INTO tblScenePattern(scene_ID, ledTypeModel_ID, color, wait_ms, iterations, direction, cdiff,OrderBy, OutPin, brightness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",(_scene_ID, _ledTypeModel_ID, _color, _wait_ms, _iterations, _direction, _cdiff, _OrderBy, _OutPin, _brightness))
         conn.commit()
         return c.lastrowid
     elif CRUD == "R":
@@ -743,7 +746,7 @@ def CRUD_tblScenePattern(row,CRUD):
         return data
     elif CRUD == "bySceneID":
         _Scene_ID = row[0]
-        c.execute("SELECT * FROM tblScenePattern where Scene_ID = ?", (_Scene_ID,))
+        c.execute("SELECT * FROM tblScenePattern where Scene_ID = ? order by OrderBy", (_Scene_ID,))
         data = c.fetchall()
         conn.commit()
         return data
@@ -756,7 +759,10 @@ def CRUD_tblScenePattern(row,CRUD):
         _iterations = row[5]
         _direction = row[6]
         _cdiff = row[7]
-        c.execute("UPDATE tblScenePattern SET Scene_ID = ?, ledTypeModel_ID = ?, color = ?, wait_ms = ?, iterations = ?, direction = ?, cdiff = ? where ScenePattern_id = ?",(_Scene_ID,  _ledTypeModel_ID,  _color, _wait_ms, _iterations, _direction, _cdiff, _ScenePattern_ID))
+        _OrderBy = row[8]
+        _OutPin = row[9]
+        _brightness = row[10]
+        c.execute("UPDATE tblScenePattern SET Scene_ID = ?, ledTypeModel_ID = ?, color = ?, wait_ms = ?, iterations = ?, direction = ?, cdiff = ?, OrderBy = ?, OutPin = ?, brightness = ? where ScenePattern_id = ?",(_Scene_ID,  _ledTypeModel_ID,  _color, _wait_ms, _iterations, _direction, _cdiff, _OrderBy, _OutPin, _brightness, _ScenePattern_ID))
         conn.commit()
     elif CRUD == "D":
         _ScenePattern_ID = row[0]
@@ -782,8 +788,12 @@ def CRUD_tblLEDTypeModel(row,CRUD):
         conn.commit()
         return c.lastrowid
     elif CRUD == "R":
-        _LEDTypeModel_ID = row[0]
-        c.execute("SELECT * FROM tblLEDTypeModel where LEDTypeModel_ID = ?", (_LEDTypeModel_ID,))
+        _LEDTypeModel_ID = str(row)
+        print("LEDTypeModel_ID = " + _LEDTypeModel_ID)
+        sql_query = f"SELECT * FROM tblLEDTypeModel WHERE LEDTypeModel_ID IN ({_LEDTypeModel_ID})"
+        #c.execute("SELECT * FROM tblLEDTypeModel where LEDTypeModel_ID in ( ? )", (_LEDTypeModel_ID,))
+        print(sql_query)
+        c.execute(sql_query)
         data = c.fetchall()
         conn.commit()
         return data

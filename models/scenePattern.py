@@ -9,7 +9,10 @@ class tblscenepattern(db.Model):
     iterations = db.Column(db.Integer)
     direction = db.Column(db.Integer)
     cdiff = db.Column(db.Text)
-    
+    orderBy = db.Column(db.Integer)
+    outPin = db.Column(db.Integer)
+    brightness = db.Column(db.Float)
+        
     def to_dict(self):
         return {
             'scenePattern_ID': self.scenePattern_ID,
@@ -19,6 +22,9 @@ class tblscenepattern(db.Model):
             'wait_ms': self.wait_ms,
             'iterations' : self.iterations,
             'direction': self.direction,
-            'cdiff': self.cdiff
+            'cdiff': self.cdiff,
+            'orderBy': self.orderBy,
+            'outPin': self.outPin,
+            'brightness': self.brightness
         }
         

@@ -141,15 +141,13 @@ def activatescene():
     scnPat = CRUD_tblScenePattern(scnID,"bySceneID")
     #print(scnPat)
     ledMdl = None
+    _scene_ID = []
+    _ledType_ID = []
     if len(scnPat) > 0:
-        _scene_ID = []
-        _scene_ID.append(scnPat[0][1])
-    #print(_scene_ID)
-        _ledType_ID = []
-        _ledType_ID.append(scnPat[0][2])
-    #print(_ledType_ID)
-        ledMdl = CRUD_tblLEDTypeModel(_ledType_ID,"R")
-    # #get all songs associated with scene
+        id_list = [str(item[2]) for item in scnPat]
+        ledTypestrIDS = ",".join(id_list)
+        ledMdl = CRUD_tblLEDTypeModel(ledTypestrIDS ,"R")
+        # #get all songs associated with scene
     rows = get_MusicSceneSongs_BYSceneID(id)
     rowsVideo = get_VideoScene_BYSceneID(id)
     
@@ -189,6 +187,10 @@ def activatescene():
             ledPattern = json.loads(ledPattern)
             remoteSend(ledPattern)
             if is_raspberry_pi() == True:
+                ledPattern = prepJsonRemote(ledMdl, scnPat, True)
+                ledPattern = ledPattern.replace("\"",'"')
+                ledPattern = json.dumps(str(ledPattern))
+                ledPattern = json.loads(ledPattern)
                 insert_LEDJSON(ledPattern)
                 threaderLED()
     else:

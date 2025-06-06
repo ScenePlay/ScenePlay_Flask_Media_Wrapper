@@ -20,10 +20,13 @@ from ledPlayer import *
 # 5    iterations       INT      0                    0 
 # 6    direction        INT      0                    0 
 # 7    cdiff            TEXT     0                    0
+# 8    orderBy          INT      0                    0
+# 9    outPin           INT      0                    0
+# 10   brightness       REAL     0                    0
 
 sp = Blueprint('sp', __name__)
 
-tblColumns = ['scenePattern_ID', 'scene_ID','ledTypeModel_ID', 'color', 'wait_ms', 'iterations', 'direction', 'cdiff']
+tblColumns = ['scenePattern_ID', 'scene_ID','ledTypeModel_ID', 'color', 'wait_ms', 'iterations', 'direction', 'cdiff', 'orderBy', 'outPin', 'brightness']
 primeKey = tblColumns[0]
 @sp.route('/scenePattern')
 def edittbl():
@@ -38,9 +41,9 @@ def edittbl():
 def data():
     sceneFilter = appsettingGetSceneFilter()
     if int(sceneFilter[0][0]) != 0:
-        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.scenePattern_ID.desc())
+        query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.orderBy.asc())
     else:
-        query = tbl.query.order_by(tbl.scene_ID)
+        query = tbl.query.order_by(tbl.scene_ID.asc(),tbl.orderBy.asc())
 
     # search filter
     search = request.args.get('search')
@@ -104,7 +107,8 @@ def update():
 @sp.route('/api/scenepatternaddrow')
 def scenesaddrow():
     sceneFilter = appsettingGetSceneFilter()
-    row = [int(sceneFilter[0][0]),0,'[0,0,0]',10,10000,1,'[0,0,0]']
+    pinOutData = getLEDOutPIN()
+    row = [int(sceneFilter[0][0]),0,'[0,0,0]',10,10000,1,'[0,0,0]',1,pinOutData[0][0],pinOutData[0][3]]
     CRUD_tblScenePattern(row,"C")
     return 'tblScenePattern has a new row'
 
@@ -137,7 +141,9 @@ def WLEDTest():
         _ledType_ID = []
         _ledType_ID.append(scnPat[0][2])
     #print(_ledType_ID)
-        ledMdl = CRUD_tblLEDTypeModel(_ledType_ID,"R")
+        id_list = [str(item[2]) for item in scnPat]
+        ledTypestrIDS = ",".join(id_list)
+        ledMdl = CRUD_tblLEDTypeModel(ledTypestrIDS,"R")
     
     if ledMdl is not None and len(ledMdl) > 0:
         ledPattern = prepJsonRemote(ledMdl, scnPat)
@@ -146,6 +152,10 @@ def WLEDTest():
         ledPattern = json.loads(ledPattern)
         remoteSend(ledPattern)
         if is_raspberry_pi() == True:
+            ledPattern = prepJsonRemote(ledMdl, scnPat, True)
+            ledPattern = ledPattern.replace("\"",'"')
+            ledPattern = json.dumps(str(ledPattern))
+            ledPattern = json.loads(ledPattern)
             insert_LEDJSON(ledPattern)
             threaderLED()
     return '', 204

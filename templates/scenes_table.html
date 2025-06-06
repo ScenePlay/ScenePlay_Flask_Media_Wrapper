@@ -20,11 +20,42 @@
           button.setAttribute("type","submit") 
           button.setAttribute("value","Add New Row")
           button.style = "float: right; margin-right: 100px";
+          button.onclick = async function() { // Make the function asynchronous
+              try {
+                  const response = await fetch('/api/scenesaddrow', { // Await the fetch call
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      // If you need to send data in the POST request body:
+                      // body: JSON.stringify({ key: 'value' }),
+                  });
 
-          button.onclick = function() {
+                  if (!response.ok) {
+                      // Handle HTTP errors (e.g., 404, 500)
+                      console.error(`HTTP error! Status: ${response.status}`);
+                      // You might want to display a user-friendly error message here
+                      // Instead of alert, use a custom modal or update a div
+                      // alert(`Failed to add row: ${response.status}`);
+                  } else {
+                      // Request was successful
+                      console.log('Row added successfully!');
+                      // You can optionally parse the response if the server sends back data
+                      // const data = await response.json();
+                      // console.log('Response data:', data);
+                  }
+              } catch (error) {
+                  // Handle network errors or other issues during fetch
+                  console.error('Error during fetch operation:', error);
+                  // Display a user-friendly error message
+                  // alert('An error occurred while trying to add a new row.');
+              }
+
+              // Reload the page ONLY after the fetch operation has completed (or failed)
+              window.location.reload();
+          };
+          button.onclick = async function() {
               //alert("Button clicked!");
-              fetch('/api/scenesaddrow', {
-              method: 'GET',
+              const response = await fetch('/api/scenesaddrow', {
+              method: 'POST',
               headers: {'Content-Type': 'application/json'},
               });
               window.location.reload();

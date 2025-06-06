@@ -63,6 +63,7 @@ def loadLedConfig():
         ledConfig = tblledconfig(
             pin=item['pin'],
             ledCount=item['ledCount'],
+            brightness=item['brightness'],
             active=item['active']
         )
         session.add(ledConfig)

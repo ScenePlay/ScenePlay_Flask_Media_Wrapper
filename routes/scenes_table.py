@@ -24,6 +24,7 @@ def add_headers(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS') # Explicitly list allowed methods
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 
 @sn.route('/scenes')
@@ -86,7 +87,7 @@ def update():
     db.session.commit()
     return '', 204
 
-@sn.route('/api/scenesaddrow')
+@sn.route('/api/scenesaddrow', methods=['POST'])
 def scenesaddrow():
     row = [' ',1,1,1]
     CRUD_tblScenes(row,"C")

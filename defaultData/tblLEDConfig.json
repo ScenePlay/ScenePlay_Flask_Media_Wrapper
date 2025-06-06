@@ -2,11 +2,13 @@
   {
     "pin": 18,
     "ledCount": 100,
+    "brightness": 0.08,
     "active": 0
   },
   {
     "pin": 21,
     "ledCount": 100,
+    "brightness": 0.08,
     "active": 1
   }
 ]
