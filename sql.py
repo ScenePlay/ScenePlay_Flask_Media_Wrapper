@@ -789,10 +789,10 @@ def CRUD_tblLEDTypeModel(row,CRUD):
         return c.lastrowid
     elif CRUD == "R":
         _LEDTypeModel_ID = str(row)
-        print("LEDTypeModel_ID = " + _LEDTypeModel_ID)
+        #print("LEDTypeModel_ID = " + _LEDTypeModel_ID)
         sql_query = f"SELECT * FROM tblLEDTypeModel WHERE LEDTypeModel_ID IN ({_LEDTypeModel_ID})"
         #c.execute("SELECT * FROM tblLEDTypeModel where LEDTypeModel_ID in ( ? )", (_LEDTypeModel_ID,))
-        print(sql_query)
+        #print(sql_query)
         c.execute(sql_query)
         data = c.fetchall()
         conn.commit()

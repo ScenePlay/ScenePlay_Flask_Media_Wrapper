@@ -116,36 +116,64 @@ def beam(color, wait_ms, iterations,direction):
         pixels.fill([0, 0, 0])
         pixels.show()
 
-def colorRand(color,cdiff):
-    if cdiff > 100:
-        cdiff = 100
-    if color <= 0+cdiff:
-        color = cdiff
-    if color >= 256-cdiff:
-        color = 255-cdiff 
-    return random.randint(color-cdiff,color+cdiff)
 
+def colorRand(color_component, difference):
+    """
+    Generates a random color value within a given range of a base color component.
+
+    Args:
+        color_component (int): The base R, G, or B value (0-255).
+        difference (int): The max random difference to apply. Clamped at 100.
+
+    Returns:
+        int: A new random color component between 0 and 255.
+    """
+    # Clamp the difference to a maximum of 100 to keep colors from varying too wildly
+    if difference > 100:
+        difference = 100
+
+    # To prevent random.randint from getting an invalid range (e.g., randint(-10, 30)),
+    # we shift the center color away from the boundary.
+    if color_component < difference:
+        color_component = difference
+    if color_component > 255 - difference:
+        color_component = 255 - difference
+        
+    return random.randint(color_component - difference, color_component + difference)
 
 def sparkle(color_center, cdiff, wait_ms, iterations):
+    """
+    Fills the strip with a color and then permanently changes random pixels
+    to a variation of that color, one by one.
+    Also, gently pulses the brightness of the entire strip.
+    """
     pixels.fill(color_center)
     pixels.show()
-    check = True
-    j = 0
-    k = 0
+
     brightFlag = False
-    for z in range(iterations):
-        k+=1
-        start = int(random.random() * num_pixels)
-        end = start+1
-        for i in range(start, end):
-            pixels[i] = colorRand(color_center[0],cdiff[0]),colorRand(color_center[1],cdiff[1]),colorRand(color_center[2],cdiff[2])
-        if (brightFlag):
-            pixels.brightness -= .008
+    for _ in range(iterations):
+        # Choose a single random pixel to change
+        pixel_to_sparkle = random.randint(0, num_pixels - 1)
+
+        # Generate a new random color for that pixel
+        sparkle_color = (
+            colorRand(color_center[0], cdiff[0]),
+            colorRand(color_center[1], cdiff[1]),
+            colorRand(color_center[2], cdiff[2])
+        )
+        pixels[pixel_to_sparkle] = sparkle_color
+
+        # Oscillate the global brightness
+        if brightFlag:
+            pixels.brightness = max(0, pixels.brightness - 0.008) # Prevent negative brightness
+            brightFlag = False
         else:
-            pixels.brightness += .008
-        #print(pixels[i])
+            pixels.brightness = min(1.0, pixels.brightness + 0.008) # Clamp brightness at 1.0
+            brightFlag = True
+
         pixels.show()
-        time.sleep(random.randint(1,wait_ms) / 1000.0)
+        time.sleep(random.randint(1, wait_ms) / 1000.0)
+
 
 
 def rainbow_rotate_adjust(c):
@@ -178,9 +206,12 @@ def rainbow_rotate(wait_ms=1, iterations=10):
 
 
 def eye_look(color,wait_ms,iterations):
-    i = eye(color,num_pixels) 
+    i = eye(color,num_pixels)
+    j = eye(color,num_pixels)
+    
     for q in range(iterations):
         i.move(random.randint(0,num_pixels-1),wait_ms)
+        j.move(random.randint(0,num_pixels-1),wait_ms)
 
     
 class eye:
@@ -273,49 +304,72 @@ class eye:
             #print("-")
 
 
-def fireworks_simulation(color=(255, 255, 255), cdiff=(255, 0, 0),wait_ms=5,iterations=5, fade_speed=0.01):
+import random
+import time
+
+# NOTE: 'num_pixels', 'pixels', and 'colorRand' are assumed to be defined elsewhere.
+# For example:
+# num_pixels = 100
+# pixels = [(0, 0, 0)] * num_pixels
+# def colorRand(a, b): return random.randint(min(a, b), max(a, b))
+# def show(): pass
+# pixels.show = show
+
+
+def fireworks_simulation(color=(255, 255, 255), cdiff=(255, 0, 0), wait_ms=5, iterations=5, fade_speed=0.01):
     """
     Simulate a fireworks effect on the LED strip.
-    
-    Parameters:
-    - wait_ms: Time in milliseconds between updates.
-    - explosion_count: Number of explosions to simulate.
-    - trail_color: Color of the "trail" as the firework launches.
-    - explosion_color: Color of the explosion.
-    - fade_speed: Speed at which the explosion fades.
     """
     for _ in range(iterations):
-        # Choose a random start point (launch point) and explosion center
-        start_pixel = random.randint(0, num_pixels // 2)
-        explosion_center = start_pixel + random.randint(5, 15)  # A little offset for the explosion
+        # FIX 1: The upper bound for the start pixel must be num_pixels - 1.
+        start_pixel = random.randint(0, num_pixels - 1)
+
+        # Calculate a potential explosion center.
+        potential_explosion_center = start_pixel + random.randint(5, 15)
+
+        # FIX 2: Clamp the explosion_center to stay within the valid index range.
+        explosion_center = min(potential_explosion_center, num_pixels - 1)
 
         # Launch the firework (lighting up trail pixels)
         for i in range(start_pixel, explosion_center):
-            pixels[i] = cdiff
-            pixels.show()
-            time.sleep(wait_ms / 1000.0)
-            # Clear the trail behind to simulate movement
-            pixels[i] = (0, 0, 0)
+            # This check is good practice, although our fixes make it less likely to be needed.
+            if 0 <= i < num_pixels-1:
+                pixels[i] = cdiff
+                pixels.show()
+                time.sleep(wait_ms / 1000.0)
+                # Clear the trail behind to simulate movement
+                pixels[i] = (0, 0, 0)
 
         # Explosion at the center
-        pixels[explosion_center] = color
-        pixels.show()
-        time.sleep(wait_ms / 500.0)  # Short delay to emphasize the explosion
+        if 0 <= explosion_center < num_pixels-1:
+            pixels[explosion_center] = color
+            pixels.show()
+            time.sleep(wait_ms / 500.0)
+
+        # Generate a random color for the fading sparks
         rndcolor = (colorRand(color[0], cdiff[0]), colorRand(color[1], cdiff[1]), colorRand(color[2], cdiff[2]))
+
         # Fade the explosion outward
         for radius in range(1, 10):
             for offset in [-radius, radius]:
                 pixel_index = explosion_center + offset
-                if 0 <= pixel_index < num_pixels:
-                   pixels[pixel_index] = tuple(max(0, min(255, int(c * (1 - radius * fade_speed)))) for c in rndcolor)
+                if 0 <= pixel_index < num_pixels-1:
+                    # Calculate the faded color
+                    fade_factor = 1 - (radius * fade_speed)
+                    faded_color = tuple(max(0, int(c * fade_factor)) for c in rndcolor)
+                    pixels[pixel_index] = faded_color
             pixels.show()
             time.sleep(wait_ms / 1000.0)
 
-        # Clear the explosion
-        for i in range(explosion_center - 10, explosion_center + 10):
-            if 0 <= i < num_pixels:
-                pixels[i] = (0, 0, 0)
+        # Clear the explosion area safely
+        start_clear = max(0, explosion_center - 10)
+        end_clear = min(num_pixels, explosion_center + 10)
+        if end_clear > num_pixels-1:
+            end_clear = num_pixels-1
+        for i in range(start_clear, end_clear):
+            pixels[i] = (0, 0, 0)
         pixels.show()
+        time.sleep(wait_ms / 1000.0)
 
 # Example usage:
 # fireworks_simulation()  # Call this function to simulate fireworks
@@ -340,17 +394,20 @@ def fireworks_finale(finale_count=3, fireworks_per_finale=10, wait_ms=50, trail_
             random_explosion_color = tuple(random.randint(0, 255) for _ in range(3))
             
             # Choose a random start point and explosion center for each firework
-            start_pixel = random.randint(0, num_pixels // 2)
+            start_pixel = random.randint(0, num_pixels-1)
             explosion_center = start_pixel + random.randint(5, 15)
 
             # Launch the firework with randomized colors
             for i in range(start_pixel, explosion_center):
-                pixels[i] = random_trail_color
-                pixels.show()
-                time.sleep(wait_ms / 2000.0)  # Faster for finale effect
-                pixels[i] = (0, 0, 0)  # Clear the trail behind
+                if 0 <= i < num_pixels-1:
+                    pixels[i] = random_trail_color
+                    pixels.show()
+                    time.sleep(wait_ms / 2000.0)  # Faster for finale effect
+                    pixels[i] = (0, 0, 0)  # Clear the trail behind
 
             # Explosion at the center with randomized color
+            if explosion_center > num_pixels-1:
+                explosion_center = num_pixels-1
             pixels[explosion_center] = random_explosion_color
             pixels.show()
             time.sleep(wait_ms / 500.0)
@@ -359,7 +416,7 @@ def fireworks_finale(finale_count=3, fireworks_per_finale=10, wait_ms=50, trail_
             for radius in range(1, 10):
                 for offset in [-radius, radius]:
                     pixel_index = explosion_center + offset
-                    if 0 <= pixel_index < num_pixels:
+                    if 0 <= pixel_index < num_pixels-1:
                         pixels[pixel_index] = tuple(min(255, max(0, int(c * (1 - radius * fade_speed)))) for c in random_explosion_color)
                 pixels.show()
                 time.sleep(wait_ms / 1000.0)
