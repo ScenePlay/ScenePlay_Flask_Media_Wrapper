@@ -847,7 +847,7 @@ def lightning_strike(duration=10, min_strike_delay=0.5, max_strike_delay=2, min_
 # lightning_strike()  # Call this function to run the 'Lightning Strike' effect
 
 
-def thunderstorm(duration=30, min_strike_delay=1, max_strike_delay=3, min_strike_length=5, max_strike_length=20, rain_intensity=0.05):
+def thunderstorm(iterations=30, min_strike_delay=1, max_strike_delay=3, min_strike_length=5, max_strike_length=20, rain_intensity=0.05):
     """
     Create a 'Thunderstorm' effect on the LED strip.
     
@@ -861,7 +861,7 @@ def thunderstorm(duration=30, min_strike_delay=1, max_strike_delay=3, min_strike
     """
     start_time = time.time()
     
-    while (time.time() - start_time) < duration:
+    while (time.time() - start_time) < iterations:
         # Ambient rainfall effect
         for i in range(num_pixels):
             if random.random() < rain_intensity:
@@ -969,7 +969,7 @@ def run():
     jFromData = get_LEDJSON()
     #print(jFromData)
     json_data = json.loads(jFromData)
-    
+    #print(json_data)
     for pattern in json_data["patterns"]:
         ModifyBrightness = pattern.get("brightness") # Safely get brightness
         #print(ModifyBrightness)
@@ -1052,7 +1052,8 @@ def run():
         elif str(pattern_type) == "lightning_strike":
             lightning_strike()
         elif str(pattern_type) == "thunderstorm":
-            thunderstorm()
+            iterations = pattern["iterations"]
+            thunderstorm(iterations)
         elif str(pattern_type) == "joyful_celebration":
             joyful_celebration()
         elif str(pattern_type) == "marquee":
