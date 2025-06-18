@@ -15,7 +15,7 @@ session = Session()
 
 def remoteSend(LEDPattern):
     try:
-        query = select(IP, Role).where(Role.ID == IP.serverroleid).where(Role.name == 'Remote')
+        query = select(IP, Role).where(Role.ID == IP.serverroleid).where(Role.name == 'Remote').where(IP.active == 1)
         remoteIPs = session.execute(query).fetchall()
         for eachIP in remoteIPs:
             ip_address = str(eachIP[0].ipAddress) #eachIP.
