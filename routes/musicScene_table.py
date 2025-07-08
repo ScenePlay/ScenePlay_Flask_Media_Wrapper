@@ -98,7 +98,7 @@ def update():
     return '', 204
 
 
-@ms.route('/api/musicSceneaddrow')
+@ms.route('/api/musicSceneaddrow', methods=['POST'])
 def scenesaddrow():
     sceneFilter = appsettingGetSceneFilter()
     row = [int(sceneFilter[0][0]),0,1,100]

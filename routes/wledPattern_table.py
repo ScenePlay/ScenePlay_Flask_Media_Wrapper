@@ -114,7 +114,7 @@ def update():
     db.session.commit()
     return '', 204
 
-@wl.route('/api/wledpatternaddrow')
+@wl.route('/api/wledpatternaddrow', methods=['POST'])
 def wledaddrow():
     sceneFilter = appsettingGetSceneFilter()
     newrow = tbl(scene_ID=int(sceneFilter[0][0]), server_ID=0, effect=0, pallette=0, color1='[0,0,0]', color2='[0,0,0]', color3='[0,0,0]', speed=125, brightness=125, orderBy=1)

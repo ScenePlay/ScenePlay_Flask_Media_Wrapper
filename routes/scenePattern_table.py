@@ -104,7 +104,7 @@ def update():
     db.session.commit()
     return '', 204
 
-@sp.route('/api/scenepatternaddrow')
+@sp.route('/api/scenepatternaddrow', methods=['POST'])
 def scenesaddrow():
     sceneFilter = appsettingGetSceneFilter()
     pinOutData = getLEDOutPIN()

@@ -78,7 +78,7 @@ def update():
     return '', 204
 
 
-@cp.route('/api/campaignaddrow')
+@cp.route('/api/campaignaddrow', methods=['POST'])
 def campaignaddrow():
     newrow = tbl( campaign_name=' ', active=1, order_by='10')
     db.session.add(newrow)

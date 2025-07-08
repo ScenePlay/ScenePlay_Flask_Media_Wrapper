@@ -83,7 +83,7 @@ def update():
     return '', 204
 
 
-@ip.route('/api/serveripaddrow')
+@ip.route('/api/serveripaddrow', methods=['POST'])
 def scenesaddrow():
     row = [' ', '127.0.0.1', '',1,1]
     CRUD_tblServersIP(row,"C")

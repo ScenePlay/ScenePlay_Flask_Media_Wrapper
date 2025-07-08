@@ -98,7 +98,7 @@ def update():
     return '', 204
 
 
-@vs.route('/api/videoSceneaddrow')
+@vs.route('/api/videoSceneaddrow', methods=['POST'])
 def videoSceneaddrow():
     sceneFilter = appsettingGetSceneFilter()
     row = [int(sceneFilter[0][0]),0,0,1,100,0]

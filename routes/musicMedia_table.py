@@ -76,7 +76,7 @@ def update():
     db.session.commit()
     return '', 204
 
-@mu.route('/api/musicaddrow')
+@mu.route('/api/musicaddrow', methods=['POST'])
 def musicaddrow():
     row = [' ',' ',0,'',1,1,0,'','']
     CRUD_tblMusic(row,"C")

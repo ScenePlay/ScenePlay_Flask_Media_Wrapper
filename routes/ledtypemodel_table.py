@@ -90,7 +90,7 @@ def update():
     return '', 204
 
 
-@ltm.route('/api/ledtypemodeladdrow')
+@ltm.route('/api/ledtypemodeladdrow', methods=['POST'])
 def ledtypemodeladdrow():
     row = [' ','{"type": "solid","color": [0,0,0]}']
     CRUD_tblLEDTypeModel(row,"C")

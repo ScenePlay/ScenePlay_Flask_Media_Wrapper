@@ -90,7 +90,7 @@ def update():
 
     return '', 204
 
-@vm.route('/api/videomediaaddrow')
+@vm.route('/api/videomediaaddrow', methods=['POST'])
 def videomediaaddrow():
     row = ['empty','empty',0,'',1,1,0,'','']
     CRUD_tblvideomedia(row,"C")

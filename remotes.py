@@ -22,6 +22,7 @@ def remoteSend(LEDPattern):
             #print(f"Sending Data to Remotes: {ip_address}")
             port = str(8086)
             api_url = f"http://{ip_address}:{port}/receive_led_patterns"
+            print(LEDPattern)
             response = requests.post(api_url, json=json.loads(LEDPattern))
         session.close()
     except Exception as err: 

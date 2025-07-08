@@ -31,12 +31,40 @@
           button.setAttribute("type","submit") 
           button.setAttribute("value","Add New Row")
           button.style = "float: right; margin-right: 100px";
-          button.onclick = function() {
-              //alert("Button clicked!");
-              fetch('/api/musicSceneaddrow', {
-              method: 'GET',
-              headers: {'Content-Type': 'application/json'},
-              });
+                    button.onclick = async function() { // Make the function asynchronous
+              try {
+                  const response = await fetch('/api/musicSceneaddrow', { // Await the fetch call
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      // If you need to send data in the POST request body:
+                      // body: JSON.stringify({ key: 'value' }),
+                  });
+
+                  if (!response.ok) {
+                      // Handle HTTP errors (e.g., 404, 500)
+                      console.error(`HTTP error! Status: ${response.status}`);
+                      // You might want to display a user-friendly error message here
+                      // Instead of alert, use a custom modal or update a div
+                      // alert(`Failed to add row: ${response.status}`);
+                  } else {
+                      // Request was successful
+                      console.log('Row added successfully!');
+                      // You can optionally parse the response if the server sends back data
+                      // const data = await response.json();
+                      // console.log('Response data:', data);
+                  }
+              } catch (error) {
+                  // Handle network errors or other issues during fetch
+                  console.error('Error during fetch operation:', error);
+                  // Display a user-friendly error message
+                  // alert('An error occurred while trying to add a new row.');
+              }
+          // button.onclick = function() {
+          //     //alert("Button clicked!");
+          //     fetch('/api/musicSceneaddrow', {
+          //     method: 'GET',
+          //     headers: {'Content-Type': 'application/json'},
+          //     });
               window.location.reload();
           }
           element.parentNode.insertBefore(button, element.nextSibling);
@@ -179,7 +207,7 @@
               dlete.name = "Dlete"
               dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
               dlete.setAttribute("type","submit")           
-              dlete.setAttribute("onclick","dlete()")
+              dlete.setAttribute("onclick","dlete(event)")
               dlete.setAttribute("value","Delete")
               dlete.className = "btn btn-primary";
               return gridjs.html(dlete.outerHTML);
@@ -283,29 +311,58 @@
           }
         }
       });
-      function dlete(){
-        var ev = event.target;
-        id = ev.id.split("_ID_")
-        if(ev.id.toString().includes("Dlete_")){
-          jsn = {[primeKey]:id[1]}
-          console.log(JSON.stringify(jsn))
+            async function dlete(event) {
         if (confirm('Are you sure you want to DELETE?')) {
-            jsn = {[primeKey]:id[1]}
-            console.log(JSON.stringify(jsn))
-            fetch('/api/musicScenedelrow', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(jsn),
-            });
-            window.location.reload();
-        } else {
-          // Do nothing!
-          console.log('Thing was not saved to the database.');
-        }
-          //saveChange(JSON.stringify(jsn))
-          //console.log("Selected " + jsn);
+          const ev = event.target;
+          const idParts = ev.id.split("_ID_");
+
+          if (ev.id.includes("Dlete_") && idParts.length > 1) {
+            const rowId = idParts[1];
+            const payload = { [primeKey]: rowId };
+
+            try {
+              const response = await fetch('/api/musicScenedelrow', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+
+              if (response.ok) {
+                window.location.reload();
+              } else {
+                alert(`Failed to delete row: ${response.statusText}`);
+              }
+            } catch (error) {
+              console.error('Error during delete operation:', error);
+              alert('An error occurred while trying to delete the row.');
+            }
+          }
         }
       }
+      // function dlete(){
+      //   if (confirm('Are you sure you want to DELETE?')) {
+      //   var ev = event.target;
+      //   id = ev.id.split("_ID_")
+      //   if(ev.id.toString().includes("Dlete_")){
+      //     jsn = {[primeKey]:id[1]}
+      //     console.log(JSON.stringify(jsn))
+        
+      //       jsn = {[primeKey]:id[1]}
+      //       console.log(JSON.stringify(jsn))
+      //       fetch('/api/musicScenedelrow', {
+      //         method: 'POST',
+      //         headers: {'Content-Type': 'application/json'},
+      //         body: JSON.stringify(jsn),
+      //       });
+      //       window.location.reload();
+      //   } else {
+      //     // Do nothing!
+      //     console.log('Thing was not saved to the database.');
+      //   }
+      //     //saveChange(JSON.stringify(jsn))
+      //     //console.log("Selected " + jsn);
+      //   }
+      // }
 
     </script>
   </body>
