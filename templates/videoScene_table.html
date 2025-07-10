@@ -102,31 +102,39 @@
           }
       }
 
-      const sceneDD = new Dropdown
-      fetch('/api/scenes')
-      .then(response => response.json())
-      .then(data => {
-        sceneDD.addItem(0, '')
-        for (const item of data.data) {
-          sceneDD.addItem(item.scene_ID, item.sceneName)
+      const sceneDD = new Dropdown;
+      (async () => {
+        try {
+          const response = await fetch('/api/scenes');
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          sceneDD.addItem(0, '');
+          for (const item of data.data) {
+            sceneDD.addItem(item.scene_ID, item.sceneName);
+          }
+        } catch (error) {
+          console.error('Error fetching scene data:', error);
         }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
+      })();
 
-      const videoDD = new Dropdown
-      fetch('api/videomedia')
-      .then(response => response.json())
-      .then(data => {
-        videoDD.addItem(0, '')
-        for (const item of data.data) {
-          videoDD.addItem(item.video_ID, item.title)
+      const videoDD = new Dropdown;
+      (async () => {
+        try {
+          const response = await fetch('api/videomedia');
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          videoDD.addItem(0, '');
+          for (const item of data.data) {
+            videoDD.addItem(item.video_ID, item.title);
+          }
+        } catch (error) {
+          console.error('Error fetching video data:', error);
         }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
+      })();
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();

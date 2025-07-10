@@ -102,44 +102,40 @@
           }
       }
 
-      const sceneDD = new Dropdown
-      fetch('/api/scenes')
-      .then(response => response.json())
-      .then(data => {
-        sceneDD.addItem(0, '')
-        for (const item of data.data) {
-          sceneDD.addItem(item.scene_ID, item.sceneName)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
-
-      const songDD = new Dropdown
-      let songDataReceived = false
-      const songPromise = fetch('api/music')
-        .then(response => response.json())
-        .then(data => {
-          songDD.addItem(0, '')
+      const sceneDD = new Dropdown;
+      (async () => {
+        try {
+          const response = await fetch('/api/scenes');
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          sceneDD.addItem(0, '');
           for (const item of data.data) {
-            songDD.addItem(item.song_ID, item.song)
+            sceneDD.addItem(item.scene_ID, item.sceneName);
           }
-          songDataReceived = true;
-        })
-        .catch(error => {
+        } catch (error) {
+          console.error('Error fetching scene data:', error);
+        }
+      })();
+
+      const songDD = new Dropdown();
+      (async () => {
+        try {
+          const response = await fetch('api/music');
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+          songDD.addItem(0, '');
+          for (const item of data.data) {
+            songDD.addItem(item.song_ID, item.song);
+          }
+          console.log('songDD ready');
+        } catch (error) {
           console.error('Error fetching data:', error);
-        });
-      const waitForSongData = () => new Promise(resolve => {
-        const intervalId = setInterval(() => {
-          if (songDataReceived) {
-            clearInterval(intervalId);
-            resolve();
-          }
-        }, 100);
-      });
-      Promise.all([songPromise, waitForSongData()]).then(() => {
-        console.log('songDD ready');
-      });
+        }
+      })();
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
