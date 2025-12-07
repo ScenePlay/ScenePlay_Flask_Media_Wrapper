@@ -24,8 +24,7 @@ primeKey = tblColumns[0]
 @vs.route('/videoScene')
 def edittbl():
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
     sceneFilter = appsettingGetSceneFilter()
     return render_template('videoScene_table.html',items=data,volume=volume,scenes=scenes,sceneFilter=int(sceneFilter[0][0]))

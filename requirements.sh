@@ -42,6 +42,7 @@ pip3 install flask_sqlalchemy $BREAK_SYSTEM_PACKAGES
 pip3 install flask_migrate $BREAK_SYSTEM_PACKAGES
 pip3 install gtts $BREAK_SYSTEM_PACKAGES
 pip3 install psutil $BREAK_SYSTEM_PACKAGES
+pip3 install pulsectl $BREAK_SYSTEM_PACKAGES
 sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel $BREAK_SYSTEM_PACKAGES
 sudo python3 -m pip install --force-reinstall adafruit-blinka $BREAK_SYSTEM_PACKAGES
 deactivated

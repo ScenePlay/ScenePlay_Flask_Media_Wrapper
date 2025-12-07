@@ -33,8 +33,7 @@ def datalcf():
 @lcf.route('/ledconfig')
 def edittbl():
     data = select_data_stats()
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('ledConfig_table.html',items=data,volume=volume)
 
 

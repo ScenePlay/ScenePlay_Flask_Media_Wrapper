@@ -45,8 +45,7 @@ def main():
     scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
     scenes.insert(0, (0, "None"))
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('utils.html',items=data,volume=volume,Scenes=scenes)
 
     

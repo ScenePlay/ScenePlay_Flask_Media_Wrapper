@@ -22,8 +22,7 @@ primeKey = tblColumns[0]
 @ip.route('/serverIP')
 def edittbl():
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('serverIP_table.html',items=data,volume=volume)
 
 @ip.route('/api/serverIP')

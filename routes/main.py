@@ -35,8 +35,7 @@ def favicon():
 def home():
     create_table()
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     scenes = get_Scenes()
     campaigns = CRUD_tblCampaigns([], "Selected")
     campaignRow = appsettingGetCampaignSelected()
@@ -61,8 +60,7 @@ def add_headers(response):
 def set_volume():
     json_data = json.loads(json.dumps(request.get_json()))
     new_volume = int(json_data["volume"])
-    mixer = alsaaudio.Mixer("Master")
-    mixer.setvolume(new_volume)
+    setvolume(new_volume)
     return "Volume set successfully!"
 
 @main.route("/api/songandvideocount", methods=["GET"])

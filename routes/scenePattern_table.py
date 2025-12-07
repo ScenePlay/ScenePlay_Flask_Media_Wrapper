@@ -31,8 +31,7 @@ primeKey = tblColumns[0]
 @sp.route('/scenePattern')
 def edittbl():
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
     sceneFilter = appsettingGetSceneFilter()
     return render_template('scenePattern_table.html',items=data,volume=volume,scenes=scenes,sceneFilter=int(sceneFilter[0][0]))

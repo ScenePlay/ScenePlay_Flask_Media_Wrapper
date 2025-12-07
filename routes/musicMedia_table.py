@@ -13,8 +13,7 @@ primeKey = tblColumns[0]
 @mu.route('/music')
 def edittbl():
     data = select_data_stats()
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('musicMedia_table.html',items=data,volume=volume)
 
 

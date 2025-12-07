@@ -27,8 +27,7 @@ primeKey = tblColumns[0]
 @vm.route('/videomedia')
 def edittbl():
     data = select_data_stats()
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('videoMedia_table.html',items=data,volume=volume)
 
 

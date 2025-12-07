@@ -19,8 +19,7 @@ primeKey = tblColumns[0]
 @sr.route('/serverrole')
 def edittbl():
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('serverrole_table.html',items=data,volume=volume)
 
 @sr.route('/api/serverrole')

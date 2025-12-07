@@ -24,8 +24,7 @@ ge = Blueprint('ge', __name__)
 @ge.route('/genre')
 def edittbl():
     data = select_data_stats()
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('genre_table.html',items=data,volume=volume)
 
 @ge.route('/api/genre')

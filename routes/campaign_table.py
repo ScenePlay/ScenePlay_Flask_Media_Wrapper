@@ -19,8 +19,7 @@ primeKey = tblColumns[0]
 @cp.route('/campaigns')
 def edittbl():
     data = select_data_stats()#arr)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    volume = currentvolume()
     return render_template('campaigns_table.html',items=data,volume=volume)
 
 @cp.route('/api/campaigns')

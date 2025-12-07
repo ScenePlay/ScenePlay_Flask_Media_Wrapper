@@ -25,6 +25,7 @@ class pinger:
     FNULL = open(os.devnull, 'w')
     def pingThing(self):
         FNULL = open(os.devnull, 'w')
+        print(self.host)
         p = subprocess.Popen(['ping', '-c', '1', self.host], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
         p.wait()
         try:
@@ -75,8 +76,10 @@ def main():
     N = 16 + int(IPBase[3]) -1
     for i in range(int(IPBase[3]), N):
         if(i>0 and i<255):
-            #print(f"{str(i)}")
+            print(f"{str(i)}")
             pinger(f"{IPBase[0]}.{IPBase[1]}.{IPBase[2]}.{str(i)}")
+            time.sleep(2)
+    
     print(pid)
     p.terminate()
     p.kill()
