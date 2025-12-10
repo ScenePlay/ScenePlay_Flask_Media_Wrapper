@@ -73,7 +73,7 @@ def main():
     p = psutil.Process(pid)
     args = sys.argv[1:]
     IPBase = args[0].split(".")
-    N = 16 + int(IPBase[3]) -1
+    N = 64 + int(IPBase[3]) -1
     for i in range(int(IPBase[3]), N):
         if(i>0 and i<255):
             print(f"{str(i)}")

@@ -36,35 +36,35 @@ def startPinging():
     local_ip = get_local_ip()
     IPBase = local_ip.split(".")
 
-    for i in range(0,256,16):
-        hosts.append(f"{IPBase[0]}.{IPBase[1]}.{IPBase[2]}.{i}")
+    for i in range(0,256,64):
+       hosts.append(f"{IPBase[0]}.{IPBase[1]}.{IPBase[2]}.{i}")
 
-    
-
+    #hosts.append(f"{IPBase[0]}.{IPBase[1]}.{IPBase[2]}.{0}")
     start_dir = os.path.dirname(os.path.realpath(__file__))
     #ippinger_dir = start_dir + "/ippinger.py"
     ippinger = "ippinger.py"
     #ippinger_dir = "./ipping.sh"
     iplauncher_dir =  start_dir + "/./iplauncher.sh"
     #iplauncher_dir =  start_dir + "/./ipping.sh"
-    
+
+
    
     A = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[0]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
     B = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[1]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
     C = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[2]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
     D = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[3]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    E = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[4]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    F = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[5]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    G = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[6]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    H = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[7]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    I = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[8]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    J = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[9]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    K = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[10]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    L = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[11]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    M = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[12]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    N = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[13]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    O = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[14]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
-    P = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[15]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # E = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[4]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # F = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[5]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # G = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[6]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # H = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[7]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # I = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[8]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # J = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[9]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # K = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[10]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # L = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[11]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # M = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[12]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # N = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[13]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # O = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[14]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
+    # P = subprocess.Popen([iplauncher_dir, start_dir, ippinger, hosts[15]], stdout=FNULL, stderr=subprocess.STDOUT,shell=False)
     
     
     #for ip in hosts:
