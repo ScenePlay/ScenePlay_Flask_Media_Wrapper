@@ -1,86 +1,21 @@
-[
-  {
-    "modelName": "Sparkle",
-    "ledJSON": "{\"type\": \"sparkle\", \"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "Rainbow Wave",
-    "ledJSON": "{\"type\": \"rainbow_wave\",\"iterations\":1000000}"
-  },
-  {
-    "modelName": "Beam",
-    "ledJSON": "{\"type\": \"beam\",\"color\": [0,0,0],\"wait_ms\": 2,\"iterations\": 1000000,\"direction\":1}"
-  },
-  {
-    "modelName": "Color Wipe",
-    "ledJSON": "{\"type\": \"color_wipe\",\"color\": [0,0,0],\"wait_ms\": 10,\"direction\": 1}"
-  },
-  {
-    "modelName": "Rainbow Rotate",
-    "ledJSON": "{\"type\": \"rainbow_rotate\",\"color\": [0,0,0],\"wait_ms\": 1,\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "Eye Search",
-    "ledJSON": "{\"type\": \"eye\",\"color\": [0,0,0],\"wait_ms\": 15,\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "Solid",
-    "ledJSON": "{\"type\": \"solid\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "lightning strike",
-    "ledJSON": "{\"type\": \"lightning_strike\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "fireworks_simulation",
-    "ledJSON": "{\"type\": \"fireworks_simulation\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "fireworks finale",
-    "ledJSON": "{\"type\": \"fireworks_finale\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "shimmer sine wave",
-    "ledJSON": "{\"type\": \"shimmer_sine_wave\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "shimmer effect",
-    "ledJSON": "{\"type\": \"shimmer_effect\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "marquee effect",
-    "ledJSON": "{\"type\": \"marquee_effect\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "aurora drift",
-    "ledJSON": "{\"type\": \"aurora_drift\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "cosmic vortex",
-    "ledJSON": "{\"type\": \"cosmic_vortex\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "serenity flow",
-    "ledJSON": "{\"type\": \"serenity_flow\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "tranquil drift",
-    "ledJSON": "{\"type\": \"tranquil_drift\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "digital dreamscape",
-    "ledJSON": "{\"type\": \"digital_dreamscape\",\"color\": [0,0,0],\"wait_ms\": 8,\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "thunderstorm",
-    "ledJSON": "{\"type\": \"thunderstorm\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "joyful celebration",
-    "ledJSON": "{\"type\": \"joyful_celebration\",\"color\": [0,0,0],\"iterations\": 1000000}"
-  },
-  {
-    "modelName": "marquee",
-    "ledJSON": "{\"type\": \"marquee\",\"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 1000000}"
-  }
-]
+[{"modelName":"Beam","ledJSON":"{\"type\": \"beam\",\"color\": [0,0,0],\"wait_ms\": 2,\"iterations\": 9999999,\"direction\":1}"},
+{"modelName":"Color Wipe","ledJSON":"{\"type\": \"color_wipe\",\"color\": [0,0,0],\"wait_ms\": 10,\"direction\": 1}"},
+{"modelName":"Eye Search","ledJSON":"{\"type\": \"eye\",\"color\": [0,0,0],\"wait_ms\": 15,\"iterations\": 9999999}"},
+{"modelName":"Rainbow Rotate","ledJSON":"{\"type\": \"rainbow_rotate\",\"color\": [0,0,0],\"wait_ms\": 1,\"iterations\": 9999999}"},
+{"modelName":"Rainbow Wave","ledJSON":"{\"type\": \"rainbow_wave\",\"iterations\":9999999}"},
+{"modelName":"Solid","ledJSON":"{\"type\": \"solid\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"Sparkle","ledJSON":"{\"type\": \"sparkle\", \"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"aurora drift","ledJSON":"{\"type\": \"aurora_drift\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"cosmic vortex","ledJSON":"{\"type\": \"cosmic_vortex\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"digital dreamscape","ledJSON":"{\"type\": \"digital_dreamscape\",\"color\": [0,0,0],\"wait_ms\": 8,\"iterations\": 9999999}"},
+{"modelName":"fireworks finale","ledJSON":"{\"type\": \"fireworks_finale\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"fireworks_simulation","ledJSON":"{\"type\": \"fireworks_simulation\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"joyful celebration","ledJSON":"{\"type\": \"joyful_celebration\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"lightning strike","ledJSON":"{\"type\": \"lightning_strike\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"marquee","ledJSON":"{\"type\": \"marquee\",\"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"marquee effect","ledJSON":"{\"type\": \"marquee_effect\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"serenity flow","ledJSON":"{\"type\": \"serenity_flow\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"shimmer effect","ledJSON":"{\"type\": \"shimmer_effect\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"shimmer sine wave","ledJSON":"{\"type\": \"shimmer_sine_wave\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"thunderstorm","ledJSON":"{\"type\": \"thunderstorm\",\"color\": [0,0,0],\"iterations\": 9999999}"},
+{"modelName":"tranquil drift","ledJSON":"{\"type\": \"tranquil_drift\",\"color\": [0,0,0],\"iterations\": 9999999}"}]
