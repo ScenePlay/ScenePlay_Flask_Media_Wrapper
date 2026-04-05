@@ -16,6 +16,7 @@ from routes.videoScene_table import vs
 from routes.wledPattern_table import wl
 from routes.dnLoadStatus_table import dls
 from routes.ledconfig_table import lcf
+from routes.cronSchedule_table import cs
 
 from defaultData import *
 from sql import *
@@ -72,6 +73,7 @@ app.register_blueprint(vs)
 app.register_blueprint(wl)
 app.register_blueprint(dls)
 app.register_blueprint(lcf)
+app.register_blueprint(cs)
 
 num = Value('i', 1)
 arr = Array('i', range(15))

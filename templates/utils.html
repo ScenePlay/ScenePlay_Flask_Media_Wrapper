@@ -51,7 +51,33 @@
                      <br />
                      <br />
                      </div>
+                     <br />
+                     <div style="border: 3px solid black;">
+                     <h3>Music</h3>
+                     <label>Keep Music Playing (ignore All Stop for music)</label>
+                     <br />
+                     <button id="keepMusicBtn" type="button"
+                         class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }} mt-2"
+                         onclick="toggleKeepMusic()">
+                         {{ 'ON' if keep_music else 'OFF' }}
+                     </button>
+                     <br /><br />
+                     </div>
                 </form>
+                <script>
+                async function toggleKeepMusic() {
+                    const response = await fetch('/api/keepmusicplaying', { method: 'POST' });
+                    const data = await response.json();
+                    const btn = document.getElementById('keepMusicBtn');
+                    if (data.keep_music) {
+                        btn.textContent = 'ON';
+                        btn.className = 'btn btn-success mt-2';
+                    } else {
+                        btn.textContent = 'OFF';
+                        btn.className = 'btn btn-secondary mt-2';
+                    }
+                }
+                </script>
             </div>
         </div>
 {% endblock %}

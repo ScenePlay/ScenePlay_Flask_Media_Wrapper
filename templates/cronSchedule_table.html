@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+  <body onload="addButton()">
+    <div>
+      <h1>Cron Schedules</h1>
+      <hr>
+      <div id="table"></div>
+    </div>
+    <script>
+      const tableDiv = document.getElementById('table');
+
+      function addButton() {
+        var element = document.querySelector("div.gridjs-search");
+
+        var addBtn = document.createElement("input");
+        addBtn.className = "btn btn-primary";
+        addBtn.setAttribute("type", "submit");
+        addBtn.setAttribute("value", "Add New Row");
+        addBtn.style = "float: right; margin-right: 10px;";
+        addBtn.onclick = async function () {
+          try {
+            const response = await fetch('/api/cronscheduleaddrow', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+            if (response.ok) {
+              window.location.reload();
+            } else {
+              console.error('Failed to add row:', response.status);
+            }
+          } catch (error) {
+            console.error('Error adding row:', error);
+          }
+        };
+
+        var applyBtn = document.createElement("input");
+        applyBtn.className = "btn btn-success";
+        applyBtn.setAttribute("type", "submit");
+        applyBtn.setAttribute("value", "Apply to Crontab");
+        applyBtn.style = "float: right; margin-right: 10px;";
+        applyBtn.onclick = async function () {
+          if (confirm('Apply all active schedules to the system crontab? Existing ScenePlay-managed entries will be replaced.')) {
+            try {
+              const response = await fetch('/api/applycronschedules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              const result = await response.json();
+              if (result.success) {
+                alert('Crontab updated successfully. ' + result.count + ' active schedule(s) applied.');
+              } else {
+                alert('Failed to update crontab: ' + (result.error || 'Unknown error'));
+              }
+            } catch (error) {
+              console.error('Error applying crontab:', error);
+              alert('An error occurred while applying the crontab.');
+            }
+          }
+        };
+
+        element.parentNode.insertBefore(applyBtn, element.nextSibling);
+        element.parentNode.insertBefore(addBtn, applyBtn.nextSibling);
+      }
+
+      const activeDD = [
+        { value: "1", label: "Yes" },
+        { value: "0", label: "No" }
+      ];
+
+      const updateUrl = (prev, query) => {
+        return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
+      };
+
+      const editableCellAttributes = (data, row, col) => {
+        if (row) {
+          return { contentEditable: 'true', 'data-element-id': row.cells[0].data };
+        }
+        return {};
+      };
+
+      // 0  schedule_id   INTEGER  PK
+      // 1  name          TEXT
+      // 2  minute        TEXT
+      // 3  hour          TEXT
+      // 4  day_of_month  TEXT
+      // 5  month         TEXT
+      // 6  day_of_week   TEXT
+      // 7  command       TEXT
+      // 8  description   TEXT
+      // 9  active        INT
+      const tblColumns = ['schedule_id', 'name', 'minute', 'hour', 'day_of_month', 'month', 'day_of_week', 'command', 'description', 'active'];
+      const primeKey = tblColumns[0];
+
+      new gridjs.Grid({
+        columns: [
+          { id: tblColumns[0], name: 'ID', hidden: true },
+          { id: tblColumns[1], name: 'Name', sort: true, attributes: editableCellAttributes },
+          { id: tblColumns[2], name: 'Minute', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[3], name: 'Hour', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[4], name: 'Day of Month', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[5], name: 'Month', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[6], name: 'Day of Week', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[7], name: 'Command', sort: false, attributes: editableCellAttributes },
+          { id: tblColumns[8], name: 'Description', sort: false, attributes: editableCellAttributes },
+          {
+            id: tblColumns[9], name: 'Active', sort: false,
+            formatter: function (cellData, row) {
+              const active = document.createElement("select");
+              activeDD.forEach((d) => {
+                var el = document.createElement("option");
+                el.textContent = d.label;
+                el.value = d.value;
+                active.appendChild(el);
+              });
+              active.name = "active";
+              active.id = "activeOpt_" + row.cells[9].data.toString() + "_ID_" + row.cells[0].data.toString();
+              active.setAttribute("onchange", "activeChange()");
+              active.childNodes.forEach((node) => {
+                if (parseInt(node.value) === parseInt(row.cells[9].data)) {
+                  node.outerHTML = node.outerHTML.replace("<option", "<option selected");
+                }
+              });
+              return gridjs.html(active.outerHTML);
+            }
+          },
+          {
+            id: 'delete', name: 'Delete', sort: false,
+            formatter: function (cellData, row) {
+              const btn = document.createElement("input");
+              btn.name = "Dlete";
+              btn.id = "Dlete_ID_" + row.cells[0].data.toString();
+              btn.setAttribute("type", "submit");
+              btn.setAttribute("onclick", "dlete(event)");
+              btn.setAttribute("value", "Delete");
+              btn.className = "btn btn-danger";
+              return gridjs.html(btn.outerHTML);
+            }
+          },
+        ],
+        server: {
+          url: '/api/cronSchedule',
+          then: results => results.data,
+          total: results => results.total,
+        },
+        search: {
+          enabled: true,
+          server: {
+            url: (prev, search) => updateUrl(prev, { search }),
+          },
+        },
+        sort: {
+          enabled: true,
+          multiColumn: true,
+          server: {
+            url: (prev, columns) => {
+              const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + tblColumns[col.index]);
+              return updateUrl(prev, { sort });
+            },
+          },
+        },
+        pagination: {
+          enabled: true,
+          server: {
+            url: (prev, page, limit) => updateUrl(prev, { start: page * limit, length: limit }),
+          },
+        },
+      }).render(tableDiv);
+
+      let savedValue;
+
+      tableDiv.addEventListener('focusin', ev => {
+        if (ev.target.tagName === 'TD') {
+          savedValue = ev.target.textContent;
+        }
+      });
+
+      tableDiv.addEventListener('focusout', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (savedValue !== ev.target.textContent) {
+            saveChange(JSON.stringify({
+              [primeKey]: ev.target.dataset.elementId,
+              [ev.target.dataset.columnId]: ev.target.textContent
+            }));
+          }
+          savedValue = undefined;
+        }
+      });
+
+      tableDiv.addEventListener('keydown', ev => {
+        if (ev.target.tagName === 'TD') {
+          if (ev.key === 'Escape') {
+            ev.target.textContent = savedValue;
+            ev.target.blur();
+          } else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            ev.target.blur();
+          }
+        }
+      });
+
+      function saveChange(json) {
+        fetch('/api/cronSchedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: json,
+        });
+      }
+
+      function activeChange() {
+        var ev = event.target;
+        var id = ev.id.split("_ID_");
+        if (ev.id.includes("activeOpt_")) {
+          var jsn = { [primeKey]: id[1], active: ev.value };
+          saveChange(JSON.stringify(jsn));
+        }
+      }
+
+      async function dlete(event) {
+        if (confirm('Are you sure you want to DELETE this schedule?')) {
+          const ev = event.target;
+          const idParts = ev.id.split("_ID_");
+          if (ev.id.includes("Dlete_") && idParts.length > 1) {
+            const rowId = idParts[1];
+            try {
+              const response = await fetch('/api/cronscheduledelrow', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [primeKey]: rowId }),
+              });
+              if (response.ok) {
+                window.location.reload();
+              } else {
+                alert('Failed to delete: ' + response.statusText);
+              }
+            } catch (error) {
+              console.error('Error during delete:', error);
+              alert('An error occurred while trying to delete the row.');
+            }
+          }
+        }
+      }
+    </script>
+  </body>
+{% endblock %}

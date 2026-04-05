@@ -40,6 +40,7 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tbleffect (  effect_ID INTEGER PRIMARY KEY AUTOINCREMENT,  effectName TEXT, ef_ID INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblpallette (  pallette_ID INTEGER PRIMARY KEY AUTOINCREMENT,  palletteName TEXT, pa_ID INT)")
     c.execute("CREATE TABLE IF NOT EXISTS lutStatus (pkey INTEGER PRIMARY KEY AUTOINCREMENT,  status_ID INT,  status TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblCronSchedule (  schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  minute TEXT,  hour TEXT,  day_of_month TEXT,  month TEXT,  day_of_week TEXT,  command TEXT,  description TEXT,  active INT)")
     conn.commit()
     c.close()
 
@@ -57,7 +58,14 @@ def getLEDOutPIN():
     return data
 
 def appsettings(apparray):
-    CRUD_tblAppSettings(apparray,"DA")
+    names = [a[0] for a in apparray]
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    placeholders = ','.join('?' for _ in names)
+    c.execute(f"DELETE FROM tblAppSettings WHERE name IN ({placeholders})", names)
+    conn.commit()
+    c.close()
+    conn.close()
     for a in apparray:
         CRUD_tblAppSettings(a,"C")
     pass
@@ -315,6 +323,27 @@ def appsettingAudioPlayFlagUpdate(val):
     c.close()
     conn.close()
     
+def appsettingGetKeepMusicPlaying():
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT value FROM tblAppSettings where name = 'KeepMusicPlaying'")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return int(row[0]) if row else 0
+
+def appsettingSetKeepMusicPlaying(val):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT count(*) FROM tblAppSettings where name = 'KeepMusicPlaying'")
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT INTO tblAppSettings(name, value, typevalue) VALUES ('KeepMusicPlaying', ?, 'int')", (val,))
+    else:
+        c.execute("UPDATE tblAppSettings set value = ? where name = 'KeepMusicPlaying'", (val,))
+    conn.commit()
+    c.close()
+    conn.close()
+
 def appsettingAudioPlayFlagUpdatePID(val):
     conn = sqlite3.connect(database)
     #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
@@ -1034,7 +1063,7 @@ def update_data_entry(row):
     _pTimes = row[4]
     _pTimes = _pTimes + 1
     _active = row[5]
-    _que = 0
+    _que = 0 if not appsettingGetKeepMusicPlaying() else row[6]
     c.execute("UPDATE tblMusic SET pTimes = ?, playedDTTM = ?, active = ?, que = ? where song_ID = ?",(_pTimes, _playedDTTM, _active,  _que, _song_id))
     conn.commit()
     c.close()
@@ -1234,15 +1263,18 @@ def queue_off():
 def queue_kill():
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    c.execute("UPDATE tblMusic SET  que = 0 where que = 1")
-    conn.commit()
-    c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
-    conn.commit()
+    keep_music = appsettingGetKeepMusicPlaying()
+    if not keep_music:
+        c.execute("UPDATE tblMusic SET  que = 0 where que = 1")
+        conn.commit()
+    # c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
+    # conn.commit()
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")
     else:
-       os.system("pkill mpg123")
+       if not keep_music:
+           os.system("pkill mpg123")
        os.system("pkill mpv")
     c.close()
     conn.close()

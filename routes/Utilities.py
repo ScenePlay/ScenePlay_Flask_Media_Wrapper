@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, abort, jsonify, json, red
 from extensions import *
 
 from sql import *
+from sql import appsettingGetKeepMusicPlaying, appsettingSetKeepMusicPlaying
 from ipsearch import *
 from ledPlayer import *
 from sys import platform
@@ -46,9 +47,17 @@ def main():
     scenes.insert(0, (0, "None"))
     data = select_data_stats()#arr)
     volume = currentvolume()
-    return render_template('utils.html',items=data,volume=volume,Scenes=scenes)
+    keep_music = appsettingGetKeepMusicPlaying()
+    return render_template('utils.html', items=data, volume=volume, Scenes=scenes, keep_music=keep_music)
 
     
+@ut.route('/api/keepmusicplaying', methods=['POST'])
+def toggle_keep_music():
+    current = appsettingGetKeepMusicPlaying()
+    appsettingSetKeepMusicPlaying(0 if current else 1)
+    return jsonify({'keep_music': 0 if current else 1})
+
+
 @ut.route('/processyt', methods=['GET'])
 def processyt():
     url = request.form['URLLink']
