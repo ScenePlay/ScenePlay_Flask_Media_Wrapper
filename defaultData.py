@@ -10,6 +10,7 @@ from models.ledTypeModel import tblledtypemodel
 from models.serverRole import tblserverrole
 from models.genre import lutgenre
 from models.status import lutstatus
+from models.cronSchedule import tblcronschedule
 
 baseDir = os.path.dirname(os.path.realpath(__file__))
 
@@ -18,6 +19,30 @@ baseDir = os.path.dirname(os.path.realpath(__file__))
 engine = create_engine('sqlite:///' + databaseDir)
 Session = sessionmaker(bind=engine)
 session = Session()
+
+def loadCronSchedules():
+# Read the JSON file
+    with open(baseDir + '/defaultData/tblCronSchedule.json') as file:
+        data = json.load(file)
+        
+    # Iterate over the JSON data and insert it into the database
+    for item in data:
+        cronSchedule = tblcronschedule(
+            schedule_id=item['schedule_id'],
+            name=item['name'],
+            minute=item['minute'],
+            hour=item['hour'],
+            day_of_month=item['day_of_month'],
+            month=item['month'],
+            day_of_week=item['day_of_week'],
+            command=item['command'],
+            description=item['description'],
+            active=item['active']
+        )
+        session.add(cronSchedule)
+
+    # Commit the changes
+    session.commit()
 
 def loadStatus():
 # Read the JSON file
@@ -147,3 +172,7 @@ def defaultData():
     query = session.query(lutstatus)    
     if query.count() == 0:
         loadStatus()
+    
+    query = session.query(tblcronschedule)    
+    if query.count() == 0:
+        loadCronSchedules() 
