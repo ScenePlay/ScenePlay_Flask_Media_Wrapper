@@ -69,72 +69,121 @@
           }
           element.parentNode.insertBefore(button, element.nextSibling);
       }
-      class Dropdown {
-          constructor() {
-              this.items = [];
-          }
-          // Method to add an item with an ID to the dropdown list
-          addItem(id, item) {
-              this.items.push({ id, item });
-          }
-          // Method to retrieve the list of items in the dropdown
-          getItems() {
-              return this.items;
-          }
-          //Method to populate the dropdown element
-          populateDropdown(dropdownElement) {
-              //const dropdownElement = document.getElementById(dropdownElementId);
-              if (!dropdownElement) {
-                  console.error(`Element with id ${dropdownElementId} not found.`);
-                  return;
-              }
+let sceneCache = null;
+      let sceneCachePromise = null;
 
-              // Clear existing options
-              dropdownElement.innerHTML = '';
-
-              // Add new options
-              this.items.forEach(({ id, item }) => {
-                  const option = document.createElement('option');
-                  option.value = id;
-                  option.textContent = item;
-                  dropdownElement.appendChild(option);
-              });
-          }
+      function fetchScenes() {
+        if (!sceneCachePromise) {
+          sceneCachePromise = fetch('/api/scenes')
+            .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+            .then(data => { sceneCache = data.data; return sceneCache; });
+        }
+        return sceneCachePromise;
       }
 
-      const sceneDD = new Dropdown;
-      (async () => {
-        try {
-          const response = await fetch('/api/scenes');
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          const data = await response.json();
-          sceneDD.addItem(0, '');
-          for (const item of data.data) {
-            sceneDD.addItem(item.scene_ID, item.sceneName);
-          }
-        } catch (error) {
-          console.error('Error fetching scene data:', error);
-        }
-      })();
+      function sceneNameFromCache(sceneId) {
+        if (!sceneCache) return null;
+        const found = sceneCache.find(item => parseInt(item.scene_ID) === parseInt(sceneId));
+        return found ? found.sceneName : null;
+      }
 
-      const videoDD = new Dropdown;
-      (async () => {
+      function updateScenePlaceholders() {
+        document.querySelectorAll('select[data-current-scene-id]:not([data-loaded="true"])').forEach(el => {
+          const name = sceneNameFromCache(parseInt(el.dataset.currentSceneId));
+          if (name && el.options.length === 1) el.options[0].textContent = name;
+        });
+      }
+
+      // Fetch scenes in background so placeholders show real names without blocking render
+      fetchScenes().then(updateScenePlaceholders).catch(err => console.error('Error fetching scenes:', err));
+
+      async function loadSceneOptions(selectEl) {
+        if (selectEl.dataset.loaded === 'true') return;
+
         try {
-          const response = await fetch('api/videomedia');
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          const data = await response.json();
-          videoDD.addItem(0, '');
-          for (const item of data.data) {
-            videoDD.addItem(item.video_ID, item.title);
-          }
+          await fetchScenes();
         } catch (error) {
-          console.error('Error fetching video data:', error);
+          console.error('Error fetching scenes:', error);
+          return;
         }
-      })();
+
+        const currentSceneId = parseInt(selectEl.dataset.currentSceneId);
+        selectEl.innerHTML = '';
+
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '0';
+        emptyOpt.textContent = '';
+        selectEl.appendChild(emptyOpt);
+
+        sceneCache.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.scene_ID;
+          opt.textContent = item.sceneName;
+          if (parseInt(item.scene_ID) === currentSceneId) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+
+        selectEl.dataset.loaded = 'true';
+        updateScenePlaceholders();
+      }
+
+      let videoCache = null;
+      let videoCachePromise = null;
+
+      function fetchVideos() {
+        if (!videoCachePromise) {
+          videoCachePromise = fetch('api/videomedia')
+            .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+            .then(data => { videoCache = data.data; return videoCache; });
+        }
+        return videoCachePromise;
+      }
+
+      function videoNameFromCache(videoId) {
+        if (!videoCache) return null;
+        const found = videoCache.find(item => parseInt(item.video_ID) === parseInt(videoId));
+        return found ? found.title : null;
+      }
+
+      function updateVideoPlaceholders() {
+        document.querySelectorAll('select[data-current-video-id]:not([data-loaded="true"])').forEach(el => {
+          const name = videoNameFromCache(parseInt(el.dataset.currentVideoId));
+          if (name && el.options.length === 1) el.options[0].textContent = name;
+        });
+      }
+
+      // Fetch videos in background so placeholders show real titles without blocking render
+      fetchVideos().then(updateVideoPlaceholders).catch(err => console.error('Error fetching videos:', err));
+
+      async function loadVideoOptions(selectEl) {
+        if (selectEl.dataset.loaded === 'true') return;
+
+        try {
+          await fetchVideos();
+        } catch (error) {
+          console.error('Error fetching videos:', error);
+          return;
+        }
+
+        const currentVideoId = parseInt(selectEl.dataset.currentVideoId);
+        selectEl.innerHTML = '';
+
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '0';
+        emptyOpt.textContent = '';
+        selectEl.appendChild(emptyOpt);
+
+        videoCache.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.video_ID;
+          opt.textContent = item.title;
+          if (parseInt(item.video_ID) === currentVideoId) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+
+        selectEl.dataset.loaded = 'true';
+        updateVideoPlaceholders();
+      }
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
@@ -161,42 +210,44 @@
 
       const tblColumns = ['videoScene_ID','scene_ID','video_ID', 'DisplayScreen_ID', 'orderBy', 'volume', 'loops'];
       primeKey = tblColumns[0]
-      new gridjs.Grid({
+      const grid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0],name: 'videoScene_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Scene', sort: true,
-            formatter: function (cellData, row) { 
-              const selectedValue = cellData
+            formatter: function (cellData, row) {
+              const sceneId = row.cells[1].data;
+              const videoSceneId = row.cells[0].data;
               const select = document.createElement("select");
-              sceneDD.populateDropdown(select)
-              select.name = "scenes"
-              select.id = "selectSceneOpt_" + row.cells[1].data.toString() + "_ID_" + row.cells[0].data.toString()           
-              select.setAttribute("onchange","sceneChange()")
-              select.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[1].data)){
-                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
-                }
-              });
+              select.name = "scenes";
+              select.id = "selectSceneOpt_" + sceneId.toString() + "_ID_" + videoSceneId.toString();
+              select.dataset.currentSceneId = sceneId;
+              select.setAttribute("onchange", "sceneChange()");
+              select.setAttribute("onfocus", "loadSceneOptions(this)");
+              const placeholder = document.createElement('option');
+              placeholder.value = sceneId;
+              placeholder.textContent = sceneNameFromCache(sceneId) ?? (sceneId > 0 ? 'Scene #' + sceneId : '');
+              placeholder.selected = true;
+              select.appendChild(placeholder);
               return gridjs.html(select.outerHTML);
-              } 
+            }
            },
-          { id: tblColumns[2], name: 'Video' , sort: false
-          ,
-            formatter: function (cellData, row) { 
-              const selectedValue = cellData
+          { id: tblColumns[2], name: 'Video', sort: false,
+            formatter: function (cellData, row) {
+              const videoId = row.cells[2].data;
+              const videoSceneId = row.cells[0].data;
               const selectVideo = document.createElement("select");
-              videoDD.populateDropdown(selectVideo)
-              selectVideo.name = "videoMedia"
-              selectVideo.id = "selectVideoOpt_" + row.cells[2].data.toString() + "_ID_" + row.cells[0].data.toString()           
-              //console.log(row.cells[1].data.toString())
-              selectVideo.setAttribute("onchange","videomediaChange()")
-              selectVideo.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[2].data)){
-                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
-                }
-              });
+              selectVideo.name = "videoMedia";
+              selectVideo.id = "selectVideoOpt_" + videoId.toString() + "_ID_" + videoSceneId.toString();
+              selectVideo.dataset.currentVideoId = videoId;
+              selectVideo.setAttribute("onchange", "videomediaChange()");
+              selectVideo.setAttribute("onfocus", "loadVideoOptions(this)");
+              const placeholder = document.createElement('option');
+              placeholder.value = videoId;
+              placeholder.textContent = videoNameFromCache(videoId) ?? (videoId > 0 ? 'Video #' + videoId : '');
+              placeholder.selected = true;
+              selectVideo.appendChild(placeholder);
               return gridjs.html(selectVideo.outerHTML);
-              } 
+            }
           },
           { id: tblColumns[3], name: 'Display Screen','attributes': editableCellAttributes},
           { id: tblColumns[4], name: 'orderBy','attributes': editableCellAttributes},
@@ -249,6 +300,11 @@
           },
         },
       }).render(tableDiv);
+
+      grid.on('ready', () => {
+        updateScenePlaceholders();
+        updateVideoPlaceholders();
+      });
 
       let savedValue;
 

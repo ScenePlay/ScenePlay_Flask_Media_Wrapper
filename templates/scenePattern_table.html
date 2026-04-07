@@ -110,23 +110,10 @@
       { value: "1", label: "clockwise" },
       { value: "-1", label: "counter" }
     ];
-    const sceneDD = new Dropdown
-    fetch('/api/scenes')
-      .then(response => response.json())
-      .then(data => {
-        sceneDD.addItem(0, '')
-        for (const item of data.data) {
-          sceneDD.addItem(item.scene_ID, item.sceneName)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
     const outPin = new Dropdown
     fetch('/api/ledconfigmodel')
       .then(response => response.json())
       .then(data => {
-        //outPin.addItem(0, '')
         for (const item of data.data) {
           outPin.addItem(item.ledConfig_ID, item.pin)
         }
@@ -134,18 +121,110 @@
       .catch(error => {
         console.error('Error fetching data:', error);
       });
-    const ledmodeltypeDD = new Dropdown
-    fetch('/api/ledtypemodel')
-      .then(response => response.json())
-      .then(data => {
-        ledmodeltypeDD.addItem(0, '')
-        for (const item of data.data) {
-          ledmodeltypeDD.addItem(item.ledTypeModel_ID, item.modelName)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
+
+    let sceneCache = null;
+    let sceneCachePromise = null;
+
+    function fetchScenes() {
+      if (!sceneCachePromise) {
+        sceneCachePromise = fetch('/api/scenes')
+          .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+          .then(data => { sceneCache = data.data; return sceneCache; });
+      }
+      return sceneCachePromise;
+    }
+
+    function sceneNameFromCache(sceneId) {
+      if (!sceneCache) return null;
+      const found = sceneCache.find(item => parseInt(item.scene_ID) === parseInt(sceneId));
+      return found ? found.sceneName : null;
+    }
+
+    function updateScenePlaceholders() {
+      document.querySelectorAll('select[data-current-scene-id]:not([data-loaded="true"])').forEach(el => {
+        const name = sceneNameFromCache(parseInt(el.dataset.currentSceneId));
+        if (name && el.options.length === 1) el.options[0].textContent = name;
       });
+    }
+
+    fetchScenes().then(updateScenePlaceholders).catch(err => console.error('Error fetching scenes:', err));
+
+    async function loadSceneOptions(selectEl) {
+      if (selectEl.dataset.loaded === 'true') return;
+      try {
+        await fetchScenes();
+      } catch (error) {
+        console.error('Error fetching scenes:', error);
+        return;
+      }
+      const currentSceneId = parseInt(selectEl.dataset.currentSceneId);
+      selectEl.innerHTML = '';
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '0';
+      emptyOpt.textContent = '';
+      selectEl.appendChild(emptyOpt);
+      sceneCache.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.scene_ID;
+        opt.textContent = item.sceneName;
+        if (parseInt(item.scene_ID) === currentSceneId) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+      selectEl.dataset.loaded = 'true';
+      updateScenePlaceholders();
+    }
+
+    let modelCache = null;
+    let modelCachePromise = null;
+
+    function fetchModels() {
+      if (!modelCachePromise) {
+        modelCachePromise = fetch('/api/ledtypemodel')
+          .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+          .then(data => { modelCache = data.data; return modelCache; });
+      }
+      return modelCachePromise;
+    }
+
+    function modelNameFromCache(modelId) {
+      if (!modelCache) return null;
+      const found = modelCache.find(item => parseInt(item.ledTypeModel_ID) === parseInt(modelId));
+      return found ? found.modelName : null;
+    }
+
+    function updateModelPlaceholders() {
+      document.querySelectorAll('select[data-current-model-id]:not([data-loaded="true"])').forEach(el => {
+        const name = modelNameFromCache(parseInt(el.dataset.currentModelId));
+        if (name && el.options.length === 1) el.options[0].textContent = name;
+      });
+    }
+
+    fetchModels().then(updateModelPlaceholders).catch(err => console.error('Error fetching models:', err));
+
+    async function loadModelOptions(selectEl) {
+      if (selectEl.dataset.loaded === 'true') return;
+      try {
+        await fetchModels();
+      } catch (error) {
+        console.error('Error fetching models:', error);
+        return;
+      }
+      const currentModelId = parseInt(selectEl.dataset.currentModelId);
+      selectEl.innerHTML = '';
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '0';
+      emptyOpt.textContent = '';
+      selectEl.appendChild(emptyOpt);
+      modelCache.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.ledTypeModel_ID;
+        opt.textContent = item.modelName;
+        if (parseInt(item.ledTypeModel_ID) === currentModelId) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+      selectEl.dataset.loaded = 'true';
+      updateModelPlaceholders();
+    }
 
     const updateUrl = (prev, query) => {
       return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
@@ -176,41 +255,44 @@
     tblColumns = ['scenePattern_ID', 'scene_ID', 'ledTypeModel_ID', 'color', 'cdiff', 'wait_ms', 'iterations', 'direction', 'orderBy', 'outPin', 'brightness']
     primeKey = tblColumns[0]
 
-    new gridjs.Grid({
+    const grid = new gridjs.Grid({
       columns: [
         { id: tblColumns[0], name: 'scenePattern_ID', 'hidden': true },
         {
           id: tblColumns[1], name: 'Scenes', sort: false,
           formatter: function (cellData, row) {
-            const selectedValue = cellData
+            const sceneId = row.cells[1].data;
+            const patternId = row.cells[0].data;
             const select = document.createElement("select");
-            sceneDD.populateDropdown(select)
-            select.name = "scenes"
-            select.id = "selectOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            select.setAttribute("onchange", "sceneChange()")
-            select.childNodes.forEach((node) => {
-              if (parseInt(node.value) === parseInt(row.cells[1].data)) {
-                node.outerHTML = node.outerHTML.toString().replace("<option", "<option selected")
-              }
-            });
+            select.name = "scenes";
+            select.id = "selectOpt_" + patternId.toString() + "_ID_" + patternId.toString();
+            select.dataset.currentSceneId = sceneId;
+            select.setAttribute("onchange", "sceneChange()");
+            select.setAttribute("onfocus", "loadSceneOptions(this)");
+            const placeholder = document.createElement('option');
+            placeholder.value = sceneId;
+            placeholder.textContent = sceneNameFromCache(sceneId) ?? (sceneId > 0 ? 'Scene #' + sceneId : '');
+            placeholder.selected = true;
+            select.appendChild(placeholder);
             return gridjs.html(select.outerHTML);
           }
         },
         {
           id: tblColumns[2], name: 'Model', sort: false,
           formatter: function (cellData, row) {
-            const selectedValue = cellData
+            const modelId = row.cells[2].data;
+            const patternId = row.cells[0].data;
             const selectModel = document.createElement("select");
-            ledmodeltypeDD.populateDropdown(selectModel)
-            selectModel.name = "typeModel"
-            selectModel.id = "selectModelOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            //console.log(row.cells[1].data.toString())
-            selectModel.setAttribute("onchange", "modelChange()")
-            selectModel.childNodes.forEach((node) => {
-              if (parseInt(node.value) === parseInt(row.cells[2].data)) {
-                node.outerHTML = node.outerHTML.toString().replace("<option", "<option selected")
-              }
-            });
+            selectModel.name = "typeModel";
+            selectModel.id = "selectModelOpt_" + patternId.toString() + "_ID_" + patternId.toString();
+            selectModel.dataset.currentModelId = modelId;
+            selectModel.setAttribute("onchange", "modelChange()");
+            selectModel.setAttribute("onfocus", "loadModelOptions(this)");
+            const placeholder = document.createElement('option');
+            placeholder.value = modelId;
+            placeholder.textContent = modelNameFromCache(modelId) ?? (modelId > 0 ? 'Model #' + modelId : '');
+            placeholder.selected = true;
+            selectModel.appendChild(placeholder);
             return gridjs.html(selectModel.outerHTML);
           }
         },
@@ -344,6 +426,11 @@
         },
       },
     }).render(tableDiv);
+
+    grid.on('ready', () => {
+      updateScenePlaceholders();
+      updateModelPlaceholders();
+    });
 
     let savedValue;
 

@@ -69,73 +69,121 @@
           }
           element.parentNode.insertBefore(button, element.nextSibling);
       }
-      class Dropdown {
-          constructor() {
-              this.items = [];
-          }
-          // Method to add an item with an ID to the dropdown list
-          addItem(id, item) {
-              this.items.push({ id, item });
-          }
-          // Method to retrieve the list of items in the dropdown
-          getItems() {
-              return this.items;
-          }
-          //Method to populate the dropdown element
-          populateDropdown(dropdownElement) {
-              //const dropdownElement = document.getElementById(dropdownElementId);
-              if (!dropdownElement) {
-                  console.error(`Element with id ${dropdownElementId} not found.`);
-                  return;
-              }
+let sceneCache = null;
+      let sceneCachePromise = null;
 
-              // Clear existing options
-              dropdownElement.innerHTML = '';
-
-              // Add new options
-              this.items.forEach(({ id, item }) => {
-                  const option = document.createElement('option');
-                  option.value = id;
-                  option.textContent = item;
-                  dropdownElement.appendChild(option);
-              });
-          }
+      function fetchScenes() {
+        if (!sceneCachePromise) {
+          sceneCachePromise = fetch('/api/scenes')
+            .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+            .then(data => { sceneCache = data.data; return sceneCache; });
+        }
+        return sceneCachePromise;
       }
 
-      const sceneDD = new Dropdown;
-      (async () => {
-        try {
-          const response = await fetch('/api/scenes');
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          const data = await response.json();
-          sceneDD.addItem(0, '');
-          for (const item of data.data) {
-            sceneDD.addItem(item.scene_ID, item.sceneName);
-          }
-        } catch (error) {
-          console.error('Error fetching scene data:', error);
-        }
-      })();
+      function sceneNameFromCache(sceneId) {
+        if (!sceneCache) return null;
+        const found = sceneCache.find(item => parseInt(item.scene_ID) === parseInt(sceneId));
+        return found ? found.sceneName : null;
+      }
 
-      const songDD = new Dropdown();
-      (async () => {
+      function updateScenePlaceholders() {
+        document.querySelectorAll('select[data-current-scene-id]:not([data-loaded="true"])').forEach(el => {
+          const name = sceneNameFromCache(parseInt(el.dataset.currentSceneId));
+          if (name && el.options.length === 1) el.options[0].textContent = name;
+        });
+      }
+
+      // Fetch scenes in background so placeholders show real names without blocking render
+      fetchScenes().then(updateScenePlaceholders).catch(err => console.error('Error fetching scenes:', err));
+
+      async function loadSceneOptions(selectEl) {
+        if (selectEl.dataset.loaded === 'true') return;
+
         try {
-          const response = await fetch('api/music');
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          const data = await response.json();
-          songDD.addItem(0, '');
-          for (const item of data.data) {
-            songDD.addItem(item.song_ID, item.song);
-          }
-          console.log('songDD ready');
+          await fetchScenes();
         } catch (error) {
-          console.error('Error fetching data:', error);
+          console.error('Error fetching scenes:', error);
+          return;
         }
-      })();
+
+        const currentSceneId = parseInt(selectEl.dataset.currentSceneId);
+        selectEl.innerHTML = '';
+
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '0';
+        emptyOpt.textContent = '';
+        selectEl.appendChild(emptyOpt);
+
+        sceneCache.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.scene_ID;
+          opt.textContent = item.sceneName;
+          if (parseInt(item.scene_ID) === currentSceneId) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+
+        selectEl.dataset.loaded = 'true';
+        updateScenePlaceholders();
+      }
+
+      let songCache = null;
+      let songCachePromise = null;
+
+      function fetchSongs() {
+        if (!songCachePromise) {
+          songCachePromise = fetch('api/music')
+            .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
+            .then(data => { songCache = data.data; return songCache; });
+        }
+        return songCachePromise;
+      }
+
+      function songNameFromCache(songId) {
+        if (!songCache) return null;
+        const found = songCache.find(item => parseInt(item.song_ID) === parseInt(songId));
+        return found ? found.song : null;
+      }
+
+      function updateSongPlaceholders() {
+        document.querySelectorAll('select[data-current-song-id]:not([data-loaded="true"])').forEach(el => {
+          const name = songNameFromCache(parseInt(el.dataset.currentSongId));
+          if (name && el.options.length === 1) el.options[0].textContent = name;
+        });
+      }
+
+      // Fetch songs in background so placeholders show real names without blocking render
+      fetchSongs().then(updateSongPlaceholders).catch(err => console.error('Error fetching songs:', err));
+
+      async function loadSongOptions(selectEl) {
+        if (selectEl.dataset.loaded === 'true') return;
+
+        try {
+          await fetchSongs();
+        } catch (error) {
+          console.error('Error fetching songs:', error);
+          return;
+        }
+
+        const currentSongId = parseInt(selectEl.dataset.currentSongId);
+        selectEl.innerHTML = '';
+
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '0';
+        emptyOpt.textContent = '';
+        selectEl.appendChild(emptyOpt);
+
+        songCache.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.song_ID;
+          opt.textContent = item.song;
+          if (parseInt(item.song_ID) === currentSongId) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+
+        selectEl.dataset.loaded = 'true';
+        updateSongPlaceholders();
+      }
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
@@ -158,41 +206,44 @@
       // 4    volume         INTEGER  0                    0 
       const tblColumns = ['musicScene_ID','scene_ID', 'song_ID','orderBy','volume']
       primeKey = tblColumns[0]
-      new gridjs.Grid({
+      const grid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0],name: 'musicScene_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Scenes', sort: false,
-            formatter: function (cellData, row) { 
-              const selectedValue = cellData
+            formatter: function (cellData, row) {
+              const sceneId = row.cells[1].data;
+              const musicSceneId = row.cells[0].data;
               const select = document.createElement("select");
-              sceneDD.populateDropdown(select)
-              select.name = "scenes"
-              select.id = "selectSceneOpt_" + row.cells[1].data.toString() + "_ID_" + row.cells[0].data.toString()           
-              select.setAttribute("onchange","sceneChange()")
-              select.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[1].data)){
-                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
-                }
-              });
+              select.name = "scenes";
+              select.id = "selectSceneOpt_" + sceneId.toString() + "_ID_" + musicSceneId.toString();
+              select.dataset.currentSceneId = sceneId;
+              select.setAttribute("onchange", "sceneChange()");
+              select.setAttribute("onfocus", "loadSceneOptions(this)");
+              const placeholder = document.createElement('option');
+              placeholder.value = sceneId;
+              placeholder.textContent = sceneNameFromCache(sceneId) ?? (sceneId > 0 ? 'Scene #' + sceneId : '');
+              placeholder.selected = true;
+              select.appendChild(placeholder);
               return gridjs.html(select.outerHTML);
-              } 
+            }
            },
           { id: tblColumns[2], name: 'Song' , sort: false,
-            formatter: function (cellData, row) { 
-              const selectedValue = cellData
+            formatter: function (cellData, row) {
+              const songId = row.cells[2].data;
+              const musicSceneId = row.cells[0].data;
               const selectSong = document.createElement("select");
-              songDD.populateDropdown(selectSong)
-              selectSong.name = "typeModel"
-              selectSong.id = "selectSongOpt_" + row.cells[2].data.toString() + "_ID_" + row.cells[0].data.toString()           
-              //console.log(row.cells[1].data.toString())
-              selectSong.setAttribute("onchange","songChange()")
-              selectSong.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[2].data)){
-                  node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
-                }
-              });
+              selectSong.name = "typeModel";
+              selectSong.id = "selectSongOpt_" + songId.toString() + "_ID_" + musicSceneId.toString();
+              selectSong.dataset.currentSongId = songId;
+              selectSong.setAttribute("onchange", "songChange()");
+              selectSong.setAttribute("onfocus", "loadSongOptions(this)");
+              const placeholder = document.createElement('option');
+              placeholder.value = songId;
+              placeholder.textContent = songNameFromCache(songId) ?? (songId > 0 ? 'Song #' + songId : '');
+              placeholder.selected = true;
+              selectSong.appendChild(placeholder);
               return gridjs.html(selectSong.outerHTML);
-              } 
+            }
           },
           { id: tblColumns[3], name: 'orderBy','attributes': editableCellAttributes},
           { id: tblColumns[4], name: 'Volume 0-100', sort: false,'attributes': editableCellAttributes},
@@ -243,6 +294,11 @@
           },
         },
       }).render(tableDiv);
+
+      grid.on('ready', () => {
+        updateScenePlaceholders();
+        updateSongPlaceholders();
+      });
 
       let savedValue;
 
