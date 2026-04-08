@@ -57,6 +57,16 @@ def toggle_keep_music():
     appsettingSetKeepMusicPlaying(0 if current else 1)
     return jsonify({'keep_music': 0 if current else 1})
 
+@ut.route('/api/keepmusicplaying/off', methods=['GET'])
+def set_keep_music_off():
+    appsettingSetKeepMusicPlaying(0)
+    return jsonify({'keep_music': 0})
+
+@ut.route('/api/keepmusicplaying/on', methods=['GET'])
+def set_keep_music_on():
+    appsettingSetKeepMusicPlaying(1)
+    return jsonify({'keep_music': 1})
+
 
 @ut.route('/processyt', methods=['GET'])
 def processyt():

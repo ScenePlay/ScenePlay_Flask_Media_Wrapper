@@ -316,60 +316,132 @@ import time
 # pixels.show = show
 
 
-def fireworks_simulation(color=(255, 255, 255), cdiff=(255, 0, 0), wait_ms=5, iterations=5, fade_speed=0.01):
+def fireworks_simulation(color=(255, 255, 255), cdiff=(255, 50, 0), wait_ms=20, iterations=9999999, direction=1):
     """
-    Simulate a fireworks effect on the LED strip.
+    Fireworks simulation: a rising trail launches to a burst point and explodes outward.
+
+    The rocket climbs with a 3-pixel fading trail (cdiff), then detonates with a bright
+    flash (color) at the burst point. Independent sparks fly outward in both directions,
+    each fading at their own rate and color, giving an asymmetric, natural explosion.
+    A short dark pause separates each firework. 'direction' controls which end of the
+    strip rockets launch from.
+
+    Parameters:
+    - color:      Explosion burst color (R, G, B).
+    - cdiff:      Rocket trail color (R, G, B).
+    - wait_ms:    Rocket climb speed and pause between fireworks in ms.
+    - iterations: Total number of rockets to launch.
+    - direction:  Launch direction (1 = forward along strip, -1 = reverse).
     """
+    TRAIL_LEN    = 3     # Number of trail pixels behind the rocket head
+    SPARK_COUNT  = 24    # Number of independent sparks per explosion
+    SPARK_RADIUS = 22    # Max pixels a spark can travel from burst point
+
+    step = 1 if direction > 0 else -1
+
     for _ in range(iterations):
-        # FIX 1: The upper bound for the start pixel must be num_pixels - 1.
-        start_pixel = random.randint(0, num_pixels - 1)
+        # Pick launch point and burst point — rocket always travels in 'direction'
+        launch = random.randint(0, num_pixels // 3) if direction > 0 else random.randint(2 * num_pixels // 3, num_pixels - 1)
+        burst  = launch + step * random.randint(num_pixels // 4, num_pixels // 2)
+        burst  = max(0, min(num_pixels - 1, burst))
 
-        # Calculate a potential explosion center.
-        potential_explosion_center = start_pixel + random.randint(5, 15)
-
-        # FIX 2: Clamp the explosion_center to stay within the valid index range.
-        explosion_center = min(potential_explosion_center, num_pixels - 1)
-
-        # Launch the firework (lighting up trail pixels)
-        for i in range(start_pixel, explosion_center):
-            # This check is good practice, although our fixes make it less likely to be needed.
-            if 0 <= i < num_pixels-1:
-                pixels[i] = cdiff
-                pixels.show()
-                time.sleep(wait_ms / 1000.0)
-                # Clear the trail behind to simulate movement
-                pixels[i] = (0, 0, 0)
-
-        # Explosion at the center
-        if 0 <= explosion_center < num_pixels-1:
-            pixels[explosion_center] = color
+        # --- Rocket climb with fading trail ---
+        pos = launch
+        while (step > 0 and pos <= burst) or (step < 0 and pos >= burst):
+            pixels.fill((0, 0, 0))
+            # Draw trail: head brightest, fades back
+            for t in range(TRAIL_LEN + 1):
+                tp = pos - step * t
+                if 0 <= tp < num_pixels:
+                    fade = 1.0 - (t / (TRAIL_LEN + 1))
+                    pixels[tp] = (
+                        min(255, int(cdiff[0] * fade)),
+                        min(255, int(cdiff[1] * fade)),
+                        min(255, int(cdiff[2] * fade)),
+                    )
             pixels.show()
-            time.sleep(wait_ms / 500.0)
+            time.sleep(wait_ms / 1000.0)
+            pos += step
 
-        # Generate a random color for the fading sparks
-        rndcolor = (colorRand(color[0], cdiff[0]), colorRand(color[1], cdiff[1]), colorRand(color[2], cdiff[2]))
+        # --- Burst flash: illuminate a wide halo around the burst point ---
+        pixels.fill((0, 0, 0))
+        BURST_HALO = 5  # pixels either side that light up in the initial flash
+        for offset in range(-BURST_HALO, BURST_HALO + 1):
+            p = burst + offset
+            if 0 <= p < num_pixels:
+                # Bright at centre, falls off toward edges
+                intensity = 1.0 - (abs(offset) / (BURST_HALO + 1))
+                pixels[p] = (
+                    min(255, int(color[0] * intensity)),
+                    min(255, int(color[1] * intensity)),
+                    min(255, int(color[2] * intensity)),
+                )
+        pixels.show()
+        time.sleep(wait_ms * 3 / 1000.0)
 
-        # Fade the explosion outward
-        for radius in range(1, 10):
-            for offset in [-radius, radius]:
-                pixel_index = explosion_center + offset
-                if 0 <= pixel_index < num_pixels-1:
-                    # Calculate the faded color
-                    fade_factor = 1 - (radius * fade_speed)
-                    faded_color = tuple(max(0, int(c * fade_factor)) for c in rndcolor)
-                    pixels[pixel_index] = faded_color
+        # --- Sparks: large count, wide spread, very slow fizzle ---
+        sparks = []
+        for _ in range(SPARK_COUNT):
+            spark_dir  = 1 if random.random() < 0.5 else -1
+            spark_dist = random.randint(SPARK_RADIUS // 2, SPARK_RADIUS)
+            # Vary spark colors around the burst color for a rich explosion
+            spark_color = (
+                min(255, max(0, color[0] + random.randint(-40, 40))),
+                min(255, max(0, color[1] + random.randint(-40, 40))),
+                min(255, max(0, color[2] + random.randint(-40, 40))),
+            )
+            sparks.append({
+                'pos':      float(burst),
+                'dir':      spark_dir,
+                'dist':     spark_dist,
+                'traveled': 0.0,
+                'speed':    random.uniform(0.3, 0.9),   # each spark flies at its own pace
+                'intensity':1.0,
+                'color':    spark_color,
+                'fade':     random.uniform(0.025, 0.055),  # slow fizzle — 20-40 frames to die
+            })
+
+        # Animate sparks until all have fully fizzled out
+        while any(s['intensity'] > 0.015 for s in sparks):
+            pixels.fill((0, 0, 0))
+            for s in sparks:
+                if s['intensity'] <= 0.015:
+                    continue
+
+                # Still travelling — move at spark's own speed
+                if s['traveled'] < s['dist']:
+                    s['pos']      += s['dir'] * s['speed']
+                    s['traveled'] += s['speed']
+
+                # Fade every frame — slower while flying, slightly faster once stopped
+                if s['traveled'] >= s['dist']:
+                    s['fade'] = min(0.07, s['fade'] * 1.06)  # gently accelerate fade at rest
+                s['intensity'] = max(0.0, s['intensity'] - s['fade'])
+
+                # Draw spark plus a 1-pixel dim tail for sense of motion
+                p = int(s['pos'])
+                tail = p - s['dir']
+                if 0 <= p < num_pixels:
+                    pixels[p] = (
+                        min(255, int(s['color'][0] * s['intensity'])),
+                        min(255, int(s['color'][1] * s['intensity'])),
+                        min(255, int(s['color'][2] * s['intensity'])),
+                    )
+                if s['traveled'] < s['dist'] and 0 <= tail < num_pixels:
+                    tail_intensity = s['intensity'] * 0.4
+                    pixels[tail] = (
+                        min(255, int(s['color'][0] * tail_intensity)),
+                        min(255, int(s['color'][1] * tail_intensity)),
+                        min(255, int(s['color'][2] * tail_intensity)),
+                    )
+
             pixels.show()
             time.sleep(wait_ms / 1000.0)
 
-        # Clear the explosion area safely
-        start_clear = max(0, explosion_center - 10)
-        end_clear = min(num_pixels, explosion_center + 10)
-        if end_clear > num_pixels-1:
-            end_clear = num_pixels-1
-        for i in range(start_clear, end_clear):
-            pixels[i] = (0, 0, 0)
+        # Brief dark pause before next rocket
+        pixels.fill((0, 0, 0))
         pixels.show()
-        time.sleep(wait_ms / 1000.0)
+        time.sleep(random.uniform(0.3, 0.8))
 
 # Example usage:
 # fireworks_simulation()  # Call this function to simulate fireworks
@@ -406,18 +478,38 @@ def fireworks_finale(finale_count=3, fireworks_per_finale=10, wait_ms=50, trail_
                     pixels[i] = (0, 0, 0)  # Clear the trail behind
 
             # Explosion at the center with randomized color
-            if explosion_center > num_pixels-1:
-                explosion_center = num_pixels-1
-            pixels[explosion_center] = random_explosion_color
+            if explosion_center > num_pixels - 1:
+                explosion_center = num_pixels - 1
+
+            # Seed per-pixel fizzle intensities — bright at centre, dimmer toward edges
+            BURST_RADIUS = 10
+            fizzle = {}
+            for offset in range(-BURST_RADIUS, BURST_RADIUS + 1):
+                p = explosion_center + offset
+                if 0 <= p < num_pixels:
+                    # Centre starts at full, edges start proportionally dimmer
+                    fizzle[p] = 1.0 - (abs(offset) / (BURST_RADIUS + 1)) * 0.5
+
+            # Flash the burst instantly
+            for p, intensity in fizzle.items():
+                pixels[p] = (
+                    min(255, int(random_explosion_color[0] * intensity)),
+                    min(255, int(random_explosion_color[1] * intensity)),
+                    min(255, int(random_explosion_color[2] * intensity)),
+                )
             pixels.show()
             time.sleep(wait_ms / 500.0)
 
-            # Fade the explosion outward
-            for radius in range(1, 10):
-                for offset in [-radius, radius]:
-                    pixel_index = explosion_center + offset
-                    if 0 <= pixel_index < num_pixels-1:
-                        pixels[pixel_index] = tuple(min(255, max(0, int(c * (1 - radius * fade_speed)))) for c in random_explosion_color)
+            # Slowly fizzle each pixel independently until all are dark
+            while any(v > 0.02 for v in fizzle.values()):
+                for p in fizzle:
+                    # Each pixel fades at a slightly different rate for organic fizzle
+                    fizzle[p] = max(0.0, fizzle[p] - random.uniform(0.03, 0.07))
+                    pixels[p] = (
+                        min(255, int(random_explosion_color[0] * fizzle[p])),
+                        min(255, int(random_explosion_color[1] * fizzle[p])),
+                        min(255, int(random_explosion_color[2] * fizzle[p])),
+                    )
                 pixels.show()
                 time.sleep(wait_ms / 1000.0)
 
@@ -431,105 +523,152 @@ def fireworks_finale(finale_count=3, fireworks_per_finale=10, wait_ms=50, trail_
 # Example usage:
 # fireworks_finale()  # Call this function to simulate a fireworks finale
 
-def shimmer_sine_wave(duration=10, frequency=2, speed=0.05, color_change_speed=0.01):
+def shimmer_sine_wave(color=(0, 60, 180), cdiff=(200, 220, 255), wait_ms=30, iterations=9999999, direction=1):
     """
-    Create a shimmering sine wave effect with shifting colors on the LED strip.
-    
+    A rolling sine wave of color with random sparkling shimmer highlights.
+
+    A smooth sine wave travels along the strip, brightening and dimming each
+    pixel with the base 'color'. Independently, random pixels flash brightly
+    with 'cdiff' and decay quickly — like sunlight glinting off moving water.
+
     Parameters:
-    - duration: Duration of the effect in seconds.
-    - frequency: Number of sine wave peaks across the LED strip.
-    - speed: Speed at which the sine wave moves.
-    - color_change_speed: Rate at which the color transitions over time.
+    - color:      Base wave color (R, G, B).
+    - cdiff:      Shimmer/sparkle highlight color (R, G, B).
+    - wait_ms:    Frame delay in milliseconds — controls wave and shimmer speed.
+    - iterations: Total frames to render.
+    - direction:  Wave travel direction (1 = forward, -1 = reverse).
     """
-    start_time = time.time()
-    
-    while (time.time() - start_time) < duration:
-        # Loop through all the pixels
+    WAVE_CYCLES  = 2.5   # Number of full sine cycles visible across the strip
+    SHIMMER_RATE  = 0.06  # Probability per pixel per frame of a new shimmer spark
+    SHIMMER_DECAY = 0.18  # How much shimmer intensity drops each frame (~5-6 frame fade)
+
+    phase = 0.0
+    shimmer = [0.0] * num_pixels  # Per-pixel shimmer intensity, independent of the wave
+
+    for _ in range(iterations):
+        # Advance the wave one step in the chosen direction
+        phase += direction * (2 * math.pi / num_pixels) * 0.8
+
+        # Randomly ignite new shimmer sparks across the strip
         for i in range(num_pixels):
-            # Calculate sine wave brightness (range 0 to 1)
-            wave_value = (math.sin(2 * math.pi * frequency * i / num_pixels + time.time() * speed) + 1) / 2
-            
-            # Change the color gradually using a sine-based color transition
-            r = int((math.sin(time.time() * color_change_speed) + 1) * 127.5)
-            g = int((math.sin(time.time() * color_change_speed + 2) + 1) * 127.5)
-            b = int((math.sin(time.time() * color_change_speed + 4) + 1) * 127.5)
+            if random.random() < SHIMMER_RATE:
+                shimmer[i] = 1.0
 
-            # Apply the sine wave effect to the brightness of the current color
-            pixels[i] = (int(r * wave_value), int(g * wave_value), int(b * wave_value))
+        for i in range(num_pixels):
+            # Sine wave maps each pixel to a brightness factor in [0, 1]
+            wave = (math.sin(phase + i * (2 * math.pi * WAVE_CYCLES / num_pixels)) + 1) / 2
 
-        # Update the LED strip
+            # Base layer: wave color dimmed to the wave's current depth at this pixel
+            br = int(color[0] * wave)
+            bg = int(color[1] * wave)
+            bb = int(color[2] * wave)
+
+            # Shimmer layer: cdiff color scaled by this pixel's shimmer intensity
+            sr = int(cdiff[0] * shimmer[i])
+            sg = int(cdiff[1] * shimmer[i])
+            sb = int(cdiff[2] * shimmer[i])
+
+            pixels[i] = (min(255, br + sr), min(255, bg + sg), min(255, bb + sb))
+
+            # Decay shimmer toward zero
+            shimmer[i] = max(0.0, shimmer[i] - SHIMMER_DECAY)
+
         pixels.show()
-        time.sleep(0.01)  # Small delay for smooth animation
+        time.sleep(wait_ms / 1000.0)
 
 # Example usage:
-# shimmer_sine_wave()  # Call this function to run the sine wave shimmer effect
+# shimmer_sine_wave()  # Call this function to run the shimmer sine wave effect
 
-def shimmer_effect(duration=10, speed=0.1, base_color=(255, 255, 255)):
+def shimmer_effect(color=(180, 80, 0), cdiff=(255, 220, 120), wait_ms=40, iterations=9999999, direction=1):
     """
-    Create a standard shimmer effect on the LED strip.
-    
+    Breathing shimmer: each pixel independently inhales to cdiff and exhales back to color.
+
+    Every pixel runs its own smooth sine-based breath cycle — slowly brightening to cdiff
+    then slowly dimming back to color and repeating. Each pixel has a unique cycle speed
+    and starts at a random point in its breath, so the strip is always filled with pixels
+    at every stage simultaneously — some just lit, some fading, some dim and rebuilding.
+    The result is organic and calm, like a field of embers each breathing at their own pace.
+    'direction' skews cycle speeds across the strip so one end breathes slightly faster,
+    giving a subtle flowing lean without becoming a wave.
+
     Parameters:
-    - duration: Duration of the effect in seconds.
-    - speed: Delay between shimmer updates (smaller values = faster shimmer).
-    - base_color: The base color to shimmer (default is white).
+    - color:      Dim/exhale color (R, G, B).
+    - cdiff:      Bright/inhale color (R, G, B).
+    - wait_ms:    Frame delay in ms — controls breath tempo. Higher = slower breathing.
+    - iterations: Total frames to render.
+    - direction:  Speed gradient direction (1 = forward end breathes faster, -1 = reverse).
     """
-    start_time = time.time()
-    
-    while (time.time() - start_time) < duration:
-        # Loop through all the pixels and randomly adjust brightness
-        for i in range(num_pixels):
-            # Randomly pick a brightness level (from 50% to 100%)
-            brightness_factor = random.uniform(0.5, 1.0)
-            
-            # Adjust the color by applying the brightness factor
-            r = int(base_color[0] * brightness_factor)
-            g = int(base_color[1] * brightness_factor)
-            b = int(base_color[2] * brightness_factor)
-            
-            # Set the pixel color
-            pixels[i] = (r, g, b)
-        
-        # Update the LED strip
-        pixels.show()
-        time.sleep(speed)  # Control the shimmer speed
+    drift = 1.0 if direction > 0 else -1.0
 
-    # Clear the strip after the shimmer effect
+    # Fixed phase step per frame — lower wait_ms = more frames per second = faster breathing.
+    # A full breath cycle = 2*pi radians. At 0.03 rad/frame and 40ms: ~8s per cycle.
+    BASE_SPEED = 0.03
+
+    # Each pixel gets a unique multiplier so breaths are never in sync.
+    speed_mult = [
+        random.uniform(0.6, 1.4) + drift * 0.3 * (i / num_pixels)
+        for i in range(num_pixels)
+    ]
+    phases = [random.uniform(0, 2 * math.pi) for _ in range(num_pixels)]
+
+    for _ in range(iterations):
+        for i in range(num_pixels):
+            phases[i] += BASE_SPEED * speed_mult[i]
+
+            # Sine maps smoothly 0→1→0 — true inhale and exhale, no snap
+            t = (math.sin(phases[i]) + 1) / 2
+
+            pixels[i] = (
+                min(255, int(color[0] + (cdiff[0] - color[0]) * t)),
+                min(255, int(color[1] + (cdiff[1] - color[1]) * t)),
+                min(255, int(color[2] + (cdiff[2] - color[2]) * t)),
+            )
+
+        pixels.show()
+        time.sleep(wait_ms / 1000.0)
+
     pixels.fill((0, 0, 0))
     pixels.show()
 
 # Example usage:
 # shimmer_effect()  # Call this function to run the shimmer effect
-def marquee_effect(foreground_color=(255, 255, 255), background_color=(0, 0, 0), block_size=5, speed=0.1, iterations=10):
+def marquee_effect(color=(0, 0, 0), cdiff=(255, 255, 255), wait_ms=30, iterations=9999999, direction=1):
     """
-    Create a marquee effect on the LED strip.
-    
-    Parameters:
-    - foreground_color: The color of the moving block of lights.
-    - background_color: The color of the background (default is black).
-    - block_size: The number of LEDs in the moving block.
-    - speed: Delay between each movement (lower value = faster movement).
-    - iterations: Number of times the block moves across the strip.
-    """
-    for _ in range(iterations):
-        for i in range(num_pixels):
-            # Set all pixels to background color
-            pixels.fill(background_color)
-            
-            # Light up the block of pixels starting from the current position 'i'
-            for j in range(block_size):
-                if i + j < num_pixels:
-                    pixels[i + j] = foreground_color
-                else:
-                    # Wrap around to the beginning
-                    pixels[(i + j) % num_pixels] = foreground_color
-            
-            # Update the LED strip to show the current frame
-            pixels.show()
-            time.sleep(speed)
+    Comet trail: a bright head pixel chases around the strip with a 2-pixel fading tail.
 
-    # Clear the strip after the marquee effect
-    pixels.fill(background_color)
-    pixels.show()
+    The head pixel glows at full 'cdiff' brightness. The two pixels behind it trail off
+    at 55% and 25% intensity, giving a comet-like appearance. The background is 'color'.
+    The comet wraps continuously around the strip for the full duration.
+
+    Parameters:
+    - color:      Background color (R, G, B).
+    - cdiff:      Comet head color (R, G, B).
+    - wait_ms:    Delay between steps in ms — controls travel speed.
+    - iterations: Total steps (laps = iterations / num_pixels).
+    - direction:  Travel direction (1 = forward, -1 = reverse).
+    """
+    # Tail intensity levels: head=1.0, tail1=0.55, tail2=0.25
+    TAIL = [1.0, 0.55, 0.25]
+
+    step = 1 if direction > 0 else -1
+    pos  = 0 if direction > 0 else num_pixels - 1
+
+    for _ in range(iterations):
+        # Fill background
+        pixels.fill((color[0], color[1], color[2]))
+
+        # Draw comet — head then trailing pixels behind it
+        for t, intensity in enumerate(TAIL):
+            p = (pos - step * t) % num_pixels
+            pixels[p] = (
+                min(255, int(cdiff[0] * intensity)),
+                min(255, int(cdiff[1] * intensity)),
+                min(255, int(cdiff[2] * intensity)),
+            )
+
+        pixels.show()
+        time.sleep(wait_ms / 1000.0)
+        pos = (pos + step) % num_pixels
 
 # Example usage:
 # marquee_effect()  # Call this function to run the marquee effect
@@ -664,39 +803,105 @@ def cosmic_vortex(iterations=15, pulse_speed=0.05, swirl_speed=2, color_change_s
 # cosmic_vortex()  # Call this function to run the 'Cosmic Vortex' effect
 
 
-def serenity_flow(duration=15, wave_speed=0.02, color_change_speed=0.005):
+def serenity_flow(color=(0, 0, 0), cdiff=(0, 0, 0), wait_ms=30, iterations=9999999, direction=1):
     """
-    Create a calming 'Serenity Flow' effect on the LED strip.
-    
+    A serene scene that blooms from darkness, swells to full beauty, then fades and begins again.
+
+    The strip starts dark. Light slowly grows outward — 'color' blooms from the origin
+    point while 'cdiff' spreads toward the far end, blending across the strip. The scene
+    builds to a fully lit peak with a gentle shimmer, holds briefly, then softly fades
+    back to complete darkness. A quiet pause follows before the next cycle begins.
+    Each cycle varies slightly in speed so it never feels mechanical.
+
     Parameters:
-    - duration: Duration of the effect in seconds.
-    - wave_speed: Speed of the flowing wave (lower value = slower movement).
-    - color_change_speed: Speed at which the colors shift (lower value = slower color transition).
+    - color:      Origin bloom color (R, G, B) — the seed the scene grows from.
+    - cdiff:      Far-end color (R, G, B) — the hue the bloom spreads toward.
+    - wait_ms:    Frame delay in ms — scales the entire cycle tempo.
+    - iterations: Number of full bloom cycles to run.
+    - direction:  Bloom origin (1 = grows from start of strip, -1 = grows from end).
     """
-    start_time = time.time()
-    
-    while (time.time() - start_time) < duration:
-        current_time = time.time()
+    # How many frames each phase takes — all scale with wait_ms so tempo is consistent
+    GROW_FRAMES  = int(2500 / max(1, wait_ms))   # ~2.5s grow at 30ms
+    HOLD_FRAMES  = int(800  / max(1, wait_ms))   # ~0.8s hold at peak
+    FADE_FRAMES  = int(3500 / max(1, wait_ms))   # ~3.5s slow fade
+    DARK_FRAMES  = int(600  / max(1, wait_ms))   # ~0.6s silence before next cycle
 
-        # Loop through each pixel
-        for i in range(num_pixels):
-            # Calculate a smooth wave for brightness modulation (gentle sine wave pattern)
-            wave_offset = math.sin((i / num_pixels) * 2 * math.pi + current_time * wave_speed)
-            brightness = (wave_offset + 1) / 2  # Normalize the brightness to be between 0 and 1
-            
-            # Create a smooth color transition (soft colors, like a calming gradient)
-            r = int((math.sin(current_time * color_change_speed) + 1) * 127.5)
-            g = int((math.sin(current_time * color_change_speed + 2) + 1) * 127.5)
-            b = int((math.sin(current_time * color_change_speed + 4) + 1) * 127.5)
+    for cycle in range(iterations):
+        # Each cycle gets a slightly different shimmer speed for organic variation
+        shimmer_speed = random.uniform(0.008, 0.018)
+        shimmer_phase = random.uniform(0, 2 * math.pi)
+        color_phase   = random.uniform(0, 2 * math.pi)  # Starting color spread offset
 
-            # Apply the brightness factor to the colors for each pixel
-            pixels[i] = (int(r * brightness), int(g * brightness), int(b * brightness))
+        # --- GROW: brightness envelope rises 0 → 1 using a sine ease-in curve ---
+        for f in range(GROW_FRAMES):
+            # Sine ease: slow start, accelerates toward peak
+            envelope = math.sin((f / GROW_FRAMES) * (math.pi / 2))
+            shimmer_phase += shimmer_speed
+            color_phase   += 0.006
 
-        # Update the LED strip
+            for i in range(num_pixels):
+                # Position along strip: 0.0 at origin, 1.0 at far end
+                pos = (i / (num_pixels - 1)) if direction > 0 else (1.0 - i / (num_pixels - 1))
+
+                # Color blends from 'color' at origin toward 'cdiff' at far end
+                # The spread also advances with color_phase so it slowly flows
+                spread = (math.sin(color_phase + pos * math.pi) + 1) / 2
+
+                # Subtle per-pixel shimmer at the peak adds life without chaos
+                shimmer = 1.0 + 0.06 * math.sin(shimmer_phase + i * 0.4)
+
+                r = int((color[0] + (cdiff[0] - color[0]) * spread) * envelope * shimmer)
+                g = int((color[1] + (cdiff[1] - color[1]) * spread) * envelope * shimmer)
+                b = int((color[2] + (cdiff[2] - color[2]) * spread) * envelope * shimmer)
+                pixels[i] = (min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)))
+
+            pixels.show()
+            time.sleep(wait_ms / 1000.0)
+
+        # --- HOLD: full brightness with gentle shimmer ---
+        for f in range(HOLD_FRAMES):
+            shimmer_phase += shimmer_speed
+            color_phase   += 0.006
+
+            for i in range(num_pixels):
+                pos    = (i / (num_pixels - 1)) if direction > 0 else (1.0 - i / (num_pixels - 1))
+                spread = (math.sin(color_phase + pos * math.pi) + 1) / 2
+                shimmer = 1.0 + 0.06 * math.sin(shimmer_phase + i * 0.4)
+
+                r = int((color[0] + (cdiff[0] - color[0]) * spread) * shimmer)
+                g = int((color[1] + (cdiff[1] - color[1]) * spread) * shimmer)
+                b = int((color[2] + (cdiff[2] - color[2]) * spread) * shimmer)
+                pixels[i] = (min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)))
+
+            pixels.show()
+            time.sleep(wait_ms / 1000.0)
+
+        # --- FADE: brightness envelope falls 1 → 0 using a sine ease-out curve ---
+        for f in range(FADE_FRAMES):
+            # Sine ease-out: fast start to the fade, slows to a lingering close
+            envelope = math.cos((f / FADE_FRAMES) * (math.pi / 2))
+            shimmer_phase += shimmer_speed * 0.5   # Shimmer slows as scene dies
+            color_phase   += 0.003
+
+            for i in range(num_pixels):
+                pos    = (i / (num_pixels - 1)) if direction > 0 else (1.0 - i / (num_pixels - 1))
+                spread = (math.sin(color_phase + pos * math.pi) + 1) / 2
+                shimmer = 1.0 + 0.03 * math.sin(shimmer_phase + i * 0.4)
+
+                r = int((color[0] + (cdiff[0] - color[0]) * spread) * envelope * shimmer)
+                g = int((color[1] + (cdiff[1] - color[1]) * spread) * envelope * shimmer)
+                b = int((color[2] + (cdiff[2] - color[2]) * spread) * envelope * shimmer)
+                pixels[i] = (min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)))
+
+            pixels.show()
+            time.sleep(wait_ms / 1000.0)
+
+        # --- DARK: complete silence before the next bloom ---
+        pixels.fill((0, 0, 0))
         pixels.show()
-        time.sleep(0.01)  # Small delay for smooth animation
+        for _ in range(DARK_FRAMES):
+            time.sleep(wait_ms / 1000.0)
 
-    # Clear the strip after the effect
     pixels.fill((0, 0, 0))
     pixels.show()
 
@@ -704,40 +909,46 @@ def serenity_flow(duration=15, wave_speed=0.02, color_change_speed=0.005):
 # serenity_flow()  # Call this function to run the 'Serenity Flow' effect
 
 
-def tranquil_drift(duration=20, speed=0.02, color_change_speed=0.003):
+def tranquil_drift(color=(0, 100, 200), cdiff=(0, 180, 120), wait_ms=50, iterations=9999999, direction=1):
     """
     Create a 'Tranquil Drift' effect on the LED strip.
-    
-    Parameters:
-    - duration: Duration of the effect in seconds.
-    - speed: Speed of the gentle movement (lower value = slower and more calming).
-    - color_change_speed: Rate at which the colors softly change over time.
-    """
-    start_time = time.time()
-    
-    while (time.time() - start_time) < duration:
-        current_time = time.time()
-        
-        # Loop through all the pixels to create the slow, drifting effect
-        for i in range(num_pixels):
-            # Calculate smooth color transitions using a sine wave
-            color_hue = (math.sin(current_time * color_change_speed + i * speed) + 1) / 2  # Range 0 to 1
-            
-            # Use a calming palette (focus on blues and greens)
-            r = int((math.sin(color_hue * math.pi) + 1) * 127.5)  # Soft red transition
-            g = int((math.cos(color_hue * math.pi / 2) + 1) * 127.5)  # Green softly fades in and out
-            b = int((math.sin(color_hue * math.pi / 1.5) + 1) * 127.5)  # Gentle blue hues
-            
-            # Set the pixel color with smooth transitions
-            pixels[i] = (r, g, b)
-        
-        # Update the LED strip
-        pixels.show()
-        time.sleep(0.05)  # Small delay for smoother animation
 
-    # Clear the strip after the effect
-    pixels.fill((0, 0, 0))
-    pixels.show()
+    A sine wave drifts continuously across the strip, blending each pixel
+    smoothly between 'color' and 'cdiff'. A secondary slower wave modulates
+    the overall brightness, producing a gentle breathing quality.
+
+    Parameters:
+    - color:      Primary color (R, G, B) — the calm anchor hue.
+    - cdiff:      Secondary color (R, G, B) — the hue the wave drifts toward.
+    - wait_ms:    Delay between frames in milliseconds. Lower = faster drift.
+    - iterations: Total number of frames to render.
+    - direction:  Wave travel direction: 1 = forward, -1 = reverse.
+    """
+    phase = 0.0          # Tracks the wave's position along the strip
+    breath_phase = 0.0   # Tracks the slow breathing pulse
+
+    for _ in range(iterations):
+        # Advance the drift wave — pixels-per-frame proportional to strip length
+        phase += direction * (2 * math.pi / num_pixels) * 0.5
+        # Advance the breath cycle much more slowly for a calm, organic feel
+        breath_phase += 0.012
+
+        # Breathing factor: oscillates between 0.55 and 1.0 for a gentle inhale/exhale
+        breath = 0.775 + 0.225 * math.sin(breath_phase)
+
+        for i in range(num_pixels):
+            # Each pixel gets its own blend value from the travelling sine wave
+            blend = (math.sin(phase + i * (2 * math.pi / num_pixels) * 2) + 1) / 2
+
+            # Interpolate smoothly between the two user-chosen colors
+            r = int((color[0] * (1.0 - blend) + cdiff[0] * blend) * breath)
+            g = int((color[1] * (1.0 - blend) + cdiff[1] * blend) * breath)
+            b = int((color[2] * (1.0 - blend) + cdiff[2] * blend) * breath)
+
+            pixels[i] = (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+
+        pixels.show()
+        time.sleep(wait_ms / 1000.0)
 
 # Example usage:
 # tranquil_drift()  # Call this function to run the 'Tranquil Drift' effect
@@ -797,128 +1008,458 @@ def digital_dreamscape(iterations=60, wait_ms=50, color_variation=0.9, glitch_fr
 # digital_dreamscape()  # Call this function to run the 'Digital Dreamscape' effect
 
 
-def lightning_strike(duration=10, min_strike_delay=0.5, max_strike_delay=2, min_strike_length=5, max_strike_length=20):
+def lightning_strike(color=(0, 0, 20), cdiff=(220, 230, 255), wait_ms=2000, iterations=9999999, direction=1):
     """
-    Create a 'Lightning Strike' effect on the LED strip.
-    
+    A crawling lightning bolt that builds pixel by pixel with a shockwave flash and afterglow.
+
+    Each strike starts from a random origin and crawls outward in 'direction', flickering
+    as it extends. A full-strip shockwave flash fires when the bolt completes, followed by
+    a slow color afterglow that bleeds from 'cdiff' toward 'color' before fading to dark.
+    'wait_ms' controls the average quiet time between strikes.
+
     Parameters:
-    - duration: Duration of the effect in seconds.
-    - min_strike_delay: Minimum time between lightning strikes (in seconds).
-    - max_strike_delay: Maximum time between lightning strikes (in seconds).
-    - min_strike_length: Minimum number of pixels affected by a lightning strike.
-    - max_strike_length: Maximum number of pixels affected by a lightning strike.
+    - color:      Background / afterglow base color (R, G, B).
+    - cdiff:      Bolt and flash color (R, G, B).
+    - wait_ms:    Average milliseconds of darkness between strikes.
+    - iterations: Number of strikes before the effect ends.
+    - direction:  Bolt crawl direction (1 = forward, -1 = reverse).
     """
-    start_time = time.time()
+    step = 1 if direction > 0 else -1
 
-    while (time.time() - start_time) < duration:
-        # Randomly select the delay before the next lightning strike
-        strike_delay = random.uniform(min_strike_delay, max_strike_delay)
-        time.sleep(strike_delay)
+    for _ in range(iterations):
+        # Dark quiet period between strikes — longer pause for tension
+        quiet_frames = max(1, int(wait_ms * random.uniform(1.5, 2.5) / 30))
+        for f in range(quiet_frames):
+            # Very rare faint pre-flash (atmosphere building)
+            if random.random() < 0.03:
+                faint = random.uniform(0.03, 0.08)
+                pixels.fill((int(cdiff[0] * faint), int(cdiff[1] * faint), int(cdiff[2] * faint)))
+                pixels.show()
+                time.sleep(0.02)
+                pixels.fill((color[0], color[1], color[2]))
+                pixels.show()
+            time.sleep(0.03)
 
-        # Randomly determine the location and length of the lightning strike
-        strike_start = random.randint(0, num_pixels - 1)
-        strike_length = random.randint(min_strike_length, max_strike_length)
-        strike_end = min(strike_start + strike_length, num_pixels - 1)
+        # --- Build the bolt pixel by pixel with zigzag jumps ---
+        origin = random.randint(0, num_pixels - 1)
+        bolt_length = random.randint(num_pixels // 4, num_pixels // 2)
+        lit = []  # pixels that have been struck
+        pos = origin
 
-        # Generate the lightning strike (bright white flash)
-        for i in range(strike_start, strike_end):
-            # Lightning flash with varying intensity
-            intensity = random.uniform(0.8, 1.0)
-            pixels[i] = (int(255 * intensity), int(255 * intensity), int(255 * intensity))
-        pixels.show()
+        pixels.fill((color[0], color[1], color[2]))
 
-        # Short flash duration
-        time.sleep(0.1)
+        for b in range(bolt_length):
+            # Zigzag: randomly skip ahead 1-3 pixels or dart back 1
+            jitter = random.choices([-1, 1, 2, 3], weights=[15, 40, 30, 15])[0]
+            pos = (pos + step * jitter) % num_pixels
+            lit.append(pos)
 
-        # Afterglow effect - dimming the lightning slowly
-        for step in range(5):
-            for i in range(strike_start, strike_end):
-                current_color = pixels[i]
-                pixels[i] = (max(0, int(current_color[0] * 0.7)), max(0, int(current_color[1] * 0.7)), max(0, int(current_color[2] * 0.7)))
+            # Each new pixel flickers at high intensity
+            intensity = random.uniform(0.75, 1.0)
+            pixels[pos] = (
+                min(255, int(cdiff[0] * intensity)),
+                min(255, int(cdiff[1] * intensity)),
+                min(255, int(cdiff[2] * intensity)),
+            )
+
+            # Frequently re-crackle previously lit pixels for a more chaotic bolt
+            if lit and random.random() < 0.70:
+                flicker_pos = random.choice(lit)
+                flicker = random.uniform(0.2, 0.8)
+                pixels[flicker_pos] = (
+                    int(cdiff[0] * flicker),
+                    int(cdiff[1] * flicker),
+                    int(cdiff[2] * flicker),
+                )
+
             pixels.show()
-            time.sleep(0.05)
+            time.sleep(random.uniform(0.005, 0.025))  # Jagged crawl speed
 
-        # Clear the strike after the afterglow fades
-        for i in range(strike_start, strike_end):
-            pixels[i] = (0, 0, 0)
+        # --- Shockwave: full strip flash ---
+        for i in range(num_pixels):
+            intensity = random.uniform(0.88, 1.0)
+            pixels[i] = (
+                min(255, int(cdiff[0] * intensity)),
+                min(255, int(cdiff[1] * intensity)),
+                min(255, int(cdiff[2] * intensity)),
+            )
+        pixels.show()
+        time.sleep(wait_ms * random.uniform(0.5, 1.0) / 1000.0)
+
+        # --- Afterglow: fade from cdiff toward color then to dark ---
+        for step_n in range(14):
+            fade = 0.75 ** (step_n + 1)
+            for i in range(num_pixels):
+                # Blend afterglow toward color as it fades
+                blend = 1.0 - fade
+                r = int((cdiff[0] * fade) + (color[0] * blend * fade))
+                g = int((cdiff[1] * fade) + (color[1] * blend * fade))
+                b = int((cdiff[2] * fade) + (color[2] * blend * fade))
+                pixels[i] = (min(255, r), min(255, g), min(255, b))
+            pixels.show()
+            time.sleep(0.045)
+
+        pixels.fill((0, 0, 0))
         pixels.show()
 
 # Example usage:
 # lightning_strike()  # Call this function to run the 'Lightning Strike' effect
 
 
-def thunderstorm(iterations=30, min_strike_delay=1, max_strike_delay=3, min_strike_length=5, max_strike_length=20, rain_intensity=0.05):
+def thunderstorm(color=(0, 10, 30), cdiff=(200, 210, 255), wait_ms=2000, iterations=9999999, direction=1):
     """
-    Create a 'Thunderstorm' effect on the LED strip.
-    
+    A layered thunderstorm: falling rain streaks, lightning flashes, and distant rumble glow.
+
+    Three independent layers combine each frame:
+      - Rain streaks: droplets of 'color' spawn and slide along the strip, fading as they travel.
+      - Lightning: the strip flashes 'cdiff', sometimes double-flashing like real lightning,
+        then fades to a cool afterglow. 'wait_ms' sets the average ms between strikes.
+      - Rumble glow: a slow rolling dim pulse between strikes simulates distant storm light.
+
     Parameters:
-    - duration: Duration of the effect in seconds.
-    - min_strike_delay: Minimum time between lightning strikes (in seconds).
-    - max_strike_delay: Maximum time between lightning strikes (in seconds).
-    - min_strike_length: Minimum number of pixels affected by a lightning strike.
-    - max_strike_length: Maximum number of pixels affected by a lightning strike.
-    - rain_intensity: Rate of fading to simulate rain.
+    - color:      Rain droplet color (R, G, B) — dark stormy hue.
+    - cdiff:      Lightning flash color (R, G, B) — bright white-blue.
+    - wait_ms:    Average milliseconds between lightning strikes.
+    - iterations: Number of lightning strikes before the storm ends.
+    - direction:  Rain fall direction (1 = forward along strip, -1 = reverse).
     """
-    start_time = time.time()
-    
-    while (time.time() - start_time) < iterations:
-        # Ambient rainfall effect
-        for i in range(num_pixels):
-            if random.random() < rain_intensity:
-                pixels[i] = (0, 0, 255)  # Blue color for rain
-            else:
-                pixels[i] = (0, 0, 0)  # Off
-        pixels.show()
-        
-        # Randomly select the delay before the next lightning strike
-        strike_delay = random.uniform(min_strike_delay, max_strike_delay)
-        time.sleep(strike_delay)
+    RAIN_DENSITY = 0.04   # Probability a new droplet spawns each frame
+    FRAME_MS     = 30     # Rain animation frame delay in ms
+    RUMBLE_SPEED = 0.015  # Speed of the between-strike ambient glow pulse
 
-        # Randomly determine the location and length of the lightning strike
-        strike_start = random.randint(0, num_pixels - 1)
-        strike_length = random.randint(min_strike_length, max_strike_length)
-        strike_end = min(strike_start + strike_length, num_pixels - 1)
+    # Normalise direction to +1 or -1, matching the convention used by beam/color_wipe
+    step       =  1.4 if direction > 0 else -1.4
+    tail_step  = -1   if direction > 0 else  1    # tail trails behind the head
+    spawn_pos  =  0.0 if direction > 0 else float(num_pixels - 1)
 
-        # Generate the lightning strike (bright white flash)
-        for i in range(strike_start, strike_end):
-            intensity = random.uniform(0.8, 1.0)
-            pixels[i] = (int(255 * intensity), int(255 * intensity), int(255 * intensity))
-        pixels.show()
+    droplets = []         # Each droplet: [position (float), intensity (0.0-1.0)]
+    rumble_phase = 0.0
 
-        # Short flash duration
-        time.sleep(0.1)
+    for _ in range(iterations):
+        # --- Rain phase: animate until the next strike ---
+        frames_until_strike = max(1, int(wait_ms * random.uniform(0.5, 1.5) / FRAME_MS))
 
-        # Afterglow effect - dimming the lightning slowly
-        for step in range(5):
-            for i in range(strike_start, strike_end):
-                current_color = pixels[i]
-                pixels[i] = (max(0, int(current_color[0] * 0.7)), max(0, int(current_color[1] * 0.7)), max(0, int(current_color[2] * 0.7)))
+        for _ in range(frames_until_strike):
+            rumble_phase += RUMBLE_SPEED
+            rumble = (math.sin(rumble_phase) + 1) / 2 * 0.08
+
+            # Spawn new droplets at the leading edge
+            if random.random() < RAIN_DENSITY:
+                droplets.append([spawn_pos, random.uniform(0.6, 1.0)])
+
+            # Build frame starting from the faint rumble ambient
+            frame = []
+            for i in range(num_pixels):
+                frame.append([
+                    min(255, int(color[0] * (rumble + 0.15))),
+                    min(255, int(color[1] * (rumble + 0.15))),
+                    min(255, int(color[2] * (rumble + 0.15))),
+                ])
+
+            # Paint each droplet and its fading tail
+            surviving = []
+            for drop in droplets:
+                pos, intensity = drop
+                for tail in range(4):
+                    p = int(pos) + tail_step * tail
+                    if 0 <= p < num_pixels:
+                        tail_fade = intensity * (0.55 ** tail)
+                        frame[p][0] = min(255, frame[p][0] + int(color[0] * tail_fade))
+                        frame[p][1] = min(255, frame[p][1] + int(color[1] * tail_fade))
+                        frame[p][2] = min(255, frame[p][2] + int(color[2] * tail_fade))
+                drop[0] += step
+                drop[1] *= 0.97
+                if 0 <= int(drop[0]) < num_pixels and drop[1] > 0.05:
+                    surviving.append(drop)
+            droplets[:] = surviving
+
+            for i in range(num_pixels):
+                pixels[i] = (frame[i][0], frame[i][1], frame[i][2])
             pixels.show()
-            time.sleep(0.05)
+            time.sleep(FRAME_MS / 1000.0)
 
-        # Clear the strike after the afterglow fades
-        for i in range(strike_start, strike_end):
-            pixels[i] = (0, 0, 0)
-        pixels.show()
+        # --- Lightning strike ---
+        flash_count = 2 if random.random() < 0.3 else 1  # Occasional double-flash
+
+        for flash in range(flash_count):
+            for i in range(num_pixels):
+                intensity = random.uniform(0.85, 1.0)
+                pixels[i] = (
+                    min(255, int(cdiff[0] * intensity)),
+                    min(255, int(cdiff[1] * intensity)),
+                    min(255, int(cdiff[2] * intensity)),
+                )
+            pixels.show()
+            time.sleep(random.uniform(wait_ms * 0.5, wait_ms) / 1000.0)
+
+            if flash_count == 2 and flash == 0:
+                # Brief dark gap between double-flash pulses
+                pixels.fill((0, 0, 0))
+                pixels.show()
+                time.sleep(random.uniform(wait_ms * 0.5, wait_ms) / 1000.0)
+
+        # Afterglow: exponential fade back to darkness
+        for step in range(12):
+            fade = 0.72 ** (step + 1)
+            for i in range(num_pixels):
+                pixels[i] = (
+                    min(255, int(cdiff[0] * fade * random.uniform(0.9, 1.0))),
+                    min(255, int(cdiff[1] * fade * random.uniform(0.9, 1.0))),
+                    min(255, int(cdiff[2] * fade * random.uniform(0.9, 1.0))),
+                )
+            pixels.show()
+            time.sleep(0.04)
+
+    pixels.fill((0, 0, 0))
+    pixels.show()
 
 # Example usage:
 # thunderstorm()  # Call this function to run the 'Thunderstorm' effect
 
+#joyful_celebration(color, cdiff, wait_ms, iterations)
+def color_chase(color=(0, 100, 255), cdiff=(255, 50, 0), wait_ms=20, iterations=9999999, direction=1):
+    """
+    Two colored particles chase each other with randomness, local collisions, and portals.
 
-def joyful_celebration(duration=30, pulse_speed=0.1, chase_speed=0.05, confetti_probability=0.02):
+    'cdiff' begins as the chaser, 'color' as the prey. The chaser is faster but both
+    speeds wobble each frame so the chase feels unpredictable. The prey has a small
+    chance each frame to open a portal — it vanishes with a brief flash and reappears
+    at a random position, forcing the chaser to redirect. When caught, a local
+    collision burst fires around the impact point (not the whole strip), roles reverse,
+    and the chase heads the other way. 'wait_ms' controls tempo.
+
+    Parameters:
+    - color:      Prey color / second chaser color (R, G, B).
+    - cdiff:      Initial chaser color (R, G, B).
+    - wait_ms:    Frame delay in ms — lower = faster chase.
+    - iterations: Total frames to render.
+    - direction:  Initial chase direction (1 = forward, -1 = reverse).
+    """
+    TAIL_LEN        = 5      # Pixels in each particle's tail
+    CATCH_DISTANCE  = 2.0    # How close before a catch is triggered
+    CHASER_BASE     = 1.0    # Base chaser speed px/frame
+    PREY_BASE       = 0.55   # Base prey speed px/frame
+    WOBBLE          = 0.25   # Max random speed wobble per frame
+    PORTAL_CHANCE   = 0.008  # Probability per frame the prey opens a portal
+    COLLISION_HALO  = 12     # Pixels either side of impact that light up on catch
+
+    # Prey starts with an initial direction; chaser steers independently toward prey
+    prey_step   = 1 if direction > 0 else -1
+
+    chaser_pos  = 0.0 if prey_step == 1 else float(num_pixels - 1)
+    prey_pos    = chaser_pos + prey_step * (num_pixels // 3)
+
+    chaser_color = [cdiff[0], cdiff[1], cdiff[2]]
+    prey_color   = [color[0], color[1], color[2]]
+
+    def draw_particle(pos, col, tail_step):
+        p = int(pos)
+        for t in range(TAIL_LEN + 1):
+            tp = p + tail_step * t
+            if 0 <= tp < num_pixels:
+                fade = 0.55 ** t
+                pixels[tp] = (
+                    min(255, int(col[0] * fade)),
+                    min(255, int(col[1] * fade)),
+                    min(255, int(col[2] * fade)),
+                )
+
+    def portal_flash(pos, col):
+        """Brief 3-frame ripple at the portal open/close point."""
+        for fi in range(3):
+            intensity = 1.0 - fi / 3
+            for offset in range(-3, 4):
+                p = int(pos) + offset
+                if 0 <= p < num_pixels:
+                    dist_fade = intensity * (0.6 ** abs(offset))
+                    pixels[p] = (
+                        min(255, int(col[0] * dist_fade)),
+                        min(255, int(col[1] * dist_fade)),
+                        min(255, int(col[2] * dist_fade)),
+                    )
+            pixels.show()
+            time.sleep(wait_ms / 1000.0)
+
+    for _ in range(iterations):
+        # Chaser steers toward prey every frame — fully independent of prey_step
+        chaser_dir   = 1 if prey_pos > chaser_pos else -1
+        chaser_speed = CHASER_BASE + random.uniform(-WOBBLE, WOBBLE)
+        prey_speed   = PREY_BASE   + random.uniform(-WOBBLE, WOBBLE)
+
+        chaser_pos += chaser_dir * chaser_speed
+        prey_pos   += prey_step  * prey_speed
+
+        # Prey bounces off strip ends on its own — chaser is unaffected
+        if prey_pos >= num_pixels - 1:
+            prey_pos  = float(num_pixels - 1)
+            prey_step = -1
+        elif prey_pos <= 0:
+            prey_pos  = 0.0
+            prey_step = 1
+
+        # Clamp chaser to strip
+        chaser_pos = max(0.0, min(float(num_pixels - 1), chaser_pos))
+
+        # --- Portal: prey escapes to a random position ---
+        if random.random() < PORTAL_CHANCE:
+            portal_flash(prey_pos, prey_color)
+            while True:
+                new_pos = float(random.randint(2, num_pixels - 3))
+                if abs(new_pos - chaser_pos) > num_pixels // 5:
+                    break
+            prey_pos = new_pos
+            # Prey keeps its current direction after the jump
+            portal_flash(prey_pos, prey_color)
+
+        # --- Catch check ---
+        if abs(chaser_pos - prey_pos) <= CATCH_DISTANCE:
+            impact = int((chaser_pos + prey_pos) / 2)
+
+            # Local collision burst — halo around impact point only
+            for fi in range(10):
+                flash = 1.0 - (fi / 10)
+                pixels.fill((0, 0, 0))
+                for offset in range(-COLLISION_HALO, COLLISION_HALO + 1):
+                    p = impact + offset
+                    if 0 <= p < num_pixels:
+                        dist_fade = flash * (0.82 ** abs(offset))
+                        blend_r = min(255, int((chaser_color[0] + prey_color[0]) / 2 * dist_fade))
+                        blend_g = min(255, int((chaser_color[1] + prey_color[1]) / 2 * dist_fade))
+                        blend_b = min(255, int((chaser_color[2] + prey_color[2]) / 2 * dist_fade))
+                        pixels[p] = (blend_r, blend_g, blend_b)
+                pixels.show()
+                time.sleep(wait_ms / 1000.0)
+
+            # Swap roles — new prey flees in a random direction from the impact point
+            chaser_color, prey_color = prey_color, chaser_color
+            chaser_pos = float(impact)
+            prey_step  = random.choice([-1, 1])
+            prey_pos   = max(0.0, min(float(num_pixels - 1),
+                             float(impact) + prey_step * (num_pixels // 3)))
+            continue
+
+        # Draw frame — tail trails behind each particle's own direction
+        pixels.fill((0, 0, 0))
+        draw_particle(prey_pos,   prey_color,   -prey_step)
+        draw_particle(chaser_pos, chaser_color, -chaser_dir)
+        pixels.show()
+        time.sleep(wait_ms / 1000.0)
+
+    pixels.fill((0, 0, 0))
+    pixels.show()
+
+# Example usage:
+# color_chase()  # Call this function to run the 'Color Chase' effect
+
+
+def ember_rise(color=(180, 40, 0), cdiff=(255, 200, 60), wait_ms=30, iterations=9999999, direction=1):
+    """
+    A living particle system of glowing embers drifting along the strip.
+
+    Individual ember particles spawn continuously at the origin end of the strip.
+    Each ember is born hot — blending from 'cdiff' (bright core) toward 'color'
+    (base glow) — and drifts along at its own speed. As it travels it cools and
+    dims, fading to nothing before it can reach the far end. The strip is always
+    filled with embers at every stage of life simultaneously, giving a constantly
+    shifting, organic fire-like quality. No two frames are ever identical.
+
+    Parameters:
+    - color:      Base ember glow color (R, G, B) — the cooler outer hue.
+    - cdiff:      Hot ember core color (R, G, B) — the bright birth color.
+    - wait_ms:    Frame delay in ms — lower = faster drift and more frenetic.
+    - iterations: Total frames to render.
+    - direction:  Drift direction (1 = forward along strip, -1 = reverse).
+    """
+    SPAWN_RATE   = 0.25   # Probability of a new ember spawning each frame
+    MAX_EMBERS   = 60     # Cap to keep the strip from over-saturating
+    TAIL_LEN     = 6      # Tail pixels behind each ember head
+
+    step       = 1 if direction > 0 else -1
+    spawn_pos  = 0.0 if direction > 0 else float(num_pixels - 1)
+
+    # ember: position, speed, heat (1.0=hot/cdiff, 0.0=cool/color), fade_rate
+    embers = []
+
+    for _ in range(iterations):
+        # Spawn new embers at the origin end
+        if len(embers) < MAX_EMBERS and random.random() < SPAWN_RATE:
+            speed = random.uniform(0.3, 1.0)
+            # Fade is derived from speed and strip length so every ember travels
+            # roughly the full strip before dying — faster embers fade faster.
+            # random.uniform(0.7, 1.1) adds natural variation: some die just short,
+            # some make it all the way, a few even overshoot.
+            fade = (speed / num_pixels) * random.uniform(0.7, 1.1)
+            embers.append({
+                'pos':   spawn_pos + random.uniform(-1.5, 1.5),
+                'speed': speed,
+                'heat':  1.0,
+                'fade':  fade,
+            })
+
+        frame = [(0, 0, 0)] * num_pixels
+
+        surviving = []
+        for e in embers:
+            # Move the ember
+            e['pos']  += step * e['speed']
+            e['heat']  = max(0.0, e['heat'] - e['fade'])
+
+            if e['heat'] <= 0.01:
+                continue  # Ember has died
+            if not (0 <= int(e['pos']) < num_pixels):
+                continue  # Off the strip
+
+            # Color: lerp from cdiff (hot) toward color (cool) as heat drops
+            h = e['heat']
+            ec = (
+                min(255, int(cdiff[0] * h + color[0] * (1.0 - h))),
+                min(255, int(cdiff[1] * h + color[1] * (1.0 - h))),
+                min(255, int(cdiff[2] * h + color[2] * (1.0 - h))),
+            )
+
+            # Draw ember head and a fading tail behind it
+            for t in range(TAIL_LEN):
+                p = int(e['pos']) - step * t
+                if 0 <= p < num_pixels:
+                    tail_heat = h * (0.5 ** t)
+                    tc = (
+                        min(255, int(cdiff[0] * tail_heat + color[0] * (1.0 - tail_heat))),
+                        min(255, int(cdiff[1] * tail_heat + color[1] * (1.0 - tail_heat))),
+                        min(255, int(cdiff[2] * tail_heat + color[2] * (1.0 - tail_heat))),
+                    )
+                    # Additive blend — overlapping embers combine naturally
+                    frame[p] = (
+                        min(255, frame[p][0] + tc[0]),
+                        min(255, frame[p][1] + tc[1]),
+                        min(255, frame[p][2] + tc[2]),
+                    )
+
+            surviving.append(e)
+
+        embers[:] = surviving
+
+        for i in range(num_pixels):
+            pixels[i] = frame[i]
+        pixels.show()
+        time.sleep(wait_ms / 1000.0)
+
+    pixels.fill((0, 0, 0))
+    pixels.show()
+
+# Example usage:
+# ember_rise()  # Call this function to run the 'Ember Rise' effect
+
+
+def joyful_celebration(colorI, cdiff, wait_ms,iterations=9999999):
     """
     Create a 'Joyful Celebration' light show effect on the LED strip.
-    
-    Parameters:
-    - duration: Duration of the effect in seconds.
-    - pulse_speed: Speed of the color pulsing effect.
-    - chase_speed: Speed of the chasing lights effect.
-    - confetti_probability: Chance of confetti flash during the effect.
     """
     start_time = time.time()
-    colors = [(255, 0, 0), (255, 165, 0), (255, 255, 0), (0, 255, 0), (0, 0, 255), (75, 0, 130), (238, 130, 238)]  # Rainbow colors
-    
-    while (time.time() - start_time) < duration:
+    colors = [(255,0,0), (125,125,0), (255, 255, 0), (0, 255, 0), (0, 0, 255), (75, 0, 130), (238, 130, 238)]  # Rainbow colors
+    pulse_speed=0.1
+    chase_speed=0.05
+    confetti_probability=0.06
+    while (time.time() - start_time) < iterations:
         # Pulsing effect
         for brightness in range(0, 256, 5):  # Brightness increasing
             for i in range(num_pixels):
@@ -941,7 +1482,7 @@ def joyful_celebration(duration=30, pulse_speed=0.1, chase_speed=0.05, confetti_
             time.sleep(chase_speed)
             pixels[i] = (0, 0, 0)  # Turn off the previous light
 
-        # Confetti effect
+        # Confetti effectF
         if random.random() < confetti_probability:
             random_index = random.randint(0, num_pixels - 1)
             pixels[random_index] = (255, 255, 255)  # White confetti flash
@@ -956,8 +1497,9 @@ def joyful_celebration(duration=30, pulse_speed=0.1, chase_speed=0.05, confetti_
 
 def marquee(color=(255, 255, 255),cdiff=(0,0,0),  wait_ms=5, iterations=5):
     odd = True
+    pixelOdd = num_pixels if num_pixels%2 == 0 else num_pixels - 1
     for z in range(iterations):
-        for i in range(num_pixels):
+        for i in range(pixelOdd):
             pixels[i] = color if odd else cdiff  # Light up the current pixel  # Turn off the current pixel before moving to the next
             odd = not odd
         pixels.show()
@@ -1019,21 +1561,42 @@ def run():
             iterations = pattern["iterations"]
             eye_look(color,wait_ms,iterations)
         elif str(pattern_type) == "lightning_strike":
-            lightning_strike()
+            color = pattern.get("color", [0, 0, 20])
+            cdiff = pattern.get("cdiff", [220, 230, 255])
+            wait_ms = pattern.get("wait_ms", 2000)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            lightning_strike(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "fireworks_simulation":
-            color = pattern["color"]
-            cdiff = pattern["cdiff"]
-            wait_ms = pattern.get("wait_ms", 500)
-            iterations = pattern.get("iterations", 100)
-            fireworks_simulation(color, cdiff, wait_ms, iterations)
+            color = pattern.get("color", [255, 255, 255])
+            cdiff = pattern.get("cdiff", [255, 50, 0])
+            wait_ms = pattern.get("wait_ms", 20)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            fireworks_simulation(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "fireworks_finale":
             fireworks_finale()
         elif str(pattern_type) == "shimmer_sine_wave":
-            shimmer_sine_wave()
-        elif str(pattern_type) == "shimmer_effect ":
-            shimmer_effect()
+            color = pattern.get("color", [0, 60, 180])
+            cdiff = pattern.get("cdiff", [200, 220, 255])
+            wait_ms = pattern.get("wait_ms", 30)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            shimmer_sine_wave(color, cdiff, wait_ms, iterations, direction)
+        elif str(pattern_type) == "shimmer_effect":
+            color = pattern.get("color", [180, 80, 0])
+            cdiff = pattern.get("cdiff", [255, 220, 120])
+            wait_ms = pattern.get("wait_ms", 40)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            shimmer_effect(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "marquee_effect":
-            marquee_effect()
+            color = pattern.get("color", [0, 0, 0])
+            cdiff = pattern.get("cdiff", [255, 255, 255])
+            wait_ms = pattern.get("wait_ms", 30)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            marquee_effect(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "aurora_drift":
             iterations = pattern["iterations"]
             wait_ms = pattern.get("wait_ms", 500)
@@ -1042,26 +1605,56 @@ def run():
             iterations = pattern.get("iterations", 100000)
             cosmic_vortex(iterations)
         elif str(pattern_type) == "serenity_flow":
-            serenity_flow()
+            color = pattern.get("color", [0, 0, 0])
+            cdiff = pattern.get("cdiff", [0, 0, 0])
+            wait_ms = pattern.get("wait_ms", 30)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            serenity_flow(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "tranquil_drift":
-            tranquil_drift()
+            color = pattern.get("color", [0, 100, 200])
+            cdiff = pattern.get("cdiff", [0, 180, 120])
+            wait_ms = pattern.get("wait_ms", 50)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            tranquil_drift(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "digital_dreamscape":
             iterations = pattern["iterations"]
             wait_ms = pattern.get("wait_ms", 500)
             digital_dreamscape(iterations,wait_ms)
-        elif str(pattern_type) == "lightning_strike":
-            lightning_strike()
         elif str(pattern_type) == "thunderstorm":
-            iterations = pattern["iterations"]
-            thunderstorm(iterations)
+            color = pattern.get("color", [0, 10, 30])
+            cdiff = pattern.get("cdiff", [200, 210, 255])
+            wait_ms = pattern.get("wait_ms", 2000)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            thunderstorm(color, cdiff, wait_ms, iterations, direction)
         elif str(pattern_type) == "joyful_celebration":
-            joyful_celebration()
+            color = pattern["color"]
+            cdiff = pattern["cdiff"]
+            wait_ms = pattern.get("wait_ms", 500)
+            iterations = pattern.get("iterations", 100000)
+            joyful_celebration(color, cdiff, wait_ms, iterations)
         elif str(pattern_type) == "marquee":
             color = pattern["color"]
             cdiff = pattern["cdiff"]
             wait_ms = pattern.get("wait_ms", 500)
             iterations = pattern.get("iterations", 100000)
             marquee(color,cdiff, wait_ms, iterations)
+        elif str(pattern_type) == "ember_rise":
+            color = pattern.get("color", [180, 40, 0])
+            cdiff = pattern.get("cdiff", [255, 200, 60])
+            wait_ms = pattern.get("wait_ms", 30)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            ember_rise(color, cdiff, wait_ms, iterations, direction)
+        elif str(pattern_type) == "color_chase":
+            color = pattern.get("color", [0, 100, 255])
+            cdiff = pattern.get("cdiff", [255, 50, 0])
+            wait_ms = pattern.get("wait_ms", 20)
+            iterations = pattern.get("iterations", 9999999)
+            direction = pattern.get("direction", 1)
+            color_chase(color, cdiff, wait_ms, iterations, direction)
         else:
              solid_color([0,0,0])
 run()

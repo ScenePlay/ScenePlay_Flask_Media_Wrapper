@@ -28,7 +28,6 @@ def loadCronSchedules():
     # Iterate over the JSON data and insert it into the database
     for item in data:
         cronSchedule = tblcronschedule(
-            schedule_id=item['schedule_id'],
             name=item['name'],
             minute=item['minute'],
             hour=item['hour'],

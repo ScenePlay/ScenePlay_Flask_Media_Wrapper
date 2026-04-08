@@ -27,6 +27,7 @@ from multiprocessing import Process, Value, Array
 import os
 import signal
 import sys
+import time
 
 
 
@@ -56,6 +57,11 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 migrate.init_app(app, db)
+
+@app.context_processor
+def inject_keep_music():
+    from sql import appsettingGetKeepMusicPlaying
+    return {'keep_music': appsettingGetKeepMusicPlaying()}
 
 app.register_blueprint(main)
 app.register_blueprint(sp)
@@ -142,6 +148,10 @@ def startTheadPlayer():
     appsettingAudioPlayFlagUpdate(1)
     appsettingVideoPlayFlagUpdate(1)
     appsettingYT_QuePlayFlagUpdate(1)
+
+    time.sleep(3)
+    appsettingAudioPlayFlagUpdatePID(999999)  # clear stale PID so threader starts fresh
+    queue_next()
     
     
 if arr[0] > 0:

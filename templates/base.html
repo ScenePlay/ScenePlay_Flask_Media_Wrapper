@@ -102,6 +102,13 @@
                     </td> 
                     <td>
                       <input type="submit" onclick="killQueue()"  class="btn btn-danger mt-2" value="All Stop" >
+                      <br><br>
+                      <label style="font-size:0.8em;">Music Ignore Stop</label><br>
+                      <button id="keepMusicBtn" type="button"
+                          class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }} mt-1"
+                          onclick="toggleKeepMusic()">
+                          {{ 'ON' if keep_music else 'OFF' }}
+                      </button>
                     </td>
                 </td>
               </tr>
@@ -110,5 +117,19 @@
           </div>
         {% block content %}
         {% endblock %}
+        <script>
+        async function toggleKeepMusic() {
+            const response = await fetch('/api/keepmusicplaying', { method: 'POST' });
+            const data = await response.json();
+            const btn = document.getElementById('keepMusicBtn');
+            if (data.keep_music) {
+                btn.textContent = 'ON';
+                btn.className = 'btn btn-success mt-1';
+            } else {
+                btn.textContent = 'OFF';
+                btn.className = 'btn btn-secondary mt-1';
+            }
+        }
+        </script>
     </body>
 </html>
