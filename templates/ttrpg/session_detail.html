@@ -1,0 +1,417 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">
+      Session #{{ sess.session_number }}: {{ sess.title }}
+    </h3>
+    <span class="small text-muted">
+      {{ sess.session_date or 'No date set' }}
+      {% if sess.campaign %}&nbsp;&bull;&nbsp;{{ sess.campaign.campaign_name }}{% endif %}
+    </span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% set active_map = sess.battle_maps | selectattr('is_active', 'eq', 1) | first | default(none) %}
+    {% if active_map %}
+    <a href="{{ url_for('battlemap_bp.map_view', map_id=active_map.map_id) }}"
+       class="btn btn-ttrpg btn-sm">&#9776; Open Map</a>
+    {% endif %}
+    {% if sess.status == 'planning' %}
+    <form method="POST" action="{{ url_for('ttrpg.session_status', session_id=sess.session_id) }}">
+      <input type="hidden" name="status" value="active">
+      <button class="btn btn-success btn-sm">&#9654; Start Session</button>
+    </form>
+    {% elif sess.status == 'active' %}
+    <form method="POST" action="{{ url_for('ttrpg.session_status', session_id=sess.session_id) }}">
+      <input type="hidden" name="status" value="ended">
+      <button class="btn btn-warning btn-sm text-dark">&#9632; End Session</button>
+    </form>
+    {% endif %}
+    <form method="POST" action="{{ url_for('ttrpg.session_delete', session_id=sess.session_id) }}"
+          onsubmit="return confirm('Delete this session?')">
+      <button class="btn btn-outline-danger btn-sm">Delete</button>
+    </form>
+  </div>
+</div>
+
+{% if sess.status == 'active' %}
+<div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #28a745;color:#28a745;">
+  &#9654; Session is live
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <!-- Party -->
+  <div class="col-md-6">
+    <div class="ttrpg-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 style="color:var(--ttrpg-accent);">Party</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleAddParty()">+ Add</button>
+      </div>
+
+      <!-- Add character panel -->
+      <div id="add-party-panel" class="mb-3" style="display:none;">
+        <select id="add-char-select" class="form-select form-select-sm bg-dark text-light border-secondary mb-2">
+          <option value="">Select character…</option>
+          {% for char in all_chars %}
+            {% if char.character_id not in party_ids %}
+            <option value="{{ char.character_id }}">{{ char.name }} ({{ char.user.display_name }})</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <button class="btn btn-ttrpg btn-sm" onclick="addToParty()">Add to Party</button>
+      </div>
+
+      {% if sess.party %}
+        {% for sp in sess.party %}
+        {% set char = sp.character %}
+        <div class="d-flex align-items-center gap-2 mb-2 ttrpg-card p-2" style="border-color:#444;">
+          {% if char.portrait_path %}
+          <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+               style="width:36px;height:36px;object-fit:cover;border-radius:50%;" alt="">
+          {% else %}
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--ttrpg-primary);
+                      display:flex;align-items:center;justify-content:center;
+                      font-size:1rem;color:var(--ttrpg-accent);">&#9876;</div>
+          {% endif %}
+          <div class="flex-grow-1" style="min-width:0;">
+            <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+               style="color:var(--ttrpg-accent);" class="text-truncate d-block fw-bold">{{ char.name }}</a>
+            <div class="small text-muted">{{ char.user.display_name }} &bull; HP {{ char.hp_current }}/{{ char.hp_max }}</div>
+            <div class="progress mt-1" style="height:5px;background:#333;">
+              <div class="progress-bar"
+                   style="width:{{ char.hp_pct() }}%;
+                          background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="removeFromParty({{ char.character_id }})">&#10005;</button>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-muted small">No characters in this session yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- DM Notes -->
+  <div class="col-md-6">
+    <div class="ttrpg-card p-3 h-100 d-flex flex-column">
+      <h5 style="color:var(--ttrpg-accent);" class="mb-2">DM Notes</h5>
+      <textarea id="dm-notes" class="form-control bg-dark text-light border-secondary flex-grow-1"
+                rows="10" style="resize:vertical;" placeholder="Session notes…">{{ sess.dm_notes }}</textarea>
+      <div class="d-flex justify-content-between align-items-center mt-2">
+        <span id="notes-saved" class="small text-success" style="display:none;">Saved</span>
+        <button class="btn btn-ttrpg btn-sm ms-auto" onclick="saveNotes()">Save Notes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campaign Scenes -->
+  <div class="col-12">
+    <div class="ttrpg-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-0">&#9836; Campaign Scenes</h5>
+        {% if sess.campaign %}
+        <span class="small text-muted">{{ sess.campaign.campaign_name }}</span>
+        {% endif %}
+      </div>
+
+      {% if campaign_scenes %}
+      <div id="active-scene-banner" class="mb-2" style="display:none;">
+        <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);font-size:.85rem;">
+          &#9654; <span id="active-scene-name"></span>
+        </span>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for scene in campaign_scenes %}
+        <button class="btn btn-sm scene-btn"
+                data-scene-id="{{ scene.scene_ID }}"
+                data-scene-name="{{ scene.sceneName }}"
+                onclick="activateScene({{ scene.scene_ID }}, '{{ scene.sceneName | e }}')"
+                style="background:var(--ttrpg-primary);color:var(--ttrpg-text);
+                       border:1px solid #444;">
+          {{ scene.sceneName }}
+        </button>
+        {% endfor %}
+      </div>
+      {% elif sess.campaign_id %}
+      <p class="text-muted small mb-0">No active scenes found for this campaign.</p>
+      {% else %}
+      <p class="text-muted small mb-0">Link this session to a campaign to see its scenes here.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Monster Tracker -->
+  <div class="col-12">
+    <div class="ttrpg-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-0">&#9876; Monsters</h5>
+        <div class="d-flex gap-2">
+      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
+         class="btn btn-sm btn-outline-secondary">&#9776; Battle Maps</a>
+      <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">Monster Library</a>
+    </div>
+      </div>
+
+      {% set alive   = sess.monsters | selectattr('is_alive','eq',1) | list %}
+      {% set dead    = sess.monsters | selectattr('is_alive','eq',0) | list %}
+
+      {% if sess.monsters %}
+      <!-- Alive -->
+      {% if alive %}
+      <div class="mb-3">
+        {% for sm in alive | sort(attribute='sort_order') %}
+        {% set mstats = sm.template.stats_json | from_json %}
+        <div class="ttrpg-card p-2 mb-2 monster-instance" id="mi-{{ sm.monster_id }}"
+             style="border-color:#444;">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Portrait -->
+            {% if mstats.image %}
+            <img src="https://www.dnd5eapi.co{{ mstats.image }}"
+                 style="width:44px;height:44px;object-fit:contain;border-radius:4px;
+                        background:var(--ttrpg-primary);flex-shrink:0;" alt="">
+            {% else %}
+            <div style="width:44px;height:44px;border-radius:4px;background:var(--ttrpg-primary);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:1.4rem;flex-shrink:0;">&#9876;</div>
+            {% endif %}
+            <!-- Name -->
+            <div style="min-width:110px;flex:1;">
+              <span class="fw-bold" style="color:var(--ttrpg-text);">{{ sm.display_name }}</span>
+              <div class="small text-muted">{{ mstats.size or '' }} {{ mstats.type or '' }}</div>
+            </div>
+            <!-- HP controls -->
+            <div class="d-flex align-items-center gap-1">
+              <button class="btn btn-sm btn-outline-danger px-2"
+                      onclick="applyMonsterHp({{ sm.monster_id }}, -monsterHpAmt({{ sm.monster_id }}))"
+                      title="Apply damage">&#9660; Dmg</button>
+              <input type="number" id="mi-amt-{{ sm.monster_id }}"
+                     value="1" min="1"
+                     class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                     style="width:52px;">
+              <button class="btn btn-sm btn-outline-success px-2"
+                      onclick="applyMonsterHp({{ sm.monster_id }}, +monsterHpAmt({{ sm.monster_id }}))"
+                      title="Apply healing">&#9650; Heal</button>
+              <input type="number" id="mi-hp-{{ sm.monster_id }}"
+                     value="{{ sm.hp_current }}" min="0" max="{{ sm.hp_max }}"
+                     class="form-control form-control-sm bg-dark text-light border-secondary text-center fw-bold"
+                     style="width:58px;color:var(--ttrpg-accent);"
+                     onchange="setMonsterHpDirect({{ sm.monster_id }}, {{ sm.hp_max }}, this.value)">
+              <span class="small text-muted">/{{ sm.hp_max }}</span>
+            </div>
+            <!-- HP bar -->
+            <div class="flex-grow-1" style="min-width:60px;">
+              <div class="progress" style="height:6px;background:#333;">
+                <div id="mi-bar-{{ sm.monster_id }}" class="progress-bar"
+                     style="width:{{ sm.hp_pct() }}%;
+                            background:{% if sm.hp_pct() > 50 %}#28a745{% elif sm.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};
+                            transition:width .3s;">
+                </div>
+              </div>
+            </div>
+            <!-- Actions -->
+            <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-warning"
+                      onclick="toggleConditionPanel({{ sm.monster_id }})"
+                      title="Conditions">&#9763;</button>
+              <button class="btn btn-sm btn-outline-danger"
+                      onclick="killMonster({{ sm.monster_id }})"
+                      title="Kill">&#9760;</button>
+              <button class="btn btn-sm btn-outline-secondary"
+                      onclick="removeMonster({{ sm.monster_id }})"
+                      title="Remove">&#10005;</button>
+            </div>
+          </div>
+          <!-- Conditions row -->
+          <div id="cond-display-{{ sm.monster_id }}" class="mt-1 d-flex flex-wrap gap-1">
+            {% for c in sm.conditions | from_json %}
+            <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);">
+              {{ c }}
+              <span style="cursor:pointer;" onclick="removeCondition({{ sm.monster_id }}, '{{ c }}')">&#215;</span>
+            </span>
+            {% endfor %}
+          </div>
+          <!-- Condition picker (hidden) -->
+          <div id="cond-panel-{{ sm.monster_id }}" class="mt-2 d-flex flex-wrap gap-1" style="display:none!important;">
+            {% for cond in conditions %}
+            <button class="btn btn-sm btn-outline-secondary py-0"
+                    onclick="addCondition({{ sm.monster_id }}, '{{ cond }}')">{{ cond }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Dead monsters (collapsed) -->
+      {% if dead %}
+      <details class="ttrpg-card p-2" style="border-color:#444;">
+        <summary class="small text-muted" style="cursor:pointer;">
+          &#9760; Defeated ({{ dead | length }})
+        </summary>
+        <div class="mt-2">
+          {% for sm in dead %}
+          <div class="d-flex align-items-center justify-content-between gap-2 py-1"
+               style="border-top:1px solid #2a2a2a;">
+            <span class="text-muted text-decoration-line-through">{{ sm.display_name }}</span>
+            <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-outline-secondary py-0"
+                      onclick="reviveMonster({{ sm.monster_id }})">Revive</button>
+              <button class="btn btn-sm btn-outline-danger py-0"
+                      onclick="removeMonster({{ sm.monster_id }})">&#10005;</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+
+      {% else %}
+      <p class="text-muted small">No monsters added yet. Use the <a href="{{ url_for('monsters_bp.library') }}"
+         style="color:var(--ttrpg-accent);">Monster Library</a> to add monsters to this session.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SESSION_ID = {{ sess.session_id }};
+
+function toggleAddParty() {
+  const p = document.getElementById('add-party-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function addToParty() {
+  const charId = document.getElementById('add-char-select').value;
+  if (!charId) return;
+  fetch(`/ttrpg/sessions/${SESSION_ID}/party/add`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({character_id: charId})
+  }).then(() => location.reload());
+}
+
+function removeFromParty(charId) {
+  if (!confirm('Remove from party?')) return;
+  fetch(`/ttrpg/sessions/${SESSION_ID}/party/${charId}/remove`, {method:'POST'})
+    .then(() => location.reload());
+}
+
+function saveNotes() {
+  const notes = document.getElementById('dm-notes').value;
+  fetch(`/ttrpg/sessions/${SESSION_ID}/notes`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({notes})
+  }).then(() => {
+    const el = document.getElementById('notes-saved');
+    el.style.display = 'inline';
+    setTimeout(() => el.style.display = 'none', 2000);
+  });
+}
+
+// Auto-save notes every 30 seconds
+setInterval(saveNotes, 30000);
+
+// ── Scene activation ────────────────────────────────────────────────────────
+
+function activateScene(sceneId, sceneName) {
+  fetch(`/activatescenes/?id=${sceneId}`)
+    .then(() => {
+      // Highlight the active button
+      document.querySelectorAll('.scene-btn').forEach(b => {
+        b.style.borderColor = '#444';
+        b.style.color = 'var(--ttrpg-text)';
+      });
+      const btn = document.querySelector(`.scene-btn[data-scene-id="${sceneId}"]`);
+      if (btn) {
+        btn.style.borderColor = 'var(--ttrpg-accent)';
+        btn.style.color = 'var(--ttrpg-accent)';
+      }
+      // Show banner
+      document.getElementById('active-scene-name').textContent = sceneName;
+      document.getElementById('active-scene-banner').style.display = '';
+    });
+}
+
+// ── Monster instance controls ───────────────────────────────────────────────
+
+function monsterHpAmt(monsterId) {
+  return parseInt(document.getElementById(`mi-amt-${monsterId}`).value) || 1;
+}
+
+function applyMonsterHp(monsterId, delta) {
+  fetch(`/ttrpg/monsters/instance/${monsterId}/hp`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({delta})
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    const inp = document.getElementById(`mi-hp-${monsterId}`);
+    if (inp) inp.value = data.hp_current;
+    const bar = document.getElementById(`mi-bar-${monsterId}`);
+    bar.style.width = data.hp_pct + '%';
+    bar.style.background = data.hp_pct > 50 ? '#28a745' : data.hp_pct > 20 ? '#ffc107' : '#dc3545';
+    if (!data.is_alive) location.reload();
+  });
+}
+
+function setMonsterHpDirect(monsterId, hpMax, newVal) {
+  const clamped = Math.max(0, Math.min(hpMax, parseInt(newVal) || 0));
+  fetch(`/ttrpg/monsters/instance/${monsterId}/hp-set`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({hp: clamped})
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    const inp = document.getElementById(`mi-hp-${monsterId}`);
+    if (inp) inp.value = data.hp_current;
+    const bar = document.getElementById(`mi-bar-${monsterId}`);
+    bar.style.width = data.hp_pct + '%';
+    bar.style.background = data.hp_pct > 50 ? '#28a745' : data.hp_pct > 20 ? '#ffc107' : '#dc3545';
+    if (!data.is_alive) location.reload();
+  });
+}
+
+function killMonster(monsterId) {
+  if (!confirm('Mark this monster as dead?')) return;
+  fetch(`/ttrpg/monsters/instance/${monsterId}/hp`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({delta: -9999})
+  }).then(() => location.reload());
+}
+
+function reviveMonster(monsterId) {
+  fetch(`/ttrpg/monsters/instance/${monsterId}/revive`, {method:'POST'})
+    .then(() => location.reload());
+}
+
+function removeMonster(monsterId) {
+  if (!confirm('Remove this monster from the session?')) return;
+  fetch(`/ttrpg/monsters/instance/${monsterId}/delete`, {method:'POST'})
+    .then(() => location.reload());
+}
+
+function toggleConditionPanel(monsterId) {
+  const el = document.getElementById(`cond-panel-${monsterId}`);
+  el.style.setProperty('display', el.style.display === 'none' ? 'flex' : 'none', 'important');
+}
+
+function addCondition(monsterId, condition) {
+  fetch(`/ttrpg/monsters/instance/${monsterId}/condition`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({condition, action:'add'})
+  }).then(() => location.reload());
+}
+
+function removeCondition(monsterId, condition) {
+  fetch(`/ttrpg/monsters/instance/${monsterId}/condition`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({condition, action:'remove'})
+  }).then(() => location.reload());
+}
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-sm-10 col-md-6 col-lg-4">
+        <div class="ttrpg-card p-4">
+            <h3 class="text-center mb-2" style="color: var(--ttrpg-accent);">&#9876; First-Time Setup</h3>
+            <p class="text-center text-muted mb-4" style="font-size:0.9em;">
+                Create the Dungeon Master account. This page is only available until the first account is created.
+            </p>
+
+            {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST">
+                <div class="mb-3">
+                    <label class="form-label">DM Username</label>
+                    <input type="text" name="username" class="form-control bg-dark text-light border-secondary"
+                           autocomplete="username" autofocus required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Display Name</label>
+                    <input type="text" name="display_name" class="form-control bg-dark text-light border-secondary" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control bg-dark text-light border-secondary"
+                           autocomplete="new-password" required>
+                </div>
+                <button type="submit" class="btn btn-ttrpg w-100">Create DM Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

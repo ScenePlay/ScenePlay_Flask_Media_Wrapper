@@ -1,0 +1,64 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 style="color:var(--ttrpg-accent);">All Characters</h3>
+  <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg btn-sm">+ New Character</a>
+</div>
+
+{% if characters %}
+<div class="ttrpg-card p-0">
+  <table class="table table-dark table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Name</th><th>Class</th><th>Race</th><th>Lv</th>
+        <th>HP</th><th>AC</th><th>Player</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for char in characters %}
+      <tr>
+        <td>
+          <div class="d-flex align-items-center gap-2">
+            {% if char.portrait_path %}
+            <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+                 style="width:30px;height:30px;object-fit:cover;border-radius:50%;" alt="">
+            {% endif %}
+            <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+               style="color:var(--ttrpg-accent);">{{ char.name }}</a>
+          </div>
+        </td>
+        <td>{{ char.char_class or '—' }}</td>
+        <td>{{ char.race or '—' }}</td>
+        <td>{{ char.level }}</td>
+        <td>
+          <div style="min-width:80px;">
+            <div class="small">{{ char.hp_current }}/{{ char.hp_max }}</div>
+            <div class="progress" style="height:5px;background:#333;">
+              <div class="progress-bar"
+                   style="width:{{ char.hp_pct() }}%;
+                          background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+              </div>
+            </div>
+          </div>
+        </td>
+        <td>{{ char.ac }}</td>
+        <td>{{ char.user.display_name }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('ttrpg.character_delete', character_id=char.character_id) }}"
+                onsubmit="return confirm('Remove {{ char.name }}?')">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="ttrpg-card p-4 text-center">
+  <p class="text-muted">No characters yet.</p>
+  <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg">Create First Character</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ScenePlay — TTRPG</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
+    <style>
+        :root {
+            --ttrpg-primary: {{ campaign_theme.primary | default('#5c3d2e') }};
+            --ttrpg-accent:  {{ campaign_theme.accent  | default('#c9a84c') }};
+            --ttrpg-bg:      {{ campaign_theme.bg      | default('#1a1a2e') }};
+            --ttrpg-surface: {{ campaign_theme.surface | default('#16213e') }};
+            --ttrpg-text:    {{ campaign_theme.text    | default('#e0e0e0') }};
+        }
+        body {
+            background-color: var(--ttrpg-bg);
+            color: var(--ttrpg-text);
+            font-family: sans-serif;
+        }
+        .ttrpg-nav {
+            background-color: var(--ttrpg-primary);
+        }
+        .ttrpg-nav .navbar-brand,
+        .ttrpg-nav .nav-link {
+            color: var(--ttrpg-accent) !important;
+        }
+        .ttrpg-card {
+            background-color: var(--ttrpg-surface);
+            border: 1px solid var(--ttrpg-accent);
+            border-radius: 6px;
+        }
+        .btn-ttrpg {
+            background-color: var(--ttrpg-accent);
+            color: #1a1a2e;
+            font-weight: bold;
+        }
+        .btn-ttrpg:hover {
+            background-color: #228B22;
+            border-color: #228B22;
+            color: #ffffff;
+        }
+        .hp-bar { height: 18px; border-radius: 4px; }
+        .condition-badge {
+            font-size: 0.75rem;
+            background-color: var(--ttrpg-primary);
+            color: var(--ttrpg-accent);
+            border: 1px solid var(--ttrpg-accent);
+            border-radius: 12px;
+            padding: 2px 8px;
+            display: inline-block;
+            margin: 2px;
+        }
+
+        /* ── Dark-theme Bootstrap overrides ─────────────────────────── */
+
+        /* text-muted: more readable on dark surfaces */
+        .text-muted { color: rgba(224,224,224,.55) !important; }
+
+        /* Form controls — force dark bg + accent focus ring */
+        .form-control,
+        .form-select {
+            background-color: #1e2d4a !important;
+            color: var(--ttrpg-text) !important;
+            border-color: #3a4a6a !important;
+        }
+        .form-control:focus,
+        .form-select:focus {
+            background-color: #1e2d4a !important;
+            color: var(--ttrpg-text) !important;
+            border-color: var(--ttrpg-accent) !important;
+            box-shadow: 0 0 0 .2rem rgba(201,168,76,.25) !important;
+        }
+        .form-control::placeholder { color: rgba(224,224,224,.35); }
+        /* <option> elements inside dark selects */
+        .form-select option { background-color: #1a1a2e; color: #e0e0e0; }
+
+        /* btn-outline-secondary — visible on dark bg, clear hover */
+        .btn-outline-secondary {
+            color: #b8b8cc !important;
+            border-color: #555570 !important;
+        }
+        .btn-outline-secondary:hover,
+        .btn-outline-secondary:focus,
+        .btn-outline-secondary:active,
+        .btn-outline-secondary.active {
+            background-color: #228B22 !important;
+            border-color: #228B22 !important;
+            color: #ffffff !important;
+        }
+
+        /* All outline button hovers — forest green */
+        .btn-outline-danger:hover,
+        .btn-outline-danger:focus,
+        .btn-outline-success:hover,
+        .btn-outline-success:focus,
+        .btn-outline-warning:hover,
+        .btn-outline-warning:focus,
+        .btn-outline-primary:hover,
+        .btn-outline-primary:focus,
+        .btn-outline-info:hover,
+        .btn-outline-info:focus {
+            background-color: #228B22 !important;
+            border-color: #228B22 !important;
+            color: #ffffff !important;
+        }
+
+        /* Nav tabs — dark active / hover states */
+        .nav-tabs { border-bottom-color: #333 !important; }
+        .nav-tabs .nav-link {
+            color: var(--ttrpg-accent) !important;
+            border-color: transparent !important;
+            background: transparent;
+        }
+        .nav-tabs .nav-link:hover {
+            background: rgba(201,168,76,.1) !important;
+            border-color: rgba(201,168,76,.3) rgba(201,168,76,.3) transparent !important;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: var(--ttrpg-surface) !important;
+            color: var(--ttrpg-accent) !important;
+            border-color: var(--ttrpg-accent) var(--ttrpg-accent) var(--ttrpg-surface) !important;
+        }
+
+        /* Flash messages — theme-matched warning */
+        .alert-warning {
+            background-color: rgba(201,168,76,.12) !important;
+            border-color: var(--ttrpg-accent) !important;
+            color: var(--ttrpg-text) !important;
+        }
+        .alert-warning .btn-close { filter: invert(1) opacity(.7); }
+
+        /* Progress bar track */
+        .progress { background-color: #252535 !important; }
+
+        /* details/summary */
+        details > summary { color: var(--ttrpg-text); cursor: pointer; }
+        details > summary::-webkit-details-marker { color: var(--ttrpg-accent); }
+
+        /* Checkboxes */
+        .form-check-input {
+            background-color: #1e2d4a;
+            border-color: #555570;
+        }
+        .form-check-input:checked {
+            background-color: var(--ttrpg-accent);
+            border-color: var(--ttrpg-accent);
+        }
+        .form-check-label { color: var(--ttrpg-text); }
+
+        /* Navbar toggler icon visible on dark nav */
+        .navbar-toggler { border-color: var(--ttrpg-accent); }
+        .navbar-toggler-icon { filter: invert(1); }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+<nav class="navbar navbar-expand-sm ttrpg-nav">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('main.home') }}">&#9654; ScenePlay</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#ttrpgNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="ttrpgNav">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                {% if current_user.is_authenticated %}
+                    {% if current_user.is_dm() %}
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.dashboard') }}">Dashboard</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.characters') }}">Characters</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.sessions_list') }}">Sessions</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>
+                    {% else %}
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.my_character') }}">My Character</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.active_map') }}">&#9776; Battle Map</a></li>
+                    {% endif %}
+                {% endif %}
+            </ul>
+            <ul class="navbar-nav ms-auto">
+                {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <span class="nav-link" style="color: var(--ttrpg-accent);">
+                            {{ current_user.display_name }}
+                            {% if current_user.is_dm() %}<span class="badge" style="background:var(--ttrpg-accent);color:#1a1a2e;">DM</span>{% endif %}
+                        </span>
+                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a></li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid mt-3">
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    {{ msg }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

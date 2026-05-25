@@ -1,0 +1,63 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-8">
+    <div class="ttrpg-card p-4">
+      <h3 style="color:var(--ttrpg-accent);">New Session</h3>
+      {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+      <form method="POST">
+        <div class="row g-3">
+          <div class="col-sm-8">
+            <label class="form-label">Session Title *</label>
+            <input type="text" name="title" class="form-control bg-dark text-light border-secondary"
+                   placeholder="The Dragon's Lair" required autofocus>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label">Session #</label>
+            <input type="number" name="session_number" class="form-control bg-dark text-light border-secondary"
+                   value="1" min="1">
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Date</label>
+            <input type="date" name="session_date" class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Link to Campaign (optional)</label>
+            <select name="campaign_id" class="form-select bg-dark text-light border-secondary">
+              <option value="">— None —</option>
+              {% for c in campaigns %}
+              <option value="{{ c.campaign_id }}">{{ c.campaign_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Add Characters to Party</label>
+            <div class="ttrpg-card p-2" style="border-color:#444; max-height:220px; overflow-y:auto;">
+              {% for char in characters %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="character_ids"
+                       value="{{ char.character_id }}" id="char_{{ char.character_id }}">
+                <label class="form-check-label" for="char_{{ char.character_id }}">
+                  {{ char.name }}
+                  <span class="text-muted small">— Lv{{ char.level }} {{ char.char_class or '' }}
+                    ({{ char.user.display_name }})</span>
+                </label>
+              </div>
+              {% else %}
+              <p class="text-muted small mb-0">No characters yet.</p>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+          <button type="submit" class="btn btn-ttrpg">Create Session</button>
+          <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,5 +1,5 @@
-from flask import Flask 
-from extensions import *
+from flask import Flask
+from extensions import db, migrate, login_manager, bcrypt, databaseDir
 from routes.main import main
 from routes.scenePattern_table import sp
 from routes.scenes_table import sn
@@ -17,6 +17,10 @@ from routes.wledPattern_table import wl
 from routes.dnLoadStatus_table import dls
 from routes.ledconfig_table import lcf
 from routes.cronSchedule_table import cs
+from routes.auth import auth
+from routes.ttrpg import ttrpg
+from routes.monsters import monsters_bp
+from routes.battlemap import battlemap_bp
 
 from defaultData import *
 from sql import *
@@ -55,13 +59,35 @@ signal.signal(signal.SIGCHLD, reap_child)
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
 db.init_app(app)
 migrate.init_app(app, db)
+bcrypt.init_app(app)
+login_manager.init_app(app)
+login_manager.login_view = 'auth.login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    from models.user import tblUsers
+    return tblUsers.query.get(int(user_id))
+
+import json as _json
+@app.template_filter('from_json')
+def from_json_filter(s):
+    try:
+        return _json.loads(s or '[]')
+    except Exception:
+        return []
 
 @app.context_processor
 def inject_keep_music():
     from sql import appsettingGetKeepMusicPlaying
     return {'keep_music': appsettingGetKeepMusicPlaying()}
+
+@app.context_processor
+def inject_ttrpg_theme():
+    return {'campaign_theme': {}}
+
 
 app.register_blueprint(main)
 app.register_blueprint(sp)
@@ -80,6 +106,17 @@ app.register_blueprint(wl)
 app.register_blueprint(dls)
 app.register_blueprint(lcf)
 app.register_blueprint(cs)
+app.register_blueprint(auth)
+app.register_blueprint(ttrpg)
+app.register_blueprint(monsters_bp)
+app.register_blueprint(battlemap_bp)
+
+# Ensure new tables exist (idempotent; does not drop existing tables)
+with app.app_context():
+    db.create_all()
+
+# Create upload directory for battle map backgrounds
+os.makedirs(os.path.join(app.root_path, 'static', 'uploads', 'battlemaps'), exist_ok=True)
 
 num = Value('i', 1)
 arr = Array('i', range(15))
@@ -159,8 +196,6 @@ if arr[0] > 0:
     
     
 if __name__ == '__main__':
-    app.secret_key = 'super secret key'
-
     app.config['SESSION_TYPE'] = 'filesystem'
     noWaitress = sys.argv[1]
     

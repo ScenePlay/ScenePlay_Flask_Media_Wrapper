@@ -1,0 +1,138 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-10 col-lg-8">
+    <div class="ttrpg-card p-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 style="color:var(--ttrpg-accent);">Edit: {{ char.name }}</h3>
+        <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+           class="btn btn-outline-secondary btn-sm">&#8592; Back</a>
+      </div>
+
+      {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+      <form method="POST" enctype="multipart/form-data">
+
+        <!-- Identity -->
+        <h6 class="text-muted text-uppercase mb-2 mt-1" style="letter-spacing:.08em;">Identity</h6>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label">Character Name *</label>
+            <input type="text" name="name" value="{{ char.name }}"
+                   class="form-control bg-dark text-light border-secondary" required autofocus>
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Class</label>
+            <input type="text" name="char_class" value="{{ char.char_class }}"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Race</label>
+            <input type="text" name="race" value="{{ char.race }}"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Level</label>
+            <input type="number" name="level" value="{{ char.level }}"
+                   class="form-control bg-dark text-light border-secondary" min="1" max="30">
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Background</label>
+            <input type="text" name="background" value="{{ char.background }}"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Portrait</label>
+            <input type="file" name="portrait"
+                   class="form-control bg-dark text-light border-secondary"
+                   accept="image/png,image/jpeg,image/gif,image/webp">
+            {% if char.portrait_path %}
+            <div class="mt-1">
+              <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+                   style="height:40px;border-radius:4px;" alt="Current portrait">
+              <span class="text-muted small ms-1">current</span>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Hit Points -->
+        <h6 class="text-muted text-uppercase mb-2 mt-4" style="letter-spacing:.08em;">Hit Points</h6>
+        <div class="row g-3">
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Current HP</label>
+            <input type="number" name="hp_current" value="{{ char.hp_current }}"
+                   class="form-control bg-dark text-light border-secondary" min="0">
+          </div>
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Max HP</label>
+            <input type="number" name="hp_max" value="{{ char.hp_max }}"
+                   class="form-control bg-dark text-light border-secondary" min="0">
+          </div>
+        </div>
+
+        <!-- Combat stats -->
+        <h6 class="text-muted text-uppercase mb-2 mt-4" style="letter-spacing:.08em;">Combat Stats</h6>
+        <div class="row g-3">
+          <div class="col-4 col-sm-2">
+            <label class="form-label">AC</label>
+            <input type="number" name="ac" value="{{ char.ac }}"
+                   class="form-control bg-dark text-light border-secondary" min="0">
+          </div>
+          <div class="col-4 col-sm-2">
+            <label class="form-label">Speed</label>
+            <input type="number" name="speed" value="{{ char.speed }}"
+                   class="form-control bg-dark text-light border-secondary" min="0">
+          </div>
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Initiative Bonus</label>
+            <input type="number" name="initiative_bonus" value="{{ char.initiative_bonus }}"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Passive Perc.</label>
+            <input type="number" name="passive_perception" value="{{ char.passive_perception }}"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+        </div>
+
+        <!-- Attributes -->
+        <h6 class="text-muted text-uppercase mb-2 mt-4" style="letter-spacing:.08em;">Attributes</h6>
+        <div class="row g-3">
+          {% for label, field, val in [
+              ('STR','str_val',char.str_val), ('DEX','dex_val',char.dex_val),
+              ('CON','con_val',char.con_val), ('INT','int_val',char.int_val),
+              ('WIS','wis_val',char.wis_val), ('CHA','cha_val',char.cha_val)] %}
+          <div class="col-4 col-sm-2">
+            <label class="form-label">{{ label }}</label>
+            <input type="number" name="{{ field }}" value="{{ val }}"
+                   class="form-control bg-dark text-light border-secondary text-center"
+                   min="1" max="30">
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Currency -->
+        <h6 class="text-muted text-uppercase mb-2 mt-4" style="letter-spacing:.08em;">Currency</h6>
+        <div class="row g-3">
+          {% for label, field, val in [('Gold','gold',char.gold),('Silver','silver',char.silver),('Copper','copper',char.copper)] %}
+          <div class="col-4 col-sm-2">
+            <label class="form-label">{{ label }}</label>
+            <input type="number" name="{{ field }}" value="{{ val }}"
+                   class="form-control bg-dark text-light border-secondary" min="0">
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+          <button type="submit" class="btn btn-ttrpg">Save Changes</button>
+          <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+             class="btn btn-outline-secondary">Cancel</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

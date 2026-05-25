@@ -1,0 +1,147 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 style="color: var(--ttrpg-accent);">&#9876; DM Dashboard</h2>
+    <div>
+        <a href="{{ url_for('ttrpg.session_new') }}" class="btn btn-ttrpg btn-sm me-2">+ New Session</a>
+        <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-outline-secondary btn-sm">+ New Character</a>
+    </div>
+</div>
+
+<!-- Active session banner -->
+{% if active_session %}
+<div class="alert mb-4" style="background: var(--ttrpg-primary); border: 1px solid var(--ttrpg-accent); color: var(--ttrpg-accent);">
+    <strong>&#9654; Active Session:</strong> {{ active_session.title }}
+    &mdash; Session #{{ active_session.session_number }}
+    <a href="{{ url_for('ttrpg.session_detail', session_id=active_session.session_id) }}"
+       class="btn btn-ttrpg btn-sm ms-3">Manage</a>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- ── Campaigns panel ─────────────────────────────────────── -->
+    <div class="col-md-4">
+        <div class="ttrpg-card p-3 h-100">
+            <h5 style="color: var(--ttrpg-accent);">Campaigns</h5>
+            {% if campaigns %}
+            <table class="table table-dark table-sm table-hover mb-0">
+                <thead><tr><th>Name</th><th>Status</th></tr></thead>
+                <tbody>
+                    {% for c in campaigns %}
+                    <tr>
+                        <td>{{ c.campaign_name }}</td>
+                        <td>
+                            {% if c.active %}
+                            <span class="badge bg-success">Active</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted small">No campaigns yet. Create one in the main ScenePlay tables.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ── Party roster ───────────────────────────────────────── -->
+    <div class="col-md-8">
+        <div class="ttrpg-card p-3 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 style="color: var(--ttrpg-accent);">All Characters</h5>
+                <a href="{{ url_for('ttrpg.characters') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
+            </div>
+            {% if characters %}
+            <div class="row g-2">
+                {% for char in characters %}
+                <div class="col-sm-6 col-lg-4">
+                    <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+                       class="text-decoration-none">
+                        <div class="ttrpg-card p-2 d-flex align-items-center gap-2" style="border-color: #444;">
+                            {% if char.portrait_path %}
+                            <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+                                 style="width:40px;height:40px;object-fit:cover;border-radius:50%;" alt="">
+                            {% else %}
+                            <div style="width:40px;height:40px;border-radius:50%;background:var(--ttrpg-primary);
+                                        display:flex;align-items:center;justify-content:center;
+                                        font-size:1.2rem;color:var(--ttrpg-accent);">
+                                &#9876;
+                            </div>
+                            {% endif %}
+                            <div style="min-width:0;">
+                                <div class="fw-bold text-truncate" style="color:var(--ttrpg-accent);">{{ char.name }}</div>
+                                <div class="small text-muted text-truncate">
+                                    Lv{{ char.level }} {{ char.char_class or '—' }}
+                                    &bull; {{ char.user.display_name }}
+                                </div>
+                                <!-- HP bar -->
+                                <div class="progress mt-1" style="height:6px;background:#333;">
+                                    <div class="progress-bar"
+                                         style="width:{{ char.hp_pct() }}%;
+                                                background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+                                    </div>
+                                </div>
+                                <div class="small text-muted">HP {{ char.hp_current }}/{{ char.hp_max }}</div>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No characters yet. Players can create their own at
+                <a href="{{ url_for('ttrpg.character_new') }}" style="color:var(--ttrpg-accent);">/ttrpg/character/new</a>.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ── Sessions list ──────────────────────────────────────── -->
+    <div class="col-12">
+        <div class="ttrpg-card p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 style="color: var(--ttrpg-accent);">Sessions</h5>
+                <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-sm btn-outline-secondary">All Sessions</a>
+            </div>
+            {% if sessions %}
+            <table class="table table-dark table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th><th>Title</th><th>Campaign</th><th>Date</th><th>Status</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in sessions %}
+                    <tr>
+                        <td>{{ s.session_number }}</td>
+                        <td>{{ s.title }}</td>
+                        <td>{{ s.campaign.campaign_name if s.campaign else '—' }}</td>
+                        <td>{{ s.session_date or '—' }}</td>
+                        <td>
+                            {% if s.status == 'active' %}
+                            <span class="badge bg-success">Active</span>
+                            {% elif s.status == 'planning' %}
+                            <span class="badge bg-warning text-dark">Planning</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Ended</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('ttrpg.session_detail', session_id=s.session_id) }}"
+                               class="btn btn-sm btn-outline-secondary">Open</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted small">No sessions yet. <a href="{{ url_for('ttrpg.session_new') }}" style="color:var(--ttrpg-accent);">Create the first one.</a></p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

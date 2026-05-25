@@ -1,0 +1,11 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row mt-5 justify-content-center">
+    <div class="col-md-6 text-center ttrpg-card p-5">
+        <h3 style="color: var(--ttrpg-accent);">{{ section }}</h3>
+        <p class="text-muted mt-3">This section is coming in a future phase.</p>
+        <a href="{{ url_for('ttrpg.dashboard') }}" class="btn btn-ttrpg mt-3">Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}

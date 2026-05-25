@@ -1,0 +1,399 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 style="color:var(--ttrpg-accent);" class="mb-0">Monster Library</h3>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('monsters_bp.homebrew_new') }}" class="btn btn-sm btn-outline-secondary">+ Homebrew</a>
+    <form method="POST" action="{{ url_for('monsters_bp.sync') }}"
+          onsubmit="return confirm('Sync all monsters from the 5e SRD API? This may take a minute.')">
+      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD ({{ synced }} cached)</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────── -->
+<div class="ttrpg-card p-3 mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-3">
+      <label class="form-label small text-muted mb-1">Type</label>
+      <select id="filter-type" class="form-select form-select-sm bg-dark text-light border-secondary"
+              onchange="doSearch()">
+        <option value="">All Types</option>
+        {% for t in monster_types %}
+        <option value="{{ t }}">{{ t|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-3">
+      <label class="form-label small text-muted mb-1">Size</label>
+      <select id="filter-size" class="form-select form-select-sm bg-dark text-light border-secondary"
+              onchange="doSearch()">
+        <option value="">All Sizes</option>
+        <option>Tiny</option><option>Small</option><option>Medium</option>
+        <option>Large</option><option>Huge</option><option>Gargantuan</option>
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select id="filter-source" class="form-select form-select-sm bg-dark text-light border-secondary"
+              onchange="doSearch()">
+        <option value="">All</option>
+        <option value="srd">SRD</option>
+        <option value="homebrew">Homebrew</option>
+      </select>
+    </div>
+    <div class="col-sm-2 ms-auto">
+      <button class="btn btn-sm btn-outline-secondary w-100" onclick="resetFilters()">Reset Filters</button>
+    </div>
+  </div>
+  <div class="mt-3">
+    <label class="form-label small text-muted mb-1">
+      Challenge Rating:
+      <span id="cr-range-display" style="color:var(--ttrpg-accent);font-weight:600;">CR 0 – 30</span>
+    </label>
+    <div class="d-flex align-items-center gap-2">
+      <span class="small text-muted" style="min-width:24px;">Min</span>
+      <input type="range" id="cr-min-slider" min="0" max="34" value="0"
+             class="form-range flex-grow-1" oninput="syncCrSliders('min')">
+      <span class="small text-muted" style="min-width:24px;">Max</span>
+      <input type="range" id="cr-max-slider" min="0" max="34" value="34"
+             class="form-range flex-grow-1" oninput="syncCrSliders('max')">
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Search panel -->
+  <div class="col-lg-5">
+    <div class="ttrpg-card p-3">
+      <div class="mb-3">
+        <input id="search-input" type="text" class="form-control bg-dark text-light border-secondary"
+               placeholder="Search by name…" autocomplete="off">
+      </div>
+      <div id="search-results" style="max-height:60vh;overflow-y:auto;">
+        <p class="text-muted small">Type to search monsters…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stat block / add panel -->
+  <div class="col-lg-7">
+    <div id="detail-panel" class="ttrpg-card p-3" style="display:none;">
+      <!-- Header -->
+      <div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
+        <img id="det-img" src="" alt=""
+             style="width:96px;height:96px;object-fit:contain;border-radius:6px;
+                    background:var(--ttrpg-primary);display:none;flex-shrink:0;">
+        <div class="flex-grow-1">
+          <h4 id="det-name" style="color:var(--ttrpg-accent);" class="mb-0"></h4>
+          <span id="det-meta" class="small text-muted d-block mb-2"></span>
+          <div class="d-flex gap-2 flex-wrap">
+            <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);">CR <span id="det-cr"></span></span>
+            <span class="badge bg-secondary">HP <span id="det-hp"></span></span>
+            <span class="badge bg-secondary">AC <span id="det-ac"></span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ability scores -->
+      <div class="row g-1 mb-3 text-center" id="det-abilities" style="display:none;">
+        {% for ab in ['STR','DEX','CON','INT','WIS','CHA'] %}
+        <div class="col">
+          <div class="ttrpg-card p-1" style="border-color:#444;">
+            <div class="small text-muted">{{ ab }}</div>
+            <div id="det-{{ ab|lower }}" class="fw-bold" style="color:var(--ttrpg-accent);">—</div>
+            <div id="det-{{ ab|lower }}-mod" class="small text-muted"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Traits -->
+      <div id="det-traits" class="small mb-3"></div>
+
+      <!-- Actions -->
+      <div id="det-actions-wrap" class="mb-3" style="display:none;">
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Actions</h6>
+        <div id="det-actions" class="small"></div>
+      </div>
+
+      <!-- Add to session -->
+      <div class="ttrpg-card p-3" style="border-color:#555;">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-3">Add to Session</h6>
+        <div class="row g-2 align-items-end">
+          <div class="col-sm-5">
+            <label class="form-label small text-muted mb-1">Session</label>
+            <select id="session-select" class="form-select form-select-sm bg-dark text-light border-secondary">
+              <option value="">Select session…</option>
+              {% for s in sessions %}
+              <option value="{{ s.session_id }}">{{ s.title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-2">
+            <label class="form-label small text-muted mb-1">Count</label>
+            <input id="add-count" type="number" min="1" max="20" value="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label small text-muted mb-1">HP Override</label>
+            <input id="hp-override" type="number" min="1" placeholder="Default"
+                   class="form-control form-control-sm bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-2">
+            <button class="btn btn-ttrpg btn-sm w-100" onclick="addToSession()">Add</button>
+          </div>
+        </div>
+        <div id="add-result" class="mt-2 small"></div>
+      </div>
+
+      <!-- Homebrew delete -->
+      <div id="homebrew-delete-wrap" class="mt-2" style="display:none;">
+        <form id="homebrew-delete-form" method="POST">
+          <button class="btn btn-outline-danger btn-sm"
+                  onclick="return confirm('Delete this homebrew monster?')">Delete Homebrew</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="detail-placeholder" class="ttrpg-card p-4 text-center text-muted">
+      <p>Select a monster to view its stat block.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedTemplateId = null;
+let searchTimer = null;
+
+const CR_STEPS = [
+  {label:'0',   val:0},    {label:'1/8', val:0.125},{label:'1/4', val:0.25},
+  {label:'1/2', val:0.5},  {label:'1',   val:1},    {label:'2',   val:2},
+  {label:'3',   val:3},    {label:'4',   val:4},    {label:'5',   val:5},
+  {label:'6',   val:6},    {label:'7',   val:7},    {label:'8',   val:8},
+  {label:'9',   val:9},    {label:'10',  val:10},   {label:'11',  val:11},
+  {label:'12',  val:12},   {label:'13',  val:13},   {label:'14',  val:14},
+  {label:'15',  val:15},   {label:'16',  val:16},   {label:'17',  val:17},
+  {label:'18',  val:18},   {label:'19',  val:19},   {label:'20',  val:20},
+  {label:'21',  val:21},   {label:'22',  val:22},   {label:'23',  val:23},
+  {label:'24',  val:24},   {label:'25',  val:25},   {label:'26',  val:26},
+  {label:'27',  val:27},   {label:'28',  val:28},   {label:'29',  val:29},
+  {label:'30',  val:30},
+];
+
+const searchInput    = document.getElementById('search-input');
+const resultsEl      = document.getElementById('search-results');
+const detPanel       = document.getElementById('detail-panel');
+const detPlaceholder = document.getElementById('detail-placeholder');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 250);
+});
+
+function doSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 250);
+}
+
+function syncCrSliders(which) {
+  let minIdx = parseInt(document.getElementById('cr-min-slider').value);
+  let maxIdx = parseInt(document.getElementById('cr-max-slider').value);
+  if (which === 'min' && minIdx > maxIdx) {
+    document.getElementById('cr-max-slider').value = minIdx;
+    maxIdx = minIdx;
+  }
+  if (which === 'max' && maxIdx < minIdx) {
+    document.getElementById('cr-min-slider').value = maxIdx;
+    minIdx = maxIdx;
+  }
+  document.getElementById('cr-range-display').textContent =
+    'CR ' + CR_STEPS[minIdx].label + ' – ' + CR_STEPS[maxIdx].label;
+  doSearch();
+}
+
+function resetFilters() {
+  document.getElementById('filter-type').value   = '';
+  document.getElementById('filter-size').value   = '';
+  document.getElementById('filter-source').value = '';
+  document.getElementById('cr-min-slider').value = 0;
+  document.getElementById('cr-max-slider').value = CR_STEPS.length - 1;
+  document.getElementById('cr-range-display').textContent = 'CR 0 – 30';
+  searchInput.value = '';
+  doSearch();
+}
+
+function runSearch() {
+  const q      = searchInput.value.trim();
+  const type   = document.getElementById('filter-type').value;
+  const size   = document.getElementById('filter-size').value;
+  const source = document.getElementById('filter-source').value;
+  const minIdx = parseInt(document.getElementById('cr-min-slider').value);
+  const maxIdx = parseInt(document.getElementById('cr-max-slider').value);
+  const isDefaultCr = minIdx === 0 && maxIdx === CR_STEPS.length - 1;
+
+  let url = `/ttrpg/monsters/search?q=${encodeURIComponent(q)}&limit=500`;
+  if (type)   url += `&type=${encodeURIComponent(type)}`;
+  if (size)   url += `&size=${encodeURIComponent(size)}`;
+  if (source) url += `&source=${encodeURIComponent(source)}`;
+  if (!isDefaultCr) {
+    url += `&cr_min=${CR_STEPS[minIdx].val}&cr_max=${CR_STEPS[maxIdx].val}`;
+  }
+
+  fetch(url).then(r => r.json()).then(renderResults);
+}
+
+function renderResults(monsters) {
+  if (!monsters.length) {
+    resultsEl.innerHTML = '<p class="text-muted small">No results.</p>';
+    return;
+  }
+  const html = monsters.map(m => `
+    <div class="d-flex align-items-center gap-2 p-2 monster-row"
+         data-id="${m.template_id}" onclick="loadDetail(${m.template_id})"
+         style="cursor:pointer;border-bottom:1px solid #2a2a2a;">
+      <div class="flex-grow-1" style="min-width:0;">
+        <div class="fw-bold text-truncate" style="color:var(--ttrpg-text);">${m.name}</div>
+        <div class="small text-muted">${m.size} ${m.type} &bull; CR ${m.cr} &bull; HP ${m.hp_max} &bull; AC ${m.ac}</div>
+      </div>
+      ${m.source === 'homebrew' ? '<span class="badge bg-secondary">HB</span>' : ''}
+    </div>
+  `).join('');
+  resultsEl.innerHTML = html;
+}
+
+function loadDetail(templateId) {
+  // Highlight selection
+  document.querySelectorAll('.monster-row').forEach(r => r.style.background = '');
+  const row = document.querySelector(`.monster-row[data-id="${templateId}"]`);
+  if (row) row.style.background = 'var(--ttrpg-primary)';
+
+  fetch(`/ttrpg/monsters/${templateId}/detail`)
+    .then(r => r.json())
+    .then(data => renderDetail(templateId, data));
+}
+
+function mod(score) {
+  const m = Math.floor((score - 10) / 2);
+  return (m >= 0 ? '+' : '') + m;
+}
+
+function renderDetail(templateId, data) {
+  selectedTemplateId = templateId;
+  const s = data.stats || {};
+
+  document.getElementById('det-name').textContent = data.name;
+  document.getElementById('det-cr').textContent   = data.cr;
+  document.getElementById('det-hp').textContent   = data.hp_max;
+  document.getElementById('det-ac').textContent   = data.ac;
+  document.getElementById('det-meta').textContent =
+    [s.size, s.type, s.alignment].filter(Boolean).join(' ');
+
+  const imgEl = document.getElementById('det-img');
+  if (s.image) {
+    imgEl.src = 'https://www.dnd5eapi.co' + s.image;
+    imgEl.style.display = '';
+  } else {
+    imgEl.src = '';
+    imgEl.style.display = 'none';
+  }
+
+  // Ability scores
+  const abMap = {str:'strength',dex:'dexterity',con:'constitution',
+                 int:'intelligence',wis:'wisdom',cha:'charisma'};
+  let hasAb = false;
+  for (const [ab, key] of Object.entries(abMap)) {
+    if (s[key] !== undefined) {
+      document.getElementById(`det-${ab}`).textContent     = s[key];
+      document.getElementById(`det-${ab}-mod`).textContent = mod(s[key]);
+      hasAb = true;
+    }
+  }
+  document.getElementById('det-abilities').style.display = hasAb ? '' : 'none';
+
+  // Traits
+  const traits = [];
+  if (s.speed) {
+    const speeds = Object.entries(s.speed).map(([k,v]) => `${k} ${v}`).join(', ');
+    traits.push(`<strong>Speed:</strong> ${speeds}`);
+  }
+  if (s.senses && Object.keys(s.senses).length)
+    traits.push(`<strong>Senses:</strong> ${Object.entries(s.senses).map(([k,v])=>`${k} ${v}`).join(', ')}`);
+  if (s.languages) traits.push(`<strong>Languages:</strong> ${s.languages}`);
+  if (s.xp)        traits.push(`<strong>XP:</strong> ${s.xp}`);
+  if (s.damage_immunities?.length)
+    traits.push(`<strong>Immunities:</strong> ${s.damage_immunities.join(', ')}`);
+  if (s.condition_immunities?.length)
+    traits.push(`<strong>Condition Immunities:</strong> ${s.condition_immunities.map(c=>c.name||c).join(', ')}`);
+
+  const specials = (s.special_abilities || []).map(a =>
+    `<p class="mb-1"><strong>${a.name}.</strong> ${a.desc}</p>`).join('');
+
+  document.getElementById('det-traits').innerHTML =
+    traits.map(t => `<p class="mb-1">${t}</p>`).join('') + specials;
+
+  // Actions
+  const actions = s.actions || [];
+  const actWrap = document.getElementById('det-actions-wrap');
+  if (actions.length) {
+    document.getElementById('det-actions').innerHTML =
+      actions.map(a => `<p class="mb-1"><strong>${a.name}.</strong> ${a.desc}</p>`).join('');
+    actWrap.style.display = '';
+  } else {
+    actWrap.style.display = 'none';
+  }
+
+  // Homebrew delete button
+  const delWrap = document.getElementById('homebrew-delete-wrap');
+  if (data.source === 'homebrew') {
+    document.getElementById('homebrew-delete-form').action =
+      `/ttrpg/monsters/homebrew/${templateId}/delete`;
+    delWrap.style.display = '';
+  } else {
+    delWrap.style.display = 'none';
+  }
+
+  detPanel.style.display = '';
+  detPlaceholder.style.display = 'none';
+}
+
+function addToSession() {
+  if (!selectedTemplateId) { alert('Select a monster first.'); return; }
+  const sessionId  = document.getElementById('session-select').value;
+  const count      = parseInt(document.getElementById('add-count').value) || 1;
+  const hpOverride = document.getElementById('hp-override').value;
+
+  if (!sessionId) { alert('Select a session.'); return; }
+
+  const body = new FormData();
+  body.append('session_id', sessionId);
+  body.append('count', count);
+  if (hpOverride) body.append('hp_override', hpOverride);
+
+  fetch(`/ttrpg/monsters/${selectedTemplateId}/add-to-session`, {method:'POST', body})
+    .then(r => r.json())
+    .then(data => {
+      const el = document.getElementById('add-result');
+      if (data.ok) {
+        const names = data.created.map(c => c.display_name).join(', ');
+        el.innerHTML = `<span class="text-success">&#10003; Added to "${data.session_title}": ${names}</span>`;
+      } else {
+        el.innerHTML = `<span class="text-danger">${data.error}</span>`;
+      }
+    });
+}
+
+// Force filters to defaults on every page load (prevent browser state restoration)
+document.getElementById('filter-type').value   = '';
+document.getElementById('filter-size').value   = '';
+document.getElementById('filter-source').value = '';
+document.getElementById('cr-min-slider').value = 0;
+document.getElementById('cr-max-slider').value = CR_STEPS.length - 1;
+document.getElementById('cr-range-display').textContent = 'CR 0 – 30';
+searchInput.value = '';
+runSearch();
+</script>
+{% endblock %}

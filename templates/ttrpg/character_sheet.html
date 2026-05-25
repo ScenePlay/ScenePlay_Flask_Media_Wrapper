@@ -1,0 +1,527 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .attr-box {
+    background: var(--ttrpg-primary);
+    border: 1px solid var(--ttrpg-accent);
+    border-radius: 8px;
+    text-align: center;
+    padding: 6px 4px;
+    min-width: 60px;
+  }
+  .attr-box .score { font-size: 1.5rem; font-weight: bold; color: var(--ttrpg-accent); }
+  .attr-box .mod   { font-size: 0.8rem; color: #aaa; }
+  .attr-box .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; color: #ccc; }
+  .editable { cursor: pointer; border-bottom: 1px dashed var(--ttrpg-accent); }
+  .editable:hover { background: rgba(201,168,76,.08); border-radius: 3px; }
+  .hp-bar-wrap { height: 22px; background: #333; border-radius: 6px; overflow: hidden; }
+  .hp-bar-fill { height: 100%; transition: width .4s, background .4s; border-radius: 6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set can_edit = current_user.is_dm() or char.user_id == current_user.user_id %}
+{% set mod = char.modifier %}
+
+<div class="row g-3">
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <div class="col-12">
+    <div class="ttrpg-card p-3 d-flex gap-3 align-items-start flex-wrap">
+      <!-- Portrait -->
+      <div>
+        {% if char.portrait_path %}
+          <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+               style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:2px solid var(--ttrpg-accent);" alt="">
+        {% else %}
+          <div style="width:90px;height:90px;border-radius:8px;border:2px solid var(--ttrpg-accent);
+                      background:var(--ttrpg-primary);display:flex;align-items:center;
+                      justify-content:center;font-size:2.5rem;color:var(--ttrpg-accent);">&#9876;</div>
+        {% endif %}
+        {% if can_edit %}
+        <form method="POST" action="{{ url_for('ttrpg.upload_portrait', character_id=char.character_id) }}"
+              enctype="multipart/form-data" class="mt-1">
+          <input type="file" name="portrait" id="portraitInput" class="d-none"
+                 accept="image/*" onchange="this.form.submit()">
+          <label for="portraitInput" class="btn btn-sm btn-outline-secondary w-100" style="font-size:.7rem;">
+            Change
+          </label>
+        </form>
+        {% endif %}
+      </div>
+
+      <!-- Identity -->
+      <div class="flex-grow-1">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            {% if not current_user.is_dm() %}
+            <a href="{{ url_for('ttrpg.my_character') }}"
+               class="small text-muted text-decoration-none d-block mb-1">
+              &#8592; My Characters
+            </a>
+            {% endif %}
+            <h3 class="mb-0" style="color:var(--ttrpg-accent);">{{ char.name }}</h3>
+          </div>
+          {% if can_edit %}
+          <a href="{{ url_for('ttrpg.character_edit', character_id=char.character_id) }}"
+             class="btn btn-sm btn-outline-secondary">&#9998; Edit Sheet</a>
+          {% endif %}
+        </div>
+        <div class="text-muted small mt-1">
+          Lv{{ char.level }}
+          {{ char.char_class or '' }}
+          {% if char.race %}&bull; {{ char.race }}{% endif %}
+          {% if char.background %}&bull; {{ char.background }}{% endif %}
+        </div>
+        <div class="small text-muted">Player: {{ char.user.display_name }}</div>
+
+        <!-- HP controls -->
+        <div class="mt-2" style="max-width:340px;">
+          <div class="d-flex justify-content-between align-items-center small mb-1">
+            <span>HP <strong id="hp_current_disp">{{ char.hp_current }}</strong> / {{ char.hp_max }}</span>
+            <span class="text-muted" id="hp_pct_disp">{{ char.hp_pct() }}%</span>
+          </div>
+          <div class="hp-bar-wrap mb-2">
+            <div class="hp-bar-fill" id="hp_bar"
+                 style="width:{{ char.hp_pct() }}%;
+                        background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+            </div>
+          </div>
+          {% if can_edit %}
+          <div class="d-flex gap-1 align-items-center">
+            <button class="btn btn-sm btn-outline-danger px-2" onclick="applyHpDelta(-hpAmount())"
+                    title="Apply damage">&#9660; Dmg</button>
+            <input type="number" id="hp_amount" class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                   value="1" min="1" style="max-width:60px;">
+            <button class="btn btn-sm btn-outline-success px-2" onclick="applyHpDelta(+hpAmount())"
+                    title="Apply healing">&#9650; Heal</button>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Quick stats row -->
+        <div class="d-flex gap-3 mt-2 flex-wrap small">
+          <span>AC <strong>{{ char.ac }}</strong></span>
+          <span>Speed <strong>{{ char.speed }}</strong> ft</span>
+          <span>Init <strong>{{ '%+d' % char.initiative_bonus }}</strong></span>
+          <span>Pass. Perc. <strong>{{ char.passive_perception }}</strong></span>
+        </div>
+
+        {% if char.conditions %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% for c in char.conditions %}
+          <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                border:1px solid var(--ttrpg-accent);font-size:.8rem;padding:3px 8px;">
+            &#9763; {{ c.condition_name }}
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if char.skills %}
+        <div class="d-flex flex-wrap gap-2 mt-2" style="font-size:.75rem;color:#aaa;">
+          {% for s in char.skills | sort(attribute='order_by') %}
+          <span>{% if s.proficient %}<span style="color:var(--ttrpg-accent);">&#9733;</span>{% endif %}{{ s.skill_name }} <strong style="color:var(--ttrpg-text);">{{ '%+d' % s.bonus }}</strong></span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Attributes ─────────────────────────────────────────── -->
+  <div class="col-12">
+    <div class="ttrpg-card p-3">
+      <h6 class="text-muted text-uppercase mb-3" style="letter-spacing:.08em;">Attributes</h6>
+      <div class="d-flex gap-2 flex-wrap">
+        {% for label, field, score in [
+            ('STR','str_val',char.str_val),
+            ('DEX','dex_val',char.dex_val),
+            ('CON','con_val',char.con_val),
+            ('INT','int_val',char.int_val),
+            ('WIS','wis_val',char.wis_val),
+            ('CHA','cha_val',char.cha_val)] %}
+        <div class="attr-box">
+          <div class="label">{{ label }}</div>
+          <div class="score editable" data-field="{{ field }}">{{ score }}</div>
+          <div class="mod">{{ '%+d' % mod(score) }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tabs: Resources / Skills / Inventory / Notes ──────── -->
+  <div class="col-12">
+    <div class="ttrpg-card p-3">
+      <ul class="nav nav-tabs mb-3" id="sheetTabs">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-resources" style="color:var(--ttrpg-accent);">Resources</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-skills" style="color:var(--ttrpg-accent);">Skills</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-inventory" style="color:var(--ttrpg-accent);">Inventory</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">Currency</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
+          Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:#000;font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
+        </button></li>
+      </ul>
+
+      <div class="tab-content">
+
+        <!-- Resources -->
+        <div class="tab-pane fade show active" id="tab-resources">
+          {% if can_edit %}
+          <div class="d-flex gap-2 mb-3 flex-wrap">
+            <input type="text" id="new_res_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Resource name" style="max-width:180px;">
+            <input type="number" id="new_res_cur" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Current" style="max-width:90px;" value="0">
+            <input type="number" id="new_res_max" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Max" style="max-width:90px;" value="0">
+            <button class="btn btn-ttrpg btn-sm" onclick="addResource()">Add</button>
+          </div>
+          {% endif %}
+          <div id="resource-list">
+            {% for r in char.resources | sort(attribute='order_by') %}
+            <div class="d-flex align-items-center gap-2 mb-2 flex-wrap" id="res-{{ r.resource_id }}">
+              <span style="min-width:130px; color:var(--ttrpg-accent);">{{ r.resource_name }}</span>
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-danger px-2"
+                      onclick="deltaResource({{ r.resource_id }}, -1)">&#8722;</button>
+              {% endif %}
+              <span id="res-cur-{{ r.resource_id }}" class="fw-bold" style="min-width:20px; text-align:center;">{{ r.current_val }}</span>
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-success px-2"
+                      onclick="deltaResource({{ r.resource_id }}, +1)">&#43;</button>
+              {% endif %}
+              <span class="text-muted">/ {{ r.max_val }}</span>
+              <!-- pip display -->
+              <div id="res-pips-{{ r.resource_id }}" class="d-flex gap-1 flex-wrap">
+                {% for i in range(r.max_val) %}
+                <div class="res-pip" style="width:14px;height:14px;border-radius:50%;border:1px solid var(--ttrpg-accent);
+                     background:{% if i < r.current_val %}var(--ttrpg-accent){% else %}transparent{% endif %};"></div>
+                {% endfor %}
+              </div>
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteResource({{ r.resource_id }})">&#10005;</button>
+              {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No resources yet.{% if can_edit %} Add spell slots, ki points, rages, etc.{% endif %}</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Skills -->
+        <div class="tab-pane fade" id="tab-skills">
+          {% if can_edit %}
+          <div class="d-flex gap-2 mb-3 flex-wrap">
+            <input type="text" id="new_skill_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Skill name" style="max-width:180px;">
+            <input type="number" id="new_skill_bonus" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Bonus" style="max-width:80px;" value="0">
+            <div class="form-check align-self-center ms-1">
+              <input class="form-check-input" type="checkbox" id="new_skill_prof">
+              <label class="form-check-label small" for="new_skill_prof">Prof.</label>
+            </div>
+            <button class="btn btn-ttrpg btn-sm" onclick="addSkill()">Add</button>
+          </div>
+          {% endif %}
+          <div id="skill-list">
+            {% for s in char.skills | sort(attribute='order_by') %}
+            <div class="d-flex align-items-center gap-2 mb-2" id="skill-{{ s.skill_id }}">
+              <span style="min-width:160px; color:var(--ttrpg-accent);">
+                {% if s.proficient %}&#9733;{% else %}&#9734;{% endif %}
+                {{ s.skill_name }}
+              </span>
+              <span class="text-muted small">{{ '%+d' % s.bonus }}</span>
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteSkill({{ s.skill_id }})">&#10005;</button>
+              {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No skills yet.{% if can_edit %} Add Stealth, Perception, etc.{% endif %}</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Inventory -->
+        <div class="tab-pane fade" id="tab-inventory">
+          {% if can_edit %}
+          <div class="d-flex gap-2 mb-3 flex-wrap">
+            <input type="text" id="new_item_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Item name" style="max-width:180px;">
+            <input type="number" id="new_item_qty" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Qty" style="max-width:70px;" value="1">
+            <input type="text" id="new_item_notes" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Notes" style="max-width:180px;">
+            <button class="btn btn-ttrpg btn-sm" onclick="addItem()">Add</button>
+          </div>
+          {% endif %}
+          <div id="inventory-list">
+            {% for item in char.inventory | sort(attribute='order_by') %}
+            <div class="d-flex align-items-center gap-2 mb-2" id="item-{{ item.item_id }}">
+              <span class="{% if item.equipped %}fw-bold{% endif %}" style="min-width:160px; color:var(--ttrpg-accent);">
+                {% if item.equipped %}[E]{% endif %} {{ item.item_name }}
+              </span>
+              <span class="text-muted small">x{{ item.quantity }}</span>
+              {% if item.notes %}<span class="text-muted small fst-italic">{{ item.notes }}</span>{% endif %}
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteItem({{ item.item_id }})">&#10005;</button>
+              {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No items yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Currency -->
+        <div class="tab-pane fade" id="tab-currency">
+          <div class="d-flex gap-4 flex-wrap align-items-end mt-2">
+            {% for label, field, val in [('Gold','gold',char.gold),('Silver','silver',char.silver),('Copper','copper',char.copper)] %}
+            <div class="text-center">
+              <label class="form-label" style="color:var(--ttrpg-accent);">{{ label }}</label><br>
+              <input type="number" class="form-control bg-dark text-light border-secondary text-center"
+                     style="max-width:90px; font-size:1.2rem;"
+                     value="{{ val }}" min="0"
+                     onchange="saveField('{{ field }}', this.value)"
+                     {% if not can_edit %}readonly{% endif %}>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="tab-pane fade" id="tab-notes">
+          {% if can_edit %}
+          <div class="d-flex gap-2 mb-3">
+            <textarea id="new_note_text" class="form-control bg-dark text-light border-secondary" rows="2"
+                      placeholder="Add a note…" style="resize:vertical;"></textarea>
+            <button class="btn btn-ttrpg btn-sm align-self-start" onclick="addNote()">Add</button>
+          </div>
+          {% endif %}
+          <div id="note-list">
+            {% for note in char.notes | sort(attribute='created_at', reverse=True) %}
+            <div class="d-flex gap-2 mb-2 align-items-start ttrpg-card p-2" id="note-{{ note.note_id }}" style="border-color:#444;">
+              <div class="flex-grow-1">
+                <div>{{ note.note_text }}</div>
+                <div class="text-muted small">{{ note.created_at }}</div>
+              </div>
+              {% if can_edit %}
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteNote({{ note.note_id }})">&#10005;</button>
+              {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No notes yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Conditions -->
+        <div class="tab-pane fade" id="tab-conditions">
+          <!-- Active conditions -->
+          <div id="char-cond-display" class="d-flex flex-wrap gap-1 mb-2">
+            {% for c in char.conditions %}
+            <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.85rem;padding:4px 8px;">
+              {{ c.condition_name }}
+              {% if can_edit %}
+              <span style="cursor:pointer;margin-left:4px;" onclick="charRemoveCondition('{{ c.condition_name }}')">&#215;</span>
+              {% endif %}
+            </span>
+            {% else %}
+            <p class="text-muted small mb-0" id="char-cond-empty">No active conditions.</p>
+            {% endfor %}
+          </div>
+          {% if can_edit %}
+          <button class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleCharCondPanel()">&#9763; Add Condition</button>
+          <div id="char-cond-panel" class="d-flex flex-wrap gap-1" style="display:none!important;">
+            {% for cond in conditions %}
+            <button class="btn btn-sm btn-outline-secondary py-0"
+                    onclick="charAddCondition('{{ cond }}')">{{ cond }}</button>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+
+      </div><!-- tab-content -->
+    </div>
+  </div>
+
+  {% if current_user.is_dm() %}
+  <div class="col-12">
+    <div class="ttrpg-card p-3">
+      <h6 class="text-muted text-uppercase mb-3" style="letter-spacing:.08em;">DM Controls</h6>
+      <div class="d-flex flex-wrap gap-4 align-items-end">
+
+        <!-- Reassign player -->
+        <form method="POST" action="{{ url_for('ttrpg.character_assign', character_id=char.character_id) }}"
+              class="d-flex gap-2 align-items-end">
+          <div>
+            <label class="form-label small mb-1">Assign to Player</label>
+            <select name="user_id" class="form-select form-select-sm bg-dark text-light border-secondary"
+                    style="min-width:180px;">
+              {% for u in all_players %}
+              <option value="{{ u.user_id }}" {% if u.user_id == char.user_id %}selected{% endif %}>
+                {{ u.display_name }}{% if u.user_id == char.user_id %} (current){% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-sm btn-ttrpg">Reassign</button>
+        </form>
+
+        <!-- Remove character -->
+        <form method="POST" action="{{ url_for('ttrpg.character_delete', character_id=char.character_id) }}"
+              onsubmit="return confirm('Remove {{ char.name }}?')" class="ms-auto">
+          <button type="submit" class="btn btn-sm btn-outline-danger">Remove Character</button>
+        </form>
+
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div><!-- row -->
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CHAR_ID = {{ char.character_id }};
+const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
+
+// ── HP controls ──────────────────────────────────────────────
+function hpAmount() {
+  return parseInt(document.getElementById('hp_amount').value) || 1;
+}
+
+function applyHpDelta(delta) {
+  fetch(`/ttrpg/character/${CHAR_ID}/hp-delta`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delta})
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    document.getElementById('hp_current_disp').textContent = data.hp_current;
+    updateHpBar(data.hp_pct);
+  });
+}
+
+function updateHpBar(pct) {
+  const bar = document.getElementById('hp_bar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 50 ? '#28a745' : pct > 20 ? '#ffc107' : '#dc3545';
+  document.getElementById('hp_pct_disp').textContent = pct + '%';
+}
+
+function saveField(field, value, cb) {
+  fetch(`/ttrpg/character/${CHAR_ID}/save-field`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({field, value})
+  }).then(r => r.json()).then(data => { if (cb) cb(data); });
+}
+
+// ── Resources ────────────────────────────────────────────────
+function addResource() {
+  const name = document.getElementById('new_res_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/resources`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({resource_name: name,
+                          current_val: document.getElementById('new_res_cur').value,
+                          max_val: document.getElementById('new_res_max').value})
+  }).then(() => location.reload());
+}
+
+function deltaResource(id, delta) {
+  fetch(`/ttrpg/resource/${id}/delta`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delta})
+  }).then(r => r.json()).then(data => {
+    if (!data.ok) return;
+    document.getElementById('res-cur-' + id).textContent = data.current_val;
+    // Refresh pips
+    const pips = document.querySelectorAll(`#res-pips-${id} .res-pip`);
+    pips.forEach((pip, i) => {
+      pip.style.background = i < data.current_val ? 'var(--ttrpg-accent)' : 'transparent';
+    });
+  });
+}
+
+function deleteResource(id) {
+  if (!confirm('Remove this resource?')) return;
+  fetch(`/ttrpg/resource/${id}`, {method:'DELETE'}).then(() => {
+    document.getElementById('res-'+id).remove();
+  });
+}
+
+// ── Skills ───────────────────────────────────────────────────
+function addSkill() {
+  const name = document.getElementById('new_skill_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/skills`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({skill_name: name,
+                          bonus: document.getElementById('new_skill_bonus').value,
+                          proficient: document.getElementById('new_skill_prof').checked ? 1 : 0})
+  }).then(() => location.reload());
+}
+
+function deleteSkill(id) {
+  if (!confirm('Remove this skill?')) return;
+  fetch(`/ttrpg/skill/${id}`, {method:'DELETE'}).then(() => {
+    document.getElementById('skill-'+id).remove();
+  });
+}
+
+// ── Inventory ────────────────────────────────────────────────
+function addItem() {
+  const name = document.getElementById('new_item_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/inventory`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({item_name: name,
+                          quantity: document.getElementById('new_item_qty').value,
+                          notes: document.getElementById('new_item_notes').value})
+  }).then(() => location.reload());
+}
+
+function deleteItem(id) {
+  if (!confirm('Remove item?')) return;
+  fetch(`/ttrpg/inventory/${id}`, {method:'DELETE'}).then(() => {
+    document.getElementById('item-'+id).remove();
+  });
+}
+
+// ── Notes ─────────────────────────────────────────────────────
+function addNote() {
+  const text = document.getElementById('new_note_text').value.trim();
+  if (!text) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/notes`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({note_text: text})
+  }).then(r => r.json()).then(data => {
+    if (data.ok) location.reload();
+  });
+}
+
+function deleteNote(id) {
+  if (!confirm('Delete note?')) return;
+  fetch(`/ttrpg/note/${id}`, {method:'DELETE'}).then(() => {
+    document.getElementById('note-'+id).remove();
+  });
+}
+
+// ── Conditions ───────────────────────────────────────────────
+function toggleCharCondPanel() {
+  const el = document.getElementById('char-cond-panel');
+  el.style.setProperty('display', el.style.display === 'none' ? 'flex' : 'none', 'important');
+}
+
+function charAddCondition(condition) {
+  fetch(`/ttrpg/character/${CHAR_ID}/condition`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'add', condition})
+  }).then(() => location.reload());
+}
+
+function charRemoveCondition(condition) {
+  fetch(`/ttrpg/character/${CHAR_ID}/condition`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'remove', condition})
+  }).then(() => location.reload());
+}
+</script>
+{% endblock %}

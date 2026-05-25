@@ -1,11 +1,15 @@
-from flask_sqlalchemy import SQLAlchemy 
+from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_login import LoginManager
+from flask_bcrypt import Bcrypt
 import os
 import alsaaudio
 import pulsectl
 
 db = SQLAlchemy()
 migrate = Migrate()
+login_manager = LoginManager()
+bcrypt = Bcrypt()
 database = 'ScenePlay.db'
 databaseDir = os.path.dirname(os.path.realpath(__file__)) + '/' + database
 

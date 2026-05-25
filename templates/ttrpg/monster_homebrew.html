@@ -1,0 +1,121 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 style="color:var(--ttrpg-accent);">New Homebrew Monster</h3>
+  <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">&larr; Library</a>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<form method="POST">
+  <div class="row g-3">
+    <!-- Identity -->
+    <div class="col-12">
+      <div class="ttrpg-card p-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-3">Identity</h5>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label small text-muted">Name *</label>
+            <input type="text" name="name" class="form-control bg-dark text-light border-secondary" required>
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label small text-muted">Size</label>
+            <select name="size" class="form-select bg-dark text-light border-secondary">
+              {% for sz in ['Tiny','Small','Medium','Large','Huge','Gargantuan'] %}
+              <option value="{{ sz }}"{% if sz == 'Medium' %} selected{% endif %}>{{ sz }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label small text-muted">Type</label>
+            <input type="text" name="monster_type" placeholder="beast, undead…"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small text-muted">Alignment</label>
+            <input type="text" name="alignment" placeholder="chaotic evil…"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small text-muted">Speed</label>
+            <input type="text" name="speed" value="30 ft."
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-2">
+            <label class="form-label small text-muted">CR</label>
+            <input type="text" name="cr" value="1"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-sm-2">
+            <label class="form-label small text-muted">XP</label>
+            <input type="number" name="xp" value="0" min="0"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Combat stats -->
+    <div class="col-md-6">
+      <div class="ttrpg-card p-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-3">Combat</h5>
+        <div class="row g-3">
+          <div class="col-6">
+            <label class="form-label small text-muted">Max HP</label>
+            <input type="number" name="hp_max" value="10" min="1"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted">AC</label>
+            <input type="number" name="ac" value="10" min="1"
+                   class="form-control bg-dark text-light border-secondary">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ability scores -->
+    <div class="col-md-6">
+      <div class="ttrpg-card p-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-3">Ability Scores</h5>
+        <div class="row g-2 text-center">
+          {% for stat, label in [('str_val','STR'),('dex_val','DEX'),('con_val','CON'),
+                                  ('int_val','INT'),('wis_val','WIS'),('cha_val','CHA')] %}
+          <div class="col-4 col-sm-2">
+            <label class="form-label small text-muted mb-1">{{ label }}</label>
+            <input type="number" name="{{ stat }}" value="10" min="1" max="30"
+                   class="form-control form-control-sm bg-dark text-light border-secondary text-center">
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Languages & Notes -->
+    <div class="col-12">
+      <div class="ttrpg-card p-3">
+        <h5 style="color:var(--ttrpg-accent);" class="mb-3">Additional Info</h5>
+        <div class="mb-3">
+          <label class="form-label small text-muted">Languages</label>
+          <input type="text" name="languages" placeholder="Common, Draconic…"
+                 class="form-control bg-dark text-light border-secondary">
+        </div>
+        <div>
+          <label class="form-label small text-muted">Notes / Special Abilities</label>
+          <textarea name="notes" rows="4"
+                    class="form-control bg-dark text-light border-secondary"
+                    placeholder="Describe traits, actions, reactions…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg">Create Monster</button>
+      <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

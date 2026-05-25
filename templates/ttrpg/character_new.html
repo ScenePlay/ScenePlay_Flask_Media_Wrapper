@@ -1,0 +1,105 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-10 col-lg-8">
+    <div class="ttrpg-card p-4">
+      <h3 style="color:var(--ttrpg-accent);">Create Character</h3>
+      {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+      <form method="POST" enctype="multipart/form-data">
+
+        <!-- Identity -->
+        <h6 class="text-muted mt-3 mb-2 text-uppercase" style="letter-spacing:.08em;">Identity</h6>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label">Character Name *</label>
+            <input type="text" name="name" class="form-control bg-dark text-light border-secondary" required autofocus>
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Class</label>
+            <input type="text" name="char_class" class="form-control bg-dark text-light border-secondary" placeholder="Fighter, Wizard…">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Race</label>
+            <input type="text" name="race" class="form-control bg-dark text-light border-secondary" placeholder="Human, Elf…">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Level</label>
+            <input type="number" name="level" class="form-control bg-dark text-light border-secondary" value="1" min="1" max="30">
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Background</label>
+            <input type="text" name="background" class="form-control bg-dark text-light border-secondary" placeholder="Soldier, Noble…">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Portrait</label>
+            <input type="file" name="portrait" class="form-control bg-dark text-light border-secondary"
+                   accept="image/png,image/jpeg,image/gif,image/webp">
+          </div>
+        </div>
+
+        <!-- Combat stats -->
+        <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Combat Stats</h6>
+        <div class="row g-3">
+          <div class="col-4 col-sm-2">
+            <label class="form-label">HP Max</label>
+            <input type="number" name="hp_max" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+          </div>
+          <div class="col-4 col-sm-2">
+            <label class="form-label">AC</label>
+            <input type="number" name="ac" class="form-control bg-dark text-light border-secondary" value="10" min="0">
+          </div>
+          <div class="col-4 col-sm-2">
+            <label class="form-label">Speed</label>
+            <input type="number" name="speed" class="form-control bg-dark text-light border-secondary" value="30" min="0">
+          </div>
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Initiative Bonus</label>
+            <input type="number" name="initiative_bonus" class="form-control bg-dark text-light border-secondary" value="0">
+          </div>
+          <div class="col-4 col-sm-3">
+            <label class="form-label">Passive Perc.</label>
+            <input type="number" name="passive_perception" class="form-control bg-dark text-light border-secondary" value="10">
+          </div>
+        </div>
+
+        <!-- Attributes -->
+        <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Attributes</h6>
+        <div class="row g-3">
+          {% for label, field in [('STR','str_val'),('DEX','dex_val'),('CON','con_val'),('INT','int_val'),('WIS','wis_val'),('CHA','cha_val')] %}
+          <div class="col-4 col-sm-2">
+            <label class="form-label">{{ label }}</label>
+            <input type="number" name="{{ field }}" class="form-control bg-dark text-light border-secondary text-center"
+                   value="10" min="1" max="30">
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Currency -->
+        <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Currency</h6>
+        <div class="row g-3">
+          <div class="col-4 col-sm-2">
+            <label class="form-label">Gold</label>
+            <input type="number" name="gold" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+          </div>
+          <div class="col-4 col-sm-2">
+            <label class="form-label">Silver</label>
+            <input type="number" name="silver" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+          </div>
+          <div class="col-4 col-sm-2">
+            <label class="form-label">Copper</label>
+            <input type="number" name="copper" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+          </div>
+        </div>
+
+        <div class="mt-4 d-flex gap-2">
+          <button type="submit" class="btn btn-ttrpg">Create Character</button>
+          <a href="{{ url_for('ttrpg.my_character') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

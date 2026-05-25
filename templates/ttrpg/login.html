@@ -1,0 +1,36 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-sm-10 col-md-6 col-lg-4">
+        <div class="ttrpg-card p-4">
+            <h3 class="text-center mb-4" style="color: var(--ttrpg-accent);">&#9876; TTRPG Login</h3>
+
+            {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" class="form-control bg-dark text-light border-secondary"
+                           autocomplete="username" autofocus required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control bg-dark text-light border-secondary"
+                           autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="btn btn-ttrpg w-100">Enter</button>
+            </form>
+            {% if no_users %}
+            <div class="text-center mt-3">
+                <a href="{{ url_for('auth.setup') }}" style="color: var(--ttrpg-accent); font-size:0.9em;">
+                    No accounts yet? Create the DM account &rarr;
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-5">
+        <div class="ttrpg-card p-4 mb-4">
+            <h4 style="color: var(--ttrpg-accent);">Create Account</h4>
+
+            {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+            {% if success %}
+                <div class="alert alert-success">{{ success }}</div>
+            {% endif %}
+
+            <form method="POST">
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" class="form-control bg-dark text-light border-secondary" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Display Name</label>
+                    <input type="text" name="display_name" class="form-control bg-dark text-light border-secondary" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control bg-dark text-light border-secondary" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Role</label>
+                    <select name="role" class="form-select bg-dark text-light border-secondary">
+                        <option value="player">Player</option>
+                        <option value="dm">Dungeon Master</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-ttrpg w-100">Create Account</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="ttrpg-card p-4">
+            <h4 style="color: var(--ttrpg-accent);">All Users</h4>
+            <table class="table table-dark table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Display Name</th>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in players %}
+                    <tr>
+                        <td>{{ u.display_name }}</td>
+                        <td>{{ u.username }}</td>
+                        <td>
+                            <span class="badge {{ 'bg-warning text-dark' if u.role == 'dm' else 'bg-secondary' }}">
+                                {{ u.role | upper }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge {{ 'bg-success' if u.active else 'bg-danger' }}">
+                                {{ 'Active' if u.active else 'Inactive' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if u.role != 'dm' %}
+                            <form method="POST" action="{{ url_for('auth.delete_user', user_id=u.user_id) }}"
+                                  onsubmit="return confirm('Delete {{ u.display_name }}?')">
+                                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

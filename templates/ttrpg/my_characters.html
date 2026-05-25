@@ -1,0 +1,75 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 style="color:var(--ttrpg-accent);">My Characters</h3>
+  <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg btn-sm">+ New Character</a>
+</div>
+
+{% if active_map %}
+<div class="alert mb-3 d-flex align-items-center justify-content-between gap-3"
+     style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);">
+  <span style="color:var(--ttrpg-accent);">
+    &#9654; A battle is in progress — <strong>{{ active_map.name }}</strong>
+  </span>
+  <a href="{{ url_for('battlemap_bp.map_view', map_id=active_map.map_id) }}"
+     class="btn btn-ttrpg btn-sm flex-shrink-0">&#9776; Open Map</a>
+</div>
+{% endif %}
+
+{% if characters %}
+<div class="row g-3">
+  {% for char in characters %}
+  <div class="col-sm-6 col-md-4">
+    <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}" class="text-decoration-none">
+      <div class="ttrpg-card p-3">
+        <div class="d-flex gap-3 align-items-center">
+          {% if char.portrait_path %}
+          <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+               style="width:60px;height:60px;object-fit:cover;border-radius:8px;" alt="">
+          {% else %}
+          <div style="width:60px;height:60px;border-radius:8px;background:var(--ttrpg-primary);
+                      display:flex;align-items:center;justify-content:center;font-size:1.8rem;
+                      color:var(--ttrpg-accent);">&#9876;</div>
+          {% endif %}
+          <div>
+            <div class="fw-bold" style="color:var(--ttrpg-accent);">{{ char.name }}</div>
+            <div class="small text-muted">Lv{{ char.level }} {{ char.char_class or '' }} &bull; {{ char.race or '' }}</div>
+            <div class="small text-muted">HP {{ char.hp_current }}/{{ char.hp_max }}</div>
+          </div>
+        </div>
+        <div class="progress mt-2" style="height:6px;background:#333;">
+          <div class="progress-bar"
+               style="width:{{ char.hp_pct() }}%;
+                      background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+          </div>
+        </div>
+
+        {% if char.conditions %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% for c in char.conditions %}
+          <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                border:1px solid var(--ttrpg-accent);font-size:.72rem;">{{ c.condition_name }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if char.skills %}
+        <div class="mt-2" style="font-size:.72rem;color:#888;line-height:1.6;">
+          {% for s in char.skills | sort(attribute='order_by') %}
+          <span>{% if s.proficient %}&#9733;{% endif %}{{ s.skill_name }} {{ '%+d' % s.bonus }}{% if not loop.last %}&ensp;{% endif %}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="ttrpg-card p-4 text-center">
+  <p class="text-muted">You don't have any characters yet.</p>
+  <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg mt-2">Create Your Character</a>
+</div>
+{% endif %}
+{% endblock %}
