@@ -40,6 +40,7 @@ class tblCharacters(db.Model):
     inventory   = db.relationship('tblCharacterInventory',   backref='character', cascade='all, delete-orphan', lazy=True)
     skills      = db.relationship('tblCharacterSkills',      backref='character', cascade='all, delete-orphan', lazy=True)
     notes       = db.relationship('tblCharacterNotes',       backref='character', cascade='all, delete-orphan', lazy=True)
+    feats       = db.relationship('tblCharacterFeats',       backref='character', cascade='all, delete-orphan', lazy=True)
     user        = db.relationship('tblUsers', backref='characters', lazy=True)
 
     def modifier(self, score):
@@ -115,6 +116,16 @@ class tblCharacterNotes(db.Model):
     character_id = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
     note_text    = db.Column(db.Text, nullable=False)
     created_at   = db.Column(db.Text, nullable=False)
+
+
+class tblCharacterFeats(db.Model):
+    __tablename__ = 'tblCharacterFeats'
+
+    feat_id      = db.Column(db.Integer, primary_key=True)
+    character_id = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
+    feat_name    = db.Column(db.Text, nullable=False)
+    description  = db.Column(db.Text, default='')
+    order_by     = db.Column(db.Integer, default=0)
 
 
 class tblSessions(db.Model):
@@ -198,9 +209,28 @@ class tblBattleMaps(db.Model):
     is_active  = db.Column(db.Integer, default=0)  # 1 = currently shown map for this session
     created_at = db.Column(db.Text, nullable=False)
 
-    tokens  = db.relationship('tblBattleMapTokens', backref='battle_map',
+    tokens  = db.relationship('tblBattleMapTokens',  backref='battle_map',
+                               cascade='all, delete-orphan', lazy=True)
+    effects = db.relationship('tblBattleMapEffects', backref='battle_map',
                                cascade='all, delete-orphan', lazy=True)
     session = db.relationship('tblSessions', backref='battle_maps', lazy=True)
+
+
+class tblBattleMapEffects(db.Model):
+    __tablename__ = 'tblBattleMapEffects'
+
+    effect_id    = db.Column(db.Integer, primary_key=True)
+    map_id       = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'), nullable=False)
+    shape        = db.Column(db.Text, default='circle')   # circle | cone | line | square
+    label        = db.Column(db.Text, default='')
+    anchor_x     = db.Column(db.Float, default=0.0)       # fractional col (0.5 = cell centre)
+    anchor_y     = db.Column(db.Float, default=0.0)       # fractional row
+    size_ft      = db.Column(db.Integer, default=20)      # radius/length in D&D feet
+    angle        = db.Column(db.Float, default=0.0)       # degrees — direction for cone/line
+    fill_color   = db.Column(db.Text, default='#ff4400')
+    fill_opacity = db.Column(db.Float, default=0.35)
+    border_color = db.Column(db.Text, default='#ff8800')
+    created_at   = db.Column(db.Text, nullable=False)
 
 
 class tblBattleMapTokens(db.Model):

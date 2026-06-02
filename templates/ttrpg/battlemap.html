@@ -114,6 +114,60 @@
     filter: grayscale(1);
   }
 
+  /* ── FX Panel ─────────────────────────────────────────────────────────────── */
+  #fx-panel {
+    display: none;
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    z-index: 400;
+    width: 248px;
+    background: var(--ttrpg-primary);
+    border: 1px solid var(--ttrpg-accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: .82rem;
+    color: var(--ttrpg-text);
+    box-shadow: 0 4px 24px rgba(0,0,0,.7);
+  }
+  .fx-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: var(--ttrpg-accent);
+  }
+  .fx-close-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    font-size: .95rem;
+    padding: 0;
+    line-height: 1;
+  }
+  .fx-close-btn:hover { color: #fff; }
+  .fx-shape-btn {
+    flex: 1;
+    padding: 4px 0;
+    background: var(--ttrpg-surface);
+    border: 1px solid #555;
+    border-radius: 5px;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background .15s, border-color .15s;
+  }
+  .fx-shape-btn:hover  { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
+  .fx-shape-btn.active { background: rgba(201,168,76,.18); border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
+  .fx-label  { font-size: .75rem; color: #aaa; }
+  .fx-color-input {
+    width: 36px; height: 24px;
+    padding: 1px; border: 1px solid #555; border-radius: 3px;
+    background: none; cursor: pointer;
+  }
+
   #sidebar-wrap {
     position: relative;
     flex-shrink: 0;
@@ -204,6 +258,8 @@
     </div>
     <div class="d-flex gap-2">
       {% if current_user.is_dm() %}
+      <button id="fx-toggle-btn" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleFxPanel()" title="Map effects">&#10022; FX</button>
       <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
          class="btn btn-sm btn-outline-secondary">Maps</a>
       {% endif %}
@@ -301,17 +357,119 @@
                   height:{{ bm.grid_rows * cell_px }}px;">
 
         {% if bm.bg_image %}
+        {% set _bg_ext = bm.bg_image.rsplit('.', 1)[1].lower() %}
+        {% if _bg_ext in ('mp4', 'webm', 'ogv') %}
+        <video id="map-bg" autoplay loop muted playsinline>
+          <source src="{{ url_for('static', filename='uploads/battlemaps/' ~ bm.bg_image) }}"
+                  type="video/{{ 'ogg' if _bg_ext == 'ogv' else _bg_ext }}">
+        </video>
+        {% else %}
         <img id="map-bg" src="{{ url_for('static', filename='uploads/battlemaps/' ~ bm.bg_image) }}" alt="">
+        {% endif %}
         {% endif %}
 
         <div id="map-lines"
              style="background-size:{{ cell_px }}px {{ cell_px }}px;"></div>
+
+        <!-- Effects SVG layer (z:6 — above grid, below tokens) -->
+        <svg id="effects-layer"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;
+                    z-index:6;overflow:visible;pointer-events:none;"></svg>
+
+        <!-- Transparent draw overlay — active only in FX draw mode (z:20) -->
+        <div id="fx-draw-overlay"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;
+                    z-index:20;display:none;cursor:crosshair;"></div>
 
         <!-- Tokens injected by JS -->
       </div>
     </div>
   </div>
 </div>
+
+{% if current_user.is_dm() %}
+<!-- ── Effects floating panel ─────────────────────────────────────────────── -->
+<div id="fx-panel">
+  <div class="fx-panel-header">
+    <span>&#10022; Effects</span>
+    <button class="fx-close-btn" onclick="closeFxPanel()">&#10005;</button>
+  </div>
+
+  <!-- Shape picker -->
+  <div class="d-flex gap-1 mb-2" id="fx-shape-btns">
+    <button class="fx-shape-btn active" data-shape="circle"  onclick="setFxShape('circle')"  title="Circle / Sphere">&#9711;</button>
+    <button class="fx-shape-btn"        data-shape="cone"    onclick="setFxShape('cone')"    title="Cone">&#9651;</button>
+    <button class="fx-shape-btn"        data-shape="line"    onclick="setFxShape('line')"    title="Line">&#9135;</button>
+    <button class="fx-shape-btn"        data-shape="square"  onclick="setFxShape('square')"  title="Square / Cube">&#9633;</button>
+  </div>
+
+  <!-- Size -->
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <label class="fx-label">Size</label>
+    <input type="number" id="fx-size" value="20" min="5" step="5"
+           class="form-control form-control-sm bg-dark text-light border-secondary"
+           style="width:62px;"
+           oninput="fxSizeFt = Math.max(5, parseInt(this.value)||20); updateFxCellLabel()">
+    <span class="fx-label">ft</span>
+    <span id="fx-cell-label" class="fx-label" style="color:#888;">= 4 cells</span>
+  </div>
+
+  <!-- Preset palette -->
+  <div class="mb-2">
+    <div class="fx-label mb-1">Presets</div>
+    <div class="d-flex flex-wrap gap-1" id="fx-presets"></div>
+  </div>
+
+  <!-- Fill + opacity -->
+  <div class="d-flex align-items-center gap-2 mb-1">
+    <label class="fx-label" style="min-width:36px;">Fill</label>
+    <input type="color" id="fx-fill-color" value="#ff4400" class="fx-color-input"
+           oninput="fxFillColor = this.value">
+    <label class="fx-label">Opacity</label>
+    <input type="range" id="fx-opacity" min="10" max="80" value="35"
+           style="flex:1;accent-color:var(--ttrpg-accent);"
+           oninput="fxOpacity = parseInt(this.value); document.getElementById('fx-opacity-val').textContent = fxOpacity + '%'">
+    <span id="fx-opacity-val" class="fx-label" style="min-width:28px;">35%</span>
+  </div>
+
+  <!-- Border -->
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <label class="fx-label" style="min-width:36px;">Border</label>
+    <input type="color" id="fx-border-color" value="#ff8800" class="fx-color-input"
+           oninput="fxBorderColor = this.value">
+  </div>
+
+  <!-- Label -->
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <label class="fx-label" style="min-width:36px;">Label</label>
+    <input type="text" id="fx-label-input"
+           class="form-control form-control-sm bg-dark text-light border-secondary"
+           placeholder="e.g. Fireball" maxlength="40"
+           oninput="fxLabel = this.value">
+  </div>
+
+  <hr style="border-color:#333;margin:6px 0;">
+
+  <!-- Draw mode + clear -->
+  <div class="d-flex gap-2 mb-2">
+    <button id="fx-draw-btn" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="toggleFxDrawMode()">&#9998; Draw: OFF</button>
+    <button class="btn btn-sm btn-outline-danger px-2"
+            onclick="clearAllEffects()" title="Remove all effects">&#128465;</button>
+  </div>
+
+  <!-- Selected effect controls -->
+  <div id="fx-selected" style="display:none;">
+    <hr style="border-color:#333;margin:6px 0;">
+    <div class="fx-label mb-1">Selected</div>
+    <div id="fx-selected-name"
+         style="color:var(--ttrpg-accent);font-weight:600;font-size:.8rem;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;"></div>
+    <button class="btn btn-sm btn-outline-danger w-100 mt-1"
+            onclick="deleteFxSelected()">&#10005; Delete Effect</button>
+  </div>
+</div>
+{% endif %}
 
 <!-- Token hover tooltip -->
 <div id="tok-tooltip">
@@ -664,10 +822,13 @@ function removeTokenByEntity(entityType, entityId) {
 let pollTimer = null;
 
 function pollState() {
-  if (activeDrag) return;
+  if (activeDrag || activeFxDrag) return;
   fetch(`/ttrpg/battlemap/${MAP_ID}/state`)
     .then(r => r.json())
-    .then(d => renderTokens(d.tokens));
+    .then(d => {
+      renderTokens(d.tokens);
+      renderEffects(d.effects || []);
+    });
 }
 
 function startPolling() {
@@ -683,6 +844,373 @@ document.addEventListener('visibilitychange', () => {
     startPolling();
   }
 });
+
+// ── Effects ───────────────────────────────────────────────────────────────────
+
+const effectsSvg  = document.getElementById('effects-layer');
+const fxOverlay   = document.getElementById('fx-draw-overlay');
+let currentEffects = {};   // effect_id → data
+let activeFxDrag   = null; // { effectId, g, origX, origY, startCX, startCY }
+let fxSelectedId   = null;
+let fxDrawing      = null; // active preview: { startX, startY, angle, size_ft, previewG }
+let fxDrawMode     = false;
+
+// Panel state
+let fxShape       = 'circle';
+let fxSizeFt      = 20;
+let fxFillColor   = '#ff4400';
+let fxBorderColor = '#ff8800';
+let fxOpacity     = 35;
+let fxLabel       = '';
+
+const FX_PRESETS = [
+  { label: 'Fire',       fill: '#ff4400', border: '#ff8800' },
+  { label: 'Cold',       fill: '#0088ff', border: '#00ccff' },
+  { label: 'Poison',     fill: '#00cc44', border: '#00ff66' },
+  { label: 'Lightning',  fill: '#ffff00', border: '#ffcc00' },
+  { label: 'Necrotic',   fill: '#9900ff', border: '#cc44ff' },
+  { label: 'Radiant',    fill: '#ffffcc', border: '#ffff88' },
+  { label: 'Psychic',    fill: '#ff44aa', border: '#ff88cc' },
+  { label: 'Darkness',   fill: '#000033', border: '#0000cc' },
+];
+
+// ── SVG helpers ───────────────────────────────────────────────────────────────
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+const CONE_HALF_RAD = 26.57 * Math.PI / 180;  // D&D cone spread (width = length at far end)
+
+function applyEffectGeometry(g, eff) {
+  while (g.firstChild) g.removeChild(g.firstChild);
+
+  const px   = eff.anchor_x * CELL_PX;
+  const py   = eff.anchor_y * CELL_PX;
+  const θ    = (eff.angle || 0) * Math.PI / 180;
+  const dim  = (eff.size_ft / 5) * CELL_PX;  // primary dimension in px
+  let shape, lx = px, ly = py;
+
+  if (eff.shape === 'circle') {
+    shape = svgEl('circle', { cx: px, cy: py, r: dim });
+
+  } else if (eff.shape === 'square') {
+    shape = svgEl('rect', { x: px - dim, y: py - dim, width: dim * 2, height: dim * 2 });
+
+  } else if (eff.shape === 'cone') {
+    const x1 = px + dim * Math.cos(θ - CONE_HALF_RAD);
+    const y1 = py + dim * Math.sin(θ - CONE_HALF_RAD);
+    const x2 = px + dim * Math.cos(θ + CONE_HALF_RAD);
+    const y2 = py + dim * Math.sin(θ + CONE_HALF_RAD);
+    shape = svgEl('path', {
+      d: `M ${px.toFixed(1)} ${py.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${dim.toFixed(1)} ${dim.toFixed(1)} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`
+    });
+    lx = px + dim * 0.55 * Math.cos(θ);
+    ly = py + dim * 0.55 * Math.sin(θ);
+
+  } else if (eff.shape === 'line') {
+    const hw = CELL_PX * 0.5;                         // half-width = 1 cell (5 ft)
+    const nx = -Math.sin(θ), ny = Math.cos(θ);        // normal perpendicular
+    const ex = dim * Math.cos(θ), ey = dim * Math.sin(θ);
+    const pts = [
+      `${(px + nx*hw).toFixed(1)},${(py + ny*hw).toFixed(1)}`,
+      `${(px + ex + nx*hw).toFixed(1)},${(py + ey + ny*hw).toFixed(1)}`,
+      `${(px + ex - nx*hw).toFixed(1)},${(py + ey - ny*hw).toFixed(1)}`,
+      `${(px - nx*hw).toFixed(1)},${(py - ny*hw).toFixed(1)}`,
+    ].join(' ');
+    shape = svgEl('polygon', { points: pts });
+    lx = px + (dim / 2) * Math.cos(θ);
+    ly = py + (dim / 2) * Math.sin(θ);
+  }
+
+  if (!shape) return;
+  shape.setAttribute('fill',         eff.fill_color);
+  shape.setAttribute('fill-opacity', eff.fill_opacity);
+  shape.setAttribute('stroke',       eff.border_color);
+  shape.setAttribute('stroke-width', '2');
+  g.appendChild(shape);
+
+  if (eff.label) {
+    const txt = svgEl('text', {
+      x: lx.toFixed(1), y: ly.toFixed(1),
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      fill: 'white', 'font-size': '11', 'font-weight': 'bold',
+      stroke: 'black', 'stroke-width': '2.5', 'paint-order': 'stroke',
+      'pointer-events': 'none',
+    });
+    txt.textContent = eff.label;
+    g.appendChild(txt);
+  }
+}
+
+// ── Effect drag (move existing) ───────────────────────────────────────────────
+
+function attachFxDrag(g, effectId) {
+  g.addEventListener('pointerdown', e => {
+    if (fxDrawMode) return;
+    e.stopPropagation();
+    e.preventDefault();
+    g.setPointerCapture(e.pointerId);
+    const eff = currentEffects[effectId];
+    if (!eff) return;
+    activeFxDrag = {
+      effectId, g,
+      origX: eff.anchor_x, origY: eff.anchor_y,
+      startCX: e.clientX, startCY: e.clientY,
+    };
+    g.style.cursor = 'grabbing';
+    selectEffect(effectId);
+  });
+
+  g.addEventListener('pointermove', e => {
+    if (!activeFxDrag || activeFxDrag.effectId !== effectId) return;
+    const dx = (e.clientX - activeFxDrag.startCX) / CELL_PX;
+    const dy = (e.clientY - activeFxDrag.startCY) / CELL_PX;
+    const eff = currentEffects[effectId];
+    if (eff) applyEffectGeometry(g, { ...eff, anchor_x: eff.anchor_x + dx, anchor_y: eff.anchor_y + dy });
+  });
+
+  function endFxDrag(e) {
+    if (!activeFxDrag || activeFxDrag.effectId !== effectId) return;
+    const dx = (e.clientX - activeFxDrag.startCX) / CELL_PX;
+    const dy = (e.clientY - activeFxDrag.startCY) / CELL_PX;
+    let newX = activeFxDrag.origX + dx;
+    let newY = activeFxDrag.origY + dy;
+    if (!e.shiftKey) { newX = Math.round(newX * 2) / 2; newY = Math.round(newY * 2) / 2; }
+    currentEffects[effectId].anchor_x = newX;
+    currentEffects[effectId].anchor_y = newY;
+    applyEffectGeometry(g, currentEffects[effectId]);
+    activeFxDrag = null;
+    g.style.cursor = 'grab';
+    fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${effectId}/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anchor_x: newX, anchor_y: newY }),
+    });
+  }
+  g.addEventListener('pointerup',     endFxDrag);
+  g.addEventListener('pointercancel', endFxDrag);
+}
+
+// ── Build / reconcile effects ─────────────────────────────────────────────────
+
+function buildEffectEl(eff) {
+  const g = svgEl('g');
+  g.id = `fx-${eff.effect_id}`;
+  g.dataset.effectId = String(eff.effect_id);
+  if (IS_DM) {
+    g.style.cursor = 'grab';
+    attachFxDrag(g, eff.effect_id);
+    g.addEventListener('click', e => {
+      if (activeFxDrag) return;
+      e.stopPropagation();
+      selectEffect(eff.effect_id);
+    });
+  }
+  applyEffectGeometry(g, eff);
+  return g;
+}
+
+function renderEffects(effects) {
+  const seen = new Set();
+  for (const eff of effects) {
+    seen.add(eff.effect_id);
+    currentEffects[eff.effect_id] = eff;
+    let g = document.getElementById(`fx-${eff.effect_id}`);
+    if (!g) {
+      g = buildEffectEl(eff);
+      effectsSvg.appendChild(g);
+    } else if (!activeFxDrag || activeFxDrag.effectId !== eff.effect_id) {
+      applyEffectGeometry(g, eff);
+    }
+  }
+  for (const eid of Object.keys(currentEffects)) {
+    if (!seen.has(parseInt(eid))) {
+      document.getElementById(`fx-${eid}`)?.remove();
+      delete currentEffects[eid];
+    }
+  }
+}
+
+// ── Draw mode (overlay) ───────────────────────────────────────────────────────
+
+function _overlayGridPos(e) {
+  const rect = document.getElementById('map-grid').getBoundingClientRect();
+  let col = (e.clientX - rect.left) / CELL_PX;
+  let row = (e.clientY - rect.top)  / CELL_PX;
+  if (!e.shiftKey) { col = Math.round(col * 2) / 2; row = Math.round(row * 2) / 2; }
+  return [col, row];
+}
+
+function _previewEffect(startX, startY, curX, curY) {
+  const dx   = curX - startX;
+  const dy   = curY - startY;
+  const dist = Math.hypot(dx, dy);
+  let angle = fxDrawing.angle, size_ft = fxDrawing.size_ft;
+
+  if (fxShape === 'cone' || fxShape === 'line') {
+    if (dist > 0.15) angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    size_ft = dist > 0 ? Math.max(5, Math.round(dist * 5 / 5) * 5) : fxSizeFt;
+  } else if (dist > 0.3) {
+    size_ft = Math.max(5, Math.round(dist * 5 / 5) * 5);
+  }
+  fxDrawing.angle   = angle;
+  fxDrawing.size_ft = size_ft;
+  applyEffectGeometry(fxDrawing.previewG, {
+    shape: fxShape, anchor_x: startX, anchor_y: startY,
+    size_ft, angle,
+    fill_color: fxFillColor, fill_opacity: fxOpacity / 100,
+    border_color: fxBorderColor, label: fxLabel,
+  });
+}
+
+if (fxOverlay) {
+  fxOverlay.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    const [col, row] = _overlayGridPos(e);
+    const previewG = svgEl('g');
+    previewG.style.pointerEvents = 'none';
+    effectsSvg.appendChild(previewG);
+    fxDrawing = { startX: col, startY: row, angle: 0, size_ft: fxSizeFt, previewG };
+    _previewEffect(col, row, col, row);
+    e.preventDefault();
+  });
+
+  fxOverlay.addEventListener('mousemove', e => {
+    if (!fxDrawing) return;
+    const [col, row] = _overlayGridPos(e);
+    _previewEffect(fxDrawing.startX, fxDrawing.startY, col, row);
+  });
+
+  fxOverlay.addEventListener('mouseup', e => {
+    if (!fxDrawing) return;
+    const drawing = fxDrawing;
+    fxDrawing = null;
+    drawing.previewG.remove();
+    fetch(`/ttrpg/battlemap/${MAP_ID}/effect/add`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shape:        fxShape,
+        anchor_x:     drawing.startX,
+        anchor_y:     drawing.startY,
+        size_ft:      drawing.size_ft,
+        angle:        drawing.angle,
+        fill_color:   fxFillColor,
+        fill_opacity: fxOpacity / 100,
+        border_color: fxBorderColor,
+        label:        fxLabel,
+      }),
+    }).then(r => r.json()).then(d => { if (d.ok) pollState(); });
+  });
+
+  fxOverlay.addEventListener('mouseleave', () => {
+    if (fxDrawing) { fxDrawing.previewG.remove(); fxDrawing = null; }
+  });
+}
+
+// ── FX Panel controls ─────────────────────────────────────────────────────────
+
+function toggleFxPanel() {
+  const panel = document.getElementById('fx-panel');
+  if (!panel) return;
+  const open = panel.style.display !== 'none' && panel.style.display !== '';
+  if (open) {
+    closeFxPanel();
+  } else {
+    panel.style.display = 'block';
+    effectsSvg.style.pointerEvents = 'all';
+    document.getElementById('fx-toggle-btn').classList.add('btn-ttrpg');
+    document.getElementById('fx-toggle-btn').classList.remove('btn-outline-secondary');
+    _buildPresets();
+    updateFxCellLabel();
+  }
+}
+
+function closeFxPanel() {
+  const panel = document.getElementById('fx-panel');
+  if (panel) panel.style.display = 'none';
+  effectsSvg.style.pointerEvents = 'none';
+  const btn = document.getElementById('fx-toggle-btn');
+  if (btn) { btn.classList.remove('btn-ttrpg'); btn.classList.add('btn-outline-secondary'); }
+  if (fxDrawMode) { fxDrawMode = false; _applyDrawMode(); }
+  fxSelectedId = null;
+  const sel = document.getElementById('fx-selected');
+  if (sel) sel.style.display = 'none';
+}
+
+function _buildPresets() {
+  const c = document.getElementById('fx-presets');
+  if (!c || c.children.length) return;
+  FX_PRESETS.forEach(p => {
+    const b = document.createElement('button');
+    b.title = p.label;
+    b.style.cssText = `width:22px;height:22px;border-radius:4px;background:${p.fill};border:2px solid ${p.border};cursor:pointer;padding:0;`;
+    b.onclick = () => {
+      fxFillColor = p.fill; fxBorderColor = p.border;
+      document.getElementById('fx-fill-color').value   = p.fill;
+      document.getElementById('fx-border-color').value = p.border;
+    };
+    c.appendChild(b);
+  });
+}
+
+function setFxShape(shape) {
+  fxShape = shape;
+  document.querySelectorAll('.fx-shape-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.shape === shape);
+  });
+}
+
+function updateFxCellLabel() {
+  const cells = fxSizeFt / 5;
+  document.getElementById('fx-cell-label').textContent = `= ${cells} cell${cells !== 1 ? 's' : ''}`;
+}
+
+function toggleFxDrawMode() {
+  fxDrawMode = !fxDrawMode;
+  _applyDrawMode();
+}
+
+function _applyDrawMode() {
+  if (fxOverlay) fxOverlay.style.display = fxDrawMode ? 'block' : 'none';
+  const btn = document.getElementById('fx-draw-btn');
+  if (btn) {
+    btn.textContent = `✏ Draw: ${fxDrawMode ? 'ON' : 'OFF'}`;
+    btn.className   = fxDrawMode
+      ? 'btn btn-sm btn-ttrpg flex-grow-1'
+      : 'btn btn-sm btn-outline-secondary flex-grow-1';
+  }
+}
+
+function selectEffect(effectId) {
+  fxSelectedId = effectId;
+  const eff  = currentEffects[effectId];
+  const name = eff ? (eff.label || `${eff.shape} (${eff.size_ft}ft)`) : '';
+  const sel  = document.getElementById('fx-selected');
+  if (sel) {
+    document.getElementById('fx-selected-name').textContent = name;
+    sel.style.display = 'block';
+  }
+  const panel = document.getElementById('fx-panel');
+  if (panel && panel.style.display === 'none') toggleFxPanel();
+}
+
+function deleteFxSelected() {
+  if (!fxSelectedId) return;
+  const id = fxSelectedId;
+  fxSelectedId = null;
+  const sel = document.getElementById('fx-selected');
+  if (sel) sel.style.display = 'none';
+  fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${id}/delete`, { method: 'POST' })
+    .then(() => pollState());
+}
+
+function clearAllEffects() {
+  if (!confirm('Remove all effects from this map?')) return;
+  fetch(`/ttrpg/battlemap/${MAP_ID}/effect/clear`, { method: 'POST' })
+    .then(() => pollState());
+}
 
 startPolling();
 </script>

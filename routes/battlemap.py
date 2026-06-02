@@ -8,7 +8,7 @@ from flask import (Blueprint, render_template, redirect, url_for,
 from flask_login import login_required, current_user
 
 from extensions import db
-from models.ttrpg import (tblBattleMaps, tblBattleMapTokens,
+from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects,
                            tblSessions, tblSessionParty,
                            tblSessionMonsters, tblCharacters)
 from routes.auth import dm_required
@@ -16,7 +16,8 @@ from routes.auth import dm_required
 battlemap_bp = Blueprint('battlemap_bp', __name__, url_prefix='/ttrpg/battlemap')
 
 UPLOAD_FOLDER = os.path.join('static', 'uploads', 'battlemaps')
-ALLOWED_EXT   = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_EXT   = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'ogv'}
+VIDEO_EXT     = {'mp4', 'webm', 'ogv'}
 CELL_PX       = 64
 
 
@@ -237,8 +238,22 @@ def map_state(map_id):
                 'speed':       char.speed,
             })
 
+    effects = [{
+        'effect_id':    e.effect_id,
+        'shape':        e.shape,
+        'label':        e.label,
+        'anchor_x':     e.anchor_x,
+        'anchor_y':     e.anchor_y,
+        'size_ft':      e.size_ft,
+        'angle':        e.angle,
+        'fill_color':   e.fill_color,
+        'fill_opacity': e.fill_opacity,
+        'border_color': e.border_color,
+    } for e in bm.effects]
+
     return jsonify({
         'tokens':    result,
+        'effects':   effects,
         'grid_cols': bm.grid_cols,
         'grid_rows': bm.grid_rows,
     })
@@ -298,3 +313,74 @@ def token_move(map_id):
     t.updated_at = _now()
     db.session.commit()
     return jsonify({'ok': True, 'col': t.col, 'row': t.row})
+
+
+# ── Effect CRUD ───────────────────────────────────────────────────────────────
+
+@battlemap_bp.route('/<int:map_id>/effect/add', methods=['POST'])
+@login_required
+@dm_required
+def effect_add(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    data = request.get_json()
+    shape = data.get('shape', 'circle')
+    if shape not in ('circle', 'cone', 'line', 'square'):
+        return jsonify({'ok': False, 'error': 'invalid shape'}), 400
+    e = tblBattleMapEffects(
+        map_id       = map_id,
+        shape        = shape,
+        label        = data.get('label', '').strip()[:40],
+        anchor_x     = float(data.get('anchor_x', 0)),
+        anchor_y     = float(data.get('anchor_y', 0)),
+        size_ft      = max(5, int(data.get('size_ft', 20))),
+        angle        = float(data.get('angle', 0)),
+        fill_color   = data.get('fill_color', '#ff4400'),
+        fill_opacity = max(0.05, min(1.0, float(data.get('fill_opacity', 0.35)))),
+        border_color = data.get('border_color', '#ff8800'),
+        created_at   = _now(),
+    )
+    db.session.add(e)
+    db.session.commit()
+    return jsonify({'ok': True, 'effect_id': e.effect_id})
+
+
+@battlemap_bp.route('/<int:map_id>/effect/<int:effect_id>/update', methods=['POST'])
+@login_required
+@dm_required
+def effect_update(map_id, effect_id):
+    e = tblBattleMapEffects.query.get_or_404(effect_id)
+    if e.map_id != map_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json()
+    if 'anchor_x'     in data: e.anchor_x     = float(data['anchor_x'])
+    if 'anchor_y'     in data: e.anchor_y     = float(data['anchor_y'])
+    if 'angle'        in data: e.angle        = float(data['angle'])
+    if 'size_ft'      in data: e.size_ft      = max(5, int(data['size_ft']))
+    if 'fill_color'   in data: e.fill_color   = data['fill_color']
+    if 'fill_opacity' in data: e.fill_opacity = max(0.05, min(1.0, float(data['fill_opacity'])))
+    if 'border_color' in data: e.border_color = data['border_color']
+    if 'label'        in data: e.label        = data['label'].strip()[:40]
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/effect/<int:effect_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def effect_delete(map_id, effect_id):
+    e = tblBattleMapEffects.query.get_or_404(effect_id)
+    if e.map_id != map_id:
+        return jsonify({'ok': False}), 403
+    db.session.delete(e)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/effect/clear', methods=['POST'])
+@login_required
+@dm_required
+def effect_clear(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    tblBattleMapEffects.query.filter_by(map_id=map_id).delete()
+    db.session.commit()
+    return jsonify({'ok': True})

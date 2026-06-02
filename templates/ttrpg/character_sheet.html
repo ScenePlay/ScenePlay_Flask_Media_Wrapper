@@ -17,6 +17,28 @@
   .editable:hover { background: rgba(201,168,76,.08); border-radius: 3px; }
   .hp-bar-wrap { height: 22px; background: #333; border-radius: 6px; overflow: hidden; }
   .hp-bar-fill { height: 100%; transition: width .4s, background .4s; border-radius: 6px; }
+  .feat-chip {
+    display: inline-block;
+    font-size: .75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid #8b7536;
+    color: #c9a84c;
+    background: rgba(201,168,76,.1);
+    cursor: default;
+    white-space: nowrap;
+  }
+  .feat-chip:hover { background: rgba(201,168,76,.22); }
+  .feat-tooltip .tooltip-inner {
+    max-width: 300px;
+    text-align: left;
+    white-space: pre-wrap;
+    font-size: .8rem;
+    background: #1e1e30;
+    border: 1px solid var(--ttrpg-accent);
+    color: var(--ttrpg-text);
+  }
+  .feat-tooltip .tooltip-arrow::before { border-bottom-color: var(--ttrpg-accent); }
 </style>
 {% endblock %}
 
@@ -125,6 +147,20 @@
           {% endfor %}
         </div>
         {% endif %}
+
+        {% if char.feats %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% for f in char.feats | sort(attribute='order_by') %}
+          <span class="feat-chip"
+                data-bs-toggle="tooltip"
+                data-bs-placement="bottom"
+                data-bs-custom-class="feat-tooltip"
+                title="{{ f.description | e if f.description else 'No description.' }}">
+            &#10022; {{ f.feat_name }}
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -160,6 +196,9 @@
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-inventory" style="color:var(--ttrpg-accent);">Inventory</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">Currency</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-feats" style="color:var(--ttrpg-accent);">
+          Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:#000;font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
+        </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
           Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:#000;font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
         </button></li>
@@ -309,6 +348,40 @@
           </div>
         </div>
 
+        <!-- Feats -->
+        <div class="tab-pane fade" id="tab-feats">
+          {% if can_edit %}
+          <div class="d-flex gap-2 mb-3 flex-wrap">
+            <input type="text" id="new_feat_name"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   placeholder="Feat name" style="max-width:200px;">
+            <textarea id="new_feat_desc"
+                      class="form-control form-control-sm bg-dark text-light border-secondary"
+                      placeholder="What does this feat do?" rows="2"
+                      style="min-width:260px;resize:vertical;"></textarea>
+            <button class="btn btn-ttrpg btn-sm align-self-start" onclick="addFeat()">Add</button>
+          </div>
+          {% endif %}
+          <div id="feat-list">
+            {% for f in char.feats | sort(attribute='order_by') %}
+            <div class="ttrpg-card p-2 mb-2" id="feat-{{ f.feat_id }}" style="border-color:#444;">
+              <div class="d-flex justify-content-between align-items-start gap-2">
+                <span style="color:var(--ttrpg-accent);font-weight:600;">{{ f.feat_name }}</span>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-danger flex-shrink-0"
+                        onclick="deleteFeat({{ f.feat_id }})">&#10005;</button>
+                {% endif %}
+              </div>
+              {% if f.description %}
+              <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ f.description }}</div>
+              {% endif %}
+            </div>
+            {% else %}
+            <p class="text-muted small">No feats yet.{% if can_edit %} Add Alert, Lucky, War Caster, etc.{% endif %}</p>
+            {% endfor %}
+          </div>
+        </div>
+
         <!-- Conditions -->
         <div class="tab-pane fade" id="tab-conditions">
           <!-- Active conditions -->
@@ -380,6 +453,10 @@
 <script>
 const CHAR_ID = {{ char.character_id }};
 const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
+
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+  new bootstrap.Tooltip(el);
+});
 
 // ── HP controls ──────────────────────────────────────────────
 function hpAmount() {
@@ -501,6 +578,24 @@ function deleteNote(id) {
   if (!confirm('Delete note?')) return;
   fetch(`/ttrpg/note/${id}`, {method:'DELETE'}).then(() => {
     document.getElementById('note-'+id).remove();
+  });
+}
+
+// ── Feats ─────────────────────────────────────────────────────
+function addFeat() {
+  const name = document.getElementById('new_feat_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/feats`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({feat_name: name,
+                          description: document.getElementById('new_feat_desc').value.trim()})
+  }).then(() => location.reload());
+}
+
+function deleteFeat(id) {
+  if (!confirm('Remove this feat?')) return;
+  fetch(`/ttrpg/feat/${id}`, {method: 'DELETE'}).then(() => {
+    document.getElementById('feat-' + id).remove();
   });
 }
 

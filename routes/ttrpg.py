@@ -9,6 +9,7 @@ from extensions import db
 from models.ttrpg import (tblCharacters, tblCharacterResources,
                            tblCharacterConditions, tblCharacterInventory,
                            tblCharacterSkills, tblCharacterNotes,
+                           tblCharacterFeats,
                            tblSessions, tblSessionParty)
 from models.campaigns import tblcampaigns
 from models.scenes import tblscenes
@@ -506,6 +507,47 @@ def note_delete(note_id):
     if not current_user.is_dm() and char.user_id != current_user.user_id:
         return jsonify({'ok': False}), 403
     db.session.delete(note)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ── Feats CRUD (AJAX) ──────────────────────────────────────────────────────────
+
+@ttrpg.route('/character/<int:character_id>/feats', methods=['POST'])
+@login_required
+def feat_add(character_id):
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json()
+    feat_name = data.get('feat_name', '').strip()
+    if not feat_name:
+        return jsonify({'ok': False, 'error': 'Feat name is required'}), 400
+    feat = tblCharacterFeats(
+        character_id = character_id,
+        feat_name    = feat_name,
+        description  = data.get('description', '').strip(),
+        order_by     = len(char.feats),
+    )
+    db.session.add(feat)
+    db.session.commit()
+    return jsonify({'ok': True, 'feat_id': feat.feat_id})
+
+
+@ttrpg.route('/feat/<int:feat_id>', methods=['POST', 'DELETE'])
+@login_required
+def feat_update(feat_id):
+    feat = tblCharacterFeats.query.get_or_404(feat_id)
+    char = feat.character
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        db.session.delete(feat)
+        db.session.commit()
+        return jsonify({'ok': True})
+    data = request.get_json()
+    feat.feat_name   = data.get('feat_name', feat.feat_name).strip() or feat.feat_name
+    feat.description = data.get('description', feat.description)
     db.session.commit()
     return jsonify({'ok': True})
 
