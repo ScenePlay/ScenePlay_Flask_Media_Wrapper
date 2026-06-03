@@ -39,6 +39,24 @@ def _delete_bg_file(filename):
 
 # ── Active map redirect (players) ────────────────────────────────────────────
 
+@battlemap_bp.route('/maps')
+@login_required
+@dm_required
+def all_maps():
+    sessions = (tblSessions.query
+                .join(tblBattleMaps, tblBattleMaps.session_id == tblSessions.session_id)
+                .order_by(tblSessions.created_at.desc())
+                .distinct()
+                .all())
+    # Attach maps list to each session for easy template access
+    for s in sessions:
+        s._maps = (tblBattleMaps.query
+                   .filter_by(session_id=s.session_id)
+                   .order_by(tblBattleMaps.map_id)
+                   .all())
+    return render_template('ttrpg/maps_overview.html', sessions=sessions)
+
+
 @battlemap_bp.route('/active')
 @login_required
 def active_map():
@@ -108,6 +126,34 @@ def map_delete(map_id):
     db.session.commit()
     flash('Map deleted.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=session_id))
+
+
+@battlemap_bp.route('/<int:map_id>/edit', methods=['POST'])
+@login_required
+@dm_required
+def map_edit(map_id):
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    name = request.form.get('name', '').strip()
+    if name:
+        bm.name = name
+    cols = max(5, min(60, int(request.form.get('cols', bm.grid_cols) or bm.grid_cols)))
+    rows = max(5, min(60, int(request.form.get('rows', bm.grid_rows) or bm.grid_rows)))
+    bm.grid_cols = cols
+    bm.grid_rows = rows
+    # Clamp any tokens that would be outside the new grid
+    for t in bm.tokens:
+        changed = False
+        if t.col >= cols:
+            t.col = cols - 1
+            changed = True
+        if t.row >= rows:
+            t.row = rows - 1
+            changed = True
+        if changed:
+            t.updated_at = _now()
+    db.session.commit()
+    flash(f'Map "{bm.name}" updated.')
+    return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
 
 @battlemap_bp.route('/<int:map_id>/bg', methods=['POST'])

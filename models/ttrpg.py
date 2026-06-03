@@ -41,6 +41,8 @@ class tblCharacters(db.Model):
     skills      = db.relationship('tblCharacterSkills',      backref='character', cascade='all, delete-orphan', lazy=True)
     notes       = db.relationship('tblCharacterNotes',       backref='character', cascade='all, delete-orphan', lazy=True)
     feats       = db.relationship('tblCharacterFeats',       backref='character', cascade='all, delete-orphan', lazy=True)
+    armor       = db.relationship('tblCharacterArmor',       backref='character', cascade='all, delete-orphan', lazy=True)
+    weapons     = db.relationship('tblCharacterWeapons',     backref='character', cascade='all, delete-orphan', lazy=True)
     user        = db.relationship('tblUsers', backref='characters', lazy=True)
 
     def modifier(self, score):
@@ -195,6 +197,111 @@ class tblSessionMonsters(db.Model):
         if self.hp_max == 0:
             return 0
         return max(0, min(100, int(self.hp_current / self.hp_max * 100)))
+
+
+class tblDnDAPIConfig(db.Model):
+    __tablename__ = 'tblDnDAPIConfig'
+    config_id  = db.Column(db.Integer, primary_key=True)
+    key        = db.Column(db.Text, unique=True, nullable=False)
+    value      = db.Column(db.Text, default='')
+    updated_at = db.Column(db.Text, nullable=False)
+
+
+class tblFeatsLibrary(db.Model):
+    __tablename__ = 'tblFeatsLibrary'
+
+    feat_lib_id   = db.Column(db.Integer, primary_key=True)
+    api_index     = db.Column(db.Text, unique=True, nullable=True)
+    name          = db.Column(db.Text, nullable=False)
+    prerequisites = db.Column(db.Text, default='')
+    description   = db.Column(db.Text, default='')
+    source        = db.Column(db.Text, default='srd')
+    created_at    = db.Column(db.Text, nullable=False)
+
+
+class tblWeaponsLibrary(db.Model):
+    __tablename__ = 'tblWeaponsLibrary'
+
+    weapon_lib_id          = db.Column(db.Integer, primary_key=True)
+    api_index              = db.Column(db.Text, unique=True, nullable=True)
+    name                   = db.Column(db.Text, nullable=False)
+    weapon_category        = db.Column(db.Text, default='')
+    weapon_range           = db.Column(db.Text, default='')
+    damage_dice            = db.Column(db.Text, default='')
+    damage_type            = db.Column(db.Text, default='')
+    two_handed_damage_dice = db.Column(db.Text, default='')
+    two_handed_damage_type = db.Column(db.Text, default='')
+    range_normal           = db.Column(db.Integer, default=0)
+    range_long             = db.Column(db.Integer, default=0)
+    weight                 = db.Column(db.Float, default=0)
+    cost                   = db.Column(db.Text, default='')
+    properties             = db.Column(db.Text, default='')
+    mastery                = db.Column(db.Text, default='')
+    notes                  = db.Column(db.Text, default='')
+    image_url              = db.Column(db.Text, default='')
+    source                 = db.Column(db.Text, default='srd')
+    created_at             = db.Column(db.Text, nullable=False)
+
+
+class tblCharacterWeapons(db.Model):
+    __tablename__ = 'tblCharacterWeapons'
+
+    char_weapon_id         = db.Column(db.Integer, primary_key=True)
+    character_id           = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
+    weapon_lib_id          = db.Column(db.Integer, db.ForeignKey('tblWeaponsLibrary.weapon_lib_id'), nullable=True)
+    weapon_name            = db.Column(db.Text, nullable=False)
+    weapon_category        = db.Column(db.Text, default='')   # Simple / Martial / Magic
+    weapon_range           = db.Column(db.Text, default='')   # Melee / Ranged
+    damage_dice            = db.Column(db.Text, default='')
+    damage_type            = db.Column(db.Text, default='')
+    two_handed_damage_dice = db.Column(db.Text, default='')
+    two_handed_damage_type = db.Column(db.Text, default='')
+    range_normal           = db.Column(db.Integer, default=0)
+    range_long             = db.Column(db.Integer, default=0)
+    attack_bonus           = db.Column(db.Integer, default=0)  # magical +X to attack
+    damage_bonus           = db.Column(db.Integer, default=0)  # magical +X to damage
+    properties             = db.Column(db.Text, default='')
+    equipped               = db.Column(db.Integer, default=0)  # 1 = carried / ready
+    notes                  = db.Column(db.Text, default='')
+    order_by               = db.Column(db.Integer, default=0)
+
+
+class tblCharacterArmor(db.Model):
+    __tablename__ = 'tblCharacterArmor'
+
+    char_armor_id    = db.Column(db.Integer, primary_key=True)
+    character_id     = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
+    armor_lib_id     = db.Column(db.Integer, db.ForeignKey('tblArmorLibrary.armor_lib_id'), nullable=True)
+    armor_name       = db.Column(db.Text, nullable=False)
+    armor_category   = db.Column(db.Text, default='')   # Light / Medium / Heavy / Shield
+    armor_class_base = db.Column(db.Integer, default=0)
+    dex_bonus        = db.Column(db.Integer, default=0) # 1 = adds DEX mod
+    max_dex_bonus    = db.Column(db.Integer, nullable=True)  # NULL=unlimited, 0=none
+    ac_bonus         = db.Column(db.Integer, default=0) # magical +X enchantment
+    equipped         = db.Column(db.Integer, default=0) # 1 = worn
+    notes            = db.Column(db.Text, default='')
+    order_by         = db.Column(db.Integer, default=0)
+
+
+class tblArmorLibrary(db.Model):
+    __tablename__ = 'tblArmorLibrary'
+
+    armor_lib_id        = db.Column(db.Integer, primary_key=True)
+    api_index           = db.Column(db.Text, unique=True, nullable=True)
+    name                = db.Column(db.Text, nullable=False)
+    armor_category      = db.Column(db.Text, default='')   # Light / Medium / Heavy / Shield
+    armor_class_base    = db.Column(db.Integer, default=0) # AC value (e.g. 11) or bonus (+2 for shield)
+    dex_bonus           = db.Column(db.Integer, default=0) # 1 = adds DEX mod
+    max_dex_bonus       = db.Column(db.Integer, nullable=True)  # NULL=unlimited, 0=none, 2=medium cap
+    str_minimum         = db.Column(db.Integer, default=0)
+    stealth_disadvantage = db.Column(db.Integer, default=0)     # 1 = disadvantage on stealth
+    weight              = db.Column(db.Float, default=0)
+    cost                = db.Column(db.Text, default='')
+    properties          = db.Column(db.Text, default='')
+    notes               = db.Column(db.Text, default='')
+    image_url           = db.Column(db.Text, default='')
+    source              = db.Column(db.Text, default='srd')     # srd / homebrew
+    created_at          = db.Column(db.Text, nullable=False)
 
 
 class tblBattleMaps(db.Model):

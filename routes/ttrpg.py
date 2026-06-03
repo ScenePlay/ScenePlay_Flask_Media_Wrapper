@@ -9,7 +9,8 @@ from extensions import db
 from models.ttrpg import (tblCharacters, tblCharacterResources,
                            tblCharacterConditions, tblCharacterInventory,
                            tblCharacterSkills, tblCharacterNotes,
-                           tblCharacterFeats,
+                           tblCharacterFeats, tblCharacterArmor,
+                           tblCharacterWeapons,
                            tblSessions, tblSessionParty)
 from models.campaigns import tblcampaigns
 from models.scenes import tblscenes
@@ -499,14 +500,19 @@ def note_add(character_id):
     return jsonify({'ok': True, 'note_id': note.note_id, 'created_at': note.created_at})
 
 
-@ttrpg.route('/note/<int:note_id>', methods=['DELETE'])
+@ttrpg.route('/note/<int:note_id>', methods=['POST', 'DELETE'])
 @login_required
-def note_delete(note_id):
+def note_update(note_id):
     note = tblCharacterNotes.query.get_or_404(note_id)
     char = note.character
     if not current_user.is_dm() and char.user_id != current_user.user_id:
         return jsonify({'ok': False}), 403
-    db.session.delete(note)
+    if request.method == 'DELETE':
+        db.session.delete(note)
+        db.session.commit()
+        return jsonify({'ok': True})
+    data = request.get_json()
+    note.note_text = data.get('note_text', note.note_text).strip()
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -548,6 +554,108 @@ def feat_update(feat_id):
     data = request.get_json()
     feat.feat_name   = data.get('feat_name', feat.feat_name).strip() or feat.feat_name
     feat.description = data.get('description', feat.description)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ── Character Armor CRUD (AJAX) ────────────────────────────────────────────────
+
+@ttrpg.route('/character/<int:character_id>/armor', methods=['POST'])
+@login_required
+def armor_add_to_char(character_id):
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json()
+    entry = tblCharacterArmor(
+        character_id    = character_id,
+        armor_lib_id    = data.get('armor_lib_id') or None,
+        armor_name      = data.get('armor_name', '').strip(),
+        armor_category  = data.get('armor_category', ''),
+        armor_class_base = int(data.get('armor_class_base', 0) or 0),
+        dex_bonus       = int(data.get('dex_bonus', 0) or 0),
+        max_dex_bonus   = data.get('max_dex_bonus'),   # may be None
+        ac_bonus        = int(data.get('ac_bonus', 0) or 0),
+        equipped        = int(data.get('equipped', 0) or 0),
+        notes           = data.get('notes', '').strip(),
+        order_by        = len(char.armor),
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return jsonify({'ok': True, 'char_armor_id': entry.char_armor_id})
+
+
+@ttrpg.route('/char-armor/<int:char_armor_id>', methods=['POST', 'DELETE'])
+@login_required
+def armor_update(char_armor_id):
+    entry = tblCharacterArmor.query.get_or_404(char_armor_id)
+    char  = entry.character
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        db.session.delete(entry)
+        db.session.commit()
+        return jsonify({'ok': True})
+    data = request.get_json()
+    if 'equipped' in data:
+        entry.equipped = int(data['equipped'])
+    if 'ac_bonus' in data:
+        entry.ac_bonus = int(data.get('ac_bonus') or 0)
+    if 'notes' in data:
+        entry.notes = data['notes'].strip()
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ── Character Weapons CRUD (AJAX) ──────────────────────────────────────────────
+
+@ttrpg.route('/character/<int:character_id>/weapons', methods=['POST'])
+@login_required
+def weapon_add_to_char(character_id):
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json()
+    entry = tblCharacterWeapons(
+        character_id           = character_id,
+        weapon_lib_id          = data.get('weapon_lib_id') or None,
+        weapon_name            = data.get('weapon_name', '').strip(),
+        weapon_category        = data.get('weapon_category', ''),
+        weapon_range           = data.get('weapon_range', ''),
+        damage_dice            = data.get('damage_dice', ''),
+        damage_type            = data.get('damage_type', ''),
+        two_handed_damage_dice = data.get('two_handed_damage_dice', ''),
+        two_handed_damage_type = data.get('two_handed_damage_type', ''),
+        range_normal           = int(data.get('range_normal', 0) or 0),
+        range_long             = int(data.get('range_long', 0) or 0),
+        attack_bonus           = int(data.get('attack_bonus', 0) or 0),
+        damage_bonus           = int(data.get('damage_bonus', 0) or 0),
+        properties             = data.get('properties', ''),
+        equipped               = int(data.get('equipped', 0) or 0),
+        notes                  = data.get('notes', '').strip(),
+        order_by               = len(char.weapons),
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return jsonify({'ok': True, 'char_weapon_id': entry.char_weapon_id})
+
+
+@ttrpg.route('/char-weapon/<int:char_weapon_id>', methods=['POST', 'DELETE'])
+@login_required
+def weapon_char_update(char_weapon_id):
+    entry = tblCharacterWeapons.query.get_or_404(char_weapon_id)
+    char  = entry.character
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        db.session.delete(entry)
+        db.session.commit()
+        return jsonify({'ok': True})
+    data = request.get_json()
+    if 'equipped'      in data: entry.equipped      = int(data['equipped'])
+    if 'attack_bonus'  in data: entry.attack_bonus  = int(data.get('attack_bonus')  or 0)
+    if 'damage_bonus'  in data: entry.damage_bonus  = int(data.get('damage_bonus')  or 0)
+    if 'notes'         in data: entry.notes         = data['notes'].strip()
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -612,7 +720,8 @@ def session_new():
     return render_template('ttrpg/session_new.html',
                            campaigns=campaigns,
                            characters=characters,
-                           error=error)
+                           error=error,
+                           today=datetime.now().strftime('%Y-%m-%d'))
 
 
 @ttrpg.route('/sessions/<int:session_id>')

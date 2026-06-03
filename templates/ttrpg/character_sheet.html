@@ -3,7 +3,7 @@
 {% block head %}
 <style>
   .attr-box {
-    background: var(--ttrpg-primary);
+    background: color-mix(in srgb, var(--sp-accent) 25%, transparent);
     border: 1px solid var(--ttrpg-accent);
     border-radius: 8px;
     text-align: center;
@@ -11,30 +11,30 @@
     min-width: 60px;
   }
   .attr-box .score { font-size: 1.5rem; font-weight: bold; color: var(--ttrpg-accent); }
-  .attr-box .mod   { font-size: 0.8rem; color: #aaa; }
-  .attr-box .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; color: #ccc; }
+  .attr-box .mod   { font-size: 0.8rem; color: var(--sp-muted); }
+  .attr-box .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sp-muted); }
   .editable { cursor: pointer; border-bottom: 1px dashed var(--ttrpg-accent); }
-  .editable:hover { background: rgba(201,168,76,.08); border-radius: 3px; }
-  .hp-bar-wrap { height: 22px; background: #333; border-radius: 6px; overflow: hidden; }
+  .editable:hover { background: color-mix(in srgb, var(--sp-accent) 10%, transparent); border-radius: 3px; }
+  .hp-bar-wrap { height: 22px; background: var(--sp-border); border-radius: 6px; overflow: hidden; }
   .hp-bar-fill { height: 100%; transition: width .4s, background .4s; border-radius: 6px; }
   .feat-chip {
     display: inline-block;
     font-size: .75rem;
     padding: 2px 8px;
     border-radius: 12px;
-    border: 1px solid #8b7536;
-    color: #c9a84c;
-    background: rgba(201,168,76,.1);
+    border: 1px solid var(--sp-border);
+    color: var(--ttrpg-accent);
+    background: color-mix(in srgb, var(--sp-accent) 10%, transparent);
     cursor: default;
     white-space: nowrap;
   }
-  .feat-chip:hover { background: rgba(201,168,76,.22); }
+  .feat-chip:hover { background: color-mix(in srgb, var(--sp-accent) 22%, transparent); }
   .feat-tooltip .tooltip-inner {
     max-width: 300px;
     text-align: left;
     white-space: pre-wrap;
     font-size: .8rem;
-    background: #1e1e30;
+    background: var(--sp-surface);
     border: 1px solid var(--ttrpg-accent);
     color: var(--ttrpg-text);
   }
@@ -113,7 +113,7 @@
           <div class="d-flex gap-1 align-items-center">
             <button class="btn btn-sm btn-outline-danger px-2" onclick="applyHpDelta(-hpAmount())"
                     title="Apply damage">&#9660; Dmg</button>
-            <input type="number" id="hp_amount" class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+            <input type="number" id="hp_amount" class="form-control form-control-sm text-center"
                    value="1" min="1" style="max-width:60px;">
             <button class="btn btn-sm btn-outline-success px-2" onclick="applyHpDelta(+hpAmount())"
                     title="Apply healing">&#9650; Heal</button>
@@ -129,11 +129,51 @@
           <span>Pass. Perc. <strong>{{ char.passive_perception }}</strong></span>
         </div>
 
+        {% set equipped_weapons = char.weapons | selectattr('equipped', 'equalto', 1) | list %}
+        {% set equipped_armor   = char.armor   | selectattr('equipped', 'equalto', 1) | list %}
+        {% if equipped_weapons or equipped_armor %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% for w in equipped_weapons %}
+          <span style="font-size:.75rem;padding:2px 8px;border-radius:10px;
+                       background:color-mix(in srgb, var(--sp-accent) 10%, transparent);
+                       border:1px solid var(--sp-border);color:var(--ttrpg-accent);"
+                title="{{ w.weapon_category }}{% if w.weapon_range %} {{ w.weapon_range }}{% endif %}{% if w.properties %} &bull; {{ w.properties }}{% endif %}{% if w.notes %} &bull; {{ w.notes }}{% endif %}"
+                data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-custom-class="feat-tooltip">
+            &#9876;
+            {{ w.weapon_name }}
+            {% if w.damage_dice %}
+            <span style="color:var(--sp-muted);font-size:.7rem;">
+              {{ w.damage_dice }}{% if w.damage_bonus %} +{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}
+            </span>
+            {% endif %}
+            {% if w.attack_bonus %}<span style="font-size:.7rem;"> +{{ w.attack_bonus }} hit</span>{% endif %}
+          </span>
+          {% endfor %}
+          {% for a in equipped_armor %}
+          <span style="font-size:.75rem;padding:2px 8px;border-radius:10px;
+                       background:color-mix(in srgb, var(--sp-primary) 40%, transparent);
+                       border:1px solid var(--sp-border);color:var(--sp-text);"
+                title="{{ a.armor_category }}{% if a.dex_bonus %} + DEX{% if a.max_dex_bonus is not none %} (max {{ a.max_dex_bonus }}){% endif %}{% endif %}{% if a.str_minimum %} &bull; STR {{ a.str_minimum }} req{% endif %}{% if a.stealth_disadvantage %} &bull; Stealth disadv.{% endif %}{% if a.notes %} &bull; {{ a.notes }}{% endif %}"
+                data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-custom-class="feat-tooltip">
+            {% if a.armor_category == 'Shield' %}&#9694;{% else %}&#9651;{% endif %}
+            {{ a.armor_name }}
+            <span style="color:var(--sp-muted);font-size:.7rem;">
+              {% if a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
+              {% else %}{{ a.armor_class_base + a.ac_bonus }} AC{% endif %}
+            </span>
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
         {% if char.conditions %}
         <div class="d-flex flex-wrap gap-1 mt-2">
           {% for c in char.conditions %}
-          <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);
-                border:1px solid var(--ttrpg-accent);font-size:.8rem;padding:3px 8px;">
+          <span class="badge cond-tip" data-bs-toggle="tooltip" data-bs-placement="bottom"
+                data-bs-custom-class="feat-tooltip"
+                title="{{ conditions.get(c.condition_name, '') }}"
+                style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       border:1px solid var(--ttrpg-accent);font-size:.8rem;padding:3px 8px;cursor:help;">
             &#9763; {{ c.condition_name }}
           </span>
           {% endfor %}
@@ -141,7 +181,7 @@
         {% endif %}
 
         {% if char.skills %}
-        <div class="d-flex flex-wrap gap-2 mt-2" style="font-size:.75rem;color:#aaa;">
+        <div class="d-flex flex-wrap gap-2 mt-2" style="font-size:.75rem;color:var(--sp-muted);">
           {% for s in char.skills | sort(attribute='order_by') %}
           <span>{% if s.proficient %}<span style="color:var(--ttrpg-accent);">&#9733;</span>{% endif %}{{ s.skill_name }} <strong style="color:var(--ttrpg-text);">{{ '%+d' % s.bonus }}</strong></span>
           {% endfor %}
@@ -179,8 +219,10 @@
             ('CHA','cha_val',char.cha_val)] %}
         <div class="attr-box">
           <div class="label">{{ label }}</div>
-          <div class="score editable" data-field="{{ field }}">{{ score }}</div>
-          <div class="mod">{{ '%+d' % mod(score) }}</div>
+          <div class="score{% if can_edit %} editable{% endif %}" data-field="{{ field }}"
+               {% if can_edit %}onclick="startAttrEdit(this, false)"{% endif %}>{{ score }}</div>
+          <div class="mod{% if can_edit %} editable{% endif %}" data-field="{{ field }}"
+               {% if can_edit %}onclick="startAttrEdit(this, true)"{% endif %}>{{ '%+d' % mod(score) }}</div>
         </div>
         {% endfor %}
       </div>
@@ -194,13 +236,19 @@
         <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-resources" style="color:var(--ttrpg-accent);">Resources</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-skills" style="color:var(--ttrpg-accent);">Skills</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-inventory" style="color:var(--ttrpg-accent);">Inventory</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-weapons" style="color:var(--ttrpg-accent);">
+          Weapons{% set equipped_weapons = char.weapons | selectattr('equipped', 'equalto', 1) | list %}{% if equipped_weapons %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ equipped_weapons|length }}</span>{% endif %}
+        </button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-armor" style="color:var(--ttrpg-accent);">
+          Armor{% set equipped_armor = char.armor | selectattr('equipped', 'equalto', 1) | list %}{% if equipped_armor %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ equipped_armor|length }}</span>{% endif %}
+        </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">Currency</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-feats" style="color:var(--ttrpg-accent);">
-          Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:#000;font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
+          Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
-          Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:#000;font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
+          Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
         </button></li>
       </ul>
 
@@ -210,35 +258,54 @@
         <div class="tab-pane fade show active" id="tab-resources">
           {% if can_edit %}
           <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_res_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Resource name" style="max-width:180px;">
-            <input type="number" id="new_res_cur" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Current" style="max-width:90px;" value="0">
-            <input type="number" id="new_res_max" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Max" style="max-width:90px;" value="0">
+            <input type="text" id="new_res_name" class="form-control form-control-sm" placeholder="Resource name" style="max-width:180px;">
+            <input type="number" id="new_res_cur" class="form-control form-control-sm" placeholder="Current" style="max-width:90px;" value="0">
+            <input type="number" id="new_res_max" class="form-control form-control-sm" placeholder="Max" style="max-width:90px;" value="0">
             <button class="btn btn-ttrpg btn-sm" onclick="addResource()">Add</button>
           </div>
           {% endif %}
           <div id="resource-list">
             {% for r in char.resources | sort(attribute='order_by') %}
-            <div class="d-flex align-items-center gap-2 mb-2 flex-wrap" id="res-{{ r.resource_id }}">
-              <span style="min-width:130px; color:var(--ttrpg-accent);">{{ r.resource_name }}</span>
-              {% if can_edit %}
-              <button class="btn btn-sm btn-outline-danger px-2"
-                      onclick="deltaResource({{ r.resource_id }}, -1)">&#8722;</button>
-              {% endif %}
-              <span id="res-cur-{{ r.resource_id }}" class="fw-bold" style="min-width:20px; text-align:center;">{{ r.current_val }}</span>
-              {% if can_edit %}
-              <button class="btn btn-sm btn-outline-success px-2"
-                      onclick="deltaResource({{ r.resource_id }}, +1)">&#43;</button>
-              {% endif %}
-              <span class="text-muted">/ {{ r.max_val }}</span>
-              <!-- pip display -->
-              <div id="res-pips-{{ r.resource_id }}" class="d-flex gap-1 flex-wrap">
-                {% for i in range(r.max_val) %}
-                <div class="res-pip" style="width:14px;height:14px;border-radius:50%;border:1px solid var(--ttrpg-accent);
-                     background:{% if i < r.current_val %}var(--ttrpg-accent){% else %}transparent{% endif %};"></div>
-                {% endfor %}
+            <div id="res-{{ r.resource_id }}">
+              <div id="res-view-{{ r.resource_id }}" class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                <span style="min-width:130px; color:var(--ttrpg-accent);">{{ r.resource_name }}</span>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-danger px-2"
+                        onclick="deltaResource({{ r.resource_id }}, -1)">&#8722;</button>
+                {% endif %}
+                <span id="res-cur-{{ r.resource_id }}" class="fw-bold" style="min-width:20px; text-align:center;">{{ r.current_val }}</span>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-success px-2"
+                        onclick="deltaResource({{ r.resource_id }}, +1)">&#43;</button>
+                {% endif %}
+                <span class="text-muted">/ {{ r.max_val }}</span>
+                <div id="res-pips-{{ r.resource_id }}" class="d-flex gap-1 flex-wrap">
+                  {% for i in range(r.max_val) %}
+                  <div class="res-pip" style="width:14px;height:14px;border-radius:50%;border:1px solid var(--ttrpg-accent);
+                       background:{% if i < r.current_val %}var(--ttrpg-accent){% else %}transparent{% endif %};"></div>
+                  {% endfor %}
+                </div>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-secondary px-2 ms-auto" title="Edit"
+                        onclick="editToggle('res', {{ r.resource_id }})">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteResource({{ r.resource_id }})">&#10005;</button>
+                {% endif %}
               </div>
               {% if can_edit %}
-              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteResource({{ r.resource_id }})">&#10005;</button>
+              <div id="res-edit-{{ r.resource_id }}" class="mb-2 p-2"
+                   style="display:none;background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;">
+                <div class="d-flex gap-2 flex-wrap align-items-end">
+                  <input type="text" value="{{ r.resource_name }}" id="res-name-{{ r.resource_id }}"
+                         class="form-control form-control-sm" style="max-width:150px;" placeholder="Name">
+                  <input type="number" value="{{ r.current_val }}" id="res-cur-edit-{{ r.resource_id }}"
+                         class="form-control form-control-sm" style="max-width:75px;" placeholder="Current">
+                  <input type="number" value="{{ r.max_val }}" id="res-max-edit-{{ r.resource_id }}"
+                         class="form-control form-control-sm" style="max-width:75px;" placeholder="Max">
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveResource({{ r.resource_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="editToggle('res', {{ r.resource_id }})">Cancel</button>
+                </div>
+              </div>
               {% endif %}
             </div>
             {% else %}
@@ -251,8 +318,8 @@
         <div class="tab-pane fade" id="tab-skills">
           {% if can_edit %}
           <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_skill_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Skill name" style="max-width:180px;">
-            <input type="number" id="new_skill_bonus" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Bonus" style="max-width:80px;" value="0">
+            <input type="text" id="new_skill_name" class="form-control form-control-sm" placeholder="Skill name" style="max-width:180px;">
+            <input type="number" id="new_skill_bonus" class="form-control form-control-sm" placeholder="Bonus" style="max-width:80px;" value="0">
             <div class="form-check align-self-center ms-1">
               <input class="form-check-input" type="checkbox" id="new_skill_prof">
               <label class="form-check-label small" for="new_skill_prof">Prof.</label>
@@ -262,14 +329,37 @@
           {% endif %}
           <div id="skill-list">
             {% for s in char.skills | sort(attribute='order_by') %}
-            <div class="d-flex align-items-center gap-2 mb-2" id="skill-{{ s.skill_id }}">
-              <span style="min-width:160px; color:var(--ttrpg-accent);">
-                {% if s.proficient %}&#9733;{% else %}&#9734;{% endif %}
-                {{ s.skill_name }}
-              </span>
-              <span class="text-muted small">{{ '%+d' % s.bonus }}</span>
+            <div id="skill-{{ s.skill_id }}">
+              <div id="skill-view-{{ s.skill_id }}" class="d-flex align-items-center gap-2 mb-1">
+                <span style="min-width:160px; color:var(--ttrpg-accent);">
+                  {% if s.proficient %}&#9733;{% else %}&#9734;{% endif %}
+                  {{ s.skill_name }}
+                </span>
+                <span class="text-muted small">{{ '%+d' % s.bonus }}</span>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-secondary px-2 ms-auto" title="Edit"
+                        onclick="editToggle('skill', {{ s.skill_id }})">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteSkill({{ s.skill_id }})">&#10005;</button>
+                {% endif %}
+              </div>
               {% if can_edit %}
-              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteSkill({{ s.skill_id }})">&#10005;</button>
+              <div id="skill-edit-{{ s.skill_id }}" class="mb-2 p-2"
+                   style="display:none;background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;">
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                  <input type="text" value="{{ s.skill_name }}" id="skill-name-{{ s.skill_id }}"
+                         class="form-control form-control-sm" style="max-width:160px;" placeholder="Skill name">
+                  <input type="number" value="{{ s.bonus }}" id="skill-bonus-{{ s.skill_id }}"
+                         class="form-control form-control-sm" style="max-width:75px;" placeholder="Bonus">
+                  <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="skill-prof-{{ s.skill_id }}"
+                           {% if s.proficient %}checked{% endif %}>
+                    <label class="form-check-label small" for="skill-prof-{{ s.skill_id }}">Prof.</label>
+                  </div>
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveSkill({{ s.skill_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="editToggle('skill', {{ s.skill_id }})">Cancel</button>
+                </div>
+              </div>
               {% endif %}
             </div>
             {% else %}
@@ -282,27 +372,379 @@
         <div class="tab-pane fade" id="tab-inventory">
           {% if can_edit %}
           <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_item_name" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Item name" style="max-width:180px;">
-            <input type="number" id="new_item_qty" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Qty" style="max-width:70px;" value="1">
-            <input type="text" id="new_item_notes" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Notes" style="max-width:180px;">
+            <input type="text" id="new_item_name" class="form-control form-control-sm" placeholder="Item name" style="max-width:180px;">
+            <input type="number" id="new_item_qty" class="form-control form-control-sm" placeholder="Qty" style="max-width:70px;" value="1">
+            <input type="text" id="new_item_notes" class="form-control form-control-sm" placeholder="Notes" style="max-width:180px;">
             <button class="btn btn-ttrpg btn-sm" onclick="addItem()">Add</button>
           </div>
           {% endif %}
           <div id="inventory-list">
             {% for item in char.inventory | sort(attribute='order_by') %}
-            <div class="d-flex align-items-center gap-2 mb-2" id="item-{{ item.item_id }}">
-              <span class="{% if item.equipped %}fw-bold{% endif %}" style="min-width:160px; color:var(--ttrpg-accent);">
-                {% if item.equipped %}[E]{% endif %} {{ item.item_name }}
-              </span>
-              <span class="text-muted small">x{{ item.quantity }}</span>
-              {% if item.notes %}<span class="text-muted small fst-italic">{{ item.notes }}</span>{% endif %}
+            <div id="item-{{ item.item_id }}">
+              <div id="item-view-{{ item.item_id }}" class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                <span class="{% if item.equipped %}fw-bold{% endif %}" style="min-width:160px; color:var(--ttrpg-accent);">
+                  {% if item.equipped %}[E]{% endif %} {{ item.item_name }}
+                </span>
+                <span class="text-muted small">x{{ item.quantity }}</span>
+                {% if item.notes %}<span class="text-muted small fst-italic">{{ item.notes }}</span>{% endif %}
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-secondary px-2 ms-auto" title="Edit"
+                        onclick="editToggle('item', {{ item.item_id }})">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteItem({{ item.item_id }})">&#10005;</button>
+                {% endif %}
+              </div>
               {% if can_edit %}
-              <button class="btn btn-sm btn-outline-danger ms-auto" onclick="deleteItem({{ item.item_id }})">&#10005;</button>
+              <div id="item-edit-{{ item.item_id }}" class="mb-2 p-2"
+                   style="display:none;background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;">
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                  <input type="text" value="{{ item.item_name }}" id="item-name-{{ item.item_id }}"
+                         class="form-control form-control-sm" style="max-width:160px;" placeholder="Item name">
+                  <input type="number" value="{{ item.quantity }}" id="item-qty-{{ item.item_id }}"
+                         class="form-control form-control-sm" style="max-width:65px;" placeholder="Qty">
+                  <input type="text" value="{{ item.notes or '' }}" id="item-notes-{{ item.item_id }}"
+                         class="form-control form-control-sm" style="max-width:160px;" placeholder="Notes">
+                  <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="item-equip-{{ item.item_id }}"
+                           {% if item.equipped %}checked{% endif %}>
+                    <label class="form-check-label small" for="item-equip-{{ item.item_id }}">Equipped</label>
+                  </div>
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveItem({{ item.item_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="editToggle('item', {{ item.item_id }})">Cancel</button>
+                </div>
+              </div>
               {% endif %}
             </div>
             {% else %}
             <p class="text-muted small">No items yet.</p>
             {% endfor %}
+          </div>
+        </div>
+
+        <!-- Weapons -->
+        <div class="tab-pane fade" id="tab-weapons">
+          {% set all_weapons  = char.weapons | sort(attribute='order_by') %}
+          {% set ready        = all_weapons | selectattr('equipped', 'equalto', 1) | list %}
+          {% set stowed_weaps = all_weapons | selectattr('equipped', 'equalto', 0) | list %}
+
+          <!-- Ready-weapon summary -->
+          {% if ready %}
+          <div class="p-2 mb-3 rounded"
+               style="background:color-mix(in srgb, var(--sp-accent) 6%, transparent);
+                      border:1px solid var(--sp-border);">
+            <div class="small text-muted mb-1" style="font-weight:600;letter-spacing:.05em;text-transform:uppercase;">
+              Ready
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              {% for w in ready %}
+              <span class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded"
+                    style="background:var(--sp-surface);border:1px solid var(--ttrpg-accent);font-size:.82rem;">
+                <span style="color:var(--ttrpg-accent);font-weight:600;">{{ w.weapon_name }}</span>
+                {% if w.damage_dice %}
+                <span class="text-muted small">
+                  {{ w.damage_dice }}{% if w.damage_bonus %} +{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}
+                </span>
+                {% endif %}
+                {% if w.attack_bonus %}<span style="color:var(--ttrpg-accent);font-size:.75rem;">+{{ w.attack_bonus }} atk</span>{% endif %}
+              </span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Add weapon row -->
+          {% if can_edit %}
+          <div class="mb-3">
+            <div class="d-flex gap-2 flex-wrap align-items-end mb-1">
+              <div style="position:relative;max-width:260px;flex:1 1 180px;">
+                <input type="text" id="new_weap_name"
+                       class="form-control form-control-sm"
+                       placeholder="Weapon name — or search library…"
+                       autocomplete="off"
+                       oninput="weapLibSearch(this.value)">
+                <div id="weap-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;"></div>
+              </div>
+              <button class="btn btn-ttrpg btn-sm" onclick="addWeaponToChar()">Add</button>
+            </div>
+            <!-- Hidden fields populated by library pick -->
+            <input type="hidden" id="new_weap_lib_id"         value="">
+            <input type="hidden" id="new_weap_category"       value="">
+            <input type="hidden" id="new_weap_range"          value="">
+            <input type="hidden" id="new_weap_damage_dice"    value="">
+            <input type="hidden" id="new_weap_damage_type"    value="">
+            <input type="hidden" id="new_weap_2h_dice"        value="">
+            <input type="hidden" id="new_weap_2h_type"        value="">
+            <input type="hidden" id="new_weap_range_normal"   value="0">
+            <input type="hidden" id="new_weap_range_long"     value="0">
+            <input type="hidden" id="new_weap_properties"     value="">
+          </div>
+          {% endif %}
+
+          <!-- Full weapon list -->
+          <div id="weapon-list">
+            {% if all_weapons %}
+            {% for w in all_weapons %}
+            <div id="char-weapon-{{ w.char_weapon_id }}"
+                 class="d-flex align-items-start gap-2 mb-2 p-2 rounded flex-wrap"
+                 style="background:var(--sp-surface);border:1px solid var(--sp-border);">
+
+              <!-- Equip / Stow toggle -->
+              {% if can_edit %}
+              <button class="btn btn-sm px-2 flex-shrink-0"
+                      style="{% if w.equipped %}background:var(--ttrpg-accent);color:var(--sp-on-accent);border-color:var(--ttrpg-accent);{% else %}border-color:var(--sp-border);color:var(--sp-muted);{% endif %}"
+                      onclick="toggleWeapEquip({{ w.char_weapon_id }}, {{ w.equipped }})"
+                      title="{% if w.equipped %}Stow{% else %}Ready{% endif %}">
+                {% if w.equipped %}&#9741;{% else %}&#9675;{% endif %}
+              </button>
+              {% endif %}
+
+              <!-- Info -->
+              <div class="flex-grow-1 min-width-0">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <span style="color:var(--ttrpg-accent);font-weight:600;">{{ w.weapon_name }}</span>
+                  {% if w.weapon_category %}
+                  <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                               border:1px solid var(--sp-border);
+                               color:var(--ttrpg-accent);
+                               background:color-mix(in srgb, var(--sp-primary) 25%, transparent);">
+                    {{ w.weapon_category }}
+                  </span>
+                  {% endif %}
+                  {% if w.weapon_range %}
+                  <span style="font-size:.7rem;color:var(--sp-muted);">{{ w.weapon_range }}</span>
+                  {% endif %}
+                  {% if w.equipped %}
+                  <span style="font-size:.7rem;color:var(--ttrpg-accent);">&#9741; Ready</span>
+                  {% else %}
+                  <span style="font-size:.7rem;color:var(--sp-muted);">Stowed</span>
+                  {% endif %}
+                </div>
+                <div class="small text-muted mt-1 d-flex flex-wrap gap-3">
+                  {% if w.damage_dice %}
+                  <span>
+                    <strong style="color:var(--sp-text);">{{ w.damage_dice }}</strong>
+                    {% if w.damage_bonus %}<strong style="color:var(--ttrpg-accent);"> +{{ w.damage_bonus }}</strong>{% endif %}
+                    {{ w.damage_type }}
+                  </span>
+                  {% endif %}
+                  {% if w.two_handed_damage_dice %}
+                  <span>2H: {{ w.two_handed_damage_dice }} {{ w.two_handed_damage_type }}</span>
+                  {% endif %}
+                  {% if w.weapon_range == 'Ranged' and w.range_normal %}
+                  <span>Range {{ w.range_normal }}/{{ w.range_long }} ft</span>
+                  {% elif w.range_normal %}
+                  <span>Throw {{ w.range_normal }}/{{ w.range_long }} ft</span>
+                  {% endif %}
+                  {% if w.attack_bonus %}
+                  <span style="color:var(--ttrpg-accent);">+{{ w.attack_bonus }} to hit</span>
+                  {% endif %}
+                  {% if w.properties %}
+                  <span class="fst-italic">{{ w.properties }}</span>
+                  {% endif %}
+                  {% if w.notes %}
+                  <span class="fst-italic">{{ w.notes }}</span>
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Edit / Delete -->
+              {% if can_edit %}
+              <div class="d-flex gap-1 flex-shrink-0 align-items-start">
+                <button class="btn btn-sm btn-outline-secondary px-2"
+                        onclick="toggleWeapEdit({{ w.char_weapon_id }})" title="Edit">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger px-2"
+                        onclick="deleteWeapEntry({{ w.char_weapon_id }})" title="Remove">&#10005;</button>
+              </div>
+              {% endif %}
+
+              <!-- Inline edit panel -->
+              {% if can_edit %}
+              <div id="weap-edit-{{ w.char_weapon_id }}" class="w-100 mt-1" style="display:none;">
+                <div class="d-flex gap-2 flex-wrap align-items-end"
+                     style="background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;padding:8px;">
+                  <div>
+                    <label class="form-label small text-muted mb-1">+X to hit</label>
+                    <input type="number" id="weap-atk-{{ w.char_weapon_id }}"
+                           value="{{ w.attack_bonus }}" min="0" max="9"
+                           class="form-control form-control-sm" style="max-width:65px;">
+                  </div>
+                  <div>
+                    <label class="form-label small text-muted mb-1">+X damage</label>
+                    <input type="number" id="weap-dmg-{{ w.char_weapon_id }}"
+                           value="{{ w.damage_bonus }}" min="0" max="9"
+                           class="form-control form-control-sm" style="max-width:65px;">
+                  </div>
+                  <div class="flex-grow-1">
+                    <label class="form-label small text-muted mb-1">Notes</label>
+                    <input type="text" id="weap-notes-{{ w.char_weapon_id }}"
+                           value="{{ w.notes or '' }}"
+                           class="form-control form-control-sm"
+                           placeholder="Attunement, special rules, silvered…">
+                  </div>
+                  <button class="btn btn-ttrpg btn-sm"
+                          onclick="saveWeapEntry({{ w.char_weapon_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="toggleWeapEdit({{ w.char_weapon_id }})">Cancel</button>
+                </div>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted small" id="weapon-empty-msg">
+              No weapons yet.{% if can_edit %} Search the library or type a custom name above.{% endif %}
+            </p>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Armor & Shields -->
+        <div class="tab-pane fade" id="tab-armor">
+          {% set all_armor = char.armor | sort(attribute='order_by') %}
+          {% set worn       = all_armor | selectattr('equipped', 'equalto', 1) | list %}
+          {% set stowed     = all_armor | selectattr('equipped', 'equalto', 0) | list %}
+
+          <!-- Equipped summary + AC suggestion -->
+          {% if worn %}
+          <div class="p-2 mb-3 rounded"
+               style="background:color-mix(in srgb, var(--sp-accent) 6%, transparent);
+                      border:1px solid var(--sp-border);">
+            <div class="small text-muted mb-1" style="font-weight:600;letter-spacing:.05em;text-transform:uppercase;">
+              Equipped
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              {% for a in worn %}
+              <span class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded"
+                    style="background:var(--sp-surface);border:1px solid var(--ttrpg-accent);font-size:.82rem;">
+                <span style="color:var(--ttrpg-accent);font-weight:600;">{{ a.armor_name }}</span>
+                <span class="text-muted small">
+                  {% if a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
+                  {% else %}{{ a.armor_class_base + a.ac_bonus }} AC base{% endif %}
+                </span>
+              </span>
+              {% endfor %}
+              <span class="ms-auto small text-muted" id="ac-suggest-label"></span>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Add armor row -->
+          {% if can_edit %}
+          <div class="mb-3">
+            <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
+              <div style="position:relative;max-width:240px;flex:1 1 180px;">
+                <input type="text" id="new_armor_name"
+                       class="form-control form-control-sm"
+                       placeholder="Armor name — or search library…"
+                       autocomplete="off"
+                       oninput="armorLibSearch(this.value)">
+                <div id="armor-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;"></div>
+              </div>
+              <button class="btn btn-ttrpg btn-sm" onclick="addArmorToChar()">Add</button>
+            </div>
+            <!-- Hidden fields populated by library pick -->
+            <input type="hidden" id="new_armor_lib_id"     value="">
+            <input type="hidden" id="new_armor_category"   value="">
+            <input type="hidden" id="new_armor_class_base" value="0">
+            <input type="hidden" id="new_armor_dex_bonus"  value="0">
+            <input type="hidden" id="new_armor_max_dex"    value="">
+          </div>
+          {% endif %}
+
+          <!-- Full armor list -->
+          <div id="armor-list">
+            {% if all_armor %}
+            {% for a in all_armor %}
+            <div id="char-armor-{{ a.char_armor_id }}"
+                 class="d-flex align-items-start gap-2 mb-2 p-2 rounded flex-wrap"
+                 style="background:var(--sp-surface);border:1px solid var(--sp-border);">
+              <!-- Equip / Stow toggle -->
+              {% if can_edit %}
+              <button class="btn btn-sm px-2 flex-shrink-0"
+                      id="armor-equip-btn-{{ a.char_armor_id }}"
+                      style="{% if a.equipped %}background:var(--ttrpg-accent);color:var(--sp-on-accent);border-color:var(--ttrpg-accent);{% else %}border-color:var(--sp-border);color:var(--sp-muted);{% endif %}"
+                      onclick="toggleArmorEquip({{ a.char_armor_id }}, {{ a.equipped }})"
+                      title="{% if a.equipped %}Stow{% else %}Equip{% endif %}">
+                {% if a.equipped %}&#9741;{% else %}&#9675;{% endif %}
+              </button>
+              {% endif %}
+
+              <!-- Info -->
+              <div class="flex-grow-1 min-width-0">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <span style="color:var(--ttrpg-accent);font-weight:600;">{{ a.armor_name }}</span>
+                  {% if a.armor_category %}
+                  <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                               border:1px solid var(--sp-border);
+                               color:var(--ttrpg-accent);
+                               background:color-mix(in srgb, var(--sp-primary) 25%, transparent);">
+                    {{ a.armor_category }}
+                  </span>
+                  {% endif %}
+                  {% if a.equipped %}
+                  <span style="font-size:.7rem;color:var(--ttrpg-accent);">&#9741; Equipped</span>
+                  {% else %}
+                  <span style="font-size:.7rem;color:var(--sp-muted);">Stowed</span>
+                  {% endif %}
+                </div>
+                <div class="small text-muted mt-1">
+                  {% if a.armor_category == 'Shield' %}
+                    AC +{{ a.armor_class_base }}
+                  {% else %}
+                    AC {{ a.armor_class_base }}
+                    {% if a.dex_bonus %}
+                      + DEX{% if a.max_dex_bonus is not none %} (max {{ a.max_dex_bonus }}){% endif %}
+                    {% endif %}
+                  {% endif %}
+                  {% if a.ac_bonus %}<span style="color:var(--ttrpg-accent);"> +{{ a.ac_bonus }} magical</span>{% endif %}
+                  {% if a.notes %}<span class="fst-italic ms-2">{{ a.notes }}</span>{% endif %}
+                </div>
+              </div>
+
+              <!-- Edit inline -->
+              {% if can_edit %}
+              <div class="d-flex gap-1 flex-shrink-0 align-items-start">
+                <button class="btn btn-sm btn-outline-secondary px-2"
+                        onclick="toggleArmorEdit({{ a.char_armor_id }})" title="Edit">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger px-2"
+                        onclick="deleteArmorEntry({{ a.char_armor_id }})" title="Remove">&#10005;</button>
+              </div>
+              {% endif %}
+
+              <!-- Inline edit form -->
+              {% if can_edit %}
+              <div id="armor-edit-{{ a.char_armor_id }}" class="w-100 mt-1" style="display:none;">
+                <div class="d-flex gap-2 flex-wrap align-items-end"
+                     style="background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;padding:8px;">
+                  <div>
+                    <label class="form-label small text-muted mb-1">Magic bonus (+X)</label>
+                    <input type="number" id="armor-bonus-{{ a.char_armor_id }}"
+                           value="{{ a.ac_bonus }}" min="0" max="9"
+                           class="form-control form-control-sm" style="max-width:70px;">
+                  </div>
+                  <div class="flex-grow-1">
+                    <label class="form-label small text-muted mb-1">Notes</label>
+                    <input type="text" id="armor-notes-{{ a.char_armor_id }}"
+                           value="{{ a.notes or '' }}"
+                           class="form-control form-control-sm" placeholder="Attunement, special rules…">
+                  </div>
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveArmorEntry({{ a.char_armor_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="toggleArmorEdit({{ a.char_armor_id }})">Cancel</button>
+                </div>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted small" id="armor-empty-msg">No armor or shields.{% if can_edit %} Search the library or type a custom name above.{% endif %}</p>
+            {% endif %}
           </div>
         </div>
 
@@ -312,7 +754,7 @@
             {% for label, field, val in [('Gold','gold',char.gold),('Silver','silver',char.silver),('Copper','copper',char.copper)] %}
             <div class="text-center">
               <label class="form-label" style="color:var(--ttrpg-accent);">{{ label }}</label><br>
-              <input type="number" class="form-control bg-dark text-light border-secondary text-center"
+              <input type="number" class="form-control text-center"
                      style="max-width:90px; font-size:1.2rem;"
                      value="{{ val }}" min="0"
                      onchange="saveField('{{ field }}', this.value)"
@@ -326,20 +768,35 @@
         <div class="tab-pane fade" id="tab-notes">
           {% if can_edit %}
           <div class="d-flex gap-2 mb-3">
-            <textarea id="new_note_text" class="form-control bg-dark text-light border-secondary" rows="2"
+            <textarea id="new_note_text" class="form-control" rows="2"
                       placeholder="Add a note…" style="resize:vertical;"></textarea>
             <button class="btn btn-ttrpg btn-sm align-self-start" onclick="addNote()">Add</button>
           </div>
           {% endif %}
           <div id="note-list">
             {% for note in char.notes | sort(attribute='created_at', reverse=True) %}
-            <div class="d-flex gap-2 mb-2 align-items-start ttrpg-card p-2" id="note-{{ note.note_id }}" style="border-color:#444;">
-              <div class="flex-grow-1">
-                <div>{{ note.note_text }}</div>
-                <div class="text-muted small">{{ note.created_at }}</div>
+            <div class="ttrpg-card p-2 mb-2" id="note-{{ note.note_id }}" style="border-color:var(--sp-border);">
+              <div id="note-view-{{ note.note_id }}" class="d-flex gap-2 align-items-start">
+                <div class="flex-grow-1">
+                  <div>{{ note.note_text }}</div>
+                  <div class="text-muted small">{{ note.created_at }}</div>
+                </div>
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0" title="Edit"
+                        onclick="editToggle('note', {{ note.note_id }})">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="deleteNote({{ note.note_id }})">&#10005;</button>
+                {% endif %}
               </div>
               {% if can_edit %}
-              <button class="btn btn-sm btn-outline-danger" onclick="deleteNote({{ note.note_id }})">&#10005;</button>
+              <div id="note-edit-{{ note.note_id }}" class="mt-2" style="display:none;">
+                <textarea id="note-text-edit-{{ note.note_id }}" class="form-control form-control-sm mb-2"
+                          rows="3" style="resize:vertical;">{{ note.note_text }}</textarea>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveNote({{ note.note_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="editToggle('note', {{ note.note_id }})">Cancel</button>
+                </div>
+              </div>
               {% endif %}
             </div>
             {% else %}
@@ -351,29 +808,58 @@
         <!-- Feats -->
         <div class="tab-pane fade" id="tab-feats">
           {% if can_edit %}
-          <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_feat_name"
-                   class="form-control form-control-sm bg-dark text-light border-secondary"
-                   placeholder="Feat name" style="max-width:200px;">
+          <div class="mb-3" style="position:relative;">
+            <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+              <div style="position:relative;max-width:260px;flex:1 1 200px;">
+                <input type="text" id="new_feat_name"
+                       class="form-control form-control-sm"
+                       placeholder="Feat name — or search library…"
+                       autocomplete="off"
+                       oninput="featLibSearch(this.value)">
+                <div id="feat-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;"></div>
+              </div>
+              <button class="btn btn-ttrpg btn-sm" onclick="addFeat()">Add</button>
+            </div>
             <textarea id="new_feat_desc"
-                      class="form-control form-control-sm bg-dark text-light border-secondary"
+                      class="form-control form-control-sm"
                       placeholder="What does this feat do?" rows="2"
-                      style="min-width:260px;resize:vertical;"></textarea>
-            <button class="btn btn-ttrpg btn-sm align-self-start" onclick="addFeat()">Add</button>
+                      style="resize:vertical;"></textarea>
           </div>
           {% endif %}
           <div id="feat-list">
             {% for f in char.feats | sort(attribute='order_by') %}
-            <div class="ttrpg-card p-2 mb-2" id="feat-{{ f.feat_id }}" style="border-color:#444;">
-              <div class="d-flex justify-content-between align-items-start gap-2">
-                <span style="color:var(--ttrpg-accent);font-weight:600;">{{ f.feat_name }}</span>
-                {% if can_edit %}
-                <button class="btn btn-sm btn-outline-danger flex-shrink-0"
-                        onclick="deleteFeat({{ f.feat_id }})">&#10005;</button>
+            <div class="ttrpg-card p-2 mb-2" id="feat-{{ f.feat_id }}" style="border-color:var(--sp-border);">
+              <div id="feat-view-{{ f.feat_id }}">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                  <span style="color:var(--ttrpg-accent);font-weight:600;">{{ f.feat_name }}</span>
+                  {% if can_edit %}
+                  <div class="d-flex gap-1 flex-shrink-0">
+                    <button class="btn btn-sm btn-outline-secondary px-2" title="Edit"
+                            onclick="editToggle('feat', {{ f.feat_id }})">&#9998;</button>
+                    <button class="btn btn-sm btn-outline-danger"
+                            onclick="deleteFeat({{ f.feat_id }})">&#10005;</button>
+                  </div>
+                  {% endif %}
+                </div>
+                {% if f.description %}
+                <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ f.description }}</div>
                 {% endif %}
               </div>
-              {% if f.description %}
-              <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ f.description }}</div>
+              {% if can_edit %}
+              <div id="feat-edit-{{ f.feat_id }}" class="mt-1" style="display:none;">
+                <input type="text" value="{{ f.feat_name }}" id="feat-name-{{ f.feat_id }}"
+                       class="form-control form-control-sm mb-2" placeholder="Feat name">
+                <textarea id="feat-desc-{{ f.feat_id }}" class="form-control form-control-sm mb-2"
+                          rows="3" style="resize:vertical;" placeholder="Description">{{ f.description or '' }}</textarea>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-ttrpg btn-sm" onclick="saveFeat({{ f.feat_id }})">Save</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                          onclick="editToggle('feat', {{ f.feat_id }})">Cancel</button>
+                </div>
+              </div>
               {% endif %}
             </div>
             {% else %}
@@ -387,7 +873,10 @@
           <!-- Active conditions -->
           <div id="char-cond-display" class="d-flex flex-wrap gap-1 mb-2">
             {% for c in char.conditions %}
-            <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.85rem;padding:4px 8px;">
+            <span class="badge cond-tip" data-bs-toggle="tooltip" data-bs-placement="top"
+                  data-bs-custom-class="feat-tooltip"
+                  title="{{ conditions.get(c.condition_name, '') }}"
+                  style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.85rem;padding:4px 8px;cursor:help;">
               {{ c.condition_name }}
               {% if can_edit %}
               <span style="cursor:pointer;margin-left:4px;" onclick="charRemoveCondition('{{ c.condition_name }}')">&#215;</span>
@@ -400,8 +889,11 @@
           {% if can_edit %}
           <button class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleCharCondPanel()">&#9763; Add Condition</button>
           <div id="char-cond-panel" class="d-flex flex-wrap gap-1" style="display:none!important;">
-            {% for cond in conditions %}
-            <button class="btn btn-sm btn-outline-secondary py-0"
+            {% for cond, desc in conditions.items() %}
+            <button class="btn btn-sm btn-outline-secondary py-0 cond-tip"
+                    data-bs-toggle="tooltip" data-bs-placement="top"
+                    data-bs-custom-class="feat-tooltip"
+                    title="{{ desc }}"
                     onclick="charAddCondition('{{ cond }}')">{{ cond }}</button>
             {% endfor %}
           </div>
@@ -423,7 +915,7 @@
               class="d-flex gap-2 align-items-end">
           <div>
             <label class="form-label small mb-1">Assign to Player</label>
-            <select name="user_id" class="form-select form-select-sm bg-dark text-light border-secondary"
+            <select name="user_id" class="form-select form-select-sm"
                     style="min-width:180px;">
               {% for u in all_players %}
               <option value="{{ u.user_id }}" {% if u.user_id == char.user_id %}selected{% endif %}>
@@ -454,8 +946,83 @@
 const CHAR_ID = {{ char.character_id }};
 const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
 
+// ── Tab persistence across reloads ────────────────────────────
+const TAB_KEY = `sheet_tab_${CHAR_ID}`;
+function reloadKeepTab() {
+  const active = document.querySelector('#sheetTabs .nav-link.active');
+  if (active) sessionStorage.setItem(TAB_KEY, active.dataset.bsTarget);
+  location.reload();
+}
+(function restoreTab() {
+  const saved = sessionStorage.getItem(TAB_KEY);
+  if (!saved) return;
+  sessionStorage.removeItem(TAB_KEY);
+  const btn = document.querySelector(`#sheetTabs [data-bs-target="${saved}"]`);
+  if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+})();
+
+// ── Inline edit helpers ───────────────────────────────────────
+function editToggle(type, id) {
+  const view = document.getElementById(type + '-view-' + id);
+  const form = document.getElementById(type + '-edit-' + id);
+  const editing = form.style.display !== 'none';
+  view.style.display = editing ? '' : 'none';
+  form.style.display = editing ? 'none' : '';
+}
+
+function saveResource(id) {
+  fetch(`/ttrpg/resource/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      resource_name: document.getElementById('res-name-' + id).value.trim(),
+      current_val:   document.getElementById('res-cur-edit-' + id).value,
+      max_val:       document.getElementById('res-max-edit-' + id).value
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function saveSkill(id) {
+  fetch(`/ttrpg/skill/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      skill_name: document.getElementById('skill-name-' + id).value.trim(),
+      bonus:      document.getElementById('skill-bonus-' + id).value,
+      proficient: document.getElementById('skill-prof-' + id).checked ? 1 : 0
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function saveItem(id) {
+  fetch(`/ttrpg/inventory/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      item_name: document.getElementById('item-name-' + id).value.trim(),
+      quantity:  document.getElementById('item-qty-' + id).value,
+      notes:     document.getElementById('item-notes-' + id).value,
+      equipped:  document.getElementById('item-equip-' + id).checked ? 1 : 0
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function saveNote(id) {
+  fetch(`/ttrpg/note/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({note_text: document.getElementById('note-text-edit-' + id).value.trim()})
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function saveFeat(id) {
+  fetch(`/ttrpg/feat/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      feat_name:   document.getElementById('feat-name-' + id).value.trim(),
+      description: document.getElementById('feat-desc-' + id).value.trim()
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
-  new bootstrap.Tooltip(el);
+  new bootstrap.Tooltip(el, {trigger: 'hover focus'});
 });
 
 // ── HP controls ──────────────────────────────────────────────
@@ -490,6 +1057,49 @@ function saveField(field, value, cb) {
   }).then(r => r.json()).then(data => { if (cb) cb(data); });
 }
 
+// ── Attribute inline edit ─────────────────────────────────────
+function startAttrEdit(el, isMod) {
+  if (el.querySelector('input')) return; // already editing
+  const field = el.dataset.field;
+  const orig  = el.textContent.trim();
+  // For modifier, strip the sign so the input shows a plain integer
+  const current = isMod ? parseInt(orig) : parseInt(orig);
+
+  const input = document.createElement('input');
+  input.type  = 'number';
+  input.value = current;
+  input.min   = isMod ? -5 : 1;
+  input.max   = isMod ? 10 : 30;
+  input.style.cssText = [
+    'width:52px', 'text-align:center', 'font-size:inherit', 'font-weight:inherit',
+    'background:var(--sp-input-bg)', 'color:var(--sp-text)',
+    'border:1px solid var(--ttrpg-accent)', 'border-radius:3px', 'padding:1px 2px'
+  ].join(';');
+
+  el.textContent = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    const val = parseInt(input.value);
+    if (isNaN(val)) { el.textContent = orig; return; }
+    // If editing the modifier, back-calculate the score: score = mod * 2 + 10
+    const scoreVal = isMod ? (val * 2 + 10) : val;
+    el.textContent = orig; // restore text while saving
+    saveField(field, scoreVal, () => reloadKeepTab());
+  }
+
+  input.addEventListener('blur',    () => commit());
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { committed = true; el.textContent = orig; }
+  });
+}
+
 // ── Resources ────────────────────────────────────────────────
 function addResource() {
   const name = document.getElementById('new_res_name').value.trim();
@@ -499,7 +1109,7 @@ function addResource() {
     body: JSON.stringify({resource_name: name,
                           current_val: document.getElementById('new_res_cur').value,
                           max_val: document.getElementById('new_res_max').value})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
 }
 
 function deltaResource(id, delta) {
@@ -533,7 +1143,7 @@ function addSkill() {
     body: JSON.stringify({skill_name: name,
                           bonus: document.getElementById('new_skill_bonus').value,
                           proficient: document.getElementById('new_skill_prof').checked ? 1 : 0})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
 }
 
 function deleteSkill(id) {
@@ -552,7 +1162,7 @@ function addItem() {
     body: JSON.stringify({item_name: name,
                           quantity: document.getElementById('new_item_qty').value,
                           notes: document.getElementById('new_item_notes').value})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
 }
 
 function deleteItem(id) {
@@ -570,7 +1180,7 @@ function addNote() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({note_text: text})
   }).then(r => r.json()).then(data => {
-    if (data.ok) location.reload();
+    if (data.ok) reloadKeepTab();
   });
 }
 
@@ -582,6 +1192,45 @@ function deleteNote(id) {
 }
 
 // ── Feats ─────────────────────────────────────────────────────
+let _featSearchTimer = null;
+let _featResults = [];
+function featLibSearch(q) {
+  clearTimeout(_featSearchTimer);
+  const box = document.getElementById('feat-suggestions');
+  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  _featSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/feats/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _featResults = results;
+        box.innerHTML = results.map((f, i) => `
+          <div data-idx="${i}"
+               style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${f.name}</div>
+            ${f.prerequisites ? `<div style="font-size:.7rem;color:var(--sp-muted);">Req: ${f.prerequisites}</div>` : ''}
+          </div>`).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => {
+            const f = _featResults[parseInt(el.dataset.idx)];
+            featLibPick(f.name, f.description);
+          }));
+        box.style.display = 'block';
+      });
+  }, 220);
+}
+function featLibPick(name, desc) {
+  document.getElementById('new_feat_name').value = name;
+  document.getElementById('new_feat_desc').value = desc;
+  document.getElementById('feat-suggestions').style.display = 'none';
+  addFeat();
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#feat-suggestions') && e.target.id !== 'new_feat_name')
+    document.getElementById('feat-suggestions').style.display = 'none';
+});
+
 function addFeat() {
   const name = document.getElementById('new_feat_name').value.trim();
   if (!name) return;
@@ -589,7 +1238,7 @@ function addFeat() {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({feat_name: name,
                           description: document.getElementById('new_feat_desc').value.trim()})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
 }
 
 function deleteFeat(id) {
@@ -609,14 +1258,259 @@ function charAddCondition(condition) {
   fetch(`/ttrpg/character/${CHAR_ID}/condition`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'add', condition})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
 }
 
 function charRemoveCondition(condition) {
   fetch(`/ttrpg/character/${CHAR_ID}/condition`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'remove', condition})
-  }).then(() => location.reload());
+  }).then(() => reloadKeepTab());
+}
+
+// ── Weapons ───────────────────────────────────────────────────
+let _weapSearchTimer = null;
+let _weapResults = [];
+function weapLibSearch(q) {
+  clearTimeout(_weapSearchTimer);
+  const box = document.getElementById('weap-suggestions');
+  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  _weapSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/weapons/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _weapResults = results;
+        box.innerHTML = results.map((w, i) => `
+          <div data-idx="${i}"
+               style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${w.name}</div>
+            <div style="font-size:.7rem;color:var(--sp-muted);">
+              ${w.weapon_category} ${w.weapon_range}
+              ${w.damage_dice ? '&mdash; ' + w.damage_dice + ' ' + w.damage_type : ''}
+              ${w.properties ? '&bull; ' + w.properties : ''}
+            </div>
+          </div>`).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => weapLibPick(_weapResults[parseInt(el.dataset.idx)])));
+        box.style.display = 'block';
+      });
+  }, 220);
+}
+
+function weapLibPick(w) {
+  document.getElementById('new_weap_name').value         = w.name;
+  document.getElementById('new_weap_lib_id').value       = w.weapon_lib_id;
+  document.getElementById('new_weap_category').value     = w.weapon_category;
+  document.getElementById('new_weap_range').value        = w.weapon_range;
+  document.getElementById('new_weap_damage_dice').value  = w.damage_dice;
+  document.getElementById('new_weap_damage_type').value  = w.damage_type;
+  document.getElementById('new_weap_2h_dice').value      = w.two_handed_damage_dice;
+  document.getElementById('new_weap_2h_type').value      = w.two_handed_damage_type;
+  document.getElementById('new_weap_range_normal').value = w.range_normal;
+  document.getElementById('new_weap_range_long').value   = w.range_long;
+  document.getElementById('new_weap_properties').value   = w.properties;
+  document.getElementById('weap-suggestions').style.display = 'none';
+  addWeaponToChar();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#weap-suggestions') && e.target.id !== 'new_weap_name')
+    document.getElementById('weap-suggestions').style.display = 'none';
+});
+
+function addWeaponToChar() {
+  const name = document.getElementById('new_weap_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/weapons`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      weapon_name:            name,
+      weapon_lib_id:          document.getElementById('new_weap_lib_id').value || null,
+      weapon_category:        document.getElementById('new_weap_category').value,
+      weapon_range:           document.getElementById('new_weap_range').value,
+      damage_dice:            document.getElementById('new_weap_damage_dice').value,
+      damage_type:            document.getElementById('new_weap_damage_type').value,
+      two_handed_damage_dice: document.getElementById('new_weap_2h_dice').value,
+      two_handed_damage_type: document.getElementById('new_weap_2h_type').value,
+      range_normal:           parseInt(document.getElementById('new_weap_range_normal').value) || 0,
+      range_long:             parseInt(document.getElementById('new_weap_range_long').value)   || 0,
+      properties:             document.getElementById('new_weap_properties').value,
+      attack_bonus: 0, damage_bonus: 0, equipped: 0,
+    })
+  }).then(() => reloadKeepTab());
+}
+
+function toggleWeapEquip(id, current) {
+  fetch(`/ttrpg/char-weapon/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({equipped: current ? 0 : 1})
+  }).then(() => reloadKeepTab());
+}
+
+function toggleWeapEdit(id) {
+  const p = document.getElementById('weap-edit-' + id);
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveWeapEntry(id) {
+  fetch(`/ttrpg/char-weapon/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      attack_bonus: document.getElementById('weap-atk-'   + id).value,
+      damage_bonus: document.getElementById('weap-dmg-'   + id).value,
+      notes:        document.getElementById('weap-notes-' + id).value,
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function deleteWeapEntry(id) {
+  if (!confirm('Remove this weapon from the character?')) return;
+  fetch(`/ttrpg/char-weapon/${id}`, {method: 'DELETE'})
+    .then(() => document.getElementById('char-weapon-' + id).remove());
+}
+
+// ── Armor & Shields ───────────────────────────────────────────
+const DEX_MOD = {{ char.modifier(char.dex_val) }};
+
+// Armor state from server for AC suggestion
+const ARMOR_LIST = [
+  {% for a in char.armor %}
+  {
+    char_armor_id:    {{ a.char_armor_id }},
+    armor_category:   {{ a.armor_category | tojson }},
+    armor_class_base: {{ a.armor_class_base }},
+    dex_bonus:        {{ a.dex_bonus }},
+    max_dex_bonus:    {{ a.max_dex_bonus if a.max_dex_bonus is not none else 'null' }},
+    ac_bonus:         {{ a.ac_bonus }},
+    equipped:         {{ a.equipped }},
+  },
+  {% endfor %}
+];
+
+function calcSuggestedAC() {
+  let bodyAC = null;
+  let shieldBonus = 0;
+  ARMOR_LIST.forEach(a => {
+    if (!a.equipped) return;
+    const base = a.armor_class_base + a.ac_bonus;
+    if (a.armor_category === 'Shield') {
+      shieldBonus += base;
+    } else {
+      let ac = base;
+      if (a.dex_bonus) {
+        let dex = DEX_MOD;
+        if (a.max_dex_bonus !== null) dex = Math.min(dex, a.max_dex_bonus);
+        ac += dex;
+      }
+      bodyAC = ac;
+    }
+  });
+  const lbl = document.getElementById('ac-suggest-label');
+  if (!lbl) return;
+  if (bodyAC !== null) {
+    lbl.textContent = `Suggested AC: ${bodyAC + shieldBonus}`;
+    lbl.style.color = 'var(--ttrpg-accent)';
+  } else {
+    lbl.textContent = '';
+  }
+}
+calcSuggestedAC();
+
+// Library search typeahead
+let _armorSearchTimer = null;
+let _armorResults = [];
+function armorLibSearch(q) {
+  clearTimeout(_armorSearchTimer);
+  const box = document.getElementById('armor-suggestions');
+  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  _armorSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/armor/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _armorResults = results;
+        box.innerHTML = results.map((a, i) => `
+          <div data-idx="${i}"
+               style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${a.name}</div>
+            <div style="font-size:.7rem;color:var(--sp-muted);">
+              ${a.armor_category}
+              — AC ${a.armor_category === 'Shield' ? '+' : ''}${a.armor_class_base}
+              ${a.dex_bonus ? '+ DEX' + (a.max_dex_bonus !== null ? ` (max ${a.max_dex_bonus})` : '') : ''}
+              &bull; ${a.cost || '—'}
+            </div>
+          </div>`).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => armorLibPick(_armorResults[parseInt(el.dataset.idx)])));
+        box.style.display = 'block';
+      });
+  }, 220);
+}
+
+function armorLibPick(a) {
+  document.getElementById('new_armor_name').value       = a.name;
+  document.getElementById('new_armor_lib_id').value     = a.armor_lib_id;
+  document.getElementById('new_armor_category').value   = a.armor_category;
+  document.getElementById('new_armor_class_base').value = a.armor_class_base;
+  document.getElementById('new_armor_dex_bonus').value  = a.dex_bonus;
+  document.getElementById('new_armor_max_dex').value    = a.max_dex_bonus !== null ? a.max_dex_bonus : '';
+  document.getElementById('armor-suggestions').style.display = 'none';
+  addArmorToChar();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#armor-suggestions') && e.target.id !== 'new_armor_name')
+    document.getElementById('armor-suggestions').style.display = 'none';
+});
+
+function addArmorToChar() {
+  const name = document.getElementById('new_armor_name').value.trim();
+  if (!name) return;
+  const maxDexRaw = document.getElementById('new_armor_max_dex').value;
+  fetch(`/ttrpg/character/${CHAR_ID}/armor`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      armor_name:       name,
+      armor_lib_id:     document.getElementById('new_armor_lib_id').value || null,
+      armor_category:   document.getElementById('new_armor_category').value,
+      armor_class_base: parseInt(document.getElementById('new_armor_class_base').value) || 0,
+      dex_bonus:        parseInt(document.getElementById('new_armor_dex_bonus').value) || 0,
+      max_dex_bonus:    maxDexRaw === '' ? null : parseInt(maxDexRaw),
+      ac_bonus: 0, equipped: 0,
+    })
+  }).then(() => reloadKeepTab());
+}
+
+function toggleArmorEquip(id, currentEquipped) {
+  const newVal = currentEquipped ? 0 : 1;
+  fetch(`/ttrpg/char-armor/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({equipped: newVal})
+  }).then(() => reloadKeepTab());
+}
+
+function toggleArmorEdit(id) {
+  const panel = document.getElementById('armor-edit-' + id);
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveArmorEntry(id) {
+  fetch(`/ttrpg/char-armor/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      ac_bonus: document.getElementById('armor-bonus-' + id).value,
+      notes:    document.getElementById('armor-notes-' + id).value,
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function deleteArmorEntry(id) {
+  if (!confirm('Remove this armor from the character?')) return;
+  fetch(`/ttrpg/char-armor/${id}`, {method: 'DELETE'})
+    .then(() => document.getElementById('char-armor-' + id).remove());
 }
 </script>
 {% endblock %}

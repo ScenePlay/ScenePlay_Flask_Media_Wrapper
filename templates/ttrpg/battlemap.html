@@ -34,8 +34,8 @@
     z-index: 1;
     pointer-events: none;
     background-image:
-      linear-gradient(to right, rgba(60,60,90,.7) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(60,60,90,.7) 1px, transparent 1px);
+      linear-gradient(to right, color-mix(in srgb, var(--sp-accent) 25%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--sp-accent) 25%, transparent) 1px, transparent 1px);
   }
 
   .map-token {
@@ -48,6 +48,16 @@
     touch-action: none;
     will-change: transform;
     contain: layout style;
+  }
+
+  /* Per-type hover glow on the portrait ring */
+  .tok-player:hover .token-portrait {
+    box-shadow: 0 0 0 3px rgba(74,158,255,.55), 0 0 10px rgba(74,158,255,.35);
+    transition: box-shadow .15s;
+  }
+  .tok-monster:hover .token-portrait {
+    box-shadow: 0 0 0 3px rgba(204,51,51,.55), 0 0 10px rgba(204,51,51,.35);
+    transition: box-shadow .15s;
   }
 
   .token-portrait {
@@ -210,9 +220,9 @@
     line-height: 1;
   }
   #sb-toggle:hover {
-    background: #228B22;
-    color: #fff;
-    border-color: #228B22;
+    background: var(--sp-hover-bg);
+    color: var(--sp-hover-text);
+    border-color: var(--sp-hover-bg);
   }
 
   .sidebar-section-title {
@@ -515,7 +525,12 @@ function clampRow(v) { return Math.max(0, Math.min(GRID_ROWS - 1, v)); }
 const _tt = document.getElementById('tok-tooltip');
 
 function showTooltip(e, tok) {
-  document.getElementById('tt-name').textContent = tok.name;
+  const typeColor = tok.entity_type === 'player' ? '#4a9eff' : '#cc3333';
+  _tt.style.borderColor = typeColor;
+  _tt.style.background  = `color-mix(in srgb, ${typeColor} 10%, var(--ttrpg-primary))`;
+  const nameEl = document.getElementById('tt-name');
+  nameEl.textContent   = tok.name;
+  nameEl.style.color   = typeColor;
   document.getElementById('tt-hp').textContent   = `HP ${tok.hp_current} / ${tok.hp_max}`;
   document.getElementById('tt-hp-pct').textContent = tok.hp_pct + '%';
 
@@ -641,7 +656,7 @@ function createTokenEl(tok) {
   const bg     = tok.entity_type === 'player' ? '#0d2845' : '#2d0a0a';
 
   const el = document.createElement('div');
-  el.className       = 'map-token' + (tok.is_alive ? '' : ' token-dead');
+  el.className       = 'map-token tok-' + tok.entity_type + (tok.is_alive ? '' : ' token-dead');
   el.id              = `tok-${tok.token_id}`;
   el.dataset.tokenId = tok.token_id;
   el.style.cssText   = `transform:translate(${tok.col * CELL_PX}px,${tok.row * CELL_PX}px);width:${CELL_PX}px;`;
@@ -696,7 +711,7 @@ function renderTokens(tokens) {
         fill.style.width      = `${tok.hp_pct}%`;
         fill.style.background = hpColor(tok.hp_pct);
       }
-      el.className = 'map-token' + (tok.is_alive ? '' : ' token-dead');
+      el.className = 'map-token tok-' + tok.entity_type + (tok.is_alive ? '' : ' token-dead');
     }
   }
 
@@ -849,11 +864,12 @@ document.addEventListener('visibilitychange', () => {
 
 const effectsSvg  = document.getElementById('effects-layer');
 const fxOverlay   = document.getElementById('fx-draw-overlay');
-let currentEffects = {};   // effect_id → data
-let activeFxDrag   = null; // { effectId, g, origX, origY, startCX, startCY }
-let fxSelectedId   = null;
-let fxDrawing      = null; // active preview: { startX, startY, angle, size_ft, previewG }
-let fxDrawMode     = false;
+let currentEffects  = {};   // effect_id → data
+let activeFxDrag    = null; // { effectId, g, origX, origY, startCX, startCY }
+let fxSelectedId    = null;
+let fxDeleteHandle  = null; // SVG <g> for the inline delete button
+let fxDrawing       = null; // active preview: { startX, startY, angle, size_ft, previewG }
+let fxDrawMode      = false;
 
 // Panel state
 let fxShape       = 'circle';
@@ -945,6 +961,40 @@ function applyEffectGeometry(g, eff) {
   }
 }
 
+// ── Inline delete handle ──────────────────────────────────────────────────────
+
+function _removeFxHandle() {
+  if (fxDeleteHandle) { fxDeleteHandle.remove(); fxDeleteHandle = null; }
+}
+
+function _showFxHandle(eff) {
+  _removeFxHandle();
+  const px = eff.anchor_x * CELL_PX;
+  const py = eff.anchor_y * CELL_PX;
+
+  const g = svgEl('g');
+  g.style.cursor = 'pointer';
+  g.style.pointerEvents = 'all';
+
+  const bg = svgEl('circle', { cx: px, cy: py - 12, r: '10',
+    fill: '#dc3545', stroke: '#fff', 'stroke-width': '1.5' });
+  const txt = svgEl('text', {
+    x: px, y: py - 12,
+    'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    fill: 'white', 'font-size': '13', 'font-weight': 'bold',
+    'pointer-events': 'none',
+  });
+  txt.textContent = '×';
+
+  g.appendChild(bg);
+  g.appendChild(txt);
+  g.addEventListener('pointerdown', e => e.stopPropagation());
+  g.addEventListener('click', e => { e.stopPropagation(); deleteFxSelected(); });
+
+  effectsSvg.appendChild(g);
+  fxDeleteHandle = g;
+}
+
 // ── Effect drag (move existing) ───────────────────────────────────────────────
 
 function attachFxDrag(g, effectId) {
@@ -955,6 +1005,7 @@ function attachFxDrag(g, effectId) {
     g.setPointerCapture(e.pointerId);
     const eff = currentEffects[effectId];
     if (!eff) return;
+    _removeFxHandle();
     activeFxDrag = {
       effectId, g,
       origX: eff.anchor_x, origY: eff.anchor_y,
@@ -984,6 +1035,7 @@ function attachFxDrag(g, effectId) {
     applyEffectGeometry(g, currentEffects[effectId]);
     activeFxDrag = null;
     g.style.cursor = 'grab';
+    if (fxSelectedId === effectId) _showFxHandle(currentEffects[effectId]);
     fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${effectId}/update`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ anchor_x: newX, anchor_y: newY }),
@@ -1134,6 +1186,7 @@ function closeFxPanel() {
   const btn = document.getElementById('fx-toggle-btn');
   if (btn) { btn.classList.remove('btn-ttrpg'); btn.classList.add('btn-outline-secondary'); }
   if (fxDrawMode) { fxDrawMode = false; _applyDrawMode(); }
+  _removeFxHandle();
   fxSelectedId = null;
   const sel = document.getElementById('fx-selected');
   if (sel) sel.style.display = 'none';
@@ -1194,12 +1247,14 @@ function selectEffect(effectId) {
   }
   const panel = document.getElementById('fx-panel');
   if (panel && panel.style.display === 'none') toggleFxPanel();
+  if (eff) _showFxHandle(eff);
 }
 
 function deleteFxSelected() {
   if (!fxSelectedId) return;
   const id = fxSelectedId;
   fxSelectedId = null;
+  _removeFxHandle();
   const sel = document.getElementById('fx-selected');
   if (sel) sel.style.display = 'none';
   fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${id}/delete`, { method: 'POST' })

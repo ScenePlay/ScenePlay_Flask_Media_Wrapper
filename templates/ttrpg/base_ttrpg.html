@@ -2,16 +2,13 @@
 <html>
 <head>
     <title>ScenePlay — TTRPG</title>
+    <!-- themes.css first — defines --sp-* and --ttrpg-* aliases for all themes -->
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/themes.css') }}">
+    <!-- theme.js sets data-theme immediately (no FOUC) and builds the swatch picker -->
+    <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
     <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
     <style>
-        :root {
-            --ttrpg-primary: {{ campaign_theme.primary | default('#5c3d2e') }};
-            --ttrpg-accent:  {{ campaign_theme.accent  | default('#c9a84c') }};
-            --ttrpg-bg:      {{ campaign_theme.bg      | default('#1a1a2e') }};
-            --ttrpg-surface: {{ campaign_theme.surface | default('#16213e') }};
-            --ttrpg-text:    {{ campaign_theme.text    | default('#e0e0e0') }};
-        }
         body {
             background-color: var(--ttrpg-bg);
             color: var(--ttrpg-text);
@@ -31,13 +28,13 @@
         }
         .btn-ttrpg {
             background-color: var(--ttrpg-accent);
-            color: #1a1a2e;
+            color: var(--sp-on-accent);
             font-weight: bold;
         }
         .btn-ttrpg:hover {
-            background-color: #228B22;
-            border-color: #228B22;
-            color: #ffffff;
+            background-color: var(--sp-hover-bg);
+            border-color: var(--sp-hover-bg);
+            color: var(--sp-hover-text);
         }
         .hp-bar { height: 18px; border-radius: 4px; }
         .condition-badge {
@@ -51,30 +48,26 @@
             margin: 2px;
         }
 
-        /* ── Dark-theme Bootstrap overrides ─────────────────────────── */
+        /* ── Dark-theme Bootstrap overrides ──────────────────────────────── */
 
-        /* text-muted: more readable on dark surfaces */
-        .text-muted { color: rgba(224,224,224,.55) !important; }
+        .text-muted { color: var(--sp-muted) !important; }
 
-        /* Form controls — force dark bg + accent focus ring */
         .form-control,
         .form-select {
-            background-color: #1e2d4a !important;
+            background-color: var(--sp-input-bg) !important;
             color: var(--ttrpg-text) !important;
-            border-color: #3a4a6a !important;
+            border-color: var(--sp-border) !important;
         }
         .form-control:focus,
         .form-select:focus {
-            background-color: #1e2d4a !important;
+            background-color: var(--sp-input-bg) !important;
             color: var(--ttrpg-text) !important;
             border-color: var(--ttrpg-accent) !important;
-            box-shadow: 0 0 0 .2rem rgba(201,168,76,.25) !important;
+            box-shadow: 0 0 0 .2rem var(--sp-accent-glow) !important;
         }
-        .form-control::placeholder { color: rgba(224,224,224,.35); }
-        /* <option> elements inside dark selects */
-        .form-select option { background-color: #1a1a2e; color: #e0e0e0; }
+        .form-control::placeholder { color: var(--sp-muted); }
+        .form-select option { background-color: var(--sp-input-bg); color: var(--sp-text); }
 
-        /* btn-outline-secondary — visible on dark bg, clear hover */
         .btn-outline-secondary {
             color: #b8b8cc !important;
             border-color: #555570 !important;
@@ -83,12 +76,11 @@
         .btn-outline-secondary:focus,
         .btn-outline-secondary:active,
         .btn-outline-secondary.active {
-            background-color: #228B22 !important;
-            border-color: #228B22 !important;
-            color: #ffffff !important;
+            background-color: var(--sp-hover-bg) !important;
+            border-color: var(--sp-hover-bg) !important;
+            color: var(--sp-hover-text) !important;
         }
 
-        /* All outline button hovers — forest green */
         .btn-outline-danger:hover,
         .btn-outline-danger:focus,
         .btn-outline-success:hover,
@@ -99,12 +91,11 @@
         .btn-outline-primary:focus,
         .btn-outline-info:hover,
         .btn-outline-info:focus {
-            background-color: #228B22 !important;
-            border-color: #228B22 !important;
-            color: #ffffff !important;
+            background-color: var(--sp-hover-bg) !important;
+            border-color: var(--sp-hover-bg) !important;
+            color: var(--sp-hover-text) !important;
         }
 
-        /* Nav tabs — dark active / hover states */
         .nav-tabs { border-bottom-color: #333 !important; }
         .nav-tabs .nav-link {
             color: var(--ttrpg-accent) !important;
@@ -112,8 +103,10 @@
             background: transparent;
         }
         .nav-tabs .nav-link:hover {
-            background: rgba(201,168,76,.1) !important;
-            border-color: rgba(201,168,76,.3) rgba(201,168,76,.3) transparent !important;
+            background: color-mix(in srgb, var(--sp-accent) 12%, transparent) !important;
+            border-color: color-mix(in srgb, var(--sp-accent) 35%, transparent)
+                          color-mix(in srgb, var(--sp-accent) 35%, transparent)
+                          transparent !important;
         }
         .nav-tabs .nav-link.active {
             background-color: var(--ttrpg-surface) !important;
@@ -121,25 +114,21 @@
             border-color: var(--ttrpg-accent) var(--ttrpg-accent) var(--ttrpg-surface) !important;
         }
 
-        /* Flash messages — theme-matched warning */
         .alert-warning {
-            background-color: rgba(201,168,76,.12) !important;
+            background-color: var(--sp-accent-glow) !important;
             border-color: var(--ttrpg-accent) !important;
             color: var(--ttrpg-text) !important;
         }
         .alert-warning .btn-close { filter: invert(1) opacity(.7); }
 
-        /* Progress bar track */
-        .progress { background-color: #252535 !important; }
+        .progress { background-color: var(--sp-surface) !important; }
 
-        /* details/summary */
         details > summary { color: var(--ttrpg-text); cursor: pointer; }
         details > summary::-webkit-details-marker { color: var(--ttrpg-accent); }
 
-        /* Checkboxes */
         .form-check-input {
-            background-color: #1e2d4a;
-            border-color: #555570;
+            background-color: var(--sp-input-bg);
+            border-color: var(--sp-border);
         }
         .form-check-input:checked {
             background-color: var(--ttrpg-accent);
@@ -147,9 +136,44 @@
         }
         .form-check-label { color: var(--ttrpg-text); }
 
-        /* Navbar toggler icon visible on dark nav */
         .navbar-toggler { border-color: var(--ttrpg-accent); }
         .navbar-toggler-icon { filter: invert(1); }
+
+        /* ── Themed table (replaces table-dark everywhere) ─────────── */
+        .ttrpg-table {
+            background: var(--sp-surface);
+            color: var(--sp-text);
+        }
+        .ttrpg-table thead th {
+            background: var(--sp-primary) !important;
+            color: var(--sp-accent) !important;
+            border-color: var(--sp-border) !important;
+        }
+        .ttrpg-table td,
+        .ttrpg-table th {
+            border-color: var(--sp-border) !important;
+            color: var(--sp-text) !important;
+            background-color: transparent;
+        }
+        .ttrpg-table tbody tr:hover td {
+            background: color-mix(in srgb, var(--sp-accent) 8%, transparent) !important;
+        }
+
+        /* ── Theme picker panel ─────────────────────────────────────────── */
+        #sp-theme-panel {
+            background: var(--ttrpg-surface);
+            border: 1px solid var(--ttrpg-accent);
+            border-radius: 8px;
+            box-shadow: 0 4px 24px rgba(0,0,0,.8);
+        }
+        #sp-theme-panel .sp-panel-title {
+            font-size: .72rem;
+            font-weight: bold;
+            letter-spacing: .08em;
+            color: var(--ttrpg-accent);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -168,6 +192,11 @@
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.characters') }}">Characters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.sessions_list') }}">Sessions</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.all_maps') }}">Maps</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.feats_library') }}">Feats</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.weapons_library') }}">Weapons</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.armor_library') }}">Armor</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881;</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>
                     {% else %}
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.my_character') }}">My Character</a></li>
@@ -175,16 +204,33 @@
                     {% endif %}
                 {% endif %}
             </ul>
-            <ul class="navbar-nav ms-auto">
+            <ul class="navbar-nav ms-auto align-items-center">
                 {% if current_user.is_authenticated %}
                     <li class="nav-item">
-                        <span class="nav-link" style="color: var(--ttrpg-accent);">
+                        <span class="nav-link" style="color:var(--ttrpg-accent);">
                             {{ current_user.display_name }}
-                            {% if current_user.is_dm() %}<span class="badge" style="background:var(--ttrpg-accent);color:#1a1a2e;">DM</span>{% endif %}
+                            {% if current_user.is_dm() %}<span class="badge" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);">DM</span>{% endif %}
                         </span>
                     </li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a></li>
                 {% endif %}
+
+                <!-- Theme picker -->
+                <li class="nav-item" style="position:relative;">
+                    <button id="sp-theme-btn" onclick="spTogglePicker()"
+                            class="btn nav-link" title="Color theme"
+                            style="background:none;border:none;cursor:pointer;
+                                   font-size:1.15rem;color:var(--ttrpg-accent);padding:.35rem .5rem;">
+                        &#9670;
+                    </button>
+                    <div id="sp-theme-panel"
+                         style="display:none;position:absolute;right:0;top:calc(100% + 4px);
+                                z-index:9999;padding:14px;width:226px;">
+                        <div class="sp-panel-title">Color Theme</div>
+                        <div id="sp-swatches"
+                             style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;"></div>
+                    </div>
+                </li>
             </ul>
         </div>
     </div>

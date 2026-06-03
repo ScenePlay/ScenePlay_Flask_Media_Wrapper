@@ -27,6 +27,15 @@
       <input type="hidden" name="status" value="ended">
       <button class="btn btn-warning btn-sm text-dark">&#9632; End Session</button>
     </form>
+    {% elif sess.status == 'ended' %}
+    <form method="POST" action="{{ url_for('ttrpg.session_status', session_id=sess.session_id) }}">
+      <input type="hidden" name="status" value="planning">
+      <button class="btn btn-outline-secondary btn-sm">&#8617; Reopen as Planning</button>
+    </form>
+    <form method="POST" action="{{ url_for('ttrpg.session_status', session_id=sess.session_id) }}">
+      <input type="hidden" name="status" value="active">
+      <button class="btn btn-success btn-sm">&#9654; Reactivate</button>
+    </form>
     {% endif %}
     <form method="POST" action="{{ url_for('ttrpg.session_delete', session_id=sess.session_id) }}"
           onsubmit="return confirm('Delete this session?')">
@@ -38,6 +47,10 @@
 {% if sess.status == 'active' %}
 <div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #28a745;color:#28a745;">
   &#9654; Session is live
+</div>
+{% elif sess.status == 'ended' %}
+<div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #555;color:#888;">
+  &#9632; Session ended — reopen to resume or access maps
 </div>
 {% endif %}
 

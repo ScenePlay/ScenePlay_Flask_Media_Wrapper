@@ -8,7 +8,7 @@
 
 {% if characters %}
 <div class="ttrpg-card p-0">
-  <table class="table table-dark table-hover mb-0">
+  <table class="table table-hover mb-0 ttrpg-table">
     <thead>
       <tr>
         <th>Name</th><th>Class</th><th>Race</th><th>Lv</th>
@@ -34,7 +34,7 @@
         <td>
           <div style="min-width:80px;">
             <div class="small">{{ char.hp_current }}/{{ char.hp_max }}</div>
-            <div class="progress" style="height:5px;background:#333;">
+            <div class="progress" style="height:5px;background:var(--sp-border);">
               <div class="progress-bar"
                    style="width:{{ char.hp_pct() }}%;
                           background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">

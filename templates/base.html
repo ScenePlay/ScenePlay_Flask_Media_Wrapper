@@ -2,124 +2,126 @@
 <html>
     <head>
         <title>ScenePlay</title>
-        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/style.css') }}">
-        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/mermaid.min.css') }}">        
-        <!-- <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet" /> -->
-        <!-- <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous"> -->
-        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
-        
-        <script src="{{url_for('static', filename='scripts/site.js')}}"></script>
-        <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script> -->
-        <script src="{{url_for('static', filename='scripts/bootstrap.bundle.min.js')}}"></script> 
-        <!-- <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script> -->
-         <script src="{{url_for('static', filename='scripts/bootstrap.bundle.min.js.map')}}"></script> 
+        <!-- themes.css first so :root vars are available to everything that follows -->
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/themes.css') }}">
+        <!-- theme.js immediately sets data-theme from localStorage — no FOUC -->
+        <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/mermaid.min.css') }}">
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
 
-        <script src="{{url_for('static', filename='scripts/gridjs.umd.js')}}"></script> 
-        <script src="{{url_for('static', filename='scripts/w3color.js')}}"></script>
-  
-        
-        <style>
-            body {
-              font-family: Sans-Serif;
-            }
-            table, th, td {
-            border: 2px solid black;
-            }
-        </style>
-                  
+        <script src="{{ url_for('static', filename='scripts/site.js') }}"></script>
+        <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='scripts/gridjs.umd.js') }}"></script>
+        <script src="{{ url_for('static', filename='scripts/w3color.js') }}"></script>
     </head>
     <body>
-        <nav class="navbar navbar-expand-sm">
+        <nav class="navbar navbar-expand-sm sp-nav">
             <div class="container-fluid">
-              <a class="navbar-brand" href="{{url_for('main.home')}}">ScenePlay</a>
-              <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+              <a class="navbar-brand" href="{{ url_for('main.home') }}">ScenePlay</a>
+              <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#navbarSupportedContent"
+                      aria-controls="navbarSupportedContent" aria-expanded="false">
                 <span class="navbar-toggler-icon"></span>
               </button>
               <div class="collapse navbar-collapse" id="navbarSupportedContent">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                   <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                      Tables
-                    </a>
+                    <a class="nav-link dropdown-toggle" href="#" role="button"
+                       data-bs-toggle="dropdown" aria-expanded="false">Tables</a>
                     <ul class="dropdown-menu">
-                      <li><a class="dropdown-item" href="{{url_for('sn.edittbl')}}">Scenes</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('sp.edittbl')}}">Scene RPiLED</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('wl.edittbl')}}">Scene WLED</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('ms.edittbl')}}">Scene Music</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('vs.edittbl')}}">Scene Video</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('sn.edittbl') }}">Scenes</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('sp.edittbl') }}">Scene RPiLED</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('wl.edittbl') }}">Scene WLED</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('ms.edittbl') }}">Scene Music</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('vs.edittbl') }}">Scene Video</a></li>
                       <li><hr class="dropdown-divider"></li>
-                      <li><a class="dropdown-item" href="{{url_for('mu.edittbl')}}">Music Media</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('vm.edittbl')}}">Video Media</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('mu.edittbl') }}">Music Media</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('vm.edittbl') }}">Video Media</a></li>
                       <li><hr class="dropdown-divider"></li>
-                      <li><a class="dropdown-item" href="{{url_for('cp.edittbl')}}">Campaigns</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('ltm.edittbl')}}">LED Type Model</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('lcf.edittbl')}}">LED Config</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('ip.edittbl')}}">Servers</a></li>
-                      <li><a class="dropdown-item" href="{{url_for('cs.edittbl')}}">Cron Schedules</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('cp.edittbl') }}">Campaigns</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('ltm.edittbl') }}">LED Type Model</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('lcf.edittbl') }}">LED Config</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('ip.edittbl') }}">Servers</a></li>
+                      <li><a class="dropdown-item" href="{{ url_for('cs.edittbl') }}">Cron Schedules</a></li>
                     </ul>
                   </li>
                   <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('ut.main')}}">Utilities</a>
+                    <a class="nav-link" href="{{ url_for('ut.main') }}">Utilities</a>
                   </li>
                   <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('ttrpg.dashboard')}}">&#9876; TTRPG</a>
+                    <a class="nav-link" href="{{ url_for('ttrpg.dashboard') }}">&#9876; TTRPG</a>
+                  </li>
+                </ul>
+
+                <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-center">
+                  <!-- Theme picker -->
+                  <li class="nav-item" style="position:relative;">
+                    <button id="sp-theme-btn" onclick="spTogglePicker()"
+                            class="btn nav-link" title="Color theme"
+                            style="background:none;border:none;cursor:pointer;
+                                   font-size:1.15rem;color:var(--sp-accent);padding:.35rem .5rem;">
+                      &#9670;
+                    </button>
+                    <div id="sp-theme-panel"
+                         style="display:none;position:absolute;right:0;top:calc(100% + 4px);
+                                z-index:9999;padding:14px;width:226px;">
+                      <div class="sp-panel-title">Color Theme</div>
+                      <div id="sp-swatches"
+                           style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;"></div>
+                    </div>
                   </li>
                 </ul>
               </div>
             </div>
-          </nav>
-          <div id="container">
-          <div id ="content">
-            <table>
+        </nav>
+
+        <div id="container">
+          <div id="content">
+            <table style="width:100%;border:none;">
               <tr>
-                <td>
-                    <h2 id="volume">Master Volume: {{ volume }}</h2>
-                    <input  style="width:500px; margin:0 auto;" type="range" min="0" max="100" id="volume_slider" value="{{ volume }}" onchange="volumeChange()">
-                </td>  
-                <td>
+                <td style="border:none;">
+                    <h2 id="volume" style="font-size:1rem;line-height:1.5;color:var(--sp-accent);">
+                      Master Volume: {{ volume }}
+                    </h2>
+                    <input style="width:500px;margin:0 auto;accent-color:var(--sp-accent);"
+                           type="range" min="0" max="100" id="volume_slider"
+                           value="{{ volume }}" onchange="volumeChange()">
                 </td>
-                  <td style="vertical-align: middle;">
-                    <input type="button" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
-                  <br>
-                  <br>
-                    <input type="button" onclick="videoSeek(-30)" class="btn btn-secondary" value="<" style="display: inline;">
-                    <input type="button" id="playPauseButton" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display: inline;">
-                    <input type="button" onclick="videoSeek(30)" class="btn btn-secondary" value=">" style="display: inline;">
-                    <input type="button" onclick="nextVideo()" class="btn btn-primary" value="Next">
-                  </td>
-                    <td>
-                      <table >
-                        <tr>
-                          <td  id="songQueueCount">Songs: {{songQueueCount or items[0][1]}}</td>
-                        </tr>
-                        <tr>
-                          <td <br> <br> </td>
-                        </tr> 
-                        <tr>
-                          <td id="videoQueueCount">Video: {{videoQueueCount or items[1][1]}}</td>
-                        </tr>
-                        <script>
-                          setInterval(songAndVideoCount, 5000);
-                        </script>
-                      </table> 
-                    </td> 
-                    <td>
-                      <input type="submit" onclick="killQueue()"  class="btn btn-danger mt-2" value="All Stop" >
-                      <br><br>
-                      <label style="font-size:0.8em;">Music Ignore Stop</label><br>
-                      <button id="keepMusicBtn" type="button"
-                          class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }} mt-1"
-                          onclick="toggleKeepMusic()">
-                          {{ 'ON' if keep_music else 'OFF' }}
-                      </button>
-                    </td>
+                <td style="border:none;"></td>
+                <td style="vertical-align:middle;border:none;">
+                  <input type="button" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
+                  <br><br>
+                  <input type="button" onclick="videoSeek(-30)"  class="btn btn-secondary" value="&lt;" style="display:inline;">
+                  <input type="button" id="playPauseButton" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display:inline;">
+                  <input type="button" onclick="videoSeek(30)"   class="btn btn-secondary" value="&gt;" style="display:inline;">
+                  <input type="button" onclick="nextVideo()"     class="btn btn-primary"   value="Next">
+                </td>
+                <td style="border:none;">
+                  <table style="border:none;">
+                    <tr><td style="border:none;color:var(--sp-text);" id="songQueueCount">Songs: {{ songQueueCount or items[0][1] }}</td></tr>
+                    <tr><td style="border:none;">&nbsp;</td></tr>
+                    <tr><td style="border:none;color:var(--sp-text);" id="videoQueueCount">Video: {{ videoQueueCount or items[1][1] }}</td></tr>
+                    <script>setInterval(songAndVideoCount, 5000);</script>
+                  </table>
+                </td>
+                <td style="border:none;">
+                  <input type="submit" onclick="killQueue()" class="btn btn-danger mt-2" value="All Stop">
+                  <br><br>
+                  <label style="font-size:.8em;color:var(--sp-muted);">Music Ignore Stop</label><br>
+                  <button id="keepMusicBtn" type="button"
+                      class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }} mt-1"
+                      onclick="toggleKeepMusic()">
+                      {{ 'ON' if keep_music else 'OFF' }}
+                  </button>
                 </td>
               </tr>
             </table>
           </div>
-          </div>
-        {% block content %}
-        {% endblock %}
+        </div>
+
+        {% block content %}{% endblock %}
+
         <script>
         async function toggleKeepMusic() {
             const response = await fetch('/api/keepmusicplaying', { method: 'POST' });

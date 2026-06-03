@@ -1,0 +1,161 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .api-option {
+    border: 2px solid var(--sp-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .api-option:hover { border-color: var(--ttrpg-accent); }
+  .api-option.selected {
+    border-color: var(--ttrpg-accent);
+    background: color-mix(in srgb, var(--sp-accent) 8%, transparent);
+  }
+  .api-option input[type=radio] { display: none; }
+  .stat-pill {
+    font-size: .72rem; padding: 2px 7px; border-radius: 10px;
+    background: color-mix(in srgb, var(--sp-primary) 20%, transparent);
+    border: 1px solid var(--sp-border);
+    color: var(--ttrpg-accent);
+  }
+  #test-result { font-size: .8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 style="color:var(--ttrpg-accent);" class="mb-0">&#9881; D&amp;D API Settings</h3>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('reference_bp.feats_library') }}" class="btn btn-sm btn-outline-secondary">Feats</a>
+    <a href="{{ url_for('reference_bp.weapons_library') }}" class="btn btn-sm btn-outline-secondary">Weapons</a>
+    <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">Monsters</a>
+  </div>
+</div>
+
+<!-- Current status -->
+<div class="ttrpg-card p-3 mb-4">
+  <div class="d-flex align-items-center gap-3 flex-wrap">
+    <div>
+      <div class="small text-muted mb-1">Currently active API</div>
+      <code style="color:var(--ttrpg-accent);font-size:.9rem;">{{ current }}</code>
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <button class="btn btn-outline-secondary btn-sm" onclick="testApi('{{ current }}')">
+        &#10003; Test Connection
+      </button>
+      <span id="test-result" class="text-muted"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Settings form -->
+<form method="POST" action="{{ url_for('reference_bp.api_settings') }}" id="settings-form">
+  <div class="row g-3 mb-4">
+
+    {% for url, info in api_options.items() %}
+    <div class="col-md-6">
+      <label class="api-option d-block {% if current == url %}selected{% endif %}"
+             onclick="selectOption(this, '{{ url }}')">
+        <input type="radio" name="api_choice" value="{{ url }}"
+               {% if current == url %}checked{% endif %}>
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <span class="fw-bold" style="color:var(--ttrpg-accent);">{{ info.label }}</span>
+          {% if current == url %}
+          <span class="badge" style="background:var(--sp-primary);color:var(--sp-accent);font-size:.65rem;">Active</span>
+          {% endif %}
+        </div>
+        <code class="small text-muted d-block mb-2">{{ url }}</code>
+        <div class="d-flex gap-2 flex-wrap mb-2">
+          <span class="stat-pill">&#9881; {{ info.monsters }} monsters</span>
+          <span class="stat-pill">&#10022; {{ info.feats }} feats</span>
+          <span class="stat-pill">&#9876; {{ info.weapons }} weapons</span>
+        </div>
+        <div class="small text-muted">{{ info.note }}</div>
+      </label>
+    </div>
+    {% endfor %}
+
+    <!-- Custom URL option -->
+    <div class="col-md-6">
+      <label class="api-option d-block {% if current not in api_options %}selected{% endif %}"
+             onclick="selectOption(this, 'custom')">
+        <input type="radio" name="api_choice" value="custom"
+               {% if current not in api_options %}checked{% endif %}>
+        <div class="fw-bold mb-2" style="color:var(--ttrpg-accent);">Custom URL</div>
+        <input type="text" name="custom_url" id="custom-url-input"
+               class="form-control form-control-sm mb-2"
+               value="{{ current if current not in api_options else '' }}"
+               placeholder="https://…/api/…"
+               onclick="event.stopPropagation(); selectOption(this.closest('.api-option'), 'custom')">
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm"
+                  onclick="event.stopPropagation(); testApi(document.getElementById('custom-url-input').value)">
+            Test
+          </button>
+          <span id="custom-test-result" class="small text-muted"></span>
+        </div>
+      </label>
+    </div>
+
+  </div>
+
+  <div class="d-flex gap-3 align-items-center">
+    <button type="submit" class="btn btn-ttrpg">Save Settings</button>
+    <div class="small text-muted">
+      &#9888; Changing the API does not automatically re-sync existing libraries.
+      Visit each library page and click <strong>Sync SRD</strong> after saving.
+    </div>
+  </div>
+</form>
+
+<!-- Endpoint explorer -->
+<div class="ttrpg-card p-3 mt-4">
+  <h6 style="color:var(--ttrpg-accent);" class="mb-3">Endpoint Explorer</h6>
+  <div class="d-flex gap-2 mb-2">
+    <input type="text" id="explore-url" class="form-control form-control-sm"
+           value="{{ current }}" placeholder="API base URL">
+    <button class="btn btn-outline-secondary btn-sm flex-shrink-0"
+            onclick="testApi(document.getElementById('explore-url').value, 'explore-result')">
+      Fetch
+    </button>
+  </div>
+  <div id="explore-result" class="small text-muted"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function selectOption(el, value) {
+  document.querySelectorAll('.api-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  const radios = document.querySelectorAll('[name=api_choice]');
+  radios.forEach(r => { r.checked = r.value === value; });
+}
+
+function testApi(url, resultId) {
+  if (!url) return;
+  const resultEl = document.getElementById(resultId || 'test-result');
+  resultEl.textContent = 'Testing…';
+  resultEl.style.color = 'var(--sp-muted)';
+  fetch(`{{ url_for('reference_bp.api_test') }}?url=${encodeURIComponent(url)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        resultEl.textContent = '✓ Connected — endpoints: ' + data.endpoints.join(', ') + '…';
+        resultEl.style.color = 'var(--ttrpg-accent)';
+      } else {
+        resultEl.textContent = '✗ ' + data.error;
+        resultEl.style.color = '#dc3545';
+      }
+    })
+    .catch(() => {
+      resultEl.textContent = '✗ Request failed';
+      resultEl.style.color = '#dc3545';
+    });
+}
+</script>
+{% endblock %}

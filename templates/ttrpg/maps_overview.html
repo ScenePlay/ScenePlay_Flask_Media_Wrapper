@@ -1,0 +1,86 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 style="color:var(--ttrpg-accent);" class="mb-0">&#9776; Battle Maps</h3>
+</div>
+
+{% if sessions %}
+{% for sess in sessions %}
+<div class="ttrpg-card p-3 mb-3">
+
+  <!-- Session header -->
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+      <span style="color:var(--ttrpg-accent);font-weight:600;">{{ sess.title }}</span>
+      <span class="small text-muted ms-2">Session #{{ sess.session_number }}</span>
+      {% if sess.status == 'active' %}
+      <span class="badge ms-2 bg-success">Active</span>
+      {% elif sess.status == 'planning' %}
+      <span class="badge ms-2 bg-warning text-dark">Planning</span>
+      {% else %}
+      <span class="badge ms-2 bg-secondary">Ended</span>
+      {% endif %}
+    </div>
+    <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
+       class="btn btn-sm btn-outline-secondary">&#9998; Manage Maps</a>
+  </div>
+
+  <!-- Map cards -->
+  <div class="row g-3">
+    {% for m in sess._maps %}
+    <div class="col-sm-6 col-lg-4">
+      <div class="p-2 rounded h-100"
+           style="background:color-mix(in srgb, var(--sp-accent) 6%, transparent);
+                  border:1px solid {% if m.is_active %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
+
+        <!-- Thumbnail -->
+        {% if m.bg_image %}
+        {% set _ext = m.bg_image.rsplit('.', 1)[1].lower() %}
+        {% if _ext in ('mp4', 'webm', 'ogv') %}
+        <video src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
+               style="width:100%;height:90px;object-fit:cover;border-radius:4px;margin-bottom:6px;"
+               muted loop autoplay playsinline></video>
+        {% else %}
+        <img src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
+             style="width:100%;height:90px;object-fit:cover;border-radius:4px;margin-bottom:6px;" alt="">
+        {% endif %}
+        {% else %}
+        <div style="width:100%;height:90px;border-radius:4px;margin-bottom:6px;
+                    background:var(--sp-surface);display:flex;align-items:center;
+                    justify-content:center;font-size:1.8rem;color:var(--sp-muted);">
+          &#9776;
+        </div>
+        {% endif %}
+
+        <div class="d-flex justify-content-between align-items-start gap-1">
+          <div style="min-width:0;">
+            <div style="color:var(--ttrpg-accent);font-weight:600;font-size:.88rem;
+                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              {{ m.name }}
+              {% if m.is_active %}
+              <span class="badge ms-1" style="font-size:.6rem;background:var(--ttrpg-accent);
+                                              color:var(--sp-on-accent);">Live</span>
+              {% endif %}
+            </div>
+            <div class="small text-muted">{{ m.grid_cols }}&times;{{ m.grid_rows }}
+              &bull; {{ m.tokens|length }} token{{ 's' if m.tokens|length != 1 }}</div>
+          </div>
+          <a href="{{ url_for('battlemap_bp.map_view', map_id=m.map_id) }}"
+             class="btn btn-ttrpg btn-sm flex-shrink-0">Open</a>
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+{% endfor %}
+{% else %}
+<div class="ttrpg-card p-4 text-center text-muted">
+  <p>No maps created yet. Open a session and create maps there.</p>
+  <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-ttrpg btn-sm">Go to Sessions</a>
+</div>
+{% endif %}
+{% endblock %}

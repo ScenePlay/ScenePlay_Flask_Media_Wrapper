@@ -59,12 +59,43 @@
             <button class="btn btn-outline-secondary btn-sm">Set Active</button>
           </form>
           {% endif %}
+          <button class="btn btn-outline-secondary btn-sm"
+                  onclick="toggleMapEdit({{ m.map_id }})" title="Edit name / grid">&#9998;</button>
           <form method="POST"
                 action="{{ url_for('battlemap_bp.map_delete', map_id=m.map_id) }}"
                 onsubmit="return confirm('Delete map \'{{ m.name }}\'?')">
             <button class="btn btn-outline-danger btn-sm">&#10005;</button>
           </form>
         </div>
+      </div>
+
+      <!-- Inline edit panel (hidden by default) -->
+      <div id="map-edit-{{ m.map_id }}" style="display:none;">
+        <form method="POST" action="{{ url_for('battlemap_bp.map_edit', map_id=m.map_id) }}">
+          <div class="row g-2 align-items-end mb-2"
+               style="background:var(--sp-bg);border-radius:6px;padding:10px 8px;border:1px solid var(--sp-border);">
+            <div class="col-sm-5">
+              <label class="form-label small text-muted mb-1">Map Name</label>
+              <input type="text" name="name" value="{{ m.name }}"
+                     class="form-control form-control-sm" required>
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label small text-muted mb-1">Cols</label>
+              <input type="number" name="cols" min="5" max="60" value="{{ m.grid_cols }}"
+                     class="form-control form-control-sm">
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label small text-muted mb-1">Rows</label>
+              <input type="number" name="rows" min="5" max="60" value="{{ m.grid_rows }}"
+                     class="form-control form-control-sm">
+            </div>
+            <div class="col-sm-3 d-flex gap-1">
+              <button class="btn btn-ttrpg btn-sm flex-grow-1">Save</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm"
+                      onclick="toggleMapEdit({{ m.map_id }})">Cancel</button>
+            </div>
+          </div>
+        </form>
       </div>
 
       <!-- Background image / video -->
@@ -110,4 +141,13 @@
   <p>No maps yet. Create one above.</p>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleMapEdit(mapId) {
+  const panel = document.getElementById('map-edit-' + mapId);
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+</script>
 {% endblock %}

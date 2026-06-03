@@ -21,6 +21,7 @@ from routes.auth import auth
 from routes.ttrpg import ttrpg
 from routes.monsters import monsters_bp
 from routes.battlemap import battlemap_bp
+from routes.reference import reference_bp
 
 from defaultData import *
 from sql import *
@@ -84,9 +85,6 @@ def inject_keep_music():
     from sql import appsettingGetKeepMusicPlaying
     return {'keep_music': appsettingGetKeepMusicPlaying()}
 
-@app.context_processor
-def inject_ttrpg_theme():
-    return {'campaign_theme': {}}
 
 
 app.register_blueprint(main)
@@ -110,6 +108,7 @@ app.register_blueprint(auth)
 app.register_blueprint(ttrpg)
 app.register_blueprint(monsters_bp)
 app.register_blueprint(battlemap_bp)
+app.register_blueprint(reference_bp)
 
 # Ensure new tables exist (idempotent; does not drop existing tables)
 with app.app_context():

@@ -25,7 +25,7 @@
         <div class="ttrpg-card p-3 h-100">
             <h5 style="color: var(--ttrpg-accent);">Campaigns</h5>
             {% if campaigns %}
-            <table class="table table-dark table-sm table-hover mb-0">
+            <table class="table table-sm table-hover mb-0 ttrpg-table">
                 <thead><tr><th>Name</th><th>Status</th></tr></thead>
                 <tbody>
                     {% for c in campaigns %}
@@ -61,7 +61,7 @@
                 <div class="col-sm-6 col-lg-4">
                     <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
                        class="text-decoration-none">
-                        <div class="ttrpg-card p-2 d-flex align-items-center gap-2" style="border-color: #444;">
+                        <div class="ttrpg-card p-2 d-flex align-items-center gap-2" style="border-color: var(--sp-border);">
                             {% if char.portrait_path %}
                             <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
                                  style="width:40px;height:40px;object-fit:cover;border-radius:50%;" alt="">
@@ -79,7 +79,7 @@
                                     &bull; {{ char.user.display_name }}
                                 </div>
                                 <!-- HP bar -->
-                                <div class="progress mt-1" style="height:6px;background:#333;">
+                                <div class="progress mt-1" style="height:6px;background:var(--sp-border);">
                                     <div class="progress-bar"
                                          style="width:{{ char.hp_pct() }}%;
                                                 background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
@@ -108,7 +108,7 @@
                 <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-sm btn-outline-secondary">All Sessions</a>
             </div>
             {% if sessions %}
-            <table class="table table-dark table-sm table-hover mb-0">
+            <table class="table table-sm table-hover mb-0 ttrpg-table">
                 <thead>
                     <tr>
                         <th>#</th><th>Title</th><th>Campaign</th><th>Date</th><th>Status</th><th></th>

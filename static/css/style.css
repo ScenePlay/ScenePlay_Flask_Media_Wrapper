@@ -1,30 +1,30 @@
-::selection{ background-color: #E13300; color: white; }
-::moz-selection{ background-color: #E13300; color: white; }
-::webkit-selection{ background-color: #E13300; color: white; }
+::selection    { background-color: var(--sp-accent); color: var(--sp-on-accent); }
+::-moz-selection { background-color: var(--sp-accent); color: var(--sp-on-accent); }
 
 body {
-    font-family: "Helvetica Neue",Helvetica,Arial,"Lucida Grande",sans-serif;
-    color: #888;
-    font-style: normal;
+    background-color: var(--sp-bg);
+    color: var(--sp-text);
+    font-family: "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif;
     font-size: 14px;
     line-height: 22px;
 }
 
 a {
-    color: #395ca1;
+    color: var(--sp-link);
     background-color: transparent;
     font-weight: normal;
 }
+a:hover { color: var(--sp-accent); filter: brightness(1.2); }
 
 .title {
     padding: 0 20px;
-    background: #32373a;
+    background: var(--sp-primary);
     position: relative;
     height: 50px;
 }
 
 h1, h2, h3, h4, h5, h6 {
-    color: #fff;
+    color: var(--sp-accent);
     margin: 0;
     font-size: 18px;
     font-weight: 400;
@@ -33,13 +33,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 code {
-    font-family: Consolas, Monaco, Courier New, Courier, monospace;
+    font-family: Consolas, Monaco, "Courier New", Courier, monospace;
     font-size: 12px;
-    background-color: #f9f9f9;
-    border: 1px solid #D0D0D0;
-    color: #002166;
+    background-color: var(--sp-surface);
+    border: 1px solid var(--sp-border);
+    color: var(--sp-accent);
     display: block;
-    padding: 12px 10px 12px 10px;
+    padding: 12px 10px;
 }
 
 #content {
@@ -47,81 +47,287 @@ code {
     zoom: 1;
 }
 
-#body{
-    margin: 0 15px 0 15px;
+#body {
+    margin: 0 15px;
 }
 
-p.footer{
+p.footer {
     text-align: right;
     font-size: 11px;
-    border-top: 1px solid #D0D0D0;
+    border-top: 1px solid var(--sp-border);
     line-height: 32px;
-    padding: 0 10px 0 10px;
-    margin: 20px 0 0 0;
+    padding: 0 10px;
+    margin: 20px 0 0;
+    color: var(--sp-muted);
 }
 
-#container{
+#container {
     margin: 10px;
-    border: 1px solid #D0D0D0;
-    -webkit-box-shadow: 0 0 8px #D0D0D0;
+    border: 1px solid var(--sp-border);
+    box-shadow: 0 0 8px rgba(0,0,0,.5);
+    background-color: var(--sp-surface);
+    border-radius: 6px;
 }
 
 /* Form Styles */
-form label{
-    display: block;
-    margin-bottom: 5px;
-}
-form input[type=text]{
-    border: 1px solid #967c7c;
+form label { display: block; margin-bottom: 5px; }
+
+form input[type=text] {
+    background: var(--sp-input-bg);
+    color: var(--sp-text);
+    border: 1px solid var(--sp-border);
     border-radius: 2px;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,.1);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.2);
     box-sizing: border-box;
     padding: 5px;
     margin-bottom: 20px;
     outline: 0;
-    -webkit-border-radius: 2px;
-    -moz-border-radius: 2px;
-    -webkit-box-shadow: inset 0 1px 2px rgba(0,0,0,.1);
-    -moz-box-shadow: inset 0 1px 2px rgba(0,0,0,.1);
 }
-form input[type=submit]{
-    background: #198ad1;
-    color: #fff;
+
+form input[type=submit] {
+    background: var(--sp-accent);
+    color: var(--sp-on-accent);
     display: inline-block;
     padding: 0 20px;
     font-size: 16px;
     line-height: 2.6em;
-    font-family: "Helvetica Neue",Helvetica,Arial,"Lucida Grande",sans-serif;
+    font-family: "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif;
     font-weight: 400;
-    -webkit-box-shadow: inset 0 -1px 0 rgba(0,0,0,.1);
-    -moz-box-shadow: inset 0 -1px 0 rgba(0,0,0,.1);
-    box-shadow: inset 0 -1px 0 rgba(0,0,0,.1);
-    -webkit-border-radius: 2px;
-    -moz-border-radius: 2px;
     border-radius: 2px;
-    text-transform: capitalize;
     border: 0;
     cursor: pointer;
     text-align: center;
-} 
+    text-transform: capitalize;
+}
+form input[type=submit]:hover {
+    background: var(--sp-hover-bg);
+    color: var(--sp-hover-text);
+}
 
 .flex-container {
     display: flex;
     flex-flow: row wrap;
     justify-content: space-around;
-    background-color: #bedaec;
-  }
-  
-  .flex-container > div {
-    background-color: #bedaec;
+    background-color: var(--sp-surface);
+}
+.flex-container > div {
+    background-color: var(--sp-surface);
     width: 200px;
     margin: 10px;
     text-align: center;
     line-height: 75px;
     font-size: 15px;
-  }
+}
 
-  .fill-cell {
+.fill-cell {
     width: 100%;
     height: 100%;
+}
+
+/* ── Bootstrap dark overrides (main site) ──────────────────────────────── */
+
+.navbar.sp-nav {
+    background-color: var(--sp-primary) !important;
+    border-bottom: 1px solid var(--sp-border);
+}
+.navbar.sp-nav .navbar-brand,
+.navbar.sp-nav .nav-link {
+    color: var(--sp-accent) !important;
+}
+.navbar.sp-nav .nav-link:hover { filter: brightness(1.25); }
+.navbar.sp-nav .navbar-toggler { border-color: var(--sp-accent); }
+.navbar.sp-nav .navbar-toggler-icon { filter: invert(1); }
+.navbar.sp-nav .dropdown-menu {
+    background-color: var(--sp-surface);
+    border-color: var(--sp-border);
+}
+.navbar.sp-nav .dropdown-item {
+    color: var(--sp-text);
+}
+.navbar.sp-nav .dropdown-item:hover {
+    background-color: var(--sp-hover-bg);
+    color: var(--sp-hover-text);
+}
+.navbar.sp-nav .dropdown-divider { border-color: var(--sp-border); }
+
+table { border-color: var(--sp-border) !important; }
+th, td { border-color: var(--sp-border) !important; color: var(--sp-text); }
+
+/* Bootstrap form controls */
+.form-control, .form-select {
+    background-color: var(--sp-input-bg) !important;
+    color: var(--sp-text) !important;
+    border-color: var(--sp-border) !important;
+}
+.form-control:focus, .form-select:focus {
+    background-color: var(--sp-input-bg) !important;
+    color: var(--sp-text) !important;
+    border-color: var(--sp-accent) !important;
+    box-shadow: 0 0 0 .2rem var(--sp-accent-glow) !important;
+}
+.form-control::placeholder { color: var(--sp-muted); }
+.form-select option { background-color: var(--sp-surface); color: var(--sp-text); }
+
+.text-muted { color: var(--sp-muted) !important; }
+
+.btn-primary {
+    background-color: var(--sp-accent) !important;
+    border-color: var(--sp-accent) !important;
+    color: var(--sp-on-accent) !important;
+}
+.btn-primary:hover {
+    background-color: var(--sp-hover-bg) !important;
+    border-color: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+}
+.btn-secondary {
+    background-color: var(--sp-surface) !important;
+    border-color: var(--sp-border) !important;
+    color: var(--sp-text) !important;
+}
+.btn-secondary:hover {
+    background-color: var(--sp-hover-bg) !important;
+    border-color: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+}
+.btn-outline-secondary {
+    color: var(--sp-text) !important;
+    border-color: var(--sp-border) !important;
+}
+.btn-outline-secondary:hover {
+    background-color: var(--sp-hover-bg) !important;
+    border-color: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+}
+
+/* ── GridJS overrides ──────────────────────────────────────────────────── */
+/* mermaid.min.css hardcodes white/grey — override every surface with vars  */
+
+.gridjs-container {
+    color: var(--sp-text) !important;
+    background-color: transparent !important;
+}
+.gridjs-wrapper {
+    border-color: var(--sp-border) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4) !important;
+    border-radius: 8px 8px 0 0 !important;
+    background-color: var(--sp-surface) !important;
+}
+.gridjs-wrapper:nth-last-of-type(2) {
+    border-radius: 8px !important;
+}
+
+/* Header cells */
+th.gridjs-th {
+    background-color: var(--sp-primary) !important;
+    color: var(--sp-accent) !important;
+    border-color: var(--sp-border) !important;
+    font-weight: 600 !important;
+    letter-spacing: .03em !important;
+}
+th.gridjs-th-sort:hover,
+th.gridjs-th-sort:focus {
+    background-color: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+}
+
+/* Data cells */
+.gridjs-tbody,
+td.gridjs-td {
+    background-color: var(--sp-surface) !important;
+    color: var(--sp-text) !important;
+    border-color: var(--sp-border) !important;
+}
+
+/* Alternating row tint */
+.gridjs-tr:nth-child(even) td.gridjs-td {
+    background-color: color-mix(in srgb, var(--sp-surface) 80%, var(--sp-primary) 20%) !important;
+}
+.gridjs-tr:hover td.gridjs-td {
+    background-color: color-mix(in srgb, var(--sp-surface) 60%, var(--sp-accent) 10%) !important;
+    color: var(--sp-text) !important;
+}
+
+/* Selected row */
+.gridjs-tr-selected td {
+    background-color: color-mix(in srgb, var(--sp-surface) 50%, var(--sp-accent) 20%) !important;
+}
+
+/* Footer / pagination */
+.gridjs-footer {
+    background-color: var(--sp-primary) !important;
+    border-color: var(--sp-border) !important;
+    color: var(--sp-text) !important;
+}
+.gridjs-pagination {
+    color: var(--sp-text) !important;
+}
+.gridjs-pagination .gridjs-summary {
+    color: var(--sp-muted) !important;
+}
+.gridjs-pagination .gridjs-pages button {
+    background-color: var(--sp-surface) !important;
+    border-color: var(--sp-border) !important;
+    color: var(--sp-text) !important;
+}
+.gridjs-pagination .gridjs-pages button:hover {
+    background-color: var(--sp-hover-bg) !important;
+    border-color: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+}
+.gridjs-pagination .gridjs-pages button.gridjs-currentPage {
+    background-color: var(--sp-accent) !important;
+    color: var(--sp-on-accent) !important;
+    font-weight: 700 !important;
+}
+.gridjs-pagination .gridjs-pages button:disabled,
+.gridjs-pagination .gridjs-pages button:hover:disabled {
+    background-color: var(--sp-surface) !important;
+    color: var(--sp-muted) !important;
+    border-color: var(--sp-border) !important;
+}
+
+/* Search input */
+input.gridjs-input {
+    background-color: var(--sp-input-bg) !important;
+    color: var(--sp-text) !important;
+    border-color: var(--sp-border) !important;
+}
+input.gridjs-input:focus {
+    border-color: var(--sp-accent) !important;
+    box-shadow: 0 0 0 3px var(--sp-accent-glow) !important;
+}
+input.gridjs-input::placeholder {
+    color: var(--sp-muted) !important;
+}
+
+/* Loading / empty state */
+.gridjs-loading-bar {
+    background-color: var(--sp-surface) !important;
+}
+td.gridjs-message {
+    color: var(--sp-muted) !important;
+}
+
+/* Sort icons — invert them so they're visible on dark headers */
+button.gridjs-sort-neutral,
+button.gridjs-sort-asc,
+button.gridjs-sort-desc {
+    filter: invert(1) opacity(.7) !important;
+}
+
+/* ── Theme picker panel ────────────────────────────────────────────────── */
+#sp-theme-panel {
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-accent);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.8);
+}
+#sp-theme-panel .sp-panel-title {
+    font-size: .72rem;
+    font-weight: bold;
+    letter-spacing: .08em;
+    color: var(--sp-accent);
+    margin-bottom: 12px;
+    text-transform: uppercase;
 }

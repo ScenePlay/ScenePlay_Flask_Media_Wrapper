@@ -38,7 +38,7 @@
             <div class="small text-muted">HP {{ char.hp_current }}/{{ char.hp_max }}</div>
           </div>
         </div>
-        <div class="progress mt-2" style="height:6px;background:#333;">
+        <div class="progress mt-2" style="height:6px;background:var(--sp-border);">
           <div class="progress-bar"
                style="width:{{ char.hp_pct() }}%;
                       background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
@@ -55,7 +55,7 @@
         {% endif %}
 
         {% if char.skills %}
-        <div class="mt-2" style="font-size:.72rem;color:#888;line-height:1.6;">
+        <div class="mt-2" style="font-size:.72rem;color:var(--sp-muted);line-height:1.6;">
           {% for s in char.skills | sort(attribute='order_by') %}
           <span>{% if s.proficient %}&#9733;{% endif %}{{ s.skill_name }} {{ '%+d' % s.bonus }}{% if not loop.last %}&ensp;{% endif %}</span>
           {% endfor %}

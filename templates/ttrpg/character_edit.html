@@ -20,32 +20,32 @@
           <div class="col-sm-6">
             <label class="form-label">Character Name *</label>
             <input type="text" name="name" value="{{ char.name }}"
-                   class="form-control bg-dark text-light border-secondary" required autofocus>
+                   class="form-control" required autofocus>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Class</label>
             <input type="text" name="char_class" value="{{ char.char_class }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-3">
             <label class="form-label">Race</label>
             <input type="text" name="race" value="{{ char.race }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-3">
             <label class="form-label">Level</label>
             <input type="number" name="level" value="{{ char.level }}"
-                   class="form-control bg-dark text-light border-secondary" min="1" max="30">
+                   class="form-control" min="1" max="30">
           </div>
           <div class="col-sm-6">
             <label class="form-label">Background</label>
             <input type="text" name="background" value="{{ char.background }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-3">
             <label class="form-label">Portrait</label>
             <input type="file" name="portrait"
-                   class="form-control bg-dark text-light border-secondary"
+                   class="form-control"
                    accept="image/png,image/jpeg,image/gif,image/webp">
             {% if char.portrait_path %}
             <div class="mt-1">
@@ -63,12 +63,12 @@
           <div class="col-4 col-sm-3">
             <label class="form-label">Current HP</label>
             <input type="number" name="hp_current" value="{{ char.hp_current }}"
-                   class="form-control bg-dark text-light border-secondary" min="0">
+                   class="form-control" min="0">
           </div>
           <div class="col-4 col-sm-3">
             <label class="form-label">Max HP</label>
             <input type="number" name="hp_max" value="{{ char.hp_max }}"
-                   class="form-control bg-dark text-light border-secondary" min="0">
+                   class="form-control" min="0">
           </div>
         </div>
 
@@ -78,22 +78,22 @@
           <div class="col-4 col-sm-2">
             <label class="form-label">AC</label>
             <input type="number" name="ac" value="{{ char.ac }}"
-                   class="form-control bg-dark text-light border-secondary" min="0">
+                   class="form-control" min="0">
           </div>
           <div class="col-4 col-sm-2">
             <label class="form-label">Speed</label>
             <input type="number" name="speed" value="{{ char.speed }}"
-                   class="form-control bg-dark text-light border-secondary" min="0">
+                   class="form-control" min="0">
           </div>
           <div class="col-4 col-sm-3">
             <label class="form-label">Initiative Bonus</label>
             <input type="number" name="initiative_bonus" value="{{ char.initiative_bonus }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-4 col-sm-3">
             <label class="form-label">Passive Perc.</label>
             <input type="number" name="passive_perception" value="{{ char.passive_perception }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
         </div>
 
@@ -107,7 +107,7 @@
           <div class="col-4 col-sm-2">
             <label class="form-label">{{ label }}</label>
             <input type="number" name="{{ field }}" value="{{ val }}"
-                   class="form-control bg-dark text-light border-secondary text-center"
+                   class="form-control text-center"
                    min="1" max="30">
           </div>
           {% endfor %}
@@ -120,7 +120,7 @@
           <div class="col-4 col-sm-2">
             <label class="form-label">{{ label }}</label>
             <input type="number" name="{{ field }}" value="{{ val }}"
-                   class="form-control bg-dark text-light border-secondary" min="0">
+                   class="form-control" min="0">
           </div>
           {% endfor %}
         </div>
