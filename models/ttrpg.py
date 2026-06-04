@@ -43,6 +43,7 @@ class tblCharacters(db.Model):
     feats       = db.relationship('tblCharacterFeats',       backref='character', cascade='all, delete-orphan', lazy=True)
     armor       = db.relationship('tblCharacterArmor',       backref='character', cascade='all, delete-orphan', lazy=True)
     weapons     = db.relationship('tblCharacterWeapons',     backref='character', cascade='all, delete-orphan', lazy=True)
+    spells      = db.relationship('tblCharacterSpells',      backref='character', cascade='all, delete-orphan', lazy=True)
     user        = db.relationship('tblUsers', backref='characters', lazy=True)
 
     def modifier(self, score):
@@ -350,3 +351,77 @@ class tblBattleMapTokens(db.Model):
     col         = db.Column(db.Integer, default=0)
     row         = db.Column(db.Integer, default=0)
     updated_at  = db.Column(db.Text, nullable=False)
+
+
+class tblSpellsLibrary(db.Model):
+    __tablename__ = 'tblSpellsLibrary'
+    spell_lib_id  = db.Column(db.Integer, primary_key=True)
+    api_index     = db.Column(db.Text, unique=True, nullable=True)
+    name          = db.Column(db.Text, nullable=False)
+    level         = db.Column(db.Integer, default=0)      # 0=cantrip, 1-9
+    school        = db.Column(db.Text, default='')
+    casting_time  = db.Column(db.Text, default='')
+    range_text    = db.Column(db.Text, default='')
+    components    = db.Column(db.Text, default='')        # "V, S, M (a bit of bat fur)"
+    duration      = db.Column(db.Text, default='')
+    concentration = db.Column(db.Integer, default=0)
+    ritual        = db.Column(db.Integer, default=0)
+    description   = db.Column(db.Text, default='')
+    classes_text  = db.Column(db.Text, default='')        # comma-separated class names
+    source        = db.Column(db.Text, default='srd')
+    created_at    = db.Column(db.Text, nullable=False)
+
+
+class tblSkillsLibrary(db.Model):
+    __tablename__ = 'tblSkillsLibrary'
+    skill_lib_id  = db.Column(db.Integer, primary_key=True)
+    api_index     = db.Column(db.Text, unique=True, nullable=True)
+    name          = db.Column(db.Text, nullable=False)
+    ability_score = db.Column(db.Text, default='')        # STR, DEX, CON, INT, WIS, CHA
+    description   = db.Column(db.Text, default='')
+    source        = db.Column(db.Text, default='srd')
+    created_at    = db.Column(db.Text, nullable=False)
+
+
+class tblRacesLibrary(db.Model):
+    __tablename__ = 'tblRacesLibrary'
+    race_lib_id   = db.Column(db.Integer, primary_key=True)
+    api_index     = db.Column(db.Text, unique=True, nullable=True)
+    name          = db.Column(db.Text, nullable=False)
+    speed         = db.Column(db.Integer, default=30)
+    size          = db.Column(db.Text, default='')
+    ability_bonuses = db.Column(db.Text, default='')      # e.g. "+2 STR, +1 CON"
+    traits_text   = db.Column(db.Text, default='')        # newline-separated trait names
+    languages     = db.Column(db.Text, default='')
+    description   = db.Column(db.Text, default='')
+    source        = db.Column(db.Text, default='srd')
+    created_at    = db.Column(db.Text, nullable=False)
+
+
+class tblCharacterSpells(db.Model):
+    __tablename__ = 'tblCharacterSpells'
+    char_spell_id = db.Column(db.Integer, primary_key=True)
+    character_id  = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
+    spell_lib_id  = db.Column(db.Integer, db.ForeignKey('tblSpellsLibrary.spell_lib_id'), nullable=True)
+    spell_name    = db.Column(db.Text, nullable=False)
+    spell_level   = db.Column(db.Integer, default=0)
+    school        = db.Column(db.Text, default='')
+    prepared      = db.Column(db.Integer, default=0)
+    notes         = db.Column(db.Text, default='')
+    order_by      = db.Column(db.Integer, default=0)
+
+    lib_spell = db.relationship('tblSpellsLibrary', foreign_keys=[spell_lib_id], lazy=True)
+
+
+class tblDiceRolls(db.Model):
+    __tablename__ = 'tblDiceRolls'
+    roll_id      = db.Column(db.Integer, primary_key=True)
+    character_id = db.Column(db.Integer, nullable=True)
+    char_name    = db.Column(db.Text, default='')
+    expression   = db.Column(db.Text, default='')   # e.g. "2d6+3"
+    label        = db.Column(db.Text, default='')
+    dice_json    = db.Column(db.Text, default='[]') # JSON list of individual die results
+    modifier     = db.Column(db.Integer, default=0)
+    total        = db.Column(db.Integer, default=0)
+    adv_mode     = db.Column(db.Text, default='normal')  # normal | advantage | disadvantage
+    rolled_at    = db.Column(db.Text, nullable=False)

@@ -7,7 +7,10 @@
       "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \"SELECT count\\(*\\) FROM tblArmorLibrary;\")",
       "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \"SELECT api_index, name FROM tblArmorLibrary LIMIT 5;\")",
       "Bash(wait)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import sqlite3; conn=sqlite3.connect\\('/mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db'\\); print\\([t[0] for t in conn.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\).fetchall\\(\\)]\\)\")",
+      "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \".tables\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

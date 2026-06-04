@@ -178,6 +178,37 @@
     background: none; cursor: pointer;
   }
 
+  /* ── Dice roller panel ──────────────────────────────────────── */
+  #dice-map-panel {
+    display: none;
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 400;
+    width: 268px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: var(--ttrpg-primary);
+    border: 1px solid var(--ttrpg-accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: .82rem;
+    color: var(--ttrpg-text);
+    box-shadow: 0 4px 24px rgba(0,0,0,.7);
+  }
+  .map-dice-btn        { min-width: 32px; padding: 2px 4px; font-size: .78rem; }
+  .map-dice-btn.active { background: var(--ttrpg-accent) !important;
+                         border-color: var(--ttrpg-accent) !important;
+                         color: var(--sp-on-accent) !important; }
+  .map-die-val { display:inline-block;padding:1px 5px;border-radius:4px;
+                 background:color-mix(in srgb,var(--sp-accent) 18%,transparent);
+                 border:1px solid var(--sp-border);margin:1px;font-weight:600;font-size:.85rem; }
+  .map-die-val.nat20   { background:#856404;border-color:#ffc107;color:#fff200; }
+  .map-die-val.nat1    { background:#6b1a1a;border-color:#dc3545;color:#ffaaaa; }
+  .map-die-val.kept    { background:#0d2e0d;border-color:#28a745;color:#7deb7d;font-weight:bold; }
+  .map-feed-entry { font-size:.75rem;padding:4px 0;border-bottom:1px solid #333; }
+  .map-feed-entry .tot { color:var(--ttrpg-accent);font-weight:bold; }
+
   #sidebar-wrap {
     position: relative;
     flex-shrink: 0;
@@ -273,6 +304,8 @@
       <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
          class="btn btn-sm btn-outline-secondary">Maps</a>
       {% endif %}
+      <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleMapDicePanel()" title="Dice Roller">&#127922; Dice</button>
       <a href="{{ url_for('ttrpg.session_detail', session_id=sess.session_id) }}"
          class="btn btn-sm btn-outline-secondary">Session</a>
     </div>
@@ -498,6 +531,69 @@
   </div>
 </div>
 {% endif %}
+
+<!-- ── Dice Roller Panel ─────────────────────────────────────────────────── -->
+<div id="dice-map-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="font-weight:bold;color:var(--ttrpg-accent);">&#127922; Dice Roller</span>
+    <button class="fx-close-btn" onclick="toggleMapDicePanel()">&#10005;</button>
+  </div>
+
+  <!-- Die buttons -->
+  <div class="d-flex flex-wrap gap-1 mb-2">
+    {% for s in [4,6,8,10,12,20,100,2] %}
+    <button class="btn btn-sm btn-outline-secondary map-dice-btn" data-sides="{{ s }}"
+            onclick="mapSelectDie({{ s }})">d{{ s }}</button>
+    {% endfor %}
+  </div>
+
+  <!-- Count + Mode -->
+  <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+    <label class="fx-label mb-0">Count</label>
+    <input type="number" id="map-dice-count" value="1" min="1" max="20"
+           class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+           style="width:52px;">
+    <div class="btn-group btn-group-sm ms-1">
+      <button id="map-adv-normal" class="btn btn-sm btn-outline-secondary"
+              onclick="mapSetAdvMode('normal')">Normal</button>
+      <button id="map-adv-adv"    class="btn btn-sm btn-outline-secondary"
+              onclick="mapSetAdvMode('advantage')">Adv</button>
+      <button id="map-adv-dis"    class="btn btn-sm btn-outline-secondary"
+              onclick="mapSetAdvMode('disadvantage')">Disadv</button>
+    </div>
+  </div>
+
+  <!-- Modifier + Label -->
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <label class="fx-label mb-0">Mod</label>
+    <input type="number" id="map-dice-mod" value="0"
+           class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+           style="width:58px;">
+    <input type="text" id="map-dice-label"
+           class="form-control form-control-sm bg-dark text-light border-secondary"
+           placeholder="Label…" style="flex:1;">
+  </div>
+
+  <!-- Roll button -->
+  <button class="btn btn-sm btn-ttrpg w-100 mb-2" onclick="mapDoRoll()">&#127922; Roll</button>
+
+  <!-- Last result -->
+  <div id="map-dice-result" style="display:none;margin-bottom:8px;">
+    <div id="map-dice-result-inner"
+         style="background:var(--ttrpg-surface);border:1px solid var(--ttrpg-accent);
+                border-radius:6px;padding:7px 10px;font-size:.85rem;"></div>
+  </div>
+
+  <!-- Shared feed -->
+  <hr style="border-color:#333;margin:6px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <span class="fx-label">Roll Feed</span>
+    <button class="fx-close-btn" style="font-size:.7rem;" onclick="clearMapDiceFeed()">&#128465;</button>
+  </div>
+  <div id="map-dice-feed" style="max-height:220px;overflow-y:auto;">
+    <p class="fx-label">No rolls yet.</p>
+  </div>
+</div>
 
 <!-- Token hover tooltip -->
 <div id="tok-tooltip">
@@ -1536,6 +1632,177 @@ function clearAllEffects() {
   if (!confirm('Remove all effects from this map?')) return;
   fetch(`/ttrpg/battlemap/${MAP_ID}/effect/clear`, { method: 'POST' })
     .then(() => pollState());
+}
+
+// ── Map Dice Roller ───────────────────────────────────────────────────────────
+const MAP_ROLLER_NAME = '{{ roller_name | e }}';
+let _mapDiceSel    = 20;
+let _mapAdvMode    = 'normal';
+let _mapLastRollId = 0;
+let _mapDicePoll   = null;
+
+function toggleMapDicePanel() {
+  const p   = document.getElementById('dice-map-panel');
+  const btn = document.getElementById('dice-map-toggle-btn');
+  const open = p.style.display !== 'block';
+  if (open) {
+    p.style.display = 'block';
+    btn.classList.replace('btn-outline-secondary', 'btn-ttrpg');
+    mapSelectDie(20);
+    mapSetAdvMode('normal');
+    mapFetchFeed();
+    _mapDicePoll = setInterval(mapPollFeed, 3500);
+  } else {
+    p.style.display = 'none';
+    btn.classList.replace('btn-ttrpg', 'btn-outline-secondary');
+    clearInterval(_mapDicePoll);
+  }
+}
+
+function mapSelectDie(s) {
+  _mapDiceSel = s;
+  document.querySelectorAll('.map-dice-btn').forEach(b => {
+    const on = parseInt(b.dataset.sides) === s;
+    b.classList.toggle('active', on);
+    if (on) {
+      b.style.setProperty('background',   'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('border-color', 'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('color',        'var(--sp-on-accent)', 'important');
+    } else {
+      b.style.removeProperty('background');
+      b.style.removeProperty('border-color');
+      b.style.removeProperty('color');
+    }
+  });
+  mapSetAdvMode(_mapAdvMode);
+}
+
+function mapSetAdvMode(mode) {
+  _mapAdvMode = mode;
+  const cfg = {
+    'map-adv-normal': { mode: 'normal',       bg: 'var(--ttrpg-accent)', fg: 'var(--sp-on-accent)' },
+    'map-adv-adv':    { mode: 'advantage',    bg: '#28a745',             fg: '#ffffff' },
+    'map-adv-dis':    { mode: 'disadvantage', bg: '#dc3545',             fg: '#ffffff' },
+  };
+  Object.entries(cfg).forEach(([id, c]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = _mapAdvMode === c.mode;
+    el.classList.toggle('active', on);
+    if (on) {
+      el.style.setProperty('background',   c.bg,   'important');
+      el.style.setProperty('border-color', c.bg,   'important');
+      el.style.setProperty('color',        c.fg,   'important');
+      el.style.setProperty('font-weight',  'bold', 'important');
+    } else {
+      el.style.removeProperty('background');
+      el.style.removeProperty('border-color');
+      el.style.removeProperty('color');
+      el.style.removeProperty('font-weight');
+    }
+  });
+}
+
+function _mEsc(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _mapDieHtml(val, sides, mode, idx, ki) {
+  let cls = 'map-die-val';
+  if (sides === 20 && val === 20) cls += ' nat20';
+  else if (sides === 20 && val === 1) cls += ' nat1';
+  if (mode !== 'normal' && idx === ki) cls += ' kept';
+  const tick = (mode !== 'normal' && idx === ki) ? '&#10003;&thinsp;' : '';
+  return `<span class="${cls}">${tick}${val}</span>`;
+}
+
+function mapDoRoll() {
+  const count    = parseInt(document.getElementById('map-dice-count').value) || 1;
+  const modifier = parseInt(document.getElementById('map-dice-mod').value)   || 0;
+  const label    = document.getElementById('map-dice-label').value.trim();
+  fetch('/ttrpg/dice/roll', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      character_id: null, char_name: MAP_ROLLER_NAME,
+      count, sides: _mapDiceSel, modifier, label, adv_mode: _mapAdvMode,
+    })
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    _mapShowResult(d);
+    _mapRenderEntry(d, true);
+    _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
+  });
+}
+
+function _mapAdvLabel(mode) {
+  if (mode === 'advantage')    return '<div style="color:#28a745;font-size:.7rem;font-weight:600;">&#9650; Advantage — keep highest</div>';
+  if (mode === 'disadvantage') return '<div style="color:#fd7e14;font-size:.7rem;font-weight:600;">&#9660; Disadvantage — keep lowest</div>';
+  return '';
+}
+
+function _mapShowResult(d) {
+  const sides = parseInt((d.expression.match(/d(\d+)/) || ['','20'])[1]);
+  let dh = '';
+  if (d.adv_mode !== 'normal') {
+    const ki = d.adv_mode === 'advantage' ? d.dice.indexOf(Math.max(...d.dice)) : d.dice.indexOf(Math.min(...d.dice));
+    dh = d.dice.map((v,i) => _mapDieHtml(v, sides, d.adv_mode, i, ki)).join(' ');
+  } else {
+    dh = d.dice.map(v => _mapDieHtml(v, sides, 'normal', 0, 0)).join(' ');
+  }
+  const mod = d.modifier !== 0 ? ` ${d.modifier > 0 ? '+' : ''}${d.modifier}` : '';
+  const lbl = d.label ? `<div style="color:#aaa;font-size:.7rem;">${_mEsc(d.label)}</div>` : '';
+  document.getElementById('map-dice-result-inner').innerHTML =
+    `${lbl}${_mapAdvLabel(d.adv_mode)}<div>${dh}${mod ? `<span style="color:#aaa;margin-left:3px;">${mod}</span>` : ''} <span style="opacity:.5;">&#8594;</span> <span style="color:var(--ttrpg-accent);font-weight:bold;font-size:1rem;">${d.total}</span></div>`;
+  document.getElementById('map-dice-result').style.display = '';
+}
+
+function _mapRenderEntry(d, prepend) {
+  const sides = parseInt((d.expression.match(/d(\d+)/) || ['','20'])[1]);
+  let dh = '';
+  if (d.adv_mode !== 'normal') {
+    const ki = d.adv_mode === 'advantage' ? d.dice.indexOf(Math.max(...d.dice)) : d.dice.indexOf(Math.min(...d.dice));
+    dh = d.dice.map((v,i) => _mapDieHtml(v, sides, d.adv_mode, i, ki)).join(' ');
+  } else {
+    dh = d.dice.map(v => _mapDieHtml(v, sides, 'normal', 0, 0)).join(' ');
+  }
+  const mod     = d.modifier !== 0 ? ` ${d.modifier >= 0 ? '+' : ''}${d.modifier}` : '';
+  const modeTag = d.adv_mode !== 'normal'
+    ? (d.adv_mode === 'advantage' ? ' <span style="color:#28a745;font-size:.65rem;">&#9650;</span>'
+                                  : ' <span style="color:#fd7e14;font-size:.65rem;">&#9660;</span>') : '';
+  const html = `<div class="map-feed-entry" data-rid="${d.roll_id}">
+    <span style="color:var(--ttrpg-accent);font-weight:600;">${_mEsc(d.char_name)}</span>
+    ${d.label ? `<span style="color:#888;"> — ${_mEsc(d.label)}</span>` : ''}
+    <span style="color:#555;"> ${_mEsc(d.expression)}</span>${modeTag}
+    <div>${dh}${mod ? `<span style="color:#888;">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${d.total}</span></div>
+  </div>`;
+  const feed  = document.getElementById('map-dice-feed');
+  const empty = feed.querySelector('p.fx-label');
+  if (empty) empty.remove();
+  prepend ? feed.insertAdjacentHTML('afterbegin', html) : feed.insertAdjacentHTML('beforeend', html);
+}
+
+function mapFetchFeed() {
+  fetch('/ttrpg/dice/feed').then(r => r.json()).then(rolls => {
+    const feed = document.getElementById('map-dice-feed');
+    feed.innerHTML = '';
+    if (!rolls.length) { feed.innerHTML = '<p class="fx-label">No rolls yet.</p>'; return; }
+    rolls.forEach(d => { _mapRenderEntry(d, false); _mapLastRollId = Math.max(_mapLastRollId, d.roll_id); });
+  });
+}
+
+function mapPollFeed() {
+  fetch(`/ttrpg/dice/feed?since=${_mapLastRollId}`).then(r => r.json()).then(rolls => {
+    rolls.reverse().forEach(d => {
+      if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
+      _mapRenderEntry(d, true);
+      _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
+    });
+  });
+}
+
+function clearMapDiceFeed() {
+  document.getElementById('map-dice-feed').innerHTML = '<p class="fx-label">Feed cleared.</p>';
+  document.getElementById('map-dice-result').style.display = 'none';
 }
 
 startPolling();

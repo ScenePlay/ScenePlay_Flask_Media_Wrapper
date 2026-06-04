@@ -39,6 +39,35 @@
     color: var(--ttrpg-text);
   }
   .feat-tooltip .tooltip-arrow::before { border-bottom-color: var(--ttrpg-accent); }
+  .dice-btn        { min-width:38px; transition: background .15s; }
+  .dice-btn.active { background:var(--ttrpg-accent)!important; color:var(--sp-on-accent)!important;
+                     border-color:var(--ttrpg-accent)!important; }
+  .stat-mod-btn    { min-width:44px; line-height:1.1; padding:2px 4px; }
+  .die-val         { display:inline-block;padding:1px 6px;border-radius:4px;
+                     background:color-mix(in srgb,var(--sp-accent) 18%,transparent);
+                     border:1px solid var(--sp-border);margin:1px;font-weight:600; }
+  .die-val.nat20   { background:#856404;border-color:#ffc107;color:#fff200; }
+  .die-val.nat1    { background:#6b1a1a;border-color:#dc3545;color:#ffaaaa; }
+  .die-val.kept    { outline:2px solid var(--ttrpg-accent); }
+  .die-val.dropped { opacity:.4; text-decoration:line-through; }
+  .feed-entry      { font-size:.78rem;padding:5px 0;border-bottom:1px solid var(--sp-border); }
+  .feed-entry .expr{ color:var(--sp-muted); }
+  .feed-entry .tot { color:var(--ttrpg-accent);font-weight:bold;font-size:.95rem; }
+  .spell-popover .popover { max-width: 300px; }
+  .spell-popover .popover-header {
+    background: var(--ttrpg-primary);
+    color: var(--ttrpg-accent);
+    font-size: .8rem;
+    font-weight: bold;
+    border-bottom-color: var(--ttrpg-accent);
+  }
+  .spell-popover .popover-body {
+    background: var(--ttrpg-surface);
+    color: var(--ttrpg-text);
+    font-size: .78rem;
+    white-space: normal;
+    line-height: 1.4;
+  }
 </style>
 {% endblock %}
 
@@ -84,15 +113,27 @@
             {% endif %}
             <h3 class="mb-0" style="color:var(--ttrpg-accent);">{{ char.name }}</h3>
           </div>
-          {% if can_edit %}
-          <a href="{{ url_for('ttrpg.character_edit', character_id=char.character_id) }}"
-             class="btn btn-sm btn-outline-secondary">&#9998; Edit Sheet</a>
-          {% endif %}
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-secondary" onclick="toggleDicePanel()" title="Dice Roller">&#127922;</button>
+            {% if can_edit %}
+            <a href="{{ url_for('ttrpg.character_edit', character_id=char.character_id) }}"
+               class="btn btn-sm btn-outline-secondary">&#9998; Edit Sheet</a>
+            {% endif %}
+          </div>
         </div>
         <div class="text-muted small mt-1">
           Lv{{ char.level }}
           {{ char.char_class or '' }}
-          {% if char.race %}&bull; {{ char.race }}{% endif %}
+          {% if char.race %}
+          &bull; {{ char.race }}
+          {% set race_info = races_lib.get(char.race.lower()) %}
+          {% if race_info %}
+          <span data-bs-toggle="tooltip" data-bs-placement="bottom"
+                data-bs-custom-class="feat-tooltip"
+                title="{% if race_info.ability_bonuses %}{{ race_info.ability_bonuses }}{% endif %}{% if race_info.traits_text %} &#10; Traits: {{ race_info.traits_text.replace('\n', ', ') }}{% endif %}{% if race_info.speed %} &#10; Speed: {{ race_info.speed }} ft{% endif %}"
+                style="cursor:help;color:var(--ttrpg-accent);margin-left:3px;">&#9432;</span>
+          {% endif %}
+          {% endif %}
           {% if char.background %}&bull; {{ char.background }}{% endif %}
         </div>
         <div class="small text-muted">Player: {{ char.user.display_name }}</div>
@@ -201,6 +242,119 @@
           {% endfor %}
         </div>
         {% endif %}
+
+        {% set prepared_spells = char.spells | selectattr('prepared', 'equalto', 1) | sort(attribute='spell_level') | list %}
+        {% if prepared_spells %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% for cs in prepared_spells %}
+          {% set lib = cs.lib_spell %}
+          {% set lvl_label = 'Cantrip' if cs.spell_level == 0 else cs.spell_level ~ ('st' if cs.spell_level == 1 else ('nd' if cs.spell_level == 2 else ('rd' if cs.spell_level == 3 else 'th'))) ~ ' lvl' %}
+          <span class="spell-chip"
+                data-sname="{{ cs.spell_name | e }}"
+                data-slevel="{{ lvl_label }}"
+                data-sschool="{{ cs.school | e }}"
+                data-scast="{{ (lib.casting_time if lib and lib.casting_time else '') | e }}"
+                data-srange="{{ (lib.range_text if lib and lib.range_text else '') | e }}"
+                data-sdur="{{ (lib.duration if lib and lib.duration else '') | e }}"
+                data-sconc="{{ lib.concentration if lib else 0 }}"
+                data-sritual="{{ lib.ritual if lib else 0 }}"
+                data-scomp="{{ (lib.components if lib and lib.components else '') | e }}"
+                data-sdesc="{{ (lib.description[:280] if lib and lib.description else cs.notes) | e }}"
+                data-sdesc-long="{{ '1' if lib and lib.description and lib.description | length > 280 else '0' }}"
+                style="display:inline-block;font-size:.75rem;padding:2px 8px;border-radius:10px;
+                       background:color-mix(in srgb, #8888ff 12%, transparent);
+                       border:1px solid color-mix(in srgb, #8888ff 40%, transparent);
+                       color:#aaaaff;cursor:help;white-space:nowrap;">
+            &#10024; {{ cs.spell_name }}
+            <span style="font-size:.68rem;opacity:.75;">{{ lvl_label }}</span>
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Dice Roller Panel ────────────────────────────────────── -->
+  <div class="col-12" id="dice-panel" style="display:none;">
+    <div class="ttrpg-card p-3">
+      <div class="d-flex gap-3 flex-wrap">
+
+        <!-- Left: controls -->
+        <div style="flex:1 1 320px;">
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+            <label class="small text-muted mb-0">Count</label>
+            <input type="number" id="dice-count" value="1" min="1" max="20"
+                   class="form-control form-control-sm text-center" style="width:58px;">
+            <label class="small text-muted mb-0 ms-1">Die</label>
+            {% for s in [4,6,8,10,12,20,100,2] %}
+            <button class="btn btn-sm btn-outline-secondary dice-btn" data-sides="{{ s }}"
+                    onclick="selectDie({{ s }})" style="min-width:38px;">d{{ s }}</button>
+            {% endfor %}
+          </div>
+
+          <!-- Advantage toggle (d20 only) -->
+          <div class="d-flex align-items-center gap-2 mb-2" id="adv-row">
+            <label class="small text-muted mb-0">Mode</label>
+            <div class="btn-group btn-group-sm" role="group">
+              <button id="adv-normal" class="btn btn-sm btn-outline-secondary"
+                      onclick="setAdvMode('normal')">Normal</button>
+              <button id="adv-adv" class="btn btn-sm btn-outline-secondary"
+                      onclick="setAdvMode('advantage')">Adv</button>
+              <button id="adv-dis" class="btn btn-sm btn-outline-secondary"
+                      onclick="setAdvMode('disadvantage')">Disadv</button>
+            </div>
+          </div>
+
+          <!-- Modifier row -->
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+            <label class="small text-muted mb-0">Mod</label>
+            <input type="number" id="dice-modifier" value="0"
+                   class="form-control form-control-sm text-center" style="width:68px;">
+            {% set pb = ((char.level - 1) // 4) + 2 %}
+            {% for label, val in [
+                ('STR', char.modifier(char.str_val)),
+                ('DEX', char.modifier(char.dex_val)),
+                ('CON', char.modifier(char.con_val)),
+                ('INT', char.modifier(char.int_val)),
+                ('WIS', char.modifier(char.wis_val)),
+                ('CHA', char.modifier(char.cha_val)),
+                ('PROF', pb)] %}
+            <button class="btn btn-sm btn-outline-secondary stat-mod-btn"
+                    onclick="setMod({{ val }})"
+                    title="{{ label }}: {{ '%+d' % val }}">{{ label }}<br>
+              <span style="font-size:.65rem;">{{ '%+d' % val }}</span>
+            </button>
+            {% endfor %}
+          </div>
+
+          <!-- Label + Roll button -->
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <input type="text" id="dice-label" class="form-control form-control-sm"
+                   placeholder="Label (optional)…" style="max-width:180px;">
+            <button class="btn btn-ttrpg" onclick="doRoll()">&#127922; Roll</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearDiceFeed()" title="Clear feed">&#128465;</button>
+          </div>
+
+          <!-- Local result display -->
+          <div id="dice-result" class="mt-3" style="display:none;">
+            <div id="dice-result-inner"
+                 style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);
+                        border-radius:8px;padding:10px 14px;font-size:.95rem;"></div>
+          </div>
+        </div>
+
+        <!-- Right: shared feed -->
+        <div style="flex:1 1 260px;min-width:220px;max-height:320px;overflow-y:auto;"
+             id="dice-feed-box">
+          <div class="small text-muted text-uppercase mb-1" style="letter-spacing:.06em;">
+            &#127922; Roll Feed
+          </div>
+          <div id="dice-feed-list">
+            <p class="small text-muted">No rolls yet.</p>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -246,6 +400,9 @@
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-feats" style="color:var(--ttrpg-accent);">
           Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
+        </button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-spells" style="color:var(--ttrpg-accent);">
+          Spells{% if char.spells %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.spells|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
           Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
@@ -317,14 +474,27 @@
         <!-- Skills -->
         <div class="tab-pane fade" id="tab-skills">
           {% if can_edit %}
-          <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_skill_name" class="form-control form-control-sm" placeholder="Skill name" style="max-width:180px;">
-            <input type="number" id="new_skill_bonus" class="form-control form-control-sm" placeholder="Bonus" style="max-width:80px;" value="0">
-            <div class="form-check align-self-center ms-1">
-              <input class="form-check-input" type="checkbox" id="new_skill_prof">
-              <label class="form-check-label small" for="new_skill_prof">Prof.</label>
+          <div class="mb-3">
+            <div class="d-flex gap-2 mb-2 flex-wrap align-items-end">
+              <div style="position:relative;max-width:220px;flex:1 1 160px;">
+                <input type="text" id="new_skill_name"
+                       class="form-control form-control-sm"
+                       placeholder="Search or type skill…"
+                       autocomplete="off"
+                       oninput="skillLibSearch(this.value)"
+                       onfocus="skillLibSearch(this.value)">
+                <div id="skill-lib-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;"></div>
+              </div>
+              <input type="number" id="new_skill_bonus" class="form-control form-control-sm" placeholder="Bonus" style="max-width:80px;" value="0">
+              <div class="form-check align-self-center ms-1">
+                <input class="form-check-input" type="checkbox" id="new_skill_prof">
+                <label class="form-check-label small" for="new_skill_prof">Prof.</label>
+              </div>
+              <button class="btn btn-ttrpg btn-sm" onclick="addSkill()">Add</button>
             </div>
-            <button class="btn btn-ttrpg btn-sm" onclick="addSkill()">Add</button>
           </div>
           {% endif %}
           <div id="skill-list">
@@ -956,6 +1126,171 @@
           </div>
         </div>
 
+        <!-- Spells -->
+        <div class="tab-pane fade" id="tab-spells">
+          {% if can_edit %}
+          <div class="mb-3">
+            <!-- Library search -->
+            <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
+              <div style="position:relative;max-width:280px;flex:1 1 200px;">
+                <input type="text" id="new_spell_name"
+                       class="form-control form-control-sm"
+                       placeholder="Spell name — or search library…"
+                       autocomplete="off"
+                       oninput="spellLibSearch(this.value)">
+                <div id="spell-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:240px;overflow-y:auto;"></div>
+              </div>
+              <button class="btn btn-ttrpg btn-sm" onclick="addSpellToChar()">Add</button>
+              <button class="btn btn-outline-secondary btn-sm"
+                      onclick="toggleCustomSpellForm()"
+                      title="Add with full details">+ Custom</button>
+            </div>
+
+            <!-- Hidden fields populated by library pick -->
+            <input type="hidden" id="new_spell_lib_id"    value="">
+            <input type="hidden" id="new_spell_level"     value="0">
+            <input type="hidden" id="new_spell_school"    value="">
+
+            <!-- Custom spell inline form -->
+            <div id="custom-spell-form" style="display:none;margin-top:8px;padding:12px;
+                 background:var(--sp-surface);border:1px solid var(--sp-border);border-radius:6px;">
+              <div class="small fw-bold mb-2" style="color:var(--ttrpg-accent);">Custom Spell</div>
+              <div class="row g-2 mb-2">
+                <div class="col-sm-5">
+                  <label class="form-label small text-muted mb-1">Name *</label>
+                  <input type="text" id="cs_name" class="form-control form-control-sm" placeholder="Fireball">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Level</label>
+                  <select id="cs_level" class="form-select form-select-sm">
+                    <option value="0">Cantrip</option>
+                    {% for i in range(1, 10) %}
+                    <option value="{{ i }}">Level {{ i }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-sm-4">
+                  <label class="form-label small text-muted mb-1">School</label>
+                  <select id="cs_school" class="form-select form-select-sm">
+                    <option value="">—</option>
+                    <option>Abjuration</option>
+                    <option>Conjuration</option>
+                    <option>Divination</option>
+                    <option>Enchantment</option>
+                    <option>Evocation</option>
+                    <option>Illusion</option>
+                    <option>Necromancy</option>
+                    <option>Transmutation</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-auto">
+                  <div class="form-check mb-0 mt-1">
+                    <input class="form-check-input" type="checkbox" id="cs_prepared">
+                    <label class="form-check-label small" for="cs_prepared">Prepared</label>
+                  </div>
+                </div>
+                <div class="col">
+                  <input type="text" id="cs_notes" class="form-control form-control-sm" placeholder="Notes">
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-ttrpg btn-sm" onclick="addCustomSpell()">Add Spell</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleCustomSpellForm()">Cancel</button>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+          <!-- Spell list grouped by level -->
+          <div id="spell-list">
+            {% set spell_levels = char.spells | sort(attribute='spell_level') | groupby('spell_level') %}
+            {% if char.spells %}
+            {% for level, level_spells in spell_levels %}
+            <div class="mb-3">
+              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">
+                {% if level == 0 %}Cantrips
+                {% elif level == 1 %}1st Level
+                {% elif level == 2 %}2nd Level
+                {% elif level == 3 %}3rd Level
+                {% else %}{{ level }}th Level{% endif %}
+              </div>
+              {% for cs in level_spells | sort(attribute='order_by') %}
+              <div id="char-spell-{{ cs.char_spell_id }}"
+                   class="d-flex align-items-center gap-2 mb-1 p-2 rounded flex-wrap"
+                   style="background:var(--sp-surface);border:1px solid var(--sp-border);">
+                <!-- Prepared toggle -->
+                {% if can_edit %}
+                <button class="btn btn-sm px-2 flex-shrink-0"
+                        id="spell-prep-btn-{{ cs.char_spell_id }}"
+                        style="{% if cs.prepared %}background:var(--ttrpg-accent);color:var(--sp-on-accent);border-color:var(--ttrpg-accent);{% else %}border-color:var(--sp-border);color:var(--sp-muted);{% endif %}"
+                        onclick="toggleSpellPrepared({{ cs.char_spell_id }}, {{ cs.prepared }})"
+                        title="{% if cs.prepared %}Unprepare{% else %}Prepare{% endif %}">
+                  {% if cs.prepared %}&#9670;{% else %}&#9671;{% endif %}
+                </button>
+                {% endif %}
+
+                <div class="flex-grow-1 min-width-0">
+                  <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span style="color:var(--ttrpg-accent);font-weight:600;">{{ cs.spell_name }}</span>
+                    {% if cs.school %}
+                    <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                                 border:1px solid var(--sp-border);
+                                 color:var(--sp-muted);
+                                 background:color-mix(in srgb, var(--sp-accent) 8%, transparent);">
+                      {{ cs.school }}
+                    </span>
+                    {% endif %}
+                    {% if cs.prepared %}
+                    <span style="font-size:.7rem;color:var(--ttrpg-accent);">&#9670; Prepared</span>
+                    {% endif %}
+                  </div>
+                  {% if cs.notes %}
+                  <div class="small text-muted fst-italic mt-1">{{ cs.notes }}</div>
+                  {% endif %}
+                </div>
+
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0"
+                        onclick="toggleSpellEdit({{ cs.char_spell_id }})" title="Edit">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger px-2 flex-shrink-0"
+                        onclick="deleteCharSpell({{ cs.char_spell_id }})" title="Remove">&#10005;</button>
+                {% endif %}
+
+                {% if can_edit %}
+                <div id="spell-edit-{{ cs.char_spell_id }}" class="w-100 mt-1" style="display:none;">
+                  <div class="d-flex gap-2 flex-wrap align-items-end"
+                       style="background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;padding:8px;">
+                    <div class="flex-grow-1">
+                      <label class="form-label small text-muted mb-1">Notes</label>
+                      <input type="text" id="spell-notes-{{ cs.char_spell_id }}"
+                             value="{{ cs.notes or '' }}"
+                             class="form-control form-control-sm"
+                             placeholder="Cast at higher level, special use…">
+                    </div>
+                    <button class="btn btn-ttrpg btn-sm"
+                            onclick="saveSpellEntry({{ cs.char_spell_id }})">Save</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                            onclick="toggleSpellEdit({{ cs.char_spell_id }})">Cancel</button>
+                  </div>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted small" id="spell-empty-msg">
+              No spells yet.{% if can_edit %} Search the library or type a custom spell name above.{% endif %}
+            </p>
+            {% endif %}
+          </div>
+        </div>
+
         <!-- Conditions -->
         <div class="tab-pane fade" id="tab-conditions">
           <!-- Active conditions -->
@@ -1111,6 +1446,37 @@ function saveFeat(id) {
 
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   new bootstrap.Tooltip(el, {trigger: 'hover focus'});
+});
+
+function _escH(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+document.querySelectorAll('.spell-chip').forEach(el => {
+  const d = el.dataset;
+  const rows = [];
+  const lvl = _escH(d.slevel) + (d.sschool ? ' &bull; ' + _escH(d.sschool) : '');
+  rows.push('<b>' + lvl + '</b>');
+  const castParts = [];
+  if (d.scast) castParts.push('&#9200; ' + _escH(d.scast));
+  if (d.srange) castParts.push('Range: ' + _escH(d.srange));
+  if (castParts.length) rows.push(castParts.join(' &bull; '));
+  if (d.sdur) {
+    let durLine = '&#9203; ' + _escH(d.sdur);
+    if (d.sconc === '1') durLine += ' <em>(Conc)</em>';
+    if (d.sritual === '1') durLine += ' <em>[Ritual]</em>';
+    rows.push(durLine);
+  }
+  if (d.scomp) rows.push('<small style="opacity:.8">' + _escH(d.scomp) + '</small>');
+  if (d.sdesc) rows.push('<small>' + _escH(d.sdesc) + (d.sdescLong === '1' ? '&hellip;' : '') + '</small>');
+  new bootstrap.Popover(el, {
+    html: true,
+    title: _escH(d.sname),
+    content: rows.join('<br>'),
+    trigger: 'hover focus',
+    container: 'body',
+    customClass: 'spell-popover',
+    placement: 'bottom',
+  });
 });
 
 // ── HP controls ──────────────────────────────────────────────
@@ -1631,5 +1997,360 @@ function deleteArmorEntry(id) {
   fetch(`/ttrpg/char-armor/${id}`, {method: 'DELETE'})
     .then(() => document.getElementById('char-armor-' + id).remove());
 }
+
+// ── Spells ────────────────────────────────────────────────────
+let _spellSearchTimer = null;
+let _spellResults = [];
+function spellLibSearch(q) {
+  clearTimeout(_spellSearchTimer);
+  const box = document.getElementById('spell-suggestions');
+  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  _spellSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/spells/search?q=${encodeURIComponent(q)}&limit=10`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _spellResults = results;
+        box.innerHTML = results.map((s, i) => {
+          const lvlLabel = s.level === 0 ? 'Cantrip' : `Level ${s.level}`;
+          return `<div data-idx="${i}"
+               style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${s.name}</div>
+            <div style="font-size:.7rem;color:var(--sp-muted);">
+              ${lvlLabel}${s.school ? ' &bull; ' + s.school : ''}
+              ${s.classes_text ? ' &mdash; ' + s.classes_text : ''}
+            </div>
+          </div>`;
+        }).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => spellLibPick(_spellResults[parseInt(el.dataset.idx)])));
+        box.style.display = 'block';
+      });
+  }, 220);
+}
+
+function spellLibPick(s) {
+  document.getElementById('new_spell_name').value  = s.name;
+  document.getElementById('new_spell_lib_id').value = s.spell_lib_id;
+  document.getElementById('new_spell_level').value  = s.level;
+  document.getElementById('new_spell_school').value = s.school;
+  document.getElementById('spell-suggestions').style.display = 'none';
+  addSpellToChar();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#spell-suggestions') && e.target.id !== 'new_spell_name')
+    if (document.getElementById('spell-suggestions'))
+      document.getElementById('spell-suggestions').style.display = 'none';
+});
+
+function addSpellToChar() {
+  const name = document.getElementById('new_spell_name').value.trim();
+  if (!name) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/spells`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      spell_name:  name,
+      spell_lib_id: document.getElementById('new_spell_lib_id').value || null,
+      spell_level:  parseInt(document.getElementById('new_spell_level').value) || 0,
+      school:       document.getElementById('new_spell_school').value,
+      prepared: 0, notes: '',
+    })
+  }).then(() => reloadKeepTab());
+}
+
+function toggleCustomSpellForm() {
+  const f = document.getElementById('custom-spell-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') document.getElementById('cs_name').focus();
+}
+
+function addCustomSpell() {
+  const name = document.getElementById('cs_name').value.trim();
+  if (!name) { document.getElementById('cs_name').focus(); return; }
+  fetch(`/ttrpg/character/${CHAR_ID}/spells`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      spell_name:  name,
+      spell_lib_id: null,
+      spell_level:  parseInt(document.getElementById('cs_level').value) || 0,
+      school:       document.getElementById('cs_school').value,
+      prepared:     document.getElementById('cs_prepared').checked ? 1 : 0,
+      notes:        document.getElementById('cs_notes').value.trim(),
+    })
+  }).then(() => reloadKeepTab());
+}
+
+function toggleSpellPrepared(id, current) {
+  fetch(`/ttrpg/char-spell/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({prepared: current ? 0 : 1})
+  }).then(() => reloadKeepTab());
+}
+
+function toggleSpellEdit(id) {
+  const p = document.getElementById('spell-edit-' + id);
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function saveSpellEntry(id) {
+  fetch(`/ttrpg/char-spell/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      notes: document.getElementById('spell-notes-' + id).value,
+    })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
+}
+
+function deleteCharSpell(id) {
+  if (!confirm('Remove this spell from the character?')) return;
+  fetch(`/ttrpg/char-spell/${id}`, {method: 'DELETE'})
+    .then(() => document.getElementById('char-spell-' + id).remove());
+}
+
+// ── Skills library search (autofill) ─────────────────────────
+// ── Dice Roller ──────────────────────────────────────────────
+let _diceSelected = 20;
+let _advMode      = 'normal';
+let _diceLastId   = 0;
+let _dicePollTimer = null;
+
+function toggleDicePanel() {
+  const p = document.getElementById('dice-panel');
+  const open = p.style.display === 'none';
+  p.style.display = open ? '' : 'none';
+  if (open) { selectDie(20); setAdvMode('normal'); startDicePoll(); fetchDiceFeed(); }
+  else       { stopDicePoll(); }
+}
+
+function selectDie(s) {
+  _diceSelected = s;
+  document.querySelectorAll('.dice-btn').forEach(b => {
+    const active = parseInt(b.dataset.sides) === s;
+    b.classList.toggle('active', active);
+    if (active) {
+      b.style.setProperty('background',   'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('border-color', 'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('color',        'var(--sp-on-accent)', 'important');
+    } else {
+      b.style.removeProperty('background');
+      b.style.removeProperty('border-color');
+      b.style.removeProperty('color');
+    }
+  });
+  setAdvMode(_advMode);
+}
+
+function setAdvMode(mode) {
+  _advMode = mode;
+  const cfg = {
+    'adv-normal': { mode: 'normal',       bg: 'var(--ttrpg-accent)', fg: 'var(--sp-on-accent)' },
+    'adv-adv':    { mode: 'advantage',    bg: '#28a745',             fg: '#ffffff' },
+    'adv-dis':    { mode: 'disadvantage', bg: '#dc3545',             fg: '#ffffff' },
+  };
+  Object.entries(cfg).forEach(([id, c]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = _advMode === c.mode;
+    el.classList.toggle('active', on);
+    if (on) {
+      el.style.setProperty('background',   c.bg,   'important');
+      el.style.setProperty('border-color', c.bg,   'important');
+      el.style.setProperty('color',        c.fg,   'important');
+      el.style.setProperty('font-weight',  'bold', 'important');
+    } else {
+      el.style.removeProperty('background');
+      el.style.removeProperty('border-color');
+      el.style.removeProperty('color');
+      el.style.removeProperty('font-weight');
+    }
+  });
+}
+
+function setMod(val) {
+  document.getElementById('dice-modifier').value = val;
+}
+
+function doRoll() {
+  const count    = parseInt(document.getElementById('dice-count').value)    || 1;
+  const modifier = parseInt(document.getElementById('dice-modifier').value) || 0;
+  const label    = document.getElementById('dice-label').value.trim();
+
+  fetch('/ttrpg/dice/roll', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      character_id: {{ char.character_id }},
+      char_name:    '{{ char.name | e }}',
+      count, sides: _diceSelected,
+      modifier, label, adv_mode: _advMode,
+    })
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    showLocalResult(d);
+    renderFeedEntry(d, true);
+    _diceLastId = Math.max(_diceLastId, d.roll_id);
+  });
+}
+
+function _dieHtml(val, sides, mode, idx, keptIdx) {
+  let natCls = '';
+  if (sides === 20 && val === 20) natCls = ' nat20';
+  else if (sides === 20 && val === 1) natCls = ' nat1';
+
+  if (mode === 'normal') {
+    return `<span class="die-val${natCls}">${val}</span>`;
+  }
+
+  const isKept = idx === keptIdx;
+  if (isKept) {
+    const bg  = mode === 'advantage' ? '#0d2e0d' : '#2e1a00';
+    const bdr = mode === 'advantage' ? '#28a745' : '#fd7e14';
+    const col = mode === 'advantage' ? '#7deb7d' : '#ffc46e';
+    return `<span class="die-val${natCls}" style="background:${bg};border-color:${bdr};color:${col};font-weight:bold;">&#10003;&thinsp;${val}</span>`;
+  } else {
+    return `<span class="die-val${natCls}">${val}</span>`;
+  }
+}
+
+function _advLabel(mode) {
+  if (mode === 'advantage')    return '<span style="color:#28a745;font-weight:600;font-size:.75rem;">&#9650; Advantage — keep highest &nbsp;</span>';
+  if (mode === 'disadvantage') return '<span style="color:#fd7e14;font-weight:600;font-size:.75rem;">&#9660; Disadvantage — keep lowest &nbsp;</span>';
+  return '';
+}
+
+function showLocalResult(d) {
+  const sides = parseInt(d.expression.match(/d(\d+)/)[1]);
+  let diceHtml = '';
+
+  if (d.adv_mode !== 'normal') {
+    const keptIdx = d.adv_mode === 'advantage'
+      ? d.dice.indexOf(Math.max(...d.dice))
+      : d.dice.indexOf(Math.min(...d.dice));
+    diceHtml = d.dice.map((v, i) => _dieHtml(v, 20, d.adv_mode, i, keptIdx)).join(' ');
+  } else {
+    diceHtml = d.dice.map(v => _dieHtml(v, sides, 'normal', 0, 0)).join(' ');
+  }
+
+  const modStr    = d.modifier !== 0 ? ` ${d.modifier > 0 ? '+' : ''}${d.modifier}` : '';
+  const labelHtml = d.label ? `<div style="color:var(--sp-muted);font-size:.78rem;margin-bottom:2px;">${_escH(d.label)}</div>` : '';
+  const modeHtml  = _advLabel(d.adv_mode);
+
+  document.getElementById('dice-result-inner').innerHTML =
+    `${labelHtml}<div>${modeHtml}${diceHtml}` +
+    `${modStr ? `<span style="color:var(--sp-muted);margin-left:4px;">${modStr}</span>` : ''}` +
+    ` <span style="margin:0 3px;opacity:.6;">&#8594;</span><span class="tot">${d.total}</span></div>`;
+  document.getElementById('dice-result').style.display = '';
+}
+
+function renderFeedEntry(d, prepend) {
+  const sides = parseInt((d.expression.match(/d(\d+)/) || ['','20'])[1]);
+  let diceHtml = '';
+
+  if (d.adv_mode !== 'normal') {
+    const keptIdx = d.adv_mode === 'advantage'
+      ? d.dice.indexOf(Math.max(...d.dice))
+      : d.dice.indexOf(Math.min(...d.dice));
+    diceHtml = d.dice.map((v, i) => _dieHtml(v, 20, d.adv_mode, i, keptIdx)).join(' ');
+  } else {
+    diceHtml = d.dice.map(v => _dieHtml(v, sides, 'normal', 0, 0)).join(' ');
+  }
+
+  const modStr    = d.modifier !== 0 ? ` ${d.modifier >= 0 ? '+' : ''}${d.modifier}` : '';
+  const modeTag   = d.adv_mode !== 'normal'
+    ? (d.adv_mode === 'advantage'
+        ? ' <span style="color:#28a745;font-size:.68rem;">&#9650;Adv</span>'
+        : ' <span style="color:#fd7e14;font-size:.68rem;">&#9660;Disadv</span>')
+    : '';
+  const html = `<div class="feed-entry" data-rid="${d.roll_id}">
+    <span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(d.char_name)}</span>
+    ${d.label ? `<span style="color:var(--sp-muted);"> — ${_escH(d.label)}</span>` : ''}
+    <span class="expr"> ${_escH(d.expression)}</span>${modeTag}
+    <div>${diceHtml}${modStr ? `<span style="color:var(--sp-muted);">${modStr}</span>` : ''} <span style="opacity:.6;">&#8594;</span> <span class="tot">${d.total}</span></div>
+  </div>`;
+  const list = document.getElementById('dice-feed-list');
+  const empty = list.querySelector('p.text-muted');
+  if (empty) empty.remove();
+  if (prepend) {
+    list.insertAdjacentHTML('afterbegin', html);
+  } else {
+    list.insertAdjacentHTML('beforeend', html);
+  }
+}
+
+function fetchDiceFeed() {
+  fetch('/ttrpg/dice/feed')
+    .then(r => r.json()).then(rolls => {
+      const list = document.getElementById('dice-feed-list');
+      list.innerHTML = '';
+      if (!rolls.length) { list.innerHTML = '<p class="small text-muted">No rolls yet.</p>'; return; }
+      rolls.forEach(d => { renderFeedEntry(d, false); _diceLastId = Math.max(_diceLastId, d.roll_id); });
+      // scroll to bottom (most recent at top via prepend in poll)
+    });
+}
+
+function pollDiceFeed() {
+  fetch(`/ttrpg/dice/feed?since=${_diceLastId}`)
+    .then(r => r.json()).then(rolls => {
+      rolls.reverse().forEach(d => {
+        if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
+        renderFeedEntry(d, true);
+        _diceLastId = Math.max(_diceLastId, d.roll_id);
+      });
+    });
+}
+
+function startDicePoll() {
+  stopDicePoll();
+  _dicePollTimer = setInterval(pollDiceFeed, 3500);
+}
+function stopDicePoll() {
+  if (_dicePollTimer) { clearInterval(_dicePollTimer); _dicePollTimer = null; }
+}
+
+function clearDiceFeed() {
+  if (!confirm('Clear your local roll feed view?')) return;
+  document.getElementById('dice-feed-list').innerHTML = '<p class="small text-muted">Feed cleared.</p>';
+  document.getElementById('dice-result').style.display = 'none';
+}
+
+let _skillLibSearchTimer = null;
+let _skillLibResults = [];
+function skillLibSearch(q) {
+  clearTimeout(_skillLibSearchTimer);
+  const box = document.getElementById('skill-lib-suggestions');
+  if (!box) return;
+  _skillLibSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/skills/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _skillLibResults = results;
+        box.innerHTML = results.map((s, i) => `
+          <div data-idx="${i}"
+               style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${s.name}
+              ${s.ability_score ? `<span style="font-size:.72rem;font-weight:normal;color:var(--sp-muted);margin-left:6px;">${s.ability_score}</span>` : ''}
+            </div>
+          </div>`).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => skillLibPick(_skillLibResults[parseInt(el.dataset.idx)])));
+        box.style.display = 'block';
+      });
+  }, 150);
+}
+
+function skillLibPick(s) {
+  document.getElementById('new_skill_name').value = s.name;
+  document.getElementById('skill-lib-suggestions').style.display = 'none';
+  addSkill();
+}
+
+document.addEventListener('click', e => {
+  const box = document.getElementById('skill-lib-suggestions');
+  if (box && !e.target.closest('#skill-lib-suggestions') && e.target.id !== 'new_skill_name')
+    box.style.display = 'none';
+});
 </script>
 {% endblock %}

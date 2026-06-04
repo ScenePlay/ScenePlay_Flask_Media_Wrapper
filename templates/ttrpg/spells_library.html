@@ -1,0 +1,333 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .spell-table { background: var(--sp-surface); color: var(--sp-text); }
+  .spell-table thead th {
+    background: var(--sp-primary);
+    color: var(--sp-accent);
+    border-bottom-color: var(--sp-border);
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  .spell-table td { border-color: var(--sp-border); font-size: .85rem; vertical-align: middle; }
+  .spell-table tbody tr.data-row:hover td {
+    background: color-mix(in srgb, var(--sp-accent) 6%, transparent);
+  }
+  .spell-table tr.detail-row td {
+    background: var(--sp-bg);
+    border-top: none;
+    padding: 10px 14px;
+  }
+  .level-badge {
+    font-size: .7rem; padding: 1px 7px; border-radius: 8px;
+    border: 1px solid var(--sp-border);
+    color: var(--ttrpg-accent);
+    background: color-mix(in srgb, var(--sp-primary) 25%, transparent);
+    white-space: nowrap;
+  }
+  .school-badge {
+    font-size: .7rem; padding: 1px 6px; border-radius: 8px;
+    border: 1px solid var(--sp-border);
+    color: var(--sp-muted);
+    background: color-mix(in srgb, var(--sp-accent) 8%, transparent);
+    white-space: nowrap;
+  }
+  .conc-badge {
+    font-size: .65rem; padding: 1px 5px; border-radius: 6px;
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    border: 1px solid #f59e0b55;
+    color: #f59e0b;
+  }
+  .ritual-badge {
+    font-size: .65rem; padding: 1px 5px; border-radius: 6px;
+    background: color-mix(in srgb, #818cf8 20%, transparent);
+    border: 1px solid #818cf855;
+    color: #818cf8;
+  }
+  .empty-val { color: var(--sp-muted); font-style: italic; font-size: .8rem; }
+  .add-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+  }
+  .add-form-grid .full-width { grid-column: 1 / -1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Spells Library</h3>
+    <span class="small text-muted">{{ total }} spell{{ 's' if total != 1 }}</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">+ Custom Spell</button>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
+    <form method="POST" action="{{ url_for('reference_bp.spells_sync') }}"
+          onsubmit="return confirm('Sync spells from the API? (existing entries are skipped)')">
+      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
+    </form>
+  </div>
+</div>
+
+<!-- Add custom spell form -->
+<div id="add-spell-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="fw-bold mb-3" style="color:var(--ttrpg-accent);">Add Custom Spell</div>
+  <form method="POST" action="{{ url_for('reference_bp.spell_add') }}">
+    <div class="add-form-grid mb-3">
+      <div>
+        <label class="form-label small text-muted mb-1">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               placeholder="Fireball" required autofocus>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Level</label>
+        <select name="level" class="form-select form-select-sm">
+          <option value="0">Cantrip</option>
+          {% for i in range(1, 10) %}
+          <option value="{{ i }}">{{ i }}{% if i == 1 %}st{% elif i == 2 %}nd{% elif i == 3 %}rd{% else %}th{% endif %} level</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">School</label>
+        <select name="school" class="form-select form-select-sm">
+          <option value="">—</option>
+          <option>Abjuration</option>
+          <option>Conjuration</option>
+          <option>Divination</option>
+          <option>Enchantment</option>
+          <option>Evocation</option>
+          <option>Illusion</option>
+          <option>Necromancy</option>
+          <option>Transmutation</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Casting Time</label>
+        <input type="text" name="casting_time" class="form-control form-control-sm" placeholder="1 action">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Range</label>
+        <input type="text" name="range_text" class="form-control form-control-sm" placeholder="150 feet">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Components</label>
+        <input type="text" name="components" class="form-control form-control-sm" placeholder="V, S, M (bat fur)">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Duration</label>
+        <input type="text" name="duration" class="form-control form-control-sm" placeholder="Instantaneous">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Classes</label>
+        <input type="text" name="classes_text" class="form-control form-control-sm" placeholder="Wizard, Sorcerer">
+      </div>
+      <div class="d-flex gap-3 align-items-center" style="padding-top:1.6rem;">
+        <div class="form-check mb-0">
+          <input class="form-check-input" type="checkbox" name="concentration" id="add_concentration">
+          <label class="form-check-label small" for="add_concentration">Concentration</label>
+        </div>
+        <div class="form-check mb-0">
+          <input class="form-check-input" type="checkbox" name="ritual" id="add_ritual">
+          <label class="form-check-label small" for="add_ritual">Ritual</label>
+        </div>
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Description</label>
+        <textarea name="description" class="form-control form-control-sm" rows="3"
+                  style="resize:vertical;" placeholder="Spell effect description…"></textarea>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add to Library</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<div class="ttrpg-card p-3 mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-4">
+      <label class="form-label small text-muted mb-1">Search</label>
+      <input type="text" id="filter_q" value="{{ q }}" class="form-control form-control-sm" placeholder="Spell name…">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Level</label>
+      <select id="filter_level" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="0" {% if level == '0' %}selected{% endif %}>Cantrip</option>
+        {% for i in range(1, 10) %}
+        <option value="{{ i }}" {% if level == i|string %}selected{% endif %}>Level {{ i }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">School</label>
+      <select id="filter_school" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for s in ['Abjuration','Conjuration','Divination','Enchantment','Evocation','Illusion','Necromancy','Transmutation'] %}
+        <option value="{{ s }}" {% if school == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select id="filter_src" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
+        <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-ttrpg btn-sm" onclick="searchSpells()">Filter</button>
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Results table -->
+<div class="ttrpg-card p-0" style="overflow-x:auto;">
+  <table class="table table-hover mb-0 spell-table" id="spell-table">
+    <thead>
+      <tr>
+        <th style="width:30px;"></th>
+        <th>Name</th>
+        <th>Level</th>
+        <th>School</th>
+        <th>Casting Time</th>
+        <th>Classes</th>
+        <th>Source</th>
+        <th style="width:60px;"></th>
+      </tr>
+    </thead>
+    <tbody id="spell-tbody">
+      {% for s in spells %}
+      <tr class="data-row" id="srow-{{ s.spell_lib_id }}" style="cursor:pointer;"
+          onclick="toggleSpellDetail({{ s.spell_lib_id }})">
+        <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
+        <td>
+          <span style="color:var(--ttrpg-accent);font-weight:600;">{{ s.name }}</span>
+          {% if s.concentration %}<span class="conc-badge ms-1">C</span>{% endif %}
+          {% if s.ritual %}<span class="ritual-badge ms-1">R</span>{% endif %}
+          {% if s.source == 'homebrew' %}
+          <span class="level-badge ms-1">Custom</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="level-badge">
+            {% if s.level == 0 %}Cantrip{% else %}{{ s.level }}{% if s.level == 1 %}st{% elif s.level == 2 %}nd{% elif s.level == 3 %}rd{% else %}th{% endif %}{% endif %}
+          </span>
+        </td>
+        <td>
+          {% if s.school %}<span class="school-badge">{{ s.school }}</span>
+          {% else %}<span class="empty-val">—</span>{% endif %}
+        </td>
+        <td class="text-muted small">{{ s.casting_time or '—' }}</td>
+        <td class="text-muted small">{{ s.classes_text or '—' }}</td>
+        <td class="text-muted small">{{ s.source }}</td>
+        <td class="text-center" onclick="event.stopPropagation()">
+          {% if s.source == 'homebrew' %}
+          <form method="POST"
+                action="{{ url_for('reference_bp.spell_delete', spell_lib_id=s.spell_lib_id) }}"
+                onsubmit="return confirm('Delete {{ s.name }}?')">
+            <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      <!-- Detail row (hidden by default) -->
+      <tr class="detail-row" id="sdetail-{{ s.spell_lib_id }}" style="display:none;">
+        <td colspan="8">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <div class="d-flex flex-wrap gap-2 mb-2">
+                {% if s.casting_time %}
+                <span class="small"><span class="text-muted">Cast:</span> {{ s.casting_time }}</span>
+                {% endif %}
+                {% if s.range_text %}
+                <span class="small"><span class="text-muted">Range:</span> {{ s.range_text }}</span>
+                {% endif %}
+                {% if s.duration %}
+                <span class="small"><span class="text-muted">Duration:</span> {{ s.duration }}</span>
+                {% endif %}
+              </div>
+              {% if s.components %}
+              <div class="small mb-2"><span class="text-muted">Components:</span> {{ s.components }}</div>
+              {% endif %}
+              {% if s.concentration or s.ritual %}
+              <div class="d-flex gap-2 mb-2">
+                {% if s.concentration %}<span class="conc-badge">Concentration</span>{% endif %}
+                {% if s.ritual %}<span class="ritual-badge">Ritual</span>{% endif %}
+              </div>
+              {% endif %}
+            </div>
+            <div class="col-sm-6">
+              {% if s.description %}
+              <div class="small" style="white-space:pre-wrap;color:var(--sp-text);">{{ s.description }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="8" class="text-center text-muted p-4">
+          {% if q or level or school or src %}
+          No spells match your filters.
+          {% else %}
+          No spells stored yet. Click <strong>Sync SRD</strong> to pull from the API.
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-spell-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') f.querySelector('[name="name"]').focus();
+}
+
+function toggleSpellDetail(id) {
+  const detail = document.getElementById('sdetail-' + id);
+  const icon   = document.querySelector('#srow-' + id + ' td:first-child');
+  const open   = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  if (icon) icon.textContent = open ? '▼' : '▲';
+}
+
+function searchSpells() {
+  const q      = document.getElementById('filter_q').value.trim();
+  const level  = document.getElementById('filter_level').value;
+  const school = document.getElementById('filter_school').value;
+  const src    = document.getElementById('filter_src').value;
+  const params = new URLSearchParams();
+  if (q)      params.set('q', q);
+  if (level)  params.set('level', level);
+  if (school) params.set('school', school);
+  if (src)    params.set('src', src);
+  window.location.href = '{{ url_for("reference_bp.spells_library") }}?' + params.toString();
+}
+
+function clearFilters() {
+  window.location.href = '{{ url_for("reference_bp.spells_library") }}';
+}
+
+document.getElementById('filter_q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchSpells();
+});
+</script>
+{% endblock %}

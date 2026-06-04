@@ -1,0 +1,271 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .races-table { background: var(--sp-surface); color: var(--sp-text); }
+  .races-table thead th {
+    background: var(--sp-primary);
+    color: var(--sp-accent);
+    border-bottom-color: var(--sp-border);
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  .races-table td { border-color: var(--sp-border); font-size: .85rem; vertical-align: middle; }
+  .races-table tbody tr.data-row:hover td {
+    background: color-mix(in srgb, var(--sp-accent) 6%, transparent);
+  }
+  .races-table tr.detail-row td {
+    background: var(--sp-bg);
+    border-top: none;
+    padding: 10px 14px;
+  }
+  .size-badge {
+    font-size: .7rem; padding: 1px 6px; border-radius: 8px;
+    border: 1px solid var(--sp-border);
+    color: var(--sp-muted);
+    background: color-mix(in srgb, var(--sp-accent) 8%, transparent);
+  }
+  .trait-tag {
+    font-size: .7rem; padding: 1px 6px; border-radius: 6px;
+    background: color-mix(in srgb, var(--sp-accent) 10%, transparent);
+    border: 1px solid var(--sp-border);
+    color: var(--sp-muted);
+    white-space: nowrap;
+  }
+  .add-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+  }
+  .add-form-grid .full-width { grid-column: 1 / -1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Races Library</h3>
+    <span class="small text-muted">{{ total }} race{{ 's' if total != 1 }}</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">+ Custom Race</button>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
+    <form method="POST" action="{{ url_for('reference_bp.races_sync') }}"
+          onsubmit="return confirm('Sync races from the API? (existing entries are skipped)')">
+      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
+    </form>
+  </div>
+</div>
+
+<!-- Add custom race form -->
+<div id="add-race-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="fw-bold mb-3" style="color:var(--ttrpg-accent);">Add Custom Race</div>
+  <form method="POST" action="{{ url_for('reference_bp.race_add') }}">
+    <div class="add-form-grid mb-3">
+      <div>
+        <label class="form-label small text-muted mb-1">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               placeholder="Aasimar" required autofocus>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Speed (ft)</label>
+        <input type="number" name="speed" class="form-control form-control-sm" value="30" min="0">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Size</label>
+        <select name="size" class="form-select form-select-sm">
+          <option value="">—</option>
+          <option>Tiny</option>
+          <option>Small</option>
+          <option>Medium</option>
+          <option>Large</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Ability Bonuses</label>
+        <input type="text" name="ability_bonuses" class="form-control form-control-sm"
+               placeholder="+2 STR, +1 CON">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Languages</label>
+        <input type="text" name="languages" class="form-control form-control-sm"
+               placeholder="Common, Elvish">
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Traits (one per line)</label>
+        <textarea name="traits_text" class="form-control form-control-sm" rows="3"
+                  style="resize:vertical;" placeholder="Darkvision&#10;Fey Ancestry&#10;Trance"></textarea>
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Description / Notes</label>
+        <textarea name="description" class="form-control form-control-sm" rows="2"
+                  style="resize:vertical;" placeholder="Alignment tendency, lore, etc."></textarea>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add to Library</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<div class="ttrpg-card p-3 mb-3">
+  <form method="GET" action="{{ url_for('reference_bp.races_library') }}" class="row g-2 align-items-end">
+    <div class="col-sm-4">
+      <label class="form-label small text-muted mb-1">Search</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Race name…">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select name="src" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
+        <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Filter</button>
+    </div>
+    {% if q or src %}
+    <div class="col-auto">
+      <a href="{{ url_for('reference_bp.races_library') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+{% if races %}
+<div class="ttrpg-card p-0" style="overflow-x:auto;">
+  <table class="table table-hover mb-0 races-table">
+    <thead>
+      <tr>
+        <th style="width:30px;"></th>
+        <th>Race</th>
+        <th>Size</th>
+        <th>Speed</th>
+        <th>Ability Bonuses</th>
+        <th>Traits</th>
+        <th>Source</th>
+        <th style="width:60px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in races %}
+      <tr class="data-row" id="rrow-{{ r.race_lib_id }}" style="cursor:pointer;"
+          onclick="toggleRaceDetail({{ r.race_lib_id }})">
+        <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
+        <td>
+          <span style="color:var(--ttrpg-accent);font-weight:600;">{{ r.name }}</span>
+          {% if r.source == 'homebrew' %}
+          <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                       border:1px solid var(--sp-border);
+                       color:var(--ttrpg-accent);
+                       background:color-mix(in srgb, var(--sp-primary) 25%, transparent);
+                       margin-left:4px;">Custom</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.size %}<span class="size-badge">{{ r.size }}</span>
+          {% else %}<span style="color:var(--sp-muted);font-style:italic;font-size:.8rem;">—</span>{% endif %}
+        </td>
+        <td class="text-muted small">{{ r.speed }} ft</td>
+        <td>
+          {% if r.ability_bonuses %}
+          <span style="color:var(--ttrpg-accent);font-size:.82rem;">{{ r.ability_bonuses }}</span>
+          {% else %}
+          <span style="color:var(--sp-muted);font-style:italic;font-size:.8rem;">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.traits_text %}
+          {% for trait in r.traits_text.split('\n')[:3] %}
+          <span class="trait-tag me-1">{{ trait }}</span>
+          {% endfor %}
+          {% if r.traits_text.split('\n')|length > 3 %}
+          <span class="text-muted small">+{{ r.traits_text.split('\n')|length - 3 }} more</span>
+          {% endif %}
+          {% else %}
+          <span style="color:var(--sp-muted);font-style:italic;font-size:.8rem;">—</span>
+          {% endif %}
+        </td>
+        <td class="text-muted small">{{ r.source }}</td>
+        <td class="text-center" onclick="event.stopPropagation()">
+          {% if r.source == 'homebrew' %}
+          <form method="POST"
+                action="{{ url_for('reference_bp.race_delete', race_lib_id=r.race_lib_id) }}"
+                onsubmit="return confirm('Delete {{ r.name }}?')">
+            <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      <!-- Detail row -->
+      <tr class="detail-row" id="rdetail-{{ r.race_lib_id }}" style="display:none;">
+        <td colspan="8">
+          <div class="row g-3">
+            <div class="col-sm-5">
+              <div class="small mb-2">
+                <span class="text-muted">Speed:</span> {{ r.speed }} ft &nbsp;
+                {% if r.size %}<span class="text-muted">Size:</span> {{ r.size }}{% endif %}
+              </div>
+              {% if r.ability_bonuses %}
+              <div class="small mb-2"><span class="text-muted">Ability Bonuses:</span> {{ r.ability_bonuses }}</div>
+              {% endif %}
+              {% if r.languages %}
+              <div class="small mb-2"><span class="text-muted">Languages:</span> {{ r.languages }}</div>
+              {% endif %}
+              {% if r.description %}
+              <div class="small text-muted fst-italic">{{ r.description }}</div>
+              {% endif %}
+            </div>
+            <div class="col-sm-7">
+              {% if r.traits_text %}
+              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Racial Traits</div>
+              <div class="d-flex flex-wrap gap-1">
+                {% for trait in r.traits_text.split('\n') %}
+                {% if trait.strip() %}
+                <span class="trait-tag">{{ trait.strip() }}</span>
+                {% endif %}
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="ttrpg-card p-4 text-center text-muted">
+  {% if q or src %}
+  <p>No races match your filters.</p>
+  {% else %}
+  <p>No races stored yet. Click <strong>Sync SRD</strong> to pull from the API.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-race-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') f.querySelector('[name="name"]').focus();
+}
+
+function toggleRaceDetail(id) {
+  const detail = document.getElementById('rdetail-' + id);
+  const icon   = document.querySelector('#rrow-' + id + ' td:first-child');
+  const open   = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  if (icon) icon.textContent = open ? '▼' : '▲';
+}
+</script>
+{% endblock %}

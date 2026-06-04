@@ -10,8 +10,9 @@ from models.ttrpg import (tblCharacters, tblCharacterResources,
                            tblCharacterConditions, tblCharacterInventory,
                            tblCharacterSkills, tblCharacterNotes,
                            tblCharacterFeats, tblCharacterArmor,
-                           tblCharacterWeapons,
-                           tblSessions, tblSessionParty)
+                           tblCharacterWeapons, tblCharacterSpells,
+                           tblSessions, tblSessionParty,
+                           tblRacesLibrary, tblDiceRolls)
 from models.campaigns import tblcampaigns
 from models.scenes import tblscenes
 from models.ttrpg import tblSessionMonsters as _tblSessionMonsters
@@ -150,8 +151,10 @@ def character_sheet(character_id):
     if current_user.is_dm():
         from models.user import tblUsers
         all_players = tblUsers.query.filter_by(active=1).order_by(tblUsers.display_name).all()
+    races_lib = {r.name.lower(): r for r in tblRacesLibrary.query.all()}
     return render_template('ttrpg/character_sheet.html', char=char,
-                           all_players=all_players, conditions=CONDITIONS)
+                           all_players=all_players, conditions=CONDITIONS,
+                           races_lib=races_lib)
 
 
 # ── Character sheet — inline field save (AJAX) ─────────────────────────────────
@@ -658,6 +661,135 @@ def weapon_char_update(char_weapon_id):
     if 'notes'         in data: entry.notes         = data['notes'].strip()
     db.session.commit()
     return jsonify({'ok': True})
+
+
+# ── Character Spells CRUD (AJAX) ───────────────────────────────────────────────
+
+@ttrpg.route('/character/<int:character_id>/spells', methods=['POST'])
+@login_required
+def spell_add_to_char(character_id):
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json()
+    spell_name = data.get('spell_name', '').strip()
+    if not spell_name:
+        return jsonify({'ok': False, 'error': 'Spell name is required'}), 400
+    entry = tblCharacterSpells(
+        character_id = character_id,
+        spell_lib_id = data.get('spell_lib_id') or None,
+        spell_name   = spell_name,
+        spell_level  = int(data.get('spell_level', 0) or 0),
+        school       = data.get('school', '').strip(),
+        prepared     = int(data.get('prepared', 0) or 0),
+        notes        = data.get('notes', '').strip(),
+        order_by     = len(char.spells),
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return jsonify({'ok': True, 'char_spell_id': entry.char_spell_id})
+
+
+@ttrpg.route('/char-spell/<int:char_spell_id>', methods=['POST', 'DELETE'])
+@login_required
+def spell_char_update(char_spell_id):
+    entry = tblCharacterSpells.query.get_or_404(char_spell_id)
+    char  = entry.character
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False}), 403
+    if request.method == 'DELETE':
+        db.session.delete(entry)
+        db.session.commit()
+        return jsonify({'ok': True})
+    data = request.get_json()
+    if 'prepared' in data: entry.prepared = int(data['prepared'])
+    if 'notes'    in data: entry.notes    = data['notes'].strip()
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ── Dice Roller ───────────────────────────────────────────────────────────────
+
+@ttrpg.route('/dice/roll', methods=['POST'])
+@login_required
+def dice_roll():
+    import random, json as _json
+    data      = request.get_json()
+    char_id   = data.get('character_id')
+    char_name = data.get('char_name', 'Unknown')[:60]
+    count     = max(1, min(20, int(data.get('count', 1) or 1)))
+    sides     = int(data.get('sides', 20))
+    modifier  = max(-99, min(99, int(data.get('modifier', 0) or 0)))
+    label     = (data.get('label') or '').strip()[:80]
+    adv_mode  = data.get('adv_mode', 'normal')
+
+    if sides not in (2, 4, 6, 8, 10, 12, 20, 100):
+        sides = 20
+
+    if adv_mode in ('advantage', 'disadvantage'):
+        dice = [random.randint(1, sides), random.randint(1, sides)]
+        kept = max(dice) if adv_mode == 'advantage' else min(dice)
+        total = kept + modifier
+    else:
+        adv_mode = 'normal'
+        dice = [random.randint(1, sides) for _ in range(count)]
+        total = sum(dice) + modifier
+
+    expr = f'{count}d{sides}'
+    if modifier > 0:  expr += f'+{modifier}'
+    elif modifier < 0: expr += str(modifier)
+
+    roll = tblDiceRolls(
+        character_id = char_id,
+        char_name    = char_name,
+        expression   = expr,
+        label        = label,
+        dice_json    = _json.dumps(dice),
+        modifier     = modifier,
+        total        = total,
+        adv_mode     = adv_mode,
+        rolled_at    = _now(),
+    )
+    db.session.add(roll)
+    db.session.flush()
+
+    # Keep only the 50 most recent rolls
+    old = db.session.query(tblDiceRolls.roll_id).order_by(
+        tblDiceRolls.roll_id.desc()).offset(50).all()
+    if old:
+        tblDiceRolls.query.filter(
+            tblDiceRolls.roll_id.in_([r[0] for r in old])
+        ).delete(synchronize_session=False)
+    db.session.commit()
+
+    return jsonify({
+        'ok': True, 'roll_id': roll.roll_id,
+        'char_name': char_name, 'expression': expr, 'label': label,
+        'dice': dice, 'modifier': modifier, 'total': total,
+        'adv_mode': adv_mode, 'rolled_at': roll.rolled_at,
+    })
+
+
+@ttrpg.route('/dice/feed')
+@login_required
+def dice_feed():
+    import json as _json
+    since = request.args.get('since', 0, type=int)
+    q = tblDiceRolls.query
+    if since:
+        q = q.filter(tblDiceRolls.roll_id > since)
+    rolls = q.order_by(tblDiceRolls.roll_id.desc()).limit(50).all()
+    return jsonify([{
+        'roll_id':    r.roll_id,
+        'char_name':  r.char_name,
+        'expression': r.expression,
+        'label':      r.label,
+        'dice':       _json.loads(r.dice_json or '[]'),
+        'modifier':   r.modifier,
+        'total':      r.total,
+        'adv_mode':   r.adv_mode,
+        'rolled_at':  r.rolled_at,
+    } for r in rolls])
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────

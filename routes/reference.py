@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 from extensions import db
-from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig
+from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary
 from routes.auth import dm_required
 
 WEAPON_IMG_FOLDER = os.path.join('static', 'uploads', 'weapons')
@@ -732,3 +732,431 @@ def armor_search():
         'cost':              a.cost,
         'weight':            a.weight,
     } for a in armor])
+
+
+# ── Spells sync ────────────────────────────────────────────────────────────────
+
+def sync_spells_from_api():
+    api_base = get_api_base()
+    try:
+        resp = requests.get(f'{api_base}/spells', timeout=15)
+        resp.raise_for_status()
+        spell_list = resp.json().get('results', [])
+    except Exception as e:
+        return 0, 0, str(e)
+
+    added = skipped = errors = 0
+    for entry in spell_list:
+        index = entry['index']
+        if tblSpellsLibrary.query.filter_by(api_index=index).first():
+            skipped += 1
+            continue
+        try:
+            detail = requests.get(f'{api_base}/spells/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            components_list = data.get('components', [])
+            material = data.get('material', '')
+            if material and 'M' in components_list:
+                components_str = ', '.join(components_list) + f' ({material})'
+            else:
+                components_str = ', '.join(components_list)
+
+            spell = tblSpellsLibrary(
+                api_index    = index,
+                name         = data['name'],
+                level        = data.get('level', 0),
+                school       = data.get('school', {}).get('name', ''),
+                casting_time = data.get('casting_time', ''),
+                range_text   = data.get('range', ''),
+                components   = components_str,
+                duration     = data.get('duration', ''),
+                concentration = 1 if data.get('concentration', False) else 0,
+                ritual       = 1 if data.get('ritual', False) else 0,
+                description  = '\n'.join(data.get('desc', [])),
+                classes_text = ', '.join(c['name'] for c in data.get('classes', [])),
+                source       = 'srd',
+                created_at   = _now(),
+            )
+            db.session.add(spell)
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+    return added, skipped, errors
+
+
+# ── Spells library routes ──────────────────────────────────────────────────────
+
+@reference_bp.route('/spells')
+@login_required
+@dm_required
+def spells_library():
+    total = tblSpellsLibrary.query.count()
+    q      = request.args.get('q',      '').strip()
+    level  = request.args.get('level',  '').strip()
+    school = request.args.get('school', '').strip()
+    src    = request.args.get('src',    '').strip()
+
+    spells = tblSpellsLibrary.query
+    if q:
+        spells = spells.filter(tblSpellsLibrary.name.ilike(f'%{q}%'))
+    if level != '':
+        try:
+            spells = spells.filter(tblSpellsLibrary.level == int(level))
+        except ValueError:
+            pass
+    if school:
+        spells = spells.filter(tblSpellsLibrary.school == school)
+    if src:
+        spells = spells.filter(tblSpellsLibrary.source == src)
+    spells = spells.order_by(tblSpellsLibrary.level, tblSpellsLibrary.name).all()
+    current_api = get_api_base()
+    return render_template('ttrpg/spells_library.html',
+                           spells=spells, total=total,
+                           q=q, level=level, school=school, src=src,
+                           current_api=current_api,
+                           api_options=API_OPTIONS)
+
+
+@reference_bp.route('/spells/sync', methods=['POST'])
+@login_required
+@dm_required
+def spells_sync():
+    added, skipped, errors = sync_spells_from_api()
+    flash(f'Spells sync complete: {added} added, {skipped} skipped, {errors} errors.')
+    return redirect(url_for('reference_bp.spells_library'))
+
+
+@reference_bp.route('/spells/add', methods=['POST'])
+@login_required
+@dm_required
+def spell_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Spell name is required.')
+        return redirect(url_for('reference_bp.spells_library'))
+    spell = tblSpellsLibrary(
+        api_index    = None,
+        name         = name,
+        level        = int(request.form.get('level', 0) or 0),
+        school       = request.form.get('school', '').strip(),
+        casting_time = request.form.get('casting_time', '').strip(),
+        range_text   = request.form.get('range_text', '').strip(),
+        components   = request.form.get('components', '').strip(),
+        duration     = request.form.get('duration', '').strip(),
+        concentration = 1 if request.form.get('concentration') else 0,
+        ritual       = 1 if request.form.get('ritual') else 0,
+        description  = request.form.get('description', '').strip(),
+        classes_text = request.form.get('classes_text', '').strip(),
+        source       = 'homebrew',
+        created_at   = _now(),
+    )
+    db.session.add(spell)
+    db.session.commit()
+    flash(f'Added custom spell "{name}".')
+    return redirect(url_for('reference_bp.spells_library'))
+
+
+@reference_bp.route('/spells/<int:spell_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def spell_delete(spell_lib_id):
+    spell = tblSpellsLibrary.query.get_or_404(spell_lib_id)
+    if spell.source != 'homebrew':
+        flash('Only custom spells can be deleted.')
+        return redirect(url_for('reference_bp.spells_library'))
+    name = spell.name
+    db.session.delete(spell)
+    db.session.commit()
+    flash(f'Deleted "{name}".')
+    return redirect(url_for('reference_bp.spells_library'))
+
+
+@reference_bp.route('/spells/search')
+@login_required
+def spells_search():
+    q      = request.args.get('q',      '').strip()
+    level  = request.args.get('level',  '').strip()
+    school = request.args.get('school', '').strip()
+    src    = request.args.get('src',    '').strip()
+    limit  = int(request.args.get('limit', 20))
+
+    spells = tblSpellsLibrary.query
+    if q:
+        spells = spells.filter(tblSpellsLibrary.name.ilike(f'%{q}%'))
+    if level != '':
+        try:
+            spells = spells.filter(tblSpellsLibrary.level == int(level))
+        except ValueError:
+            pass
+    if school:
+        spells = spells.filter(tblSpellsLibrary.school == school)
+    if src:
+        spells = spells.filter(tblSpellsLibrary.source == src)
+    spells = spells.order_by(tblSpellsLibrary.level, tblSpellsLibrary.name).limit(limit).all()
+    return jsonify([{
+        'spell_lib_id': s.spell_lib_id,
+        'name':         s.name,
+        'level':        s.level,
+        'school':       s.school,
+        'casting_time': s.casting_time,
+        'range_text':   s.range_text,
+        'components':   s.components,
+        'duration':     s.duration,
+        'concentration': s.concentration,
+        'ritual':       s.ritual,
+        'description':  s.description,
+        'classes_text': s.classes_text,
+        'source':       s.source,
+    } for s in spells])
+
+
+# ── Skills sync ────────────────────────────────────────────────────────────────
+
+def sync_skills_from_api():
+    api_base = get_api_base()
+    try:
+        resp = requests.get(f'{api_base}/skills', timeout=15)
+        resp.raise_for_status()
+        skill_list = resp.json().get('results', [])
+    except Exception as e:
+        return 0, 0, str(e)
+
+    added = skipped = errors = 0
+    for entry in skill_list:
+        index = entry['index']
+        if tblSkillsLibrary.query.filter_by(api_index=index).first():
+            skipped += 1
+            continue
+        try:
+            detail = requests.get(f'{api_base}/skills/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            ability_obj = data.get('ability_score', {})
+            ability_score = ability_obj.get('name', '') or ability_obj.get('index', '').upper()
+
+            skill = tblSkillsLibrary(
+                api_index     = index,
+                name          = data['name'],
+                ability_score = ability_score,
+                description   = '\n'.join(data.get('desc', [])),
+                source        = 'srd',
+                created_at    = _now(),
+            )
+            db.session.add(skill)
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+    return added, skipped, errors
+
+
+# ── Skills library routes ──────────────────────────────────────────────────────
+
+@reference_bp.route('/skills')
+@login_required
+@dm_required
+def skills_library():
+    total = tblSkillsLibrary.query.count()
+    q   = request.args.get('q',   '').strip()
+    src = request.args.get('src', '').strip()
+
+    skills = tblSkillsLibrary.query
+    if q:
+        skills = skills.filter(tblSkillsLibrary.name.ilike(f'%{q}%'))
+    if src:
+        skills = skills.filter(tblSkillsLibrary.source == src)
+    skills = skills.order_by(tblSkillsLibrary.ability_score, tblSkillsLibrary.name).all()
+    current_api = get_api_base()
+    return render_template('ttrpg/skills_library.html',
+                           skills=skills, total=total, q=q, src=src,
+                           current_api=current_api,
+                           api_options=API_OPTIONS)
+
+
+@reference_bp.route('/skills/sync', methods=['POST'])
+@login_required
+@dm_required
+def skills_sync():
+    added, skipped, errors = sync_skills_from_api()
+    flash(f'Skills sync complete: {added} added, {skipped} skipped, {errors} errors.')
+    return redirect(url_for('reference_bp.skills_library'))
+
+
+@reference_bp.route('/skills/add', methods=['POST'])
+@login_required
+@dm_required
+def skill_add_to_lib():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Skill name is required.')
+        return redirect(url_for('reference_bp.skills_library'))
+    skill = tblSkillsLibrary(
+        api_index     = None,
+        name          = name,
+        ability_score = request.form.get('ability_score', '').strip(),
+        description   = request.form.get('description', '').strip(),
+        source        = 'homebrew',
+        created_at    = _now(),
+    )
+    db.session.add(skill)
+    db.session.commit()
+    flash(f'Added custom skill "{name}".')
+    return redirect(url_for('reference_bp.skills_library'))
+
+
+@reference_bp.route('/skills/<int:skill_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def skill_lib_delete(skill_lib_id):
+    skill = tblSkillsLibrary.query.get_or_404(skill_lib_id)
+    if skill.source != 'homebrew':
+        flash('Only custom skills can be deleted.')
+        return redirect(url_for('reference_bp.skills_library'))
+    name = skill.name
+    db.session.delete(skill)
+    db.session.commit()
+    flash(f'Deleted "{name}".')
+    return redirect(url_for('reference_bp.skills_library'))
+
+
+@reference_bp.route('/skills/search')
+@login_required
+def skills_search():
+    q = request.args.get('q', '').strip()
+    skills = tblSkillsLibrary.query.filter(
+        tblSkillsLibrary.name.ilike(f'%{q}%')
+    ).order_by(tblSkillsLibrary.ability_score, tblSkillsLibrary.name).limit(30).all()
+    return jsonify([{
+        'skill_lib_id': s.skill_lib_id,
+        'name':         s.name,
+        'ability_score': s.ability_score,
+        'description':  s.description,
+        'source':       s.source,
+    } for s in skills])
+
+
+# ── Races sync ─────────────────────────────────────────────────────────────────
+
+def sync_races_from_api():
+    api_base = get_api_base()
+    try:
+        resp = requests.get(f'{api_base}/races', timeout=15)
+        resp.raise_for_status()
+        race_list = resp.json().get('results', [])
+    except Exception as e:
+        return 0, 0, str(e)
+
+    added = skipped = errors = 0
+    for entry in race_list:
+        index = entry['index']
+        if tblRacesLibrary.query.filter_by(api_index=index).first():
+            skipped += 1
+            continue
+        try:
+            detail = requests.get(f'{api_base}/races/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            ability_bonuses = ', '.join(
+                f"+{ab['bonus']} {ab['ability_score']['name']}"
+                for ab in data.get('ability_bonuses', [])
+            )
+
+            race = tblRacesLibrary(
+                api_index      = index,
+                name           = data['name'],
+                speed          = data.get('speed', 30),
+                size           = data.get('size', ''),
+                ability_bonuses = ability_bonuses,
+                traits_text    = '\n'.join(t['name'] for t in data.get('traits', [])),
+                languages      = ', '.join(l['name'] for l in data.get('languages', [])),
+                description    = data.get('alignment', ''),
+                source         = 'srd',
+                created_at     = _now(),
+            )
+            db.session.add(race)
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+    return added, skipped, errors
+
+
+# ── Races library routes ───────────────────────────────────────────────────────
+
+@reference_bp.route('/races')
+@login_required
+@dm_required
+def races_library():
+    total = tblRacesLibrary.query.count()
+    q   = request.args.get('q',   '').strip()
+    src = request.args.get('src', '').strip()
+
+    races = tblRacesLibrary.query
+    if q:
+        races = races.filter(tblRacesLibrary.name.ilike(f'%{q}%'))
+    if src:
+        races = races.filter(tblRacesLibrary.source == src)
+    races = races.order_by(tblRacesLibrary.name).all()
+    current_api = get_api_base()
+    return render_template('ttrpg/races_library.html',
+                           races=races, total=total, q=q, src=src,
+                           current_api=current_api,
+                           api_options=API_OPTIONS)
+
+
+@reference_bp.route('/races/sync', methods=['POST'])
+@login_required
+@dm_required
+def races_sync():
+    added, skipped, errors = sync_races_from_api()
+    flash(f'Races sync complete: {added} added, {skipped} skipped, {errors} errors.')
+    return redirect(url_for('reference_bp.races_library'))
+
+
+@reference_bp.route('/races/add', methods=['POST'])
+@login_required
+@dm_required
+def race_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Race name is required.')
+        return redirect(url_for('reference_bp.races_library'))
+    race = tblRacesLibrary(
+        api_index       = None,
+        name            = name,
+        speed           = int(request.form.get('speed', 30) or 30),
+        size            = request.form.get('size', '').strip(),
+        ability_bonuses = request.form.get('ability_bonuses', '').strip(),
+        traits_text     = request.form.get('traits_text', '').strip(),
+        languages       = request.form.get('languages', '').strip(),
+        description     = request.form.get('description', '').strip(),
+        source          = 'homebrew',
+        created_at      = _now(),
+    )
+    db.session.add(race)
+    db.session.commit()
+    flash(f'Added custom race "{name}".')
+    return redirect(url_for('reference_bp.races_library'))
+
+
+@reference_bp.route('/races/<int:race_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def race_delete(race_lib_id):
+    race = tblRacesLibrary.query.get_or_404(race_lib_id)
+    if race.source != 'homebrew':
+        flash('Only custom races can be deleted.')
+        return redirect(url_for('reference_bp.races_library'))
+    name = race.name
+    db.session.delete(race)
+    db.session.commit()
+    flash(f'Deleted "{name}".')
+    return redirect(url_for('reference_bp.races_library'))

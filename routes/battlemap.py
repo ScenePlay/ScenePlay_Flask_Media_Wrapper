@@ -211,12 +211,21 @@ def map_view(map_id):
             else:
                 on_map_player_ids.add(t.entity_id)
 
+    # Determine roller name: player's character name or DM display name
+    roller_name = current_user.display_name
+    if not current_user.is_dm():
+        for sp in sess.party:
+            if sp.character.user_id == current_user.user_id:
+                roller_name = sp.character.name
+                break
+
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
                            monsters=monsters, party=party,
                            on_map_monster_ids=on_map_monster_ids,
                            on_map_player_ids=on_map_player_ids,
-                           cell_px=CELL_PX)
+                           cell_px=CELL_PX,
+                           roller_name=roller_name)
 
 
 # ── State poll endpoint ───────────────────────────────────────────────────────

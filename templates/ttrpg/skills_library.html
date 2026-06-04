@@ -1,0 +1,202 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .ability-badge {
+    font-size: .7rem; padding: 1px 7px; border-radius: 8px;
+    border: 1px solid var(--sp-border);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .ability-STR { color: #ef4444; background: color-mix(in srgb, #ef4444 15%, transparent); }
+  .ability-DEX { color: #22c55e; background: color-mix(in srgb, #22c55e 15%, transparent); }
+  .ability-CON { color: #f97316; background: color-mix(in srgb, #f97316 15%, transparent); }
+  .ability-INT { color: #3b82f6; background: color-mix(in srgb, #3b82f6 15%, transparent); }
+  .ability-WIS { color: #a78bfa; background: color-mix(in srgb, #a78bfa 15%, transparent); }
+  .ability-CHA { color: #ec4899; background: color-mix(in srgb, #ec4899 15%, transparent); }
+  .skills-table { background: var(--sp-surface); color: var(--sp-text); }
+  .skills-table thead th {
+    background: var(--sp-primary);
+    color: var(--sp-accent);
+    border-bottom-color: var(--sp-border);
+    font-size: .8rem;
+  }
+  .skills-table td { border-color: var(--sp-border); font-size: .85rem; vertical-align: middle; }
+  .skills-table tbody tr.data-row:hover td {
+    background: color-mix(in srgb, var(--sp-accent) 6%, transparent);
+  }
+  .skills-table tr.detail-row td {
+    background: var(--sp-bg);
+    border-top: none;
+    padding: 8px 14px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Skills Library</h3>
+    <span class="small text-muted">{{ total }} skill{{ 's' if total != 1 }}</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">+ Custom Skill</button>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
+    <form method="POST" action="{{ url_for('reference_bp.skills_sync') }}"
+          onsubmit="return confirm('Sync skills from the API? (existing entries are skipped)')">
+      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
+    </form>
+  </div>
+</div>
+
+<!-- Add custom skill form -->
+<div id="add-skill-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="fw-bold mb-3" style="color:var(--ttrpg-accent);">Add Custom Skill</div>
+  <form method="POST" action="{{ url_for('reference_bp.skill_add_to_lib') }}">
+    <div class="row g-2 mb-3">
+      <div class="col-sm-4">
+        <label class="form-label small text-muted mb-1">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               placeholder="Lockpicking" required autofocus>
+      </div>
+      <div class="col-sm-3">
+        <label class="form-label small text-muted mb-1">Ability Score</label>
+        <select name="ability_score" class="form-select form-select-sm">
+          <option value="">—</option>
+          <option>STR</option>
+          <option>DEX</option>
+          <option>CON</option>
+          <option>INT</option>
+          <option>WIS</option>
+          <option>CHA</option>
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label small text-muted mb-1">Description</label>
+        <textarea name="description" class="form-control form-control-sm" rows="2"
+                  style="resize:vertical;" placeholder="What this skill covers…"></textarea>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add to Library</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<div class="ttrpg-card p-3 mb-3">
+  <form method="GET" action="{{ url_for('reference_bp.skills_library') }}" class="row g-2 align-items-end">
+    <div class="col-sm-4">
+      <label class="form-label small text-muted mb-1">Search</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Skill name…">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select name="src" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
+        <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Filter</button>
+    </div>
+    {% if q or src %}
+    <div class="col-auto">
+      <a href="{{ url_for('reference_bp.skills_library') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+{% if skills %}
+<div class="ttrpg-card p-0" style="overflow-x:auto;">
+  <table class="table table-hover mb-0 skills-table">
+    <thead>
+      <tr>
+        <th style="width:30px;"></th>
+        <th>Skill Name</th>
+        <th>Ability Score</th>
+        <th>Source</th>
+        <th style="width:60px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in skills %}
+      <tr class="data-row" id="skrow-{{ s.skill_lib_id }}" style="cursor:pointer;"
+          onclick="toggleSkillDetail({{ s.skill_lib_id }})">
+        <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
+        <td>
+          <span style="color:var(--ttrpg-accent);font-weight:600;">{{ s.name }}</span>
+          {% if s.source == 'homebrew' %}
+          <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                       border:1px solid var(--sp-border);
+                       color:var(--ttrpg-accent);
+                       background:color-mix(in srgb, var(--sp-primary) 25%, transparent);
+                       margin-left:4px;">Custom</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if s.ability_score %}
+          <span class="ability-badge ability-{{ s.ability_score }}">{{ s.ability_score }}</span>
+          {% else %}
+          <span style="color:var(--sp-muted);font-style:italic;font-size:.8rem;">—</span>
+          {% endif %}
+        </td>
+        <td class="text-muted small">{{ s.source }}</td>
+        <td class="text-center" onclick="event.stopPropagation()">
+          {% if s.source == 'homebrew' %}
+          <form method="POST"
+                action="{{ url_for('reference_bp.skill_lib_delete', skill_lib_id=s.skill_lib_id) }}"
+                onsubmit="return confirm('Delete {{ s.name }}?')">
+            <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      <!-- Detail row -->
+      <tr class="detail-row" id="skdetail-{{ s.skill_lib_id }}" style="display:none;">
+        <td colspan="5">
+          {% if s.description %}
+          <div class="small" style="white-space:pre-wrap;color:var(--sp-text);">{{ s.description }}</div>
+          {% else %}
+          <span class="text-muted small fst-italic">No description.</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="ttrpg-card p-4 text-center text-muted">
+  {% if q or src %}
+  <p>No skills match your filters.</p>
+  {% else %}
+  <p>No skills stored yet. Click <strong>Sync SRD</strong> to pull from the API.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-skill-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') f.querySelector('[name="name"]').focus();
+}
+
+function toggleSkillDetail(id) {
+  const detail = document.getElementById('skdetail-' + id);
+  const icon   = document.querySelector('#skrow-' + id + ' td:first-child');
+  const open   = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  if (icon) icon.textContent = open ? '▼' : '▲';
+}
+</script>
+{% endblock %}
