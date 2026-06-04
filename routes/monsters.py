@@ -118,17 +118,21 @@ def sync_monsters_from_api():
 @login_required
 @dm_required
 def library():
+    from routes.reference import get_api_base, API_OPTIONS
     synced = tblMonsterTemplates.query.count()
     sessions = tblSessions.query.filter(
         tblSessions.status.in_(['planning', 'active'])
     ).order_by(tblSessions.title).all()
     raw_types = db.session.query(tblMonsterTemplates.monster_type).distinct().all()
     monster_types = sorted(t[0].lower() for t in raw_types if t[0])
+    current_api = get_api_base()
     return render_template('ttrpg/monsters.html',
                            synced=synced,
                            sessions=sessions,
                            conditions=CONDITIONS,
-                           monster_types=monster_types)
+                           monster_types=monster_types,
+                           current_api=current_api,
+                           api_options=API_OPTIONS)
 
 
 # ── AJAX search ───────────────────────────────────────────────────────────────

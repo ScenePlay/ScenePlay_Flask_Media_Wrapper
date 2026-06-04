@@ -189,15 +189,15 @@
                 {% if current_user.is_authenticated %}
                     {% if current_user.is_dm() %}
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.dashboard') }}">Dashboard</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.characters') }}">Characters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.sessions_list') }}">Sessions</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.all_maps') }}">Maps</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.characters') }}">Characters</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.armor_library') }}">Armor</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.feats_library') }}">Feats</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.weapons_library') }}">Weapons</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.armor_library') }}">Armor</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881;</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881;</a></li>
                     {% else %}
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.my_character') }}">My Character</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.active_map') }}">&#9776; Battle Map</a></li>

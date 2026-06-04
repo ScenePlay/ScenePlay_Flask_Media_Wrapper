@@ -386,7 +386,12 @@
              style="position:absolute;top:0;left:0;width:100%;height:100%;
                     z-index:6;overflow:visible;pointer-events:none;"></svg>
 
-        <!-- Transparent draw overlay — active only in FX draw mode (z:20) -->
+        <!-- Fog / Cloud-of-War layer (z:12 — above tokens) -->
+        <svg id="fog-layer"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;
+                    z-index:12;overflow:visible;pointer-events:none;"></svg>
+
+        <!-- Transparent draw overlay — active only in FX / cloud draw mode (z:20) -->
         <div id="fx-draw-overlay"
              style="position:absolute;top:0;left:0;width:100%;height:100%;
                     z-index:20;display:none;cursor:crosshair;"></div>
@@ -436,7 +441,7 @@
     <input type="color" id="fx-fill-color" value="#ff4400" class="fx-color-input"
            oninput="fxFillColor = this.value">
     <label class="fx-label">Opacity</label>
-    <input type="range" id="fx-opacity" min="10" max="80" value="35"
+    <input type="range" id="fx-opacity" min="10" max="100" value="35"
            style="flex:1;accent-color:var(--ttrpg-accent);"
            oninput="fxOpacity = parseInt(this.value); document.getElementById('fx-opacity-val').textContent = fxOpacity + '%'">
     <span id="fx-opacity-val" class="fx-label" style="min-width:28px;">35%</span>
@@ -466,6 +471,19 @@
             onclick="toggleFxDrawMode()">&#9998; Draw: OFF</button>
     <button class="btn btn-sm btn-outline-danger px-2"
             onclick="clearAllEffects()" title="Remove all effects">&#128465;</button>
+  </div>
+
+  <!-- Cloud of War -->
+  <hr style="border-color:#333;margin:8px 0;">
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#9608; Cloud of War</div>
+  <div class="fx-label mb-1" style="color:#666;font-size:.68rem;">Drag to paint &bull; Eraser to uncover</div>
+  <div class="d-flex gap-2 mb-1">
+    <button id="cloud-draw-btn" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="toggleCloudDrawMode()">&#9608; Paint: OFF</button>
+    <button id="cloud-erase-btn" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="toggleCloudEraseMode()">&#9711; Erase: OFF</button>
+    <button class="btn btn-sm btn-outline-danger px-2"
+            onclick="clearAllClouds()" title="Remove all clouds">&#128465;</button>
   </div>
 
   <!-- Selected effect controls -->
@@ -863,6 +881,11 @@ document.addEventListener('visibilitychange', () => {
 // ── Effects ───────────────────────────────────────────────────────────────────
 
 const effectsSvg  = document.getElementById('effects-layer');
+const fogSvg      = document.getElementById('fog-layer');
+let cloudDrawMode  = false;
+let cloudEraseMode = false;
+let cloudPlacing   = null;   // { startX, startY, previewG, _minX, _minY, _wCells, _hCells }
+let cloudErasing   = null;   // { previewG, cells: Set of 'x,y' strings }
 const fxOverlay   = document.getElementById('fx-draw-overlay');
 let currentEffects  = {};   // effect_id → data
 let activeFxDrag    = null; // { effectId, g, origX, origY, startCX, startCY }
@@ -939,16 +962,61 @@ function applyEffectGeometry(g, eff) {
     shape = svgEl('polygon', { points: pts });
     lx = px + (dim / 2) * Math.cos(θ);
     ly = py + (dim / 2) * Math.sin(θ);
+
+  } else if (eff.shape === 'cloud') {
+    const wCells = eff.size_ft / 5;
+    const hCells = eff.angle > 0 ? eff.angle : wCells;
+    shape = svgEl('rect', {
+      x: px, y: py,
+      width:  wCells * CELL_PX,
+      height: hCells * CELL_PX,
+    });
   }
 
   if (!shape) return;
   shape.setAttribute('fill',         eff.fill_color);
   shape.setAttribute('fill-opacity', eff.fill_opacity);
-  shape.setAttribute('stroke',       eff.border_color);
-  shape.setAttribute('stroke-width', '2');
+  if (eff.shape !== 'cloud') {
+    shape.setAttribute('stroke',       eff.border_color);
+    shape.setAttribute('stroke-width', '2');
+  } else {
+    shape.setAttribute('stroke',       '#c0c0c0');
+    shape.setAttribute('stroke-width', '1.5');
+  }
   g.appendChild(shape);
 
-  if (eff.label) {
+  if (IS_DM && eff.shape === 'cloud') {
+    const wCells = eff.size_ft / 5;
+    const btnSize = Math.min(CELL_PX * 0.55, 22);
+    const bx = px + wCells * CELL_PX - btnSize - 2;
+    const by = py + 2;
+    const bg = svgEl('rect', {
+      x: bx, y: by, width: btnSize, height: btnSize,
+      rx: 3, ry: 3,
+      fill: '#c0c0c0', 'fill-opacity': '0.85',
+    });
+    const xt = svgEl('text', {
+      x: bx + btnSize / 2, y: by + btnSize / 2 + 1,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': Math.round(btnSize * 0.65),
+      fill: '#111', 'font-weight': 'bold', 'font-family': 'sans-serif',
+    });
+    xt.textContent = '✕';
+    [bg, xt].forEach(el => {
+      el.style.cursor = 'pointer';
+      el.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); });
+      el.addEventListener('pointerup', e => {
+        e.stopPropagation();
+        g.remove();
+        delete currentEffects[eff.effect_id];
+        fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${eff.effect_id}/delete`, { method: 'POST' });
+      });
+    });
+    g.appendChild(bg);
+    g.appendChild(xt);
+  }
+
+  if (eff.label && eff.shape !== 'cloud') {
     const txt = svgEl('text', {
       x: lx.toFixed(1), y: ly.toFixed(1),
       'text-anchor': 'middle', 'dominant-baseline': 'middle',
@@ -1047,10 +1115,17 @@ function attachFxDrag(g, effectId) {
 
 // ── Build / reconcile effects ─────────────────────────────────────────────────
 
+function _layerForEff(eff) {
+  return eff.shape === 'cloud' ? fogSvg : effectsSvg;
+}
+
 function buildEffectEl(eff) {
   const g = svgEl('g');
   g.id = `fx-${eff.effect_id}`;
   g.dataset.effectId = String(eff.effect_id);
+  if (eff.shape === 'cloud') {
+    g.style.pointerEvents = 'all';
+  }
   if (IS_DM) {
     g.style.cursor = 'grab';
     attachFxDrag(g, eff.effect_id);
@@ -1072,7 +1147,7 @@ function renderEffects(effects) {
     let g = document.getElementById(`fx-${eff.effect_id}`);
     if (!g) {
       g = buildEffectEl(eff);
-      effectsSvg.appendChild(g);
+      _layerForEff(eff).appendChild(g);
     } else if (!activeFxDrag || activeFxDrag.effectId !== eff.effect_id) {
       applyEffectGeometry(g, eff);
     }
@@ -1117,9 +1192,160 @@ function _previewEffect(startX, startY, curX, curY) {
   });
 }
 
+// ── Cloud-of-War helpers ──────────────────────────────────────────────────────
+
+function _cloudGridPos(e) {
+  const rect = document.getElementById('map-grid').getBoundingClientRect();
+  return [
+    Math.floor((e.clientX - rect.left) / CELL_PX),
+    Math.floor((e.clientY - rect.top)  / CELL_PX),
+  ];
+}
+
+function _updateCloudPreview(startX, startY, endX, endY) {
+  if (!cloudPlacing) return;
+  const g = cloudPlacing.previewG;
+  while (g.firstChild) g.removeChild(g.firstChild);
+  const minX    = Math.min(startX, endX);
+  const minY    = Math.min(startY, endY);
+  const wCells  = Math.max(1, Math.abs(endX - startX) + 1);
+  const hCells  = Math.max(1, Math.abs(endY - startY) + 1);
+  const r = svgEl('rect', {
+    x: minX * CELL_PX, y: minY * CELL_PX,
+    width: wCells * CELL_PX, height: hCells * CELL_PX,
+    fill: '#000000', 'fill-opacity': '0.55', stroke: 'none',
+  });
+  g.appendChild(r);
+  cloudPlacing._minX   = minX;
+  cloudPlacing._minY   = minY;
+  cloudPlacing._wCells = wCells;
+  cloudPlacing._hCells = hCells;
+}
+
+function _applyCloudDrawMode() {
+  const btn = document.getElementById('cloud-draw-btn');
+  if (cloudDrawMode) {
+    btn.textContent = '█ Paint: ON';
+    btn.classList.replace('btn-outline-secondary', 'btn-warning');
+    btn.style.color = '#000';
+    if (fxOverlay) { fxOverlay.style.display = 'block'; fxOverlay.style.cursor = 'crosshair'; }
+  } else {
+    btn.textContent = '█ Paint: OFF';
+    btn.classList.replace('btn-warning', 'btn-outline-secondary');
+    btn.style.color = '';
+    if (!cloudEraseMode) {
+      if (fxOverlay) fxOverlay.style.display = 'none';
+    }
+    if (cloudPlacing) { cloudPlacing.previewG.remove(); cloudPlacing = null; }
+  }
+}
+
+function toggleCloudDrawMode() {
+  cloudDrawMode = !cloudDrawMode;
+  if (cloudDrawMode) {
+    if (fxDrawMode)     { fxDrawMode    = false; _applyDrawMode(); }
+    if (cloudEraseMode) { cloudEraseMode = false; _applyCloudEraseMode(); }
+  }
+  _applyCloudDrawMode();
+}
+
+function _applyCloudEraseMode() {
+  const btn = document.getElementById('cloud-erase-btn');
+  if (cloudEraseMode) {
+    btn.textContent = '◯ Erase: ON';
+    btn.classList.replace('btn-outline-secondary', 'btn-info');
+    if (fxOverlay) { fxOverlay.style.display = 'block'; fxOverlay.style.cursor = 'cell'; }
+  } else {
+    btn.textContent = '◯ Erase: OFF';
+    btn.classList.replace('btn-info', 'btn-outline-secondary');
+    if (!cloudDrawMode) {
+      if (fxOverlay) fxOverlay.style.display = 'none';
+    }
+    if (fxOverlay) fxOverlay.style.cursor = 'crosshair';
+    if (cloudErasing) { cloudErasing.previewG.remove(); cloudErasing = null; }
+  }
+}
+
+function toggleCloudEraseMode() {
+  cloudEraseMode = !cloudEraseMode;
+  if (cloudEraseMode) {
+    if (fxDrawMode)    { fxDrawMode    = false; _applyDrawMode(); }
+    if (cloudDrawMode) { cloudDrawMode = false; _applyCloudDrawMode(); }
+  }
+  _applyCloudEraseMode();
+}
+
+// Find all cloud effects that overlap a given cell (col, row)
+function _cloudsAtCell(col, row) {
+  return Object.values(currentEffects).filter(eff => {
+    if (eff.shape !== 'cloud') return false;
+    const wCells = eff.size_ft / 5;
+    const hCells = eff.angle > 0 ? eff.angle : wCells;
+    return col >= eff.anchor_x && col < eff.anchor_x + wCells &&
+           row >= eff.anchor_y && row < eff.anchor_y + hCells;
+  });
+}
+
+// Delete all clouds touching (col, row) during an erase stroke
+function _eraseCloudCells(col, row) {
+  if (!cloudErasing) return;
+  const key = `${col},${row}`;
+  if (cloudErasing.erased.has(key)) return;
+  cloudErasing.erased.add(key);
+
+  // Visually flash the cell being erased
+  const flash = svgEl('rect', {
+    x: col * CELL_PX, y: row * CELL_PX,
+    width: CELL_PX, height: CELL_PX,
+    fill: '#ffffff', 'fill-opacity': '0.25', stroke: 'none',
+  });
+  cloudErasing.previewG.appendChild(flash);
+
+  // Delete any cloud effect that covers this cell
+  _cloudsAtCell(col, row).forEach(eff => {
+    if (cloudErasing.erased.has(`id:${eff.effect_id}`)) return;
+    cloudErasing.erased.add(`id:${eff.effect_id}`);
+    // Optimistically remove from DOM so it feels instant
+    document.getElementById(`fx-${eff.effect_id}`)?.remove();
+    delete currentEffects[eff.effect_id];
+    fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${eff.effect_id}/delete`, { method: 'POST' });
+  });
+}
+
+function clearAllClouds() {
+  if (!confirm('Remove all cloud-of-war blocks from this map?')) return;
+  const ids = Object.values(currentEffects)
+    .filter(e => e.shape === 'cloud')
+    .map(e => e.effect_id);
+  Promise.all(ids.map(id =>
+    fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${id}/delete`, { method: 'POST' })
+  )).then(() => pollState());
+}
+
 if (fxOverlay) {
   fxOverlay.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
+    if (cloudEraseMode) {
+      const [col, row] = _cloudGridPos(e);
+      const previewG = svgEl('g');
+      previewG.style.pointerEvents = 'none';
+      fogSvg.appendChild(previewG);
+      cloudErasing = { previewG, erased: new Set() };
+      // Erase clouds under the initial click immediately
+      _eraseCloudCells(col, row);
+      e.preventDefault();
+      return;
+    }
+    if (cloudDrawMode) {
+      const [col, row] = _cloudGridPos(e);
+      const previewG = svgEl('g');
+      previewG.style.pointerEvents = 'none';
+      fogSvg.appendChild(previewG);
+      cloudPlacing = { startX: col, startY: row, previewG };
+      _updateCloudPreview(col, row, col, row);
+      e.preventDefault();
+      return;
+    }
     const [col, row] = _overlayGridPos(e);
     const previewG = svgEl('g');
     previewG.style.pointerEvents = 'none';
@@ -1130,12 +1356,49 @@ if (fxOverlay) {
   });
 
   fxOverlay.addEventListener('mousemove', e => {
+    if (cloudErasing) {
+      const [col, row] = _cloudGridPos(e);
+      _eraseCloudCells(col, row);
+      return;
+    }
+    if (cloudPlacing) {
+      const [col, row] = _cloudGridPos(e);
+      _updateCloudPreview(cloudPlacing.startX, cloudPlacing.startY, col, row);
+      return;
+    }
     if (!fxDrawing) return;
     const [col, row] = _overlayGridPos(e);
     _previewEffect(fxDrawing.startX, fxDrawing.startY, col, row);
   });
 
   fxOverlay.addEventListener('mouseup', e => {
+    if (cloudErasing) {
+      cloudErasing.previewG.remove();
+      cloudErasing = null;
+      pollState();
+      return;
+    }
+    if (cloudPlacing) {
+      const cp = cloudPlacing;
+      cloudPlacing = null;
+      cp.previewG.remove();
+      if (cp._wCells == null) return;
+      fetch(`/ttrpg/battlemap/${MAP_ID}/effect/add`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shape:        'cloud',
+          anchor_x:     cp._minX,
+          anchor_y:     cp._minY,
+          size_ft:      cp._wCells * 5,
+          angle:        cp._hCells,
+          fill_color:   '#000000',
+          fill_opacity: 1.0,
+          border_color: '#000000',
+          label:        '',
+        }),
+      }).then(r => r.json()).then(d => { if (d.ok) pollState(); });
+      return;
+    }
     if (!fxDrawing) return;
     const drawing = fxDrawing;
     fxDrawing = null;
@@ -1157,7 +1420,9 @@ if (fxOverlay) {
   });
 
   fxOverlay.addEventListener('mouseleave', () => {
-    if (fxDrawing) { fxDrawing.previewG.remove(); fxDrawing = null; }
+    if (cloudErasing) { cloudErasing.previewG.remove(); cloudErasing = null; pollState(); }
+    if (cloudPlacing) { cloudPlacing.previewG.remove(); cloudPlacing = null; }
+    if (fxDrawing)    { fxDrawing.previewG.remove();    fxDrawing = null;    }
   });
 }
 
@@ -1185,7 +1450,9 @@ function closeFxPanel() {
   effectsSvg.style.pointerEvents = 'none';
   const btn = document.getElementById('fx-toggle-btn');
   if (btn) { btn.classList.remove('btn-ttrpg'); btn.classList.add('btn-outline-secondary'); }
-  if (fxDrawMode) { fxDrawMode = false; _applyDrawMode(); }
+  if (fxDrawMode)    { fxDrawMode    = false; _applyDrawMode(); }
+  if (cloudDrawMode) { cloudDrawMode = false; _applyCloudDrawMode(); }
+  if (cloudEraseMode){ cloudEraseMode = false; _applyCloudEraseMode(); }
   _removeFxHandle();
   fxSelectedId = null;
   const sel = document.getElementById('fx-selected');
@@ -1222,6 +1489,10 @@ function updateFxCellLabel() {
 
 function toggleFxDrawMode() {
   fxDrawMode = !fxDrawMode;
+  if (fxDrawMode) {
+    if (cloudDrawMode)  { cloudDrawMode  = false; _applyCloudDrawMode(); }
+    if (cloudEraseMode) { cloudEraseMode = false; _applyCloudEraseMode(); }
+  }
   _applyDrawMode();
 }
 

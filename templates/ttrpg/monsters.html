@@ -2,12 +2,19 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <h3 style="color:var(--ttrpg-accent);" class="mb-0">Monster Library</h3>
-  <div class="d-flex gap-2 flex-wrap">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Monster Library</h3>
+    <span class="small text-muted">{{ synced }} monster{{ 's' if synced != 1 }} cached</span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
     <a href="{{ url_for('monsters_bp.homebrew_new') }}" class="btn btn-sm btn-outline-secondary">+ Homebrew</a>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
     <form method="POST" action="{{ url_for('monsters_bp.sync') }}"
-          onsubmit="return confirm('Sync all monsters from the 5e SRD API? This may take a minute.')">
-      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD ({{ synced }} cached)</button>
+          onsubmit="return confirm('Sync all monsters from the API? This may take a minute.')">
+      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
     </form>
   </div>
 </div>

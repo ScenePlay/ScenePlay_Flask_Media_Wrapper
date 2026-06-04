@@ -370,7 +370,7 @@ def effect_add(map_id):
     tblBattleMaps.query.get_or_404(map_id)
     data = request.get_json()
     shape = data.get('shape', 'circle')
-    if shape not in ('circle', 'cone', 'line', 'square'):
+    if shape not in ('circle', 'cone', 'line', 'square', 'cloud'):
         return jsonify({'ok': False, 'error': 'invalid shape'}), 400
     e = tblBattleMapEffects(
         map_id       = map_id,

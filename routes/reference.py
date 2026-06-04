@@ -538,22 +538,33 @@ def sync_armor_from_api():
             skipped += 1
             continue
         try:
-            detail = requests.get(f'{api_base}/equipment/{index}', timeout=10)
-            detail.raise_for_status()
-            data = detail.json()
+            # Some armor category entries (e.g. Adamantine/Mithral variants) live
+            # under /magic-items/ not /equipment/ — try equipment first, fall back.
+            data = None
+            for endpoint in ('equipment', 'magic-items'):
+                r = requests.get(f'{api_base}/{endpoint}/{index}', timeout=10)
+                if r.ok and r.content:
+                    try:
+                        data = r.json()
+                        break
+                    except Exception:
+                        pass
+            if not data:
+                skipped += 1
+                continue
 
             ac_obj   = data.get('armor_class', {})
             cost_obj = data.get('cost', {})
 
-            ac_base      = ac_obj.get('base', 0)
-            dex_bonus    = 1 if ac_obj.get('dex_bonus') else 0
-            max_dex_raw  = ac_obj.get('max_bonus')
+            ac_base     = ac_obj.get('base', 0)
+            dex_bonus   = 1 if ac_obj.get('dex_bonus') else 0
+            max_dex_raw = ac_obj.get('max_bonus')
             if max_dex_raw is None and dex_bonus:
-                max_dex_bonus = None       # unlimited (Light armor)
+                max_dex_bonus = None
             elif max_dex_raw is not None:
                 max_dex_bonus = int(max_dex_raw)
             else:
-                max_dex_bonus = 0          # no dex bonus (Heavy / Shield)
+                max_dex_bonus = 0
 
             if version == '2024':
                 cats = [c['index'] for c in data.get('equipment_categories', [])]
@@ -578,8 +589,8 @@ def sync_armor_from_api():
                 stealth_disadvantage=1 if data.get('stealth_disadvantage') else 0,
                 weight=data.get('weight', 0) or 0,
                 cost=f"{cost_obj.get('quantity', '')} {cost_obj.get('unit', '')}".strip(),
-                properties=', '.join(p['name'] for p in data.get('properties', [])),
-                notes='',
+                properties=', '.join(p.get('name', '') for p in data.get('properties', [])),
+                notes=data.get('desc', [''])[0] if data.get('desc') else '',
                 image_url='',
                 source='srd',
                 created_at=_now(),
@@ -588,6 +599,7 @@ def sync_armor_from_api():
             db.session.commit()
             added += 1
         except Exception:
+            db.session.rollback()
             errors += 1
     return added, skipped, errors
 

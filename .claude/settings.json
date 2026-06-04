@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -)",
+      "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \"PRAGMA table_info\\(tblArmorLibrary\\);\")",
+      "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \"SELECT count\\(*\\) FROM tblArmorLibrary;\")",
+      "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \"SELECT api_index, name FROM tblArmorLibrary LIMIT 5;\")",
+      "Bash(wait)",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}
