@@ -1,10 +1,42 @@
+import os
+import uuid
 import requests
 from datetime import datetime
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify
+from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required
+from werkzeug.utils import secure_filename
 from extensions import db
 from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig
 from routes.auth import dm_required
+
+WEAPON_IMG_FOLDER = os.path.join('static', 'uploads', 'weapons')
+ALLOWED_IMG_EXTS  = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+
+ARMOR_IMG_FOLDER = os.path.join('static', 'uploads', 'armor')
+
+
+def _save_upload(file_field, subfolder):
+    """Save an uploaded image to static/uploads/<subfolder>/; return URL or None."""
+    f = request.files.get(file_field)
+    if not f or not f.filename:
+        return None
+    ext = f.filename.rsplit('.', 1)[-1].lower()
+    if ext not in ALLOWED_IMG_EXTS:
+        return None
+    filename = f'{uuid.uuid4().hex}.{ext}'
+    folder = os.path.join(current_app.root_path, 'static', 'uploads', subfolder)
+    os.makedirs(folder, exist_ok=True)
+    f.save(os.path.join(folder, filename))
+    return url_for('static', filename=f'uploads/{subfolder}/{filename}')
+
+
+def _save_weapon_image(file_field):
+    return _save_upload(file_field, 'weapons')
+
+
+def _save_armor_image(file_field):
+    return _save_upload(file_field, 'armor')
 
 reference_bp = Blueprint('reference_bp', __name__, url_prefix='/ttrpg/reference')
 
@@ -344,6 +376,41 @@ def feats_search():
 
 # ── Weapons library ────────────────────────────────────────────────────────────
 
+@reference_bp.route('/weapons/add', methods=['POST'])
+@login_required
+@dm_required
+def weapon_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Weapon name is required.')
+        return redirect(url_for('reference_bp.weapons_library'))
+    uploaded = _save_weapon_image('image_file')
+    image_url = uploaded or request.form.get('image_url', '')
+    w = tblWeaponsLibrary(
+        name                   = name,
+        weapon_category        = request.form.get('weapon_category', ''),
+        weapon_range           = request.form.get('weapon_range', ''),
+        damage_dice            = request.form.get('damage_dice', ''),
+        damage_type            = request.form.get('damage_type', ''),
+        two_handed_damage_dice = request.form.get('two_handed_damage_dice', ''),
+        two_handed_damage_type = request.form.get('two_handed_damage_type', ''),
+        range_normal           = int(request.form.get('range_normal') or 0),
+        range_long             = int(request.form.get('range_long') or 0),
+        cost                   = request.form.get('cost', ''),
+        weight                 = float(request.form.get('weight') or 0),
+        properties             = request.form.get('properties', ''),
+        mastery                = request.form.get('mastery', ''),
+        notes                  = request.form.get('notes', ''),
+        image_url              = image_url,
+        source                 = 'homebrew',
+        created_at             = datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    )
+    db.session.add(w)
+    db.session.commit()
+    flash(f'Added "{name}" to the weapons library.')
+    return redirect(url_for('reference_bp.weapons_library'))
+
+
 @reference_bp.route('/weapons/<int:weapon_lib_id>/edit', methods=['POST'])
 @login_required
 @dm_required
@@ -363,7 +430,11 @@ def weapon_edit(weapon_lib_id):
     w.properties             = request.form.get('properties', w.properties)
     w.mastery                = request.form.get('mastery', w.mastery)
     w.notes                  = request.form.get('notes', w.notes)
-    w.image_url              = request.form.get('image_url', w.image_url)
+    uploaded = _save_weapon_image('image_file')
+    if uploaded:
+        w.image_url = uploaded
+    elif request.form.get('image_url', '').strip():
+        w.image_url = request.form.get('image_url').strip()
     db.session.commit()
     flash(f'Updated "{w.name}".')
     return redirect(url_for('reference_bp.weapons_library'))
@@ -540,7 +611,11 @@ def armor_edit(armor_lib_id):
     a.cost                = request.form.get('cost', a.cost)
     a.properties          = request.form.get('properties', a.properties)
     a.notes               = request.form.get('notes', a.notes)
-    a.image_url           = request.form.get('image_url', a.image_url)
+    uploaded = _save_armor_image('image_file')
+    if uploaded:
+        a.image_url = uploaded
+    elif request.form.get('image_url', '').strip():
+        a.image_url = request.form.get('image_url').strip()
     db.session.commit()
     flash(f'Updated "{a.name}".')
     return redirect(url_for('reference_bp.armor_library'))
@@ -616,7 +691,7 @@ def armor_add():
         cost=request.form.get('cost', '').strip(),
         properties=request.form.get('properties', '').strip(),
         notes=request.form.get('notes', '').strip(),
-        image_url='',
+        image_url=_save_armor_image('image_file') or request.form.get('image_url', '').strip(),
         source='homebrew',
         created_at=_now(),
     )

@@ -1,14 +1,14 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+<div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
   <div>
-    <h3 style="color:var(--ttrpg-accent);" class="mb-0">
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0" id="sessHeading">
       Session #{{ sess.session_number }}: {{ sess.title }}
     </h3>
-    <span class="small text-muted">
+    <span class="small text-muted" id="sessSubheading">
       {{ sess.session_date or 'No date set' }}
-      {% if sess.campaign %}&nbsp;&bull;&nbsp;{{ sess.campaign.campaign_name }}{% endif %}
+      {% if sess.campaign %}&nbsp;&bull;&nbsp;<span id="sessCampaignName">{{ sess.campaign.campaign_name }}</span>{% else %}<span id="sessCampaignName"></span>{% endif %}
     </span>
   </div>
   <div class="d-flex gap-2 flex-wrap">
@@ -37,10 +37,49 @@
       <button class="btn btn-success btn-sm">&#9654; Reactivate</button>
     </form>
     {% endif %}
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleSessionEdit()" title="Edit session details">&#9998; Edit</button>
     <form method="POST" action="{{ url_for('ttrpg.session_delete', session_id=sess.session_id) }}"
           onsubmit="return confirm('Delete this session?')">
       <button class="btn btn-outline-danger btn-sm">Delete</button>
     </form>
+  </div>
+</div>
+
+<!-- Inline session edit panel -->
+<div id="sessEditPanel" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-5">
+      <label class="form-label small mb-1">Title</label>
+      <input type="text" id="editTitle" class="form-control form-control-sm"
+             value="{{ sess.title }}">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small mb-1">Session #</label>
+      <input type="number" id="editNumber" class="form-control form-control-sm"
+             value="{{ sess.session_number }}" min="1">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small mb-1">Date</label>
+      <input type="date" id="editDate" class="form-control form-control-sm"
+             value="{{ sess.session_date or '' }}">
+    </div>
+    <div class="col-sm-3">
+      <label class="form-label small mb-1">Campaign</label>
+      <select id="editCampaign" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for c in campaigns %}
+        <option value="{{ c.campaign_id }}"
+          {% if sess.campaign_id == c.campaign_id %}selected{% endif %}>
+          {{ c.campaign_name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="mt-2 d-flex gap-2">
+    <button class="btn btn-ttrpg btn-sm" onclick="saveSessionEdit()">Save</button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleSessionEdit()">Cancel</button>
+    <span id="sessEditSaved" class="small text-success align-self-center" style="display:none;">Saved</span>
   </div>
 </div>
 
@@ -295,6 +334,46 @@
 {% block scripts %}
 <script>
 const SESSION_ID = {{ sess.session_id }};
+
+function toggleSessionEdit() {
+  const panel = document.getElementById('sessEditPanel');
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+function saveSessionEdit() {
+  const payload = {
+    title:          document.getElementById('editTitle').value.trim(),
+    session_number: document.getElementById('editNumber').value,
+    session_date:   document.getElementById('editDate').value,
+    campaign_id:    document.getElementById('editCampaign').value || null,
+  };
+  fetch(`/ttrpg/sessions/${SESSION_ID}/edit`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    // Update heading
+    document.getElementById('sessHeading').textContent =
+      `Session #${d.session_number}: ${d.title}`;
+    // Update subheading date + campaign
+    const campEl = document.getElementById('sessCampaignName');
+    const sub = document.getElementById('sessSubheading');
+    let subText = d.session_date || 'No date set';
+    if (d.campaign_name) {
+      subText += ' • ';
+      campEl.textContent = d.campaign_name;
+    } else {
+      campEl.textContent = '';
+    }
+    // Replace just the text node before the campaign span
+    sub.childNodes[0].textContent = subText;
+    // Show saved flash
+    const sv = document.getElementById('sessEditSaved');
+    sv.style.display = 'inline';
+    setTimeout(() => { sv.style.display = 'none'; }, 2000);
+  });
+}
 
 function toggleAddParty() {
   const p = document.getElementById('add-party-panel');

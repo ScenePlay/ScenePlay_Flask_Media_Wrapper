@@ -60,6 +60,7 @@ signal.signal(signal.SIGCHLD, reap_child)
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
 db.init_app(app)
 migrate.init_app(app, db)

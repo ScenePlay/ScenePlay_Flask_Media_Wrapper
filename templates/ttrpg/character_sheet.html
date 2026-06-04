@@ -455,11 +455,12 @@
           <!-- Add weapon row -->
           {% if can_edit %}
           <div class="mb-3">
+            <!-- Library search / quick add -->
             <div class="d-flex gap-2 flex-wrap align-items-end mb-1">
               <div style="position:relative;max-width:260px;flex:1 1 180px;">
                 <input type="text" id="new_weap_name"
                        class="form-control form-control-sm"
-                       placeholder="Weapon name — or search library…"
+                       placeholder="Weapon name or search library…"
                        autocomplete="off"
                        oninput="weapLibSearch(this.value)">
                 <div id="weap-suggestions"
@@ -468,7 +469,11 @@
                             border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;"></div>
               </div>
               <button class="btn btn-ttrpg btn-sm" onclick="addWeaponToChar()">Add</button>
+              <button class="btn btn-outline-secondary btn-sm"
+                      onclick="toggleCustomWeapForm()"
+                      title="Add a weapon with full stats">+ Custom</button>
             </div>
+
             <!-- Hidden fields populated by library pick -->
             <input type="hidden" id="new_weap_lib_id"         value="">
             <input type="hidden" id="new_weap_category"       value="">
@@ -480,6 +485,89 @@
             <input type="hidden" id="new_weap_range_normal"   value="0">
             <input type="hidden" id="new_weap_range_long"     value="0">
             <input type="hidden" id="new_weap_properties"     value="">
+
+            <!-- Custom weapon form (collapsed by default) -->
+            <div id="custom-weap-form" style="display:none;margin-top:8px;padding:12px;
+                 background:var(--sp-surface);border:1px solid var(--sp-border);border-radius:6px;">
+              <div class="small fw-bold mb-2" style="color:var(--ttrpg-accent);">Custom Weapon</div>
+              <div class="row g-2 mb-2">
+                <div class="col-sm-5">
+                  <label class="form-label small text-muted mb-1">Name *</label>
+                  <input type="text" id="cw_name" class="form-control form-control-sm" placeholder="Vorpal Sword">
+                </div>
+                <div class="col-sm-4">
+                  <label class="form-label small text-muted mb-1">Category</label>
+                  <select id="cw_category" class="form-select form-select-sm">
+                    <option value="">— pick —</option>
+                    <option>Simple Melee</option>
+                    <option>Simple Ranged</option>
+                    <option>Martial Melee</option>
+                    <option>Martial Ranged</option>
+                    <option>Other</option>
+                  </select>
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Range type</label>
+                  <select id="cw_range" class="form-select form-select-sm">
+                    <option value="">—</option>
+                    <option>Melee</option>
+                    <option>Ranged</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Damage Dice</label>
+                  <input type="text" id="cw_dmg_dice" class="form-control form-control-sm" placeholder="1d8">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Damage Type</label>
+                  <input type="text" id="cw_dmg_type" class="form-control form-control-sm" placeholder="slashing">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">+X to Hit</label>
+                  <input type="number" id="cw_atk_bonus" class="form-control form-control-sm" value="0" min="-5" max="20">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">+X Damage</label>
+                  <input type="number" id="cw_dmg_bonus" class="form-control form-control-sm" value="0" min="-5" max="20">
+                </div>
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">2H Dice</label>
+                  <input type="text" id="cw_2h_dice" class="form-control form-control-sm" placeholder="1d10">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">2H Type</label>
+                  <input type="text" id="cw_2h_type" class="form-control form-control-sm" placeholder="slashing">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Range (normal ft)</label>
+                  <input type="number" id="cw_range_normal" class="form-control form-control-sm" value="0" min="0">
+                </div>
+                <div class="col-sm-3">
+                  <label class="form-label small text-muted mb-1">Range (long ft)</label>
+                  <input type="number" id="cw_range_long" class="form-control form-control-sm" value="0" min="0">
+                </div>
+              </div>
+              <div class="row g-2 mb-3">
+                <div class="col-sm-6">
+                  <label class="form-label small text-muted mb-1">Properties</label>
+                  <input type="text" id="cw_properties" class="form-control form-control-sm"
+                         placeholder="finesse, thrown, versatile…">
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label small text-muted mb-1">Notes</label>
+                  <input type="text" id="cw_notes" class="form-control form-control-sm"
+                         placeholder="Attunement, silvered, magic…">
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-ttrpg btn-sm" onclick="addCustomWeapon()">Add Weapon</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleCustomWeapForm()">Cancel</button>
+              </div>
+            </div>
           </div>
           {% endif %}
 
@@ -1338,6 +1426,37 @@ function addWeaponToChar() {
       range_long:             parseInt(document.getElementById('new_weap_range_long').value)   || 0,
       properties:             document.getElementById('new_weap_properties').value,
       attack_bonus: 0, damage_bonus: 0, equipped: 0,
+    })
+  }).then(() => reloadKeepTab());
+}
+
+function toggleCustomWeapForm() {
+  const f = document.getElementById('custom-weap-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') document.getElementById('cw_name').focus();
+}
+
+function addCustomWeapon() {
+  const name = document.getElementById('cw_name').value.trim();
+  if (!name) { document.getElementById('cw_name').focus(); return; }
+  fetch(`/ttrpg/character/${CHAR_ID}/weapons`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      weapon_name:            name,
+      weapon_lib_id:          null,
+      weapon_category:        document.getElementById('cw_category').value,
+      weapon_range:           document.getElementById('cw_range').value,
+      damage_dice:            document.getElementById('cw_dmg_dice').value,
+      damage_type:            document.getElementById('cw_dmg_type').value,
+      two_handed_damage_dice: document.getElementById('cw_2h_dice').value,
+      two_handed_damage_type: document.getElementById('cw_2h_type').value,
+      range_normal:           parseInt(document.getElementById('cw_range_normal').value) || 0,
+      range_long:             parseInt(document.getElementById('cw_range_long').value)   || 0,
+      properties:             document.getElementById('cw_properties').value,
+      notes:                  document.getElementById('cw_notes').value,
+      attack_bonus:           parseInt(document.getElementById('cw_atk_bonus').value)    || 0,
+      damage_bonus:           parseInt(document.getElementById('cw_dmg_bonus').value)    || 0,
+      equipped: 0,
     })
   }).then(() => reloadKeepTab());
 }

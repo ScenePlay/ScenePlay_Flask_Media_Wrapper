@@ -25,11 +25,12 @@
         <div class="ttrpg-card p-3 h-100">
             <h5 style="color: var(--ttrpg-accent);">Campaigns</h5>
             {% if campaigns %}
-            <table class="table table-sm table-hover mb-0 ttrpg-table">
+            <table class="table table-sm table-hover mb-0 ttrpg-table" id="campaignTable">
                 <thead><tr><th>Name</th><th>Status</th></tr></thead>
                 <tbody>
                     {% for c in campaigns %}
-                    <tr>
+                    <tr class="campaign-row" data-campaign-id="{{ c.campaign_id }}"
+                        style="cursor:pointer;" title="Click to filter sessions">
                         <td>{{ c.campaign_name }}</td>
                         <td>
                             {% if c.active %}
@@ -104,11 +105,18 @@
     <div class="col-12">
         <div class="ttrpg-card p-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 style="color: var(--ttrpg-accent);">Sessions</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <h5 style="color: var(--ttrpg-accent);" class="mb-0">Sessions</h5>
+                    <span id="campaignFilterLabel"
+                          style="display:none;font-size:.78rem;padding:2px 10px;border-radius:12px;
+                                 background:color-mix(in srgb, var(--sp-accent) 20%, transparent);
+                                 border:1px solid var(--ttrpg-accent);color:var(--ttrpg-accent);">
+                    </span>
+                </div>
                 <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-sm btn-outline-secondary">All Sessions</a>
             </div>
             {% if sessions %}
-            <table class="table table-sm table-hover mb-0 ttrpg-table">
+            <table class="table table-sm table-hover mb-0 ttrpg-table" id="sessionsTable">
                 <thead>
                     <tr>
                         <th>#</th><th>Title</th><th>Campaign</th><th>Date</th><th>Status</th><th></th>
@@ -116,7 +124,7 @@
                 </thead>
                 <tbody>
                     {% for s in sessions %}
-                    <tr>
+                    <tr class="session-row" data-campaign-id="{{ s.campaign_id or '' }}">
                         <td>{{ s.session_number }}</td>
                         <td>{{ s.title }}</td>
                         <td>{{ s.campaign.campaign_name if s.campaign else '—' }}</td>
@@ -144,4 +152,61 @@
         </div>
     </div>
 </div>
+
+{% block scripts %}
+<script>
+(function() {
+  let activeCampaignId = null;
+
+  document.querySelectorAll('.campaign-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const cid = row.dataset.campaignId;
+
+      if (activeCampaignId === cid) {
+        clearFilter();
+        return;
+      }
+
+      activeCampaignId = cid;
+      const name = row.querySelector('td').textContent.trim();
+
+      // Highlight selected campaign row
+      document.querySelectorAll('.campaign-row').forEach(r => {
+        r.style.background = '';
+        r.style.outline = '';
+      });
+      row.style.background = 'color-mix(in srgb, var(--sp-accent) 18%, transparent)';
+      row.style.outline = '1px solid var(--ttrpg-accent)';
+
+      // Filter sessions
+      document.querySelectorAll('.session-row').forEach(sr => {
+        sr.style.display = sr.dataset.campaignId === cid ? '' : 'none';
+      });
+
+      // Show filter label (click × to clear)
+      const lbl = document.getElementById('campaignFilterLabel');
+      lbl.textContent = name + '  ×';
+      lbl.style.display = '';
+      lbl.style.cursor = 'pointer';
+      lbl.title = 'Click to clear filter';
+      lbl.onclick = clearFilter;
+    });
+  });
+
+  function clearFilter() {
+    activeCampaignId = null;
+    document.querySelectorAll('.campaign-row').forEach(r => {
+      r.style.background = '';
+      r.style.outline = '';
+    });
+    document.querySelectorAll('.session-row').forEach(sr => {
+      sr.style.display = '';
+    });
+    const lbl = document.getElementById('campaignFilterLabel');
+    lbl.style.display = 'none';
+    lbl.onclick = null;
+  }
+})();
+</script>
+{% endblock %}
 {% endblock %}

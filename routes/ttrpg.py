@@ -41,7 +41,7 @@ def dashboard():
         return redirect(url_for('ttrpg.my_character'))
 
     campaigns = tblcampaigns.query.order_by(tblcampaigns.campaign_name).all()
-    sessions  = tblSessions.query.order_by(tblSessions.created_at.desc()).limit(20).all()
+    sessions  = tblSessions.query.order_by(tblSessions.created_at.desc()).all()
     characters = tblCharacters.query.filter_by(active=1).order_by(tblCharacters.name).all()
     active_session = tblSessions.query.filter_by(status='active').first()
     return render_template('ttrpg/dashboard.html',
@@ -770,6 +770,33 @@ def session_notes_save(session_id):
     sess.dm_notes = request.get_json().get('notes', '')
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@ttrpg.route('/sessions/<int:session_id>/edit', methods=['POST'])
+@login_required
+@dm_required
+def session_edit(session_id):
+    sess = tblSessions.query.get_or_404(session_id)
+    data = request.get_json()
+    if 'title' in data:
+        title = data['title'].strip()
+        if title:
+            sess.title = title
+    if 'session_number' in data:
+        try:
+            sess.session_number = int(data['session_number'])
+        except (ValueError, TypeError):
+            pass
+    if 'session_date' in data:
+        sess.session_date = data['session_date'] or ''
+    if 'campaign_id' in data:
+        cid = data['campaign_id']
+        sess.campaign_id = int(cid) if cid else None
+    db.session.commit()
+    campaign_name = sess.campaign.campaign_name if sess.campaign else None
+    return jsonify({'ok': True, 'campaign_name': campaign_name,
+                    'title': sess.title, 'session_number': sess.session_number,
+                    'session_date': sess.session_date})
 
 
 @ttrpg.route('/sessions/<int:session_id>/party/add', methods=['POST'])
