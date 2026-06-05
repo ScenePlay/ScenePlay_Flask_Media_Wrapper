@@ -333,6 +333,7 @@
             <input type="text" id="dice-label" class="form-control form-control-sm"
                    placeholder="Label (optional)…" style="max-width:180px;">
             <button class="btn btn-ttrpg" onclick="doRoll()">&#127922; Roll</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="resetDice()" title="Reset to 1d20 +0">&#8635;</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="clearDiceFeed()" title="Clear feed">&#128465;</button>
           </div>
 
@@ -541,11 +542,53 @@
         <!-- Inventory -->
         <div class="tab-pane fade" id="tab-inventory">
           {% if can_edit %}
-          <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_item_name" class="form-control form-control-sm" placeholder="Item name" style="max-width:180px;">
-            <input type="number" id="new_item_qty" class="form-control form-control-sm" placeholder="Qty" style="max-width:70px;" value="1">
-            <input type="text" id="new_item_notes" class="form-control form-control-sm" placeholder="Notes" style="max-width:180px;">
-            <button class="btn btn-ttrpg btn-sm" onclick="addItem()">Add</button>
+          <div class="mb-3">
+            <!-- Search row -->
+            <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+              <div style="position:relative;flex:1 1 200px;max-width:320px;">
+                <input type="text" id="new_item_name" class="form-control form-control-sm"
+                       placeholder="Search equipment or type a custom name…"
+                       autocomplete="off"
+                       oninput="equipSearch(this.value)"
+                       onfocus="equipSearch(this.value)">
+                <div id="equip-suggestions"
+                     style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
+                            min-width:300px;
+                            background:var(--sp-surface);border:1px solid var(--sp-border);
+                            border-radius:0 0 6px 6px;max-height:260px;overflow-y:auto;
+                            box-shadow:0 4px 12px rgba(0,0,0,.4);"></div>
+              </div>
+              <input type="number" id="new_item_qty" class="form-control form-control-sm"
+                     placeholder="Qty" style="max-width:65px;" value="1">
+              <input type="text" id="new_item_notes" class="form-control form-control-sm"
+                     placeholder="Notes" style="max-width:160px;">
+              <input type="hidden" id="new_item_weight" value="">
+              <button class="btn btn-ttrpg btn-sm" onclick="addItem()">Add</button>
+            </div>
+
+            <!-- Equipment detail preview (shown when item picked from library) -->
+            <div id="equip-preview" style="display:none;"
+                 class="ttrpg-card p-3"
+                 style="border-color:var(--ttrpg-accent);">
+              <div class="d-flex justify-content-between align-items-start gap-2 mb-1 flex-wrap">
+                <div>
+                  <span id="equip-prev-name"
+                        style="color:var(--ttrpg-accent);font-weight:600;font-size:1rem;"></span>
+                  <span id="equip-prev-cat"
+                        style="font-size:.72rem;padding:1px 6px;border-radius:8px;
+                               border:1px solid var(--sp-border);color:var(--sp-muted);
+                               background:color-mix(in srgb,var(--sp-accent) 8%,transparent);
+                               margin-left:6px;"></span>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary px-2"
+                        onclick="clearEquipPick()" title="Clear selection">&#10005;</button>
+              </div>
+              <div id="equip-prev-meta" class="small text-muted mb-1"></div>
+              <div id="equip-prev-desc"
+                   class="small mt-1"
+                   style="color:var(--ttrpg-text);white-space:pre-wrap;line-height:1.5;
+                          max-height:120px;overflow-y:auto;"></div>
+            </div>
           </div>
           {% endif %}
           <div id="inventory-list">
@@ -1220,49 +1263,98 @@
                 {% else %}{{ level }}th Level{% endif %}
               </div>
               {% for cs in level_spells | sort(attribute='order_by') %}
-              <div id="char-spell-{{ cs.char_spell_id }}"
-                   class="d-flex align-items-center gap-2 mb-1 p-2 rounded flex-wrap"
-                   style="background:var(--sp-surface);border:1px solid var(--sp-border);">
-                <!-- Prepared toggle -->
-                {% if can_edit %}
-                <button class="btn btn-sm px-2 flex-shrink-0"
-                        id="spell-prep-btn-{{ cs.char_spell_id }}"
-                        style="{% if cs.prepared %}background:var(--ttrpg-accent);color:var(--sp-on-accent);border-color:var(--ttrpg-accent);{% else %}border-color:var(--sp-border);color:var(--sp-muted);{% endif %}"
-                        onclick="toggleSpellPrepared({{ cs.char_spell_id }}, {{ cs.prepared }})"
-                        title="{% if cs.prepared %}Unprepare{% else %}Prepare{% endif %}">
-                  {% if cs.prepared %}&#9670;{% else %}&#9671;{% endif %}
-                </button>
-                {% endif %}
+              {% set lib = cs.lib_spell %}
+              <div id="char-spell-{{ cs.char_spell_id }}" class="ttrpg-card p-2 mb-2"
+                   style="border-color:{% if cs.prepared %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
 
-                <div class="flex-grow-1 min-width-0">
-                  <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span style="color:var(--ttrpg-accent);font-weight:600;">{{ cs.spell_name }}</span>
-                    {% if cs.school %}
-                    <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
-                                 border:1px solid var(--sp-border);
-                                 color:var(--sp-muted);
-                                 background:color-mix(in srgb, var(--sp-accent) 8%, transparent);">
-                      {{ cs.school }}
-                    </span>
-                    {% endif %}
-                    {% if cs.prepared %}
-                    <span style="font-size:.7rem;color:var(--ttrpg-accent);">&#9670; Prepared</span>
-                    {% endif %}
-                  </div>
-                  {% if cs.notes %}
-                  <div class="small text-muted fst-italic mt-1">{{ cs.notes }}</div>
+                <!-- Header row: prepared · name · badges · actions -->
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  {% if can_edit %}
+                  <button class="btn btn-sm px-2 flex-shrink-0"
+                          id="spell-prep-btn-{{ cs.char_spell_id }}"
+                          style="{% if cs.prepared %}background:var(--ttrpg-accent);color:var(--sp-on-accent);border-color:var(--ttrpg-accent);{% else %}border-color:var(--sp-border);color:var(--sp-muted);{% endif %}"
+                          onclick="toggleSpellPrepared({{ cs.char_spell_id }}, {{ cs.prepared }})"
+                          title="{% if cs.prepared %}Unprepare{% else %}Prepare{% endif %}">
+                    {% if cs.prepared %}&#9670;{% else %}&#9671;{% endif %}
+                  </button>
+                  {% endif %}
+
+                  <span style="color:var(--ttrpg-accent);font-weight:600;flex:1 1 auto;">{{ cs.spell_name }}</span>
+
+                  {% if cs.school %}
+                  <span style="font-size:.68rem;padding:1px 6px;border-radius:8px;
+                               border:1px solid var(--sp-border);color:var(--sp-muted);
+                               background:color-mix(in srgb, var(--sp-accent) 8%, transparent);">
+                    {{ cs.school }}
+                  </span>
+                  {% endif %}
+                  {% if lib and lib.concentration %}
+                  <span style="font-size:.68rem;padding:1px 5px;border-radius:8px;
+                               border:1px solid #4466cc;color:#88aaff;">Conc</span>
+                  {% endif %}
+                  {% if lib and lib.ritual %}
+                  <span style="font-size:.68rem;padding:1px 5px;border-radius:8px;
+                               border:1px solid var(--sp-border);color:var(--sp-muted);">(R)</span>
+                  {% endif %}
+
+                  {% if lib and lib.description %}
+                  <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0"
+                          onclick="toggleSpellDesc({{ cs.char_spell_id }})"
+                          title="Toggle description">&#9432;</button>
+                  {% endif %}
+                  {% if can_edit %}
+                  <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0"
+                          onclick="toggleSpellEdit({{ cs.char_spell_id }})" title="Edit">&#9998;</button>
+                  <button class="btn btn-sm btn-outline-danger px-2 flex-shrink-0"
+                          onclick="deleteCharSpell({{ cs.char_spell_id }})" title="Remove">&#10005;</button>
                   {% endif %}
                 </div>
 
-                {% if can_edit %}
-                <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0"
-                        onclick="toggleSpellEdit({{ cs.char_spell_id }})" title="Edit">&#9998;</button>
-                <button class="btn btn-sm btn-outline-danger px-2 flex-shrink-0"
-                        onclick="deleteCharSpell({{ cs.char_spell_id }})" title="Remove">&#10005;</button>
+                <!-- Stat line: cast · range · duration -->
+                {% if lib and (lib.casting_time or lib.range_text or lib.duration) %}
+                <div class="mt-1" style="font-size:.75rem;color:var(--sp-muted);display:flex;flex-wrap:wrap;gap:10px;">
+                  {% if lib.casting_time %}
+                  <span>&#9200; {{ lib.casting_time }}</span>
+                  {% endif %}
+                  {% if lib.range_text %}
+                  <span>&#128247; {{ lib.range_text }}</span>
+                  {% endif %}
+                  {% if lib.duration %}
+                  <span>&#8987; {{ lib.duration }}</span>
+                  {% endif %}
+                </div>
                 {% endif %}
 
+                <!-- Components -->
+                {% if lib and lib.components %}
+                <div class="mt-1" style="font-size:.72rem;color:var(--sp-muted);font-style:italic;">
+                  {{ lib.components }}
+                </div>
+                {% endif %}
+
+                <!-- Classes -->
+                {% if lib and lib.classes_text %}
+                <div class="mt-1" style="font-size:.7rem;color:var(--sp-muted);">
+                  Classes: {{ lib.classes_text }}
+                </div>
+                {% endif %}
+
+                <!-- Notes -->
+                {% if cs.notes %}
+                <div class="mt-1 small text-muted fst-italic">&#9998; {{ cs.notes }}</div>
+                {% endif %}
+
+                <!-- Collapsible description -->
+                {% if lib and lib.description %}
+                <div id="spell-desc-{{ cs.char_spell_id }}" style="display:none;">
+                  <div class="mt-2 pt-2 small" style="border-top:1px solid var(--sp-border);
+                       color:var(--ttrpg-text);white-space:pre-wrap;line-height:1.5;">{{ lib.description }}</div>
+                </div>
+                {% endif %}
+
+                <!-- Edit panel -->
                 {% if can_edit %}
-                <div id="spell-edit-{{ cs.char_spell_id }}" class="w-100 mt-1" style="display:none;">
+                <div id="spell-edit-{{ cs.char_spell_id }}" class="mt-2" style="display:none;">
                   <div class="d-flex gap-2 flex-wrap align-items-end"
                        style="background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:6px;padding:8px;">
                     <div class="flex-grow-1">
@@ -1613,11 +1705,79 @@ function addItem() {
   if (!name) return;
   fetch(`/ttrpg/character/${CHAR_ID}/inventory`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({item_name: name,
-                          quantity: document.getElementById('new_item_qty').value,
-                          notes: document.getElementById('new_item_notes').value})
+    body: JSON.stringify({
+      item_name: name,
+      quantity:  document.getElementById('new_item_qty').value,
+      weight:    document.getElementById('new_item_weight').value,
+      notes:     document.getElementById('new_item_notes').value,
+    })
   }).then(() => reloadKeepTab());
 }
+
+let _equipSearchTimer = null;
+let _equipResults = [];
+function equipSearch(q) {
+  clearTimeout(_equipSearchTimer);
+  const box = document.getElementById('equip-suggestions');
+  if (!box) return;
+  _equipSearchTimer = setTimeout(() => {
+    fetch(`/ttrpg/reference/equipment/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json()).then(results => {
+        if (!results.length) { box.style.display = 'none'; return; }
+        _equipResults = results;
+        box.innerHTML = results.map((it, i) => `
+          <div data-idx="${i}"
+               style="padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--sp-border);"
+               onmouseenter="this.style.background='color-mix(in srgb,var(--sp-accent) 10%,transparent)'"
+               onmouseleave="this.style.background=''">
+            <div style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</div>
+            <div style="font-size:.7rem;color:var(--sp-muted);">
+              ${it.category ? _escH(it.category) : ''}
+              ${it.subcategory ? ' &rsaquo; ' + _escH(it.subcategory) : ''}
+              ${it.weight ? ' &mdash; ' + it.weight + ' lb' : ''}
+              ${it.cost  ? ' &bull; ' + _escH(it.cost) : ''}
+            </div>
+            ${it.description ? `<div style="font-size:.68rem;color:var(--sp-muted);margin-top:2px;
+                                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                                            max-width:360px;">${_escH(it.description.slice(0,120))}${it.description.length > 120 ? '…' : ''}</div>` : ''}
+          </div>`).join('');
+        box.querySelectorAll('[data-idx]').forEach(el =>
+          el.addEventListener('click', () => equipPick(_equipResults[parseInt(el.dataset.idx)])));
+        box.style.display = 'block';
+      });
+  }, 150);
+}
+
+function equipPick(it) {
+  document.getElementById('new_item_name').value   = it.name;
+  document.getElementById('new_item_weight').value = it.weight || '';
+  document.getElementById('equip-suggestions').style.display = 'none';
+
+  // Show detail preview card
+  document.getElementById('equip-prev-name').textContent = it.name;
+  const catEl = document.getElementById('equip-prev-cat');
+  catEl.textContent = [it.category, it.subcategory].filter(Boolean).join(' › ');
+  catEl.style.display = catEl.textContent ? '' : 'none';
+
+  const meta = [];
+  if (it.weight) meta.push('⚖ ' + it.weight + ' lb');
+  if (it.cost)   meta.push('💰 ' + it.cost);
+  document.getElementById('equip-prev-meta').textContent = meta.join('  •  ');
+  document.getElementById('equip-prev-desc').textContent = it.description || '';
+  document.getElementById('equip-preview').style.display = '';
+}
+
+function clearEquipPick() {
+  document.getElementById('new_item_name').value   = '';
+  document.getElementById('new_item_weight').value = '';
+  document.getElementById('equip-preview').style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  const box = document.getElementById('equip-suggestions');
+  if (box && !e.target.closest('#equip-suggestions') && e.target.id !== 'new_item_name')
+    box.style.display = 'none';
+});
 
 function deleteItem(id) {
   if (!confirm('Remove item?')) return;
@@ -2082,6 +2242,11 @@ function addCustomSpell() {
   }).then(() => reloadKeepTab());
 }
 
+function toggleSpellDesc(id) {
+  const el = document.getElementById('spell-desc-' + id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
 function toggleSpellPrepared(id, current) {
   fetch(`/ttrpg/char-spell/${id}`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -2306,6 +2471,15 @@ function startDicePoll() {
 }
 function stopDicePoll() {
   if (_dicePollTimer) { clearInterval(_dicePollTimer); _dicePollTimer = null; }
+}
+
+function resetDice() {
+  document.getElementById('dice-count').value    = 1;
+  document.getElementById('dice-modifier').value = 0;
+  document.getElementById('dice-label').value    = '';
+  selectDie(20);
+  setAdvMode('normal');
+  document.getElementById('dice-result').style.display = 'none';
 }
 
 function clearDiceFeed() {

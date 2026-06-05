@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 from extensions import db
-from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary
+from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary
 from routes.auth import dm_required
 
 WEAPON_IMG_FOLDER = os.path.join('static', 'uploads', 'weapons')
@@ -1160,3 +1160,156 @@ def race_delete(race_lib_id):
     db.session.commit()
     flash(f'Deleted "{name}".')
     return redirect(url_for('reference_bp.races_library'))
+
+
+# ── Equipment Library ───────────────────────────────────────────────────────────
+
+SKIP_EQUIPMENT_CATEGORIES = {'armor', 'weapon', 'weapons', 'armor and shields'}
+
+def sync_equipment_from_api():
+    api_base = get_api_base()
+    try:
+        resp = requests.get(f'{api_base}/equipment', timeout=15)
+        resp.raise_for_status()
+        eq_list = resp.json().get('results', [])
+    except Exception as e:
+        return 0, 0, str(e)
+
+    added = skipped = errors = 0
+    for entry in eq_list:
+        index = entry['index']
+        if tblEquipmentLibrary.query.filter_by(api_index=index).first():
+            skipped += 1
+            continue
+        try:
+            r = requests.get(f'{api_base}/equipment/{index}', timeout=10)
+            if not r.ok or not r.content:
+                skipped += 1
+                continue
+            data = r.json()
+
+            cat = (data.get('equipment_category') or {}).get('name', '')
+            if cat.lower() in SKIP_EQUIPMENT_CATEGORIES:
+                skipped += 1
+                continue
+
+            subcat = (data.get('gear_category') or
+                      data.get('tool_category') or
+                      data.get('vehicle_category') or {})
+            if isinstance(subcat, dict):
+                subcat = subcat.get('name', '')
+            else:
+                subcat = ''
+
+            cost_obj = data.get('cost', {})
+            cost_str = f"{cost_obj.get('quantity', 0)} {cost_obj.get('unit', 'gp')}" if cost_obj else ''
+
+            item = tblEquipmentLibrary(
+                api_index   = index,
+                name        = data.get('name', index),
+                category    = cat,
+                subcategory = subcat,
+                weight      = float(data.get('weight', 0) or 0),
+                cost        = cost_str,
+                description = '\n'.join(data.get('desc', [])),
+                source      = 'srd',
+                created_at  = _now(),
+            )
+            db.session.add(item)
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+
+    return added, skipped, errors
+
+
+@reference_bp.route('/equipment')
+@login_required
+@dm_required
+def equipment_library():
+    total = tblEquipmentLibrary.query.count()
+    q    = request.args.get('q',   '').strip()
+    cat  = request.args.get('cat', '').strip()
+    src  = request.args.get('src', '').strip()
+
+    query = tblEquipmentLibrary.query
+    if q:   query = query.filter(tblEquipmentLibrary.name.ilike(f'%{q}%'))
+    if cat: query = query.filter(tblEquipmentLibrary.category == cat)
+    if src: query = query.filter(tblEquipmentLibrary.source == src)
+    items = query.order_by(tblEquipmentLibrary.category, tblEquipmentLibrary.name).all()
+
+    categories = sorted({i.category for i in tblEquipmentLibrary.query.all() if i.category})
+    current_api = get_api_base()
+    return render_template('ttrpg/equipment_library.html',
+                           items=items, total=total, q=q, cat=cat, src=src,
+                           categories=categories,
+                           current_api=current_api, api_options=API_OPTIONS)
+
+
+@reference_bp.route('/equipment/sync', methods=['POST'])
+@login_required
+@dm_required
+def equipment_sync():
+    added, skipped, errors = sync_equipment_from_api()
+    flash(f'Equipment sync complete: {added} added, {skipped} skipped, {errors} errors.')
+    return redirect(url_for('reference_bp.equipment_library'))
+
+
+@reference_bp.route('/equipment/add', methods=['POST'])
+@login_required
+@dm_required
+def equipment_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Item name is required.')
+        return redirect(url_for('reference_bp.equipment_library'))
+    item = tblEquipmentLibrary(
+        api_index   = None,
+        name        = name,
+        category    = request.form.get('category', '').strip(),
+        subcategory = request.form.get('subcategory', '').strip(),
+        weight      = float(request.form.get('weight', 0) or 0),
+        cost        = request.form.get('cost', '').strip(),
+        description = request.form.get('description', '').strip(),
+        source      = 'homebrew',
+        created_at  = _now(),
+    )
+    db.session.add(item)
+    db.session.commit()
+    flash(f'Added "{name}".')
+    return redirect(url_for('reference_bp.equipment_library'))
+
+
+@reference_bp.route('/equipment/<int:equipment_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def equipment_delete(equipment_lib_id):
+    item = tblEquipmentLibrary.query.get_or_404(equipment_lib_id)
+    if item.source != 'homebrew':
+        flash('Only custom items can be deleted.')
+        return redirect(url_for('reference_bp.equipment_library'))
+    name = item.name
+    db.session.delete(item)
+    db.session.commit()
+    flash(f'Deleted "{name}".')
+    return redirect(url_for('reference_bp.equipment_library'))
+
+
+@reference_bp.route('/equipment/search')
+@login_required
+def equipment_search():
+    q = request.args.get('q', '').strip()
+    items = tblEquipmentLibrary.query.filter(
+        tblEquipmentLibrary.name.ilike(f'%{q}%')
+    ).order_by(tblEquipmentLibrary.name).limit(25).all()
+    return jsonify([{
+        'equipment_lib_id': i.equipment_lib_id,
+        'name':             i.name,
+        'category':         i.category,
+        'subcategory':      i.subcategory,
+        'weight':           i.weight,
+        'cost':             i.cost,
+        'description':      i.description,
+    } for i in items])

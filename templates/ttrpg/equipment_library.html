@@ -1,0 +1,130 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h4 class="mb-0" style="color:var(--ttrpg-accent);">&#127978; Equipment Library</h4>
+    <div class="small text-muted">{{ total }} items synced</div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
+    <span class="small text-muted">API: {{ api_options[current_api]['label'] if current_api in api_options else current_api }}</span>
+    <a href="{{ url_for('reference_bp.api_settings') }}" class="btn btn-sm btn-outline-secondary">&#9881;</a>
+    <button class="btn btn-sm btn-outline-secondary" onclick="toggleAddForm()">+ Custom Item</button>
+    <form method="POST" action="{{ url_for('reference_bp.equipment_sync') }}" style="display:inline;">
+      <button class="btn btn-sm btn-ttrpg" type="submit">&#8635; Sync from API</button>
+    </form>
+  </div>
+</div>
+
+<!-- Add form (collapsible) -->
+<div id="add-item-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <h6 style="color:var(--ttrpg-accent);">Add Custom Item</h6>
+  <form method="POST" action="{{ url_for('reference_bp.equipment_add') }}">
+    <div class="row g-2 mb-2">
+      <div class="col-md-4">
+        <label class="form-label small text-muted">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm" required placeholder="Rope (50 ft)">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small text-muted">Category</label>
+        <input type="text" name="category" class="form-control form-control-sm" placeholder="Adventuring Gear">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small text-muted">Subcategory</label>
+        <input type="text" name="subcategory" class="form-control form-control-sm" placeholder="Standard Gear">
+      </div>
+      <div class="col-md-1">
+        <label class="form-label small text-muted">Weight (lb)</label>
+        <input type="number" name="weight" step="0.1" min="0" value="0" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-1">
+        <label class="form-label small text-muted">Cost</label>
+        <input type="text" name="cost" class="form-control form-control-sm" placeholder="1 gp">
+      </div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small text-muted">Description</label>
+      <textarea name="description" class="form-control form-control-sm" rows="2" placeholder="What does this item do?"></textarea>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add Item</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<form method="GET" class="d-flex gap-2 mb-3 flex-wrap align-items-end">
+  <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm"
+         placeholder="Search items…" style="max-width:240px;">
+  <select name="cat" class="form-select form-select-sm" style="max-width:200px;">
+    <option value="">All Categories</option>
+    {% for c in categories %}
+    <option value="{{ c }}" {% if cat == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  <select name="src" class="form-select form-select-sm" style="max-width:140px;">
+    <option value="">All Sources</option>
+    <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
+    <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Homebrew</option>
+  </select>
+  <button type="submit" class="btn btn-sm btn-ttrpg">Search</button>
+  <a href="{{ url_for('reference_bp.equipment_library') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+</form>
+
+<!-- Table -->
+<div class="ttrpg-card p-0" style="overflow:hidden;">
+  <table class="table ttrpg-table mb-0">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Category</th>
+        <th>Weight</th>
+        <th>Cost</th>
+        <th>Source</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>
+          <span style="color:var(--ttrpg-accent);font-weight:600;">{{ item.name }}</span>
+          {% if item.subcategory %}
+          <span class="small text-muted ms-1">({{ item.subcategory }})</span>
+          {% endif %}
+          {% if item.description %}
+          <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ item.description[:180] }}{% if item.description|length > 180 %}…{% endif %}</div>
+          {% endif %}
+        </td>
+        <td class="small text-muted">{{ item.category or '—' }}</td>
+        <td class="small text-muted">{{ item.weight ~ ' lb' if item.weight else '—' }}</td>
+        <td class="small text-muted">{{ item.cost or '—' }}</td>
+        <td><span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);">{{ item.source }}</span></td>
+        <td class="text-end">
+          {% if item.source == 'homebrew' %}
+          <form method="POST" action="{{ url_for('reference_bp.equipment_delete', equipment_lib_id=item.equipment_lib_id) }}"
+                style="display:inline;" onsubmit="return confirm('Delete {{ item.name | e }}?');">
+            <button class="btn btn-sm btn-outline-danger px-2">&#10005;</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted text-center py-4">
+        No items yet — sync from the D&amp;D API or add a custom item.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-item-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') f.querySelector('input[name="name"]').focus();
+}
+</script>
+{% endblock %}

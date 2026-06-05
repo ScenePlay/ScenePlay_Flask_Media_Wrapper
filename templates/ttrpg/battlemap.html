@@ -575,7 +575,10 @@
   </div>
 
   <!-- Roll button -->
-  <button class="btn btn-sm btn-ttrpg w-100 mb-2" onclick="mapDoRoll()">&#127922; Roll</button>
+  <div class="d-flex gap-1 mb-2">
+    <button class="btn btn-sm btn-ttrpg flex-grow-1" onclick="mapDoRoll()">&#127922; Roll</button>
+    <button class="btn btn-sm btn-outline-secondary px-2" onclick="mapResetDice()" title="Reset to 1d20 +0">&#8635;</button>
+  </div>
 
   <!-- Last result -->
   <div id="map-dice-result" style="display:none;margin-bottom:8px;">
@@ -1798,6 +1801,15 @@ function mapPollFeed() {
       _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
     });
   });
+}
+
+function mapResetDice() {
+  document.getElementById('map-dice-count').value = 1;
+  document.getElementById('map-dice-mod').value   = 0;
+  document.getElementById('map-dice-label').value = '';
+  mapSelectDie(20);
+  mapSetAdvMode('normal');
+  document.getElementById('map-dice-result').style.display = 'none';
 }
 
 function clearMapDiceFeed() {

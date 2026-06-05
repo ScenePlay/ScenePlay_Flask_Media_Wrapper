@@ -425,3 +425,17 @@ class tblDiceRolls(db.Model):
     total        = db.Column(db.Integer, default=0)
     adv_mode     = db.Column(db.Text, default='normal')  # normal | advantage | disadvantage
     rolled_at    = db.Column(db.Text, nullable=False)
+
+
+class tblEquipmentLibrary(db.Model):
+    __tablename__ = 'tblEquipmentLibrary'
+    equipment_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index        = db.Column(db.Text, unique=True, nullable=True)
+    name             = db.Column(db.Text, nullable=False)
+    category         = db.Column(db.Text, default='')   # Adventuring Gear, Tool, Mount, etc.
+    subcategory      = db.Column(db.Text, default='')   # Standard Gear, Arcane Focus, etc.
+    weight           = db.Column(db.Float, default=0)
+    cost             = db.Column(db.Text, default='')   # e.g. "5 gp"
+    description      = db.Column(db.Text, default='')
+    source           = db.Column(db.Text, default='srd')
+    created_at       = db.Column(db.Text, nullable=False)

@@ -163,6 +163,10 @@ cython_debug/
 
 
 #folders
+static/uploads/armor/
+static/uploads/portraits/
+static/uploads/battlemaps/
+static/uploads/weapons/
 yt-dlp/
 fileHold/
 #Files
