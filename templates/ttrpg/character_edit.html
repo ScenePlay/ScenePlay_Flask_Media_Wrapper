@@ -1,5 +1,11 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
+{% block head %}
+<style>
+.edit-lib-row:hover { background: color-mix(in srgb, var(--sp-accent) 10%, transparent); }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-10 col-lg-8">
@@ -24,13 +30,31 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label">Class</label>
-            <input type="text" name="char_class" value="{{ char.char_class }}"
-                   class="form-control">
+            <div style="position:relative;">
+              <input type="text" name="char_class" id="edit-char-class" value="{{ char.char_class }}"
+                     class="form-control" autocomplete="off"
+                     oninput="editLibSearch('class', this.value)"
+                     onfocus="editLibSearch('class', this.value)">
+              <div id="edit-class-suggestions"
+                   style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                          background:var(--sp-surface);border:1px solid var(--sp-border);
+                          border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;
+                          box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:220px;"></div>
+            </div>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Race</label>
-            <input type="text" name="race" value="{{ char.race }}"
-                   class="form-control">
+            <div style="position:relative;">
+              <input type="text" name="race" id="edit-race" value="{{ char.race }}"
+                     class="form-control" autocomplete="off"
+                     oninput="editLibSearch('race', this.value)"
+                     onfocus="editLibSearch('race', this.value)">
+              <div id="edit-race-suggestions"
+                   style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                          background:var(--sp-surface);border:1px solid var(--sp-border);
+                          border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;
+                          box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:220px;"></div>
+            </div>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Level</label>
@@ -135,4 +159,68 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const _editLibUrls = {
+  'class': "{{ url_for('reference_bp.classes_search') }}",
+  'race':  "{{ url_for('reference_bp.races_search') }}"
+};
+const _editLibTimers = {};
+
+function editLibSearch(type, q) {
+  clearTimeout(_editLibTimers[type]);
+  const box = document.getElementById(type === 'class' ? 'edit-class-suggestions' : 'edit-race-suggestions');
+  _editLibTimers[type] = setTimeout(() => {
+    fetch(_editLibUrls[type] + '?q=' + encodeURIComponent(q))
+      .then(r => r.json())
+      .then(data => {
+        const results = Array.isArray(data) ? data : (data.results || []);
+        if (!results.length) { box.style.display = 'none'; return; }
+        box.innerHTML = results.map(it => {
+          let sub = '';
+          if (type === 'class') {
+            const saves = it.saving_throws || '';
+            sub = 'd' + (it.hit_die || '8') + (saves ? ' &middot; Saves: ' + _escHtml(saves) : '');
+          } else {
+            const parts = [];
+            if (it.size)            parts.push(_escHtml(it.size));
+            if (it.speed)           parts.push(it.speed + ' ft');
+            if (it.ability_bonuses) parts.push(_escHtml(it.ability_bonuses));
+            sub = parts.join(' &middot; ');
+          }
+          return '<div class="edit-lib-row px-3 py-2" style="cursor:pointer;" '
+               + 'onmousedown="editLibPick(\'' + type + '\',\'' + it.name.replace(/'/g, "\\'") + '\')">'
+               + '<div style="font-weight:600;color:var(--ttrpg-accent);font-size:.88rem;">' + _escHtml(it.name) + '</div>'
+               + (sub ? '<div style="font-size:.75rem;color:var(--sp-muted);">' + sub + '</div>' : '')
+               + '</div>';
+        }).join('');
+        box.style.display = 'block';
+      })
+      .catch(() => { box.style.display = 'none'; });
+  }, 200);
+}
+
+function editLibPick(type, name) {
+  const input = document.getElementById(type === 'class' ? 'edit-char-class' : 'edit-race');
+  const box   = document.getElementById(type === 'class' ? 'edit-class-suggestions' : 'edit-race-suggestions');
+  input.value = name;
+  box.style.display = 'none';
+}
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.addEventListener('click', e => {
+  ['edit-class-suggestions','edit-race-suggestions'].forEach(id => {
+    const box = document.getElementById(id);
+    if (box && !box.contains(e.target) &&
+        e.target.id !== 'edit-char-class' && e.target.id !== 'edit-race') {
+      box.style.display = 'none';
+    }
+  });
+});
+</script>
 {% endblock %}

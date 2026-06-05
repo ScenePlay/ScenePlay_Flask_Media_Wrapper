@@ -1,12 +1,13 @@
 import os
 import uuid
+import threading
 import requests
 from datetime import datetime
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 from extensions import db
-from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary
+from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary, tblClassesLibrary
 from routes.auth import dm_required
 
 WEAPON_IMG_FOLDER = os.path.join('static', 'uploads', 'weapons')
@@ -39,6 +40,8 @@ def _save_armor_image(file_field):
     return _save_upload(file_field, 'armor')
 
 reference_bp = Blueprint('reference_bp', __name__, url_prefix='/ttrpg/reference')
+
+_sync_states = {}   # {job_type: {total, done, added, skipped, errors, running, message}}
 
 DEFAULT_API_BASE = 'https://www.dnd5eapi.co/api/2014'
 
@@ -75,7 +78,7 @@ def _api_version(api_base):
 
 # ── Feats sync ─────────────────────────────────────────────────────────────────
 
-def sync_feats_from_api():
+def sync_feats_from_api(state=None):
     api_base = get_api_base()
     version = _api_version(api_base)
     try:
@@ -85,48 +88,55 @@ def sync_feats_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(feat_list)
+
     added = skipped = errors = 0
-    for entry in feat_list:
-        index = entry['index']
-        if tblFeatsLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(feat_list):
         try:
-            detail = requests.get(f'{api_base}/feats/{index}', timeout=10)
-            detail.raise_for_status()
-            data = detail.json()
+            index = entry['index']
+            if tblFeatsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            try:
+                detail = requests.get(f'{api_base}/feats/{index}', timeout=10)
+                detail.raise_for_status()
+                data = detail.json()
 
-            if version == '2024':
-                description = data.get('description', '')
-                feat_type = data.get('type', '')
-                prerequisites = f'Type: {feat_type.replace("-", " ").title()}' if feat_type else ''
-            else:
-                description = '\n'.join(data.get('desc', []))
-                prerequisites = ', '.join(
-                    f"{p['ability_score']['name']} {p['minimum_score']}+"
-                    for p in data.get('prerequisites', [])
-                    if 'ability_score' in p
+                if version == '2024':
+                    description = data.get('description', '')
+                    feat_type = data.get('type', '')
+                    prerequisites = f'Type: {feat_type.replace("-", " ").title()}' if feat_type else ''
+                else:
+                    description = '\n'.join(data.get('desc', []))
+                    prerequisites = ', '.join(
+                        f"{p['ability_score']['name']} {p['minimum_score']}+"
+                        for p in data.get('prerequisites', [])
+                        if 'ability_score' in p
+                    )
+
+                feat = tblFeatsLibrary(
+                    api_index=index,
+                    name=data['name'],
+                    prerequisites=prerequisites,
+                    description=description,
+                    source='srd',
+                    created_at=_now(),
                 )
-
-            feat = tblFeatsLibrary(
-                api_index=index,
-                name=data['name'],
-                prerequisites=prerequisites,
-                description=description,
-                source='srd',
-                created_at=_now(),
-            )
-            db.session.add(feat)
-            db.session.commit()
-            added += 1
-        except Exception:
-            errors += 1
+                db.session.add(feat)
+                db.session.commit()
+                added += 1
+            except Exception:
+                errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
 # ── Weapons sync ───────────────────────────────────────────────────────────────
 
-def sync_weapons_from_api():
+def sync_weapons_from_api(state=None):
     api_base = get_api_base()
     version = _api_version(api_base)
     cat_path = 'weapons' if version == '2024' else 'weapon'
@@ -138,112 +148,126 @@ def sync_weapons_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(weapon_list)
+
     added = skipped = errors = 0
-    for entry in weapon_list:
-        index = entry['index']
-        if tblWeaponsLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(weapon_list):
+        _outcome = 'skip'
         try:
-            detail = requests.get(f'{api_base}/equipment/{index}', timeout=10)
-
-            if detail.status_code == 404:
-                # Magic weapons live under /magic-items/ instead of /equipment/
-                magic = requests.get(f'{api_base}/magic-items/{index}', timeout=10)
-                if magic.status_code == 404:
-                    skipped += 1
-                    continue
-                magic.raise_for_status()
-                mdata = magic.json()
-                desc_lines = mdata.get('desc', [])
-                type_line  = desc_lines[0] if desc_lines else ''
-                full_desc  = '\n'.join(desc_lines[1:]) if len(desc_lines) > 1 else ''
-                raw_img    = mdata.get('image', '')
-                image_url  = ('https://www.dnd5eapi.co' + raw_img) if raw_img else ''
-                w = tblWeaponsLibrary(
-                    api_index=index,
-                    name=mdata['name'],
-                    weapon_category='Magic',
-                    weapon_range='',
-                    damage_dice='',
-                    damage_type='',
-                    two_handed_damage_dice='',
-                    two_handed_damage_type='',
-                    range_normal=0,
-                    range_long=0,
-                    weight=0,
-                    cost='',
-                    properties=type_line,
-                    mastery='',
-                    notes=full_desc,
-                    image_url=image_url,
-                    source='srd-magic',
-                    created_at=_now(),
-                )
-                db.session.add(w)
-                db.session.commit()
-                added += 1
-                continue
-
-            detail.raise_for_status()
-            data = detail.json()
-
-            if not data.get('damage'):
-                skipped += 1
-                continue
-
-            dmg   = data['damage']
-            two_h = data.get('two_handed_damage') or {}
-            cost  = data.get('cost') or {}
-            rng   = data.get('range') or {}
-            throw_rng = data.get('throw_range') or {}
-
-            if version == '2024':
-                cats = [c['index'] for c in data.get('equipment_categories', [])]
-                weapon_category = ('Martial' if 'martial-weapons' in cats
-                                   else 'Simple' if 'simple-weapons' in cats else '')
-                weapon_range    = ('Ranged' if 'ranged-weapons' in cats
-                                   else 'Melee' if 'melee-weapons' in cats else '')
-                mastery = data.get('mastery', {}).get('name', '') if data.get('mastery') else ''
+            index = entry['index']
+            if tblWeaponsLibrary.query.filter_by(api_index=index).first():
+                _outcome = 'skip'
             else:
-                weapon_category = data.get('weapon_category', '')
-                weapon_range    = data.get('weapon_range', '')
-                mastery = ''
+                try:
+                    detail = requests.get(f'{api_base}/equipment/{index}', timeout=10)
 
-            if weapon_range == 'Ranged':
-                range_normal = rng.get('normal', 0)
-                range_long   = rng.get('long', 0)
-            elif throw_rng:
-                range_normal = throw_rng.get('normal', 0)
-                range_long   = throw_rng.get('long', 0)
-            else:
-                range_normal = range_long = 0
+                    if detail.status_code == 404:
+                        # Magic weapons live under /magic-items/ instead of /equipment/
+                        magic = requests.get(f'{api_base}/magic-items/{index}', timeout=10)
+                        if magic.status_code == 404:
+                            _outcome = 'skip'
+                        else:
+                            magic.raise_for_status()
+                            mdata = magic.json()
+                            desc_lines = mdata.get('desc', [])
+                            type_line  = desc_lines[0] if desc_lines else ''
+                            full_desc  = '\n'.join(desc_lines[1:]) if len(desc_lines) > 1 else ''
+                            raw_img    = mdata.get('image', '')
+                            image_url  = ('https://www.dnd5eapi.co' + raw_img) if raw_img else ''
+                            w = tblWeaponsLibrary(
+                                api_index=index,
+                                name=mdata['name'],
+                                weapon_category='Magic',
+                                weapon_range='',
+                                damage_dice='',
+                                damage_type='',
+                                two_handed_damage_dice='',
+                                two_handed_damage_type='',
+                                range_normal=0,
+                                range_long=0,
+                                weight=0,
+                                cost='',
+                                properties=type_line,
+                                mastery='',
+                                notes=full_desc,
+                                image_url=image_url,
+                                source='srd-magic',
+                                created_at=_now(),
+                            )
+                            db.session.add(w)
+                            db.session.commit()
+                            _outcome = 'add'
+                    else:
+                        detail.raise_for_status()
+                        data = detail.json()
 
-            w = tblWeaponsLibrary(
-                api_index=index,
-                name=data['name'],
-                weapon_category=weapon_category,
-                weapon_range=weapon_range,
-                damage_dice=dmg.get('damage_dice', ''),
-                damage_type=dmg.get('damage_type', {}).get('name', ''),
-                two_handed_damage_dice=two_h.get('damage_dice', ''),
-                two_handed_damage_type=two_h.get('damage_type', {}).get('name', ''),
-                range_normal=range_normal,
-                range_long=range_long,
-                weight=data.get('weight', 0),
-                cost=f"{cost.get('quantity', '')} {cost.get('unit', '')}".strip(),
-                properties=', '.join(p['name'] for p in data.get('properties', [])),
-                mastery=mastery,
-                notes='',
-                image_url='',
-                source='srd',
-                created_at=_now(),
-            )
-            db.session.add(w)
-            db.session.commit()
-            added += 1
+                        if not data.get('damage'):
+                            _outcome = 'skip'
+                        else:
+                            dmg   = data['damage']
+                            two_h = data.get('two_handed_damage') or {}
+                            cost  = data.get('cost') or {}
+                            rng   = data.get('range') or {}
+                            throw_rng = data.get('throw_range') or {}
+
+                            if version == '2024':
+                                cats = [c['index'] for c in data.get('equipment_categories', [])]
+                                weapon_category = ('Martial' if 'martial-weapons' in cats
+                                                   else 'Simple' if 'simple-weapons' in cats else '')
+                                weapon_range    = ('Ranged' if 'ranged-weapons' in cats
+                                                   else 'Melee' if 'melee-weapons' in cats else '')
+                                mastery = data.get('mastery', {}).get('name', '') if data.get('mastery') else ''
+                            else:
+                                weapon_category = data.get('weapon_category', '')
+                                weapon_range    = data.get('weapon_range', '')
+                                mastery = ''
+
+                            if weapon_range == 'Ranged':
+                                range_normal = rng.get('normal', 0)
+                                range_long   = rng.get('long', 0)
+                            elif throw_rng:
+                                range_normal = throw_rng.get('normal', 0)
+                                range_long   = throw_rng.get('long', 0)
+                            else:
+                                range_normal = range_long = 0
+
+                            w = tblWeaponsLibrary(
+                                api_index=index,
+                                name=data['name'],
+                                weapon_category=weapon_category,
+                                weapon_range=weapon_range,
+                                damage_dice=dmg.get('damage_dice', ''),
+                                damage_type=dmg.get('damage_type', {}).get('name', ''),
+                                two_handed_damage_dice=two_h.get('damage_dice', ''),
+                                two_handed_damage_type=two_h.get('damage_type', {}).get('name', ''),
+                                range_normal=range_normal,
+                                range_long=range_long,
+                                weight=data.get('weight', 0),
+                                cost=f"{cost.get('quantity', '')} {cost.get('unit', '')}".strip(),
+                                properties=', '.join(p['name'] for p in data.get('properties', [])),
+                                mastery=mastery,
+                                notes='',
+                                image_url='',
+                                source='srd',
+                                created_at=_now(),
+                            )
+                            db.session.add(w)
+                            db.session.commit()
+                            _outcome = 'add'
+                except Exception:
+                    _outcome = 'error'
         except Exception:
-            errors += 1
+            _outcome = 'error'
+        finally:
+            if _outcome == 'add':
+                added += 1
+            elif _outcome == 'skip':
+                skipped += 1
+            else:
+                errors += 1
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
@@ -318,9 +342,18 @@ def feats_library():
 @login_required
 @dm_required
 def feats_sync():
-    added, skipped, errors = sync_feats_from_api()
-    flash(f'Feats sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.feats_library'))
+    key = 'feats'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_feats_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/feats/add', methods=['POST'])
@@ -487,9 +520,18 @@ def weapons_library():
 @login_required
 @dm_required
 def weapons_sync():
-    added, skipped, errors = sync_weapons_from_api()
-    flash(f'Weapons sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.weapons_library'))
+    key = 'weapons'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_weapons_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/weapons/search')
@@ -519,25 +561,27 @@ def weapons_search():
 
 # ── Armor sync ─────────────────────────────────────────────────────────────────
 
-def sync_armor_from_api():
+def sync_armor_from_api(state=None):
     api_base = get_api_base()
     version = _api_version(api_base)
-    cat_path = 'armor' if version == '2024' else 'armor'
 
     try:
-        resp = requests.get(f'{api_base}/equipment-categories/{cat_path}', timeout=15)
+        resp = requests.get(f'{api_base}/equipment-categories/armor', timeout=15)
         resp.raise_for_status()
         armor_list = resp.json().get('equipment', [])
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(armor_list)
+
     added = skipped = errors = 0
-    for entry in armor_list:
-        index = entry['index']
-        if tblArmorLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(armor_list):
         try:
+            index = entry['index']
+            if tblArmorLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             # Some armor category entries (e.g. Adamantine/Mithral variants) live
             # under /magic-items/ not /equipment/ — try equipment first, fall back.
             data = None
@@ -601,6 +645,9 @@ def sync_armor_from_api():
         except Exception:
             db.session.rollback()
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
@@ -676,9 +723,18 @@ def armor_library():
 @login_required
 @dm_required
 def armor_sync():
-    added, skipped, errors = sync_armor_from_api()
-    flash(f'Armor sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.armor_library'))
+    key = 'armor'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_armor_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/armor/add', methods=['POST'])
@@ -736,7 +792,7 @@ def armor_search():
 
 # ── Spells sync ────────────────────────────────────────────────────────────────
 
-def sync_spells_from_api():
+def sync_spells_from_api(state=None):
     api_base = get_api_base()
     try:
         resp = requests.get(f'{api_base}/spells', timeout=15)
@@ -745,13 +801,16 @@ def sync_spells_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(spell_list)
+
     added = skipped = errors = 0
-    for entry in spell_list:
-        index = entry['index']
-        if tblSpellsLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(spell_list):
         try:
+            index = entry['index']
+            if tblSpellsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             detail = requests.get(f'{api_base}/spells/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
@@ -785,6 +844,9 @@ def sync_spells_from_api():
         except Exception:
             db.session.rollback()
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
@@ -825,9 +887,18 @@ def spells_library():
 @login_required
 @dm_required
 def spells_sync():
-    added, skipped, errors = sync_spells_from_api()
-    flash(f'Spells sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.spells_library'))
+    key = 'spells'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_spells_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/spells/add', methods=['POST'])
@@ -916,7 +987,7 @@ def spells_search():
 
 # ── Skills sync ────────────────────────────────────────────────────────────────
 
-def sync_skills_from_api():
+def sync_skills_from_api(state=None):
     api_base = get_api_base()
     try:
         resp = requests.get(f'{api_base}/skills', timeout=15)
@@ -925,13 +996,16 @@ def sync_skills_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(skill_list)
+
     added = skipped = errors = 0
-    for entry in skill_list:
-        index = entry['index']
-        if tblSkillsLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(skill_list):
         try:
+            index = entry['index']
+            if tblSkillsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             detail = requests.get(f'{api_base}/skills/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
@@ -953,6 +1027,9 @@ def sync_skills_from_api():
         except Exception:
             db.session.rollback()
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
@@ -983,9 +1060,18 @@ def skills_library():
 @login_required
 @dm_required
 def skills_sync():
-    added, skipped, errors = sync_skills_from_api()
-    flash(f'Skills sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.skills_library'))
+    key = 'skills'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_skills_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/skills/add', methods=['POST'])
@@ -1043,7 +1129,7 @@ def skills_search():
 
 # ── Races sync ─────────────────────────────────────────────────────────────────
 
-def sync_races_from_api():
+def sync_races_from_api(state=None):
     api_base = get_api_base()
     try:
         resp = requests.get(f'{api_base}/races', timeout=15)
@@ -1052,13 +1138,16 @@ def sync_races_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(race_list)
+
     added = skipped = errors = 0
-    for entry in race_list:
-        index = entry['index']
-        if tblRacesLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(race_list):
         try:
+            index = entry['index']
+            if tblRacesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             detail = requests.get(f'{api_base}/races/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
@@ -1086,6 +1175,9 @@ def sync_races_from_api():
         except Exception:
             db.session.rollback()
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
     return added, skipped, errors
 
 
@@ -1116,9 +1208,18 @@ def races_library():
 @login_required
 @dm_required
 def races_sync():
-    added, skipped, errors = sync_races_from_api()
-    flash(f'Races sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.races_library'))
+    key = 'races'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_races_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
 
 
 @reference_bp.route('/races/add', methods=['POST'])
@@ -1166,7 +1267,7 @@ def race_delete(race_lib_id):
 
 SKIP_EQUIPMENT_CATEGORIES = {'armor', 'weapon', 'weapons', 'armor and shields'}
 
-def sync_equipment_from_api():
+def sync_equipment_from_api(state=None):
     api_base = get_api_base()
     try:
         resp = requests.get(f'{api_base}/equipment', timeout=15)
@@ -1175,13 +1276,16 @@ def sync_equipment_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(eq_list)
+
     added = skipped = errors = 0
-    for entry in eq_list:
-        index = entry['index']
-        if tblEquipmentLibrary.query.filter_by(api_index=index).first():
-            skipped += 1
-            continue
+    for i, entry in enumerate(eq_list):
         try:
+            index = entry['index']
+            if tblEquipmentLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             r = requests.get(f'{api_base}/equipment/{index}', timeout=10)
             if not r.ok or not r.content:
                 skipped += 1
@@ -1221,6 +1325,9 @@ def sync_equipment_from_api():
         except Exception:
             db.session.rollback()
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
 
     return added, skipped, errors
 
@@ -1252,9 +1359,27 @@ def equipment_library():
 @login_required
 @dm_required
 def equipment_sync():
-    added, skipped, errors = sync_equipment_from_api()
-    flash(f'Equipment sync complete: {added} added, {skipped} skipped, {errors} errors.')
-    return redirect(url_for('reference_bp.equipment_library'))
+    key = 'equipment'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_equipment_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
+
+
+@reference_bp.route('/sync/status/<job_type>')
+@login_required
+def sync_status(job_type):
+    state = _sync_states.get(job_type, {})
+    if not state:
+        return jsonify({'running': False, 'total': 0, 'done': 0, 'message': ''})
+    return jsonify(dict(state))
 
 
 @reference_bp.route('/equipment/add', methods=['POST'])
@@ -1313,3 +1438,194 @@ def equipment_search():
         'cost':             i.cost,
         'description':      i.description,
     } for i in items])
+
+
+# ── Classes sync ────────────────────────────────────────────────────────────────
+
+def sync_classes_from_api(state=None):
+    api_base = get_api_base()
+    try:
+        resp = requests.get(f'{api_base}/classes', timeout=15)
+        resp.raise_for_status()
+        class_list = resp.json().get('results', [])
+    except Exception as e:
+        return 0, 0, str(e)
+
+    if state is not None:
+        state['total'] = len(class_list)
+
+    added = skipped = errors = 0
+    for i, entry in enumerate(class_list):
+        try:
+            index = entry['index']
+            if tblClassesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/classes/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            saving_throws = ', '.join(st['name'] for st in data.get('saving_throws', []))
+
+            # All proficiencies except saving-throw entries
+            profs = [p['name'] for p in data.get('proficiencies', [])
+                     if not p['name'].startswith('Saving Throw')]
+            proficiencies = ', '.join(profs)
+
+            # Skill choices description
+            skill_choices = ''
+            for choice in data.get('proficiency_choices', []):
+                desc = choice.get('desc', '')
+                if desc:
+                    skill_choices = desc
+                    break
+
+            subclasses = ', '.join(sc['name'] for sc in data.get('subclasses', []))
+
+            spell_obj = data.get('spellcasting', {})
+            spellcasting_ability = (spell_obj.get('spellcasting_ability', {}) or {}).get('name', '')
+
+            cls = tblClassesLibrary(
+                api_index            = index,
+                name                 = data['name'],
+                hit_die              = data.get('hit_die', 8),
+                saving_throws        = saving_throws,
+                proficiencies        = proficiencies,
+                skill_choices        = skill_choices,
+                subclasses           = subclasses,
+                spellcasting_ability = spellcasting_ability,
+                description          = '',
+                source               = 'srd',
+                created_at           = _now(),
+            )
+            db.session.add(cls)
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Classes library routes ─────────────────────────────────────────────────────
+
+@reference_bp.route('/classes')
+@login_required
+@dm_required
+def classes_library():
+    total = tblClassesLibrary.query.count()
+    q   = request.args.get('q',   '').strip()
+    src = request.args.get('src', '').strip()
+
+    classes = tblClassesLibrary.query
+    if q:
+        classes = classes.filter(tblClassesLibrary.name.ilike(f'%{q}%'))
+    if src:
+        classes = classes.filter(tblClassesLibrary.source == src)
+    classes = classes.order_by(tblClassesLibrary.name).all()
+    current_api = get_api_base()
+    return render_template('ttrpg/classes_library.html',
+                           classes=classes, total=total, q=q, src=src,
+                           current_api=current_api, api_options=API_OPTIONS)
+
+
+@reference_bp.route('/classes/sync', methods=['POST'])
+@login_required
+@dm_required
+def classes_sync():
+    key = 'classes'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_classes_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
+
+
+@reference_bp.route('/classes/add', methods=['POST'])
+@login_required
+@dm_required
+def class_add():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Class name is required.')
+        return redirect(url_for('reference_bp.classes_library'))
+    cls = tblClassesLibrary(
+        api_index            = None,
+        name                 = name,
+        hit_die              = int(request.form.get('hit_die', 8) or 8),
+        saving_throws        = request.form.get('saving_throws', '').strip(),
+        proficiencies        = request.form.get('proficiencies', '').strip(),
+        skill_choices        = request.form.get('skill_choices', '').strip(),
+        subclasses           = request.form.get('subclasses', '').strip(),
+        spellcasting_ability = request.form.get('spellcasting_ability', '').strip(),
+        description          = request.form.get('description', '').strip(),
+        source               = 'homebrew',
+        created_at           = _now(),
+    )
+    db.session.add(cls)
+    db.session.commit()
+    flash(f'Added custom class "{name}".')
+    return redirect(url_for('reference_bp.classes_library'))
+
+
+@reference_bp.route('/classes/<int:class_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def class_delete(class_lib_id):
+    cls = tblClassesLibrary.query.get_or_404(class_lib_id)
+    if cls.source != 'homebrew':
+        flash('Only custom classes can be deleted.')
+        return redirect(url_for('reference_bp.classes_library'))
+    name = cls.name
+    db.session.delete(cls)
+    db.session.commit()
+    flash(f'Deleted "{name}".')
+    return redirect(url_for('reference_bp.classes_library'))
+
+
+@reference_bp.route('/races/search')
+@login_required
+def races_search():
+    q = request.args.get('q', '').strip()
+    races = tblRacesLibrary.query.filter(
+        tblRacesLibrary.name.ilike(f'%{q}%')
+    ).order_by(tblRacesLibrary.name).limit(20).all()
+    return jsonify([{
+        'race_lib_id':    r.race_lib_id,
+        'name':           r.name,
+        'speed':          r.speed,
+        'size':           r.size,
+        'ability_bonuses': r.ability_bonuses,
+        'traits_text':    r.traits_text,
+        'languages':      r.languages,
+        'description':    r.description,
+    } for r in races])
+
+
+@reference_bp.route('/classes/search')
+@login_required
+def classes_search():
+    q = request.args.get('q', '').strip()
+    classes = tblClassesLibrary.query.filter(
+        tblClassesLibrary.name.ilike(f'%{q}%')
+    ).order_by(tblClassesLibrary.name).limit(20).all()
+    return jsonify([{
+        'class_lib_id':         c.class_lib_id,
+        'name':                 c.name,
+        'hit_die':              c.hit_die,
+        'saving_throws':        c.saving_throws,
+        'proficiencies':        c.proficiencies,
+        'skill_choices':        c.skill_choices,
+        'subclasses':           c.subclasses,
+        'spellcasting_ability': c.spellcasting_ability,
+        'description':          c.description,
+    } for c in classes])

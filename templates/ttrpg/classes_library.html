@@ -1,0 +1,299 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .classes-table { background: var(--sp-surface); color: var(--sp-text); }
+  .classes-table thead th {
+    background: var(--sp-primary);
+    color: var(--sp-accent);
+    border-bottom-color: var(--sp-border);
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  .classes-table td { border-color: var(--sp-border); font-size: .85rem; vertical-align: middle; }
+  .classes-table tbody tr.data-row:hover td {
+    background: color-mix(in srgb, var(--sp-accent) 6%, transparent);
+  }
+  .classes-table tr.detail-row td {
+    background: var(--sp-bg);
+    border-top: none;
+    padding: 10px 14px;
+  }
+  .hd-badge {
+    font-size: .72rem; padding: 2px 7px; border-radius: 8px;
+    background: color-mix(in srgb, var(--sp-accent) 12%, transparent);
+    border: 1px solid var(--sp-border);
+    color: var(--ttrpg-accent);
+    font-weight: 600;
+  }
+  .sub-tag {
+    font-size: .7rem; padding: 1px 6px; border-radius: 6px;
+    background: color-mix(in srgb, var(--sp-accent) 10%, transparent);
+    border: 1px solid var(--sp-border);
+    color: var(--sp-muted);
+    white-space: nowrap;
+  }
+  .spell-badge {
+    font-size: .7rem; padding: 2px 7px; border-radius: 8px;
+    background: color-mix(in srgb, #7c5cbf 18%, transparent);
+    border: 1px solid #7c5cbf;
+    color: #c0aaff;
+    font-weight: 600;
+  }
+  .add-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .add-form-grid .full-width { grid-column: 1 / -1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Classes Library</h3>
+    <span class="small text-muted">{{ total }} class{{ 'es' if total != 1 }}</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">+ Custom Class</button>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
+    <button id="sync-btn-classes" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('classes','{{ url_for('reference_bp.classes_sync') }}','{{ url_for('reference_bp.sync_status', job_type='classes') }}')">
+      &#8635; Sync SRD
+    </button>
+  </div>
+</div>
+
+<!-- Add custom class form -->
+<div id="add-class-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="fw-bold mb-3" style="color:var(--ttrpg-accent);">Add Custom Class</div>
+  <form method="POST" action="{{ url_for('reference_bp.class_add') }}">
+    <div class="add-form-grid mb-3">
+      <div>
+        <label class="form-label small text-muted mb-1">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               placeholder="Blood Hunter" required autofocus>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Hit Die</label>
+        <select name="hit_die" class="form-select form-select-sm">
+          <option value="6">d6</option>
+          <option value="8" selected>d8</option>
+          <option value="10">d10</option>
+          <option value="12">d12</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Saving Throws</label>
+        <input type="text" name="saving_throws" class="form-control form-control-sm"
+               placeholder="STR, CON">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Spellcasting Ability</label>
+        <select name="spellcasting_ability" class="form-select form-select-sm">
+          <option value="">None</option>
+          <option>INT</option>
+          <option>WIS</option>
+          <option>CHA</option>
+        </select>
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Proficiencies</label>
+        <input type="text" name="proficiencies" class="form-control form-control-sm"
+               placeholder="Light armor, Medium armor, Simple weapons…">
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Skill Choices</label>
+        <input type="text" name="skill_choices" class="form-control form-control-sm"
+               placeholder="Choose 2 from Arcana, History, Insight…">
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Subclasses (comma-separated)</label>
+        <input type="text" name="subclasses" class="form-control form-control-sm"
+               placeholder="Order of the Profane Soul, Order of the Ghostslayer">
+      </div>
+      <div class="full-width">
+        <label class="form-label small text-muted mb-1">Description / Notes</label>
+        <textarea name="description" class="form-control form-control-sm" rows="2"
+                  style="resize:vertical;" placeholder="Flavor text, source notes, etc."></textarea>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add to Library</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<div class="ttrpg-card p-3 mb-3">
+  <form method="GET" action="{{ url_for('reference_bp.classes_library') }}" class="row g-2 align-items-end">
+    <div class="col-sm-4">
+      <label class="form-label small text-muted mb-1">Search</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Class name…">
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select name="src" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
+        <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Filter</button>
+    </div>
+    {% if q or src %}
+    <div class="col-auto">
+      <a href="{{ url_for('reference_bp.classes_library') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+{% if classes %}
+<div class="ttrpg-card p-0" style="overflow-x:auto;">
+  <table class="table table-hover mb-0 classes-table">
+    <thead>
+      <tr>
+        <th style="width:28px;"></th>
+        <th>Class</th>
+        <th>Hit Die</th>
+        <th>Saving Throws</th>
+        <th>Subclasses</th>
+        <th>Spellcasting</th>
+        <th>Source</th>
+        <th style="width:54px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in classes %}
+      <tr class="data-row" id="crow-{{ c.class_lib_id }}" style="cursor:pointer;"
+          onclick="toggleClassDetail({{ c.class_lib_id }})">
+        <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
+        <td>
+          <span style="color:var(--ttrpg-accent);font-weight:600;">{{ c.name }}</span>
+          {% if c.source == 'homebrew' %}
+          <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                       border:1px solid var(--sp-border);color:var(--ttrpg-accent);
+                       background:color-mix(in srgb, var(--sp-primary) 25%, transparent);
+                       margin-left:4px;">Custom</span>
+          {% endif %}
+        </td>
+        <td><span class="hd-badge">d{{ c.hit_die }}</span></td>
+        <td class="small" style="color:var(--ttrpg-accent);">{{ c.saving_throws or '—' }}</td>
+        <td>
+          {% if c.subclasses %}
+            {% for sub in c.subclasses.split(',')[:3] %}
+            <span class="sub-tag me-1">{{ sub.strip() }}</span>
+            {% endfor %}
+            {% if c.subclasses.split(',')|length > 3 %}
+            <span class="text-muted small">+{{ c.subclasses.split(',')|length - 3 }} more</span>
+            {% endif %}
+          {% else %}
+          <span class="text-muted small fst-italic">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if c.spellcasting_ability %}
+          <span class="spell-badge">{{ c.spellcasting_ability }}</span>
+          {% else %}
+          <span class="text-muted small fst-italic">—</span>
+          {% endif %}
+        </td>
+        <td class="small text-muted">{{ c.source }}</td>
+        <td class="text-center" onclick="event.stopPropagation()">
+          {% if c.source == 'homebrew' %}
+          <form method="POST"
+                action="{{ url_for('reference_bp.class_delete', class_lib_id=c.class_lib_id) }}"
+                onsubmit="return confirm('Delete {{ c.name | e }}?')">
+            <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      <!-- Detail row -->
+      <tr class="detail-row" id="cdetail-{{ c.class_lib_id }}" style="display:none;">
+        <td colspan="8">
+          <div class="row g-3">
+            <div class="col-sm-5">
+              <div class="small mb-2">
+                <span class="text-muted">Hit Die:</span>
+                <span style="color:var(--ttrpg-accent);">d{{ c.hit_die }}</span>
+                &nbsp;&nbsp;
+                <span class="text-muted">Saves:</span>
+                <span style="color:var(--ttrpg-accent);">{{ c.saving_throws or '—' }}</span>
+              </div>
+              {% if c.spellcasting_ability %}
+              <div class="small mb-2">
+                <span class="text-muted">Spellcasting:</span>
+                <span class="spell-badge ms-1">{{ c.spellcasting_ability }}</span>
+              </div>
+              {% endif %}
+              {% if c.skill_choices %}
+              <div class="small mb-2">
+                <span class="text-muted">Skills:</span>
+                <span style="color:var(--sp-text);">{{ c.skill_choices }}</span>
+              </div>
+              {% endif %}
+              {% if c.description %}
+              <div class="small text-muted fst-italic mt-1">{{ c.description }}</div>
+              {% endif %}
+            </div>
+            <div class="col-sm-4">
+              {% if c.proficiencies %}
+              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Proficiencies</div>
+              <div class="small" style="color:var(--sp-text);">{{ c.proficiencies }}</div>
+              {% endif %}
+            </div>
+            <div class="col-sm-3">
+              {% if c.subclasses %}
+              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Subclasses</div>
+              <div class="d-flex flex-wrap gap-1">
+                {% for sub in c.subclasses.split(',') %}
+                {% if sub.strip() %}
+                <span class="sub-tag">{{ sub.strip() }}</span>
+                {% endif %}
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="ttrpg-card p-4 text-center text-muted">
+  {% if q or src %}
+  <p>No classes match your filters.</p>
+  {% else %}
+  <p>No classes stored yet. Click <strong>Sync SRD</strong> to pull the 12 core classes from the API.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-class-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') f.querySelector('[name="name"]').focus();
+}
+
+function toggleClassDetail(id) {
+  const detail = document.getElementById('cdetail-' + id);
+  const icon   = document.querySelector('#crow-' + id + ' td:first-child');
+  const open   = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  if (icon) icon.textContent = open ? '▼' : '▲';
+}
+</script>
+{% endblock %}

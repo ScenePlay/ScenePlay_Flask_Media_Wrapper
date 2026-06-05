@@ -10,7 +10,18 @@
       "Bash(python3 -c ' *)",
       "Bash(python3 -c \"import sqlite3; conn=sqlite3.connect\\('/mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db'\\); print\\([t[0] for t in conn.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\).fetchall\\(\\)]\\)\")",
       "Bash(sqlite3 /mnt/5FD1E1415AC80F29/dev/ScenePlay/ScenePlay.db \".tables\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routes/reference.py'\\).read\\(\\)\\); print\\('reference.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routes/monsters.py'\\).read\\(\\)\\); print\\('monsters.py OK'\\)\")",
+      "Bash(curl -s \"https://www.dnd5eapi.co/api/2014/classes/wizard\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in ['name','hit_die','saving_throws','proficiencies','subclasses','spellcasting'] if k in d}, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in ['proficiency_choices','spellcasting','multi_classing'] if k in d}, indent=2\\)\\)\")",
+      "Bash(curl -s \"https://www.dnd5eapi.co/api/2014/classes\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\([x['index'] for x in d.get\\('results',[]\\)]\\)\")",
+      "Bash(curl -s \"https://www.dnd5eapi.co/api/2014/classes/fighter\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('routes/reference.py'\\).read\\(\\)\\); print\\('reference.py OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('models/ttrpg.py'\\).read\\(\\)\\); print\\('models/ttrpg.py OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('routes/ttrpg.py'\\).read\\(\\)\\); print\\('ttrpg.py OK'\\)\")"
     ]
   }
 }

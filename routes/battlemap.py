@@ -7,10 +7,11 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    request, flash, jsonify, current_app)
 from flask_login import login_required, current_user
 
-from extensions import db
+from extensions import db, currentvolume
 from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects,
                            tblSessions, tblSessionParty,
                            tblSessionMonsters, tblCharacters)
+from models.scenes import tblscenes
 from routes.auth import dm_required
 
 battlemap_bp = Blueprint('battlemap_bp', __name__, url_prefix='/ttrpg/battlemap')
@@ -211,6 +212,18 @@ def map_view(map_id):
             else:
                 on_map_player_ids.add(t.entity_id)
 
+    campaign_scenes = []
+    if sess and sess.campaign_id:
+        campaign_scenes = (tblscenes.query
+                           .filter_by(campaign_id=sess.campaign_id, active=1)
+                           .order_by(tblscenes.orderBy)
+                           .all())
+
+    try:
+        current_vol = currentvolume()
+    except Exception:
+        current_vol = 50
+
     # Determine roller name: player's character name or DM display name
     roller_name = current_user.display_name
     if not current_user.is_dm():
@@ -225,7 +238,9 @@ def map_view(map_id):
                            on_map_monster_ids=on_map_monster_ids,
                            on_map_player_ids=on_map_player_ids,
                            cell_px=CELL_PX,
-                           roller_name=roller_name)
+                           roller_name=roller_name,
+                           campaign_scenes=campaign_scenes,
+                           current_vol=current_vol)
 
 
 # ── State poll endpoint ───────────────────────────────────────────────────────

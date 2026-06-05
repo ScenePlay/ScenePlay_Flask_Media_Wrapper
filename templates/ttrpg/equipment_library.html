@@ -9,9 +9,10 @@
     <span class="small text-muted">API: {{ api_options[current_api]['label'] if current_api in api_options else current_api }}</span>
     <a href="{{ url_for('reference_bp.api_settings') }}" class="btn btn-sm btn-outline-secondary">&#9881;</a>
     <button class="btn btn-sm btn-outline-secondary" onclick="toggleAddForm()">+ Custom Item</button>
-    <form method="POST" action="{{ url_for('reference_bp.equipment_sync') }}" style="display:inline;">
-      <button class="btn btn-sm btn-ttrpg" type="submit">&#8635; Sync from API</button>
-    </form>
+    <button id="sync-btn-equipment" class="btn btn-sm btn-ttrpg"
+            onclick="startSync('equipment','{{ url_for('reference_bp.equipment_sync') }}','{{ url_for('reference_bp.sync_status', job_type='equipment') }}')">
+      &#8635; Sync from API
+    </button>
   </div>
 </div>
 

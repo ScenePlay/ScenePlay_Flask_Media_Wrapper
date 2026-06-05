@@ -12,10 +12,10 @@
        class="btn btn-outline-secondary btn-sm" title="Change API source">
       &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
     </a>
-    <form method="POST" action="{{ url_for('monsters_bp.sync') }}"
-          onsubmit="return confirm('Sync all monsters from the API? This may take a minute.')">
-      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
-    </form>
+    <button id="sync-btn-monsters" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('monsters','{{ url_for('monsters_bp.sync') }}','{{ url_for('monsters_bp.sync_status') }}')">
+      &#8635; Sync SRD
+    </button>
   </div>
 </div>
 

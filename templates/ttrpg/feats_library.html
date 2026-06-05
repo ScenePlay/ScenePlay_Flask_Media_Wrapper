@@ -29,10 +29,10 @@
        title="Change API source">
       &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
     </a>
-    <form method="POST" action="{{ url_for('reference_bp.feats_sync') }}"
-          onsubmit="return confirm('Sync feats from the API?')">
-      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
-    </form>
+    <button id="sync-btn-feats" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('feats','{{ url_for('reference_bp.feats_sync') }}','{{ url_for('reference_bp.sync_status', job_type='feats') }}')">
+      &#8635; Sync SRD
+    </button>
   </div>
 </div>
 

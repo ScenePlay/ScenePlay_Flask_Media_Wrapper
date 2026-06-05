@@ -1,14 +1,16 @@
 import json
+import threading
 import requests
 from datetime import datetime
 from flask import (Blueprint, render_template, redirect, url_for,
-                   request, flash, jsonify)
+                   request, flash, jsonify, current_app)
 from flask_login import login_required
 from extensions import db
 from models.ttrpg import tblMonsterTemplates, tblSessionMonsters, tblSessions
 from routes.auth import dm_required
 
 monsters_bp = Blueprint('monsters_bp', __name__, url_prefix='/ttrpg/monsters')
+_sync_states = {}
 
 API_BASE = 'https://www.dnd5eapi.co/api/2014'
 CONDITIONS = {
@@ -66,7 +68,7 @@ def _extract_ac(armor_class):
 
 # ── Sync all monsters from the SRD API ────────────────────────────────────────
 
-def sync_monsters_from_api():
+def sync_monsters_from_api(state=None):
     from routes.reference import get_api_base
     api_base = get_api_base()
     try:
@@ -76,14 +78,16 @@ def sync_monsters_from_api():
     except Exception as e:
         return 0, 0, str(e)
 
+    if state is not None:
+        state['total'] = len(monster_list)
+
     added = skipped = errors = 0
-    for entry in monster_list:
-        index = entry['index']
-        existing = tblMonsterTemplates.query.filter_by(api_index=index).first()
-        if existing:
-            skipped += 1
-            continue
+    for i, entry in enumerate(monster_list):
         try:
+            index = entry['index']
+            if tblMonsterTemplates.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
             detail = requests.get(f'{api_base}/monsters/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
@@ -108,6 +112,9 @@ def sync_monsters_from_api():
             added += 1
         except Exception:
             errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
 
     return added, skipped, errors
 
@@ -244,9 +251,27 @@ def add_to_session(template_id):
 @login_required
 @dm_required
 def sync():
-    added, skipped, errors = sync_monsters_from_api()
-    flash(f'Sync complete: {added} added, {skipped} already cached, {errors} errors.')
-    return redirect(url_for('monsters_bp.library'))
+    key = 'monsters'
+    if _sync_states.get(key, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[key] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = sync_monsters_from_api(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': key})
+
+
+@monsters_bp.route('/sync/status')
+@login_required
+def sync_status():
+    state = _sync_states.get('monsters', {})
+    if not state:
+        return jsonify({'running': False, 'total': 0, 'done': 0, 'message': ''})
+    return jsonify(dict(state))
 
 
 # ── Homebrew create ───────────────────────────────────────────────────────────

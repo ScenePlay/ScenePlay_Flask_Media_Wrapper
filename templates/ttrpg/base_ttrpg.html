@@ -180,7 +180,9 @@
 <body>
 <nav class="navbar navbar-expand-sm ttrpg-nav">
     <div class="container-fluid">
+        {% if current_user.is_authenticated and current_user.is_dm() %}
         <a class="navbar-brand" href="{{ url_for('main.home') }}">&#9654; ScenePlay</a>
+        {% endif %}
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#ttrpgNav">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -199,6 +201,7 @@
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.spells_library') }}">Spells</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.skills_library') }}">Skills</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.races_library') }}">Races</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.classes_library') }}">Classes</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881;</a></li>
@@ -254,6 +257,90 @@
 
     {% block content %}{% endblock %}
 </div>
+
+<!-- Sync progress toast (shared across all library pages) -->
+<div id="sync-toast" class="ttrpg-card p-3"
+     style="display:none;position:fixed;bottom:22px;right:22px;width:290px;z-index:9000;
+            box-shadow:0 4px 24px rgba(0,0,0,.6);">
+  <div class="d-flex justify-content-between align-items-center mb-1">
+    <span id="sync-toast-title" class="fw-bold small" style="color:var(--ttrpg-accent);">Syncing…</span>
+    <span id="sync-toast-pct" class="small" style="color:var(--ttrpg-accent);">0%</span>
+  </div>
+  <div class="progress mb-2" style="height:7px;background:var(--sp-surface);border-radius:4px;">
+    <div id="sync-toast-bar" class="progress-bar" role="progressbar"
+         style="width:5%;background:var(--ttrpg-accent);transition:width .35s ease;border-radius:4px;"></div>
+  </div>
+  <div id="sync-toast-label" class="small text-muted">Fetching list from API…</div>
+</div>
+
+<script>
+function startSync(job, syncUrl, statusUrl) {
+  const toast = document.getElementById('sync-toast');
+  const title = document.getElementById('sync-toast-title');
+  const bar   = document.getElementById('sync-toast-bar');
+  const pct   = document.getElementById('sync-toast-pct');
+  const lbl   = document.getElementById('sync-toast-label');
+  const btn   = document.getElementById('sync-btn-' + job);
+
+  bar.style.width      = '5%';
+  bar.style.background = 'var(--ttrpg-accent)';
+  pct.textContent      = '0%';
+  lbl.textContent      = 'Fetching list from API…';
+  title.textContent    = '↻ Syncing ' + job.charAt(0).toUpperCase() + job.slice(1) + '…';
+  toast.style.display  = '';
+
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Running…'; }
+
+  fetch(syncUrl, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        lbl.textContent = '✗ ' + data.error;
+        if (btn) btn.disabled = false;
+        return;
+      }
+      _pollSync(job, statusUrl, btn, bar, pct, lbl, title);
+    })
+    .catch(() => {
+      lbl.textContent = '✗ Network error';
+      if (btn) btn.disabled = false;
+    });
+}
+
+function _pollSync(job, statusUrl, btn, bar, pct, lbl, title) {
+  fetch(statusUrl)
+    .then(r => r.json())
+    .then(s => {
+      const total = s.total || 0;
+      const done  = s.done  || 0;
+      const p = total > 0 ? Math.round(done / total * 100) : (s.running ? 8 : 100);
+
+      bar.style.width = p + '%';
+      pct.textContent = p + '%';
+
+      if (s.running) {
+        lbl.textContent = total > 0
+          ? 'Processing ' + done + ' / ' + total + '…'
+          : 'Fetching list from API…';
+        setTimeout(function() { _pollSync(job, statusUrl, btn, bar, pct, lbl, title); }, 450);
+      } else {
+        bar.style.width      = '100%';
+        pct.textContent      = '100%';
+        bar.style.background = '#28a745';
+        title.textContent    = '✓ Sync Complete';
+        lbl.textContent      = s.message || 'Done.';
+        if (btn) { btn.disabled = false; btn.innerHTML = '&#8635; Sync SRD'; }
+        setTimeout(function() {
+          document.getElementById('sync-toast').style.display = 'none';
+          location.reload();
+        }, 2500);
+      }
+    })
+    .catch(function() {
+      setTimeout(function() { _pollSync(job, statusUrl, btn, bar, pct, lbl, title); }, 1000);
+    });
+}
+</script>
 
 {% block scripts %}{% endblock %}
 </body>

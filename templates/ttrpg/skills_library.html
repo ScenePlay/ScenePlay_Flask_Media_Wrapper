@@ -45,10 +45,10 @@
        class="btn btn-outline-secondary btn-sm" title="Change API source">
       &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
     </a>
-    <form method="POST" action="{{ url_for('reference_bp.skills_sync') }}"
-          onsubmit="return confirm('Sync skills from the API? (existing entries are skipped)')">
-      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
-    </form>
+    <button id="sync-btn-skills" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('skills','{{ url_for('reference_bp.skills_sync') }}','{{ url_for('reference_bp.sync_status', job_type='skills') }}')">
+      &#8635; Sync SRD
+    </button>
   </div>
 </div>
 

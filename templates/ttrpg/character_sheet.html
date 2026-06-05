@@ -408,6 +408,7 @@
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
           Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
         </button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-reference" style="color:var(--ttrpg-accent);">Reference</button></li>
       </ul>
 
       <div class="tab-content">
@@ -1414,6 +1415,130 @@
           </div>
           {% endif %}
         </div>
+
+        <!-- Reference -->
+        <div class="tab-pane fade" id="tab-reference">
+
+          {% set my_race  = races_lib.get(char.race.lower())   if char.race       else None %}
+          {% set my_class = classes_lib.get(char.char_class.lower()) if char.char_class else None %}
+
+          <!-- Race & Class quick-info cards -->
+          <div class="row g-2 mb-3">
+            <!-- Race card -->
+            <div class="col-sm-6">
+              <div class="ttrpg-card p-2 h-100" style="border-color:var(--sp-border);">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="small fw-bold text-muted" style="text-transform:uppercase;letter-spacing:.06em;">Race</span>
+                  {% if current_user.is_dm() %}
+                  <a href="{{ url_for('reference_bp.races_library') }}" target="_blank"
+                     class="small text-muted text-decoration-none" style="font-size:.7rem;">&#8599; library</a>
+                  {% endif %}
+                </div>
+                {% if my_race %}
+                <div style="color:var(--ttrpg-accent);font-weight:600;">{{ my_race.name }}</div>
+                <div class="d-flex gap-3 small text-muted mt-1 flex-wrap">
+                  <span>{{ my_race.size or '—' }}</span>
+                  <span>{{ my_race.speed }} ft</span>
+                  {% if my_race.ability_bonuses %}<span style="color:var(--ttrpg-accent);">{{ my_race.ability_bonuses }}</span>{% endif %}
+                  {% if my_race.languages %}<span>{{ my_race.languages }}</span>{% endif %}
+                </div>
+                {% if my_race.traits_text %}
+                <div class="d-flex flex-wrap gap-1 mt-1">
+                  {% for t in my_race.traits_text.split('\n')[:5] %}{% if t.strip() %}
+                  <span style="font-size:.68rem;padding:1px 5px;border-radius:6px;
+                               background:color-mix(in srgb, var(--sp-accent) 10%, transparent);
+                               border:1px solid var(--sp-border);color:var(--sp-muted);">{{ t.strip() }}</span>
+                  {% endif %}{% endfor %}
+                  {% if my_race.traits_text.split('\n')|length > 5 %}
+                  <span class="text-muted" style="font-size:.68rem;">+{{ my_race.traits_text.split('\n')|length - 5 }} more</span>
+                  {% endif %}
+                </div>
+                {% endif %}
+                {% elif char.race %}
+                <div class="small text-muted fst-italic">{{ char.race }} <span style="font-size:.72rem;">(not in library)</span></div>
+                {% else %}
+                <div class="small text-muted fst-italic">No race set.</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Class card -->
+            <div class="col-sm-6">
+              <div class="ttrpg-card p-2 h-100" style="border-color:var(--sp-border);">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="small fw-bold text-muted" style="text-transform:uppercase;letter-spacing:.06em;">Class</span>
+                  {% if current_user.is_dm() %}
+                  <a href="{{ url_for('reference_bp.classes_library') }}" target="_blank"
+                     class="small text-muted text-decoration-none" style="font-size:.7rem;">&#8599; library</a>
+                  {% endif %}
+                </div>
+                {% if my_class %}
+                <div style="color:var(--ttrpg-accent);font-weight:600;">{{ my_class.name }}
+                  <span style="font-size:.75rem;color:var(--sp-muted);font-weight:normal;margin-left:4px;">d{{ my_class.hit_die }}</span>
+                </div>
+                <div class="d-flex gap-3 small text-muted mt-1 flex-wrap">
+                  {% if my_class.saving_throws %}<span>Saves: <span style="color:var(--ttrpg-accent);">{{ my_class.saving_throws }}</span></span>{% endif %}
+                  {% if my_class.spellcasting_ability %}<span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
+                    background:color-mix(in srgb, #7c5cbf 18%, transparent);border:1px solid #7c5cbf;color:#c0aaff;">
+                    {{ my_class.spellcasting_ability }}</span>{% endif %}
+                </div>
+                {% if my_class.skill_choices %}
+                <div class="small text-muted mt-1">{{ my_class.skill_choices }}</div>
+                {% endif %}
+                {% if my_class.subclasses %}
+                <div class="d-flex flex-wrap gap-1 mt-1">
+                  {% for s in my_class.subclasses.split(',')[:4] %}{% if s.strip() %}
+                  <span style="font-size:.68rem;padding:1px 5px;border-radius:6px;
+                               background:color-mix(in srgb, var(--sp-accent) 10%, transparent);
+                               border:1px solid var(--sp-border);color:var(--sp-muted);">{{ s.strip() }}</span>
+                  {% endif %}{% endfor %}
+                  {% if my_class.subclasses.split(',')|length > 4 %}
+                  <span class="text-muted" style="font-size:.68rem;">+{{ my_class.subclasses.split(',')|length - 4 }} more</span>
+                  {% endif %}
+                </div>
+                {% endif %}
+                {% elif char.char_class %}
+                <div class="small text-muted fst-italic">{{ char.char_class }} <span style="font-size:.72rem;">(not in library)</span></div>
+                {% else %}
+                <div class="small text-muted fst-italic">No class set.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <!-- Library search accordion -->
+          <div class="small fw-bold text-muted mb-2" style="text-transform:uppercase;letter-spacing:.06em;">Browse Libraries</div>
+          <div id="ref-accordion">
+            {% set lib_sections = [
+              ('spells',    'Spells',    '✦'),
+              ('weapons',   'Weapons',   '⚔'),
+              ('armor',     'Armor',     '🛡'),
+              ('equipment', 'Equipment', '🎒'),
+              ('feats',     'Feats',     '⭐'),
+              ('skills',    'Skills',    '🎯'),
+              ('races',     'Races',     '🧬'),
+              ('classes',   'Classes',   '🏰'),
+            ] %}
+            {% for key, label, icon in lib_sections %}
+            <div class="ref-section mb-1" style="border:1px solid var(--sp-border);border-radius:6px;overflow:hidden;">
+              <button class="ref-section-hdr w-100 text-start d-flex justify-content-between align-items-center px-3 py-2"
+                      style="background:var(--sp-surface);border:none;color:var(--ttrpg-accent);font-size:.85rem;cursor:pointer;"
+                      onclick="refToggle('{{ key }}')">
+                <span>{{ icon }} {{ label }}</span>
+                <span id="ref-arrow-{{ key }}" style="font-size:.7rem;color:var(--sp-muted);">▼</span>
+              </button>
+              <div id="ref-body-{{ key }}" style="display:none;padding:8px 10px;background:var(--sp-bg);">
+                <input type="text" id="ref-q-{{ key }}"
+                       class="form-control form-control-sm mb-2"
+                       placeholder="Search {{ label }}…"
+                       oninput="refSearch('{{ key }}', this.value)">
+                <div id="ref-results-{{ key }}" class="small"></div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <!-- /Reference -->
 
       </div><!-- tab-content -->
     </div>
@@ -2526,5 +2651,156 @@ document.addEventListener('click', e => {
   if (box && !e.target.closest('#skill-lib-suggestions') && e.target.id !== 'new_skill_name')
     box.style.display = 'none';
 });
+
+// ── Reference tab ─────────────────────────────────────────────────────────────
+
+const _refUrls = {
+  spells:    "{{ url_for('reference_bp.spells_search') }}",
+  weapons:   "{{ url_for('reference_bp.weapons_search') }}",
+  armor:     "{{ url_for('reference_bp.armor_search') }}",
+  equipment: "{{ url_for('reference_bp.equipment_search') }}",
+  feats:     "{{ url_for('reference_bp.feats_search') }}",
+  skills:    "{{ url_for('reference_bp.skills_search') }}",
+  races:     "{{ url_for('reference_bp.races_search') }}",
+  classes:   "{{ url_for('reference_bp.classes_search') }}",
+};
+const _refTimers = {};
+
+function refToggle(key) {
+  const body  = document.getElementById('ref-body-' + key);
+  const arrow = document.getElementById('ref-arrow-' + key);
+  const open  = body.style.display !== 'none';
+  body.style.display  = open ? 'none' : '';
+  arrow.textContent   = open ? '▼' : '▲';
+  if (!open) {
+    const inp = document.getElementById('ref-q-' + key);
+    inp.focus();
+    if (!inp.value) refSearch(key, '');
+  }
+}
+
+function refSearch(key, q) {
+  clearTimeout(_refTimers[key]);
+  _refTimers[key] = setTimeout(() => {
+    const url = _refUrls[key] + '?q=' + encodeURIComponent(q) + '&limit=15';
+    fetch(url)
+      .then(r => r.json())
+      .then(items => {
+        const box = document.getElementById('ref-results-' + key);
+        if (!items.length) { box.innerHTML = '<span class="text-muted">No results.</span>'; return; }
+        box.innerHTML = items.map(it => _refCard(key, it)).join('');
+      })
+      .catch(() => {});
+  }, 250);
+}
+
+function _escH(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _trunc(s, n) { s = s || ''; return s.length > n ? s.slice(0, n) + '…' : s; }
+
+function _refCard(key, it) {
+  const base = 'margin-bottom:6px;padding:7px 10px;border-radius:5px;border:1px solid var(--sp-border);background:var(--sp-surface);';
+  switch (key) {
+    case 'spells': {
+      const lvl  = it.level === 0 ? 'Cantrip' : 'Level ' + it.level;
+      const conc = it.concentration ? ' ◎ Conc.' : '';
+      const rit  = it.ritual ? ' ✦ Ritual' : '';
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          <span class="text-muted ms-2" style="font-size:.75rem;">${_escH(lvl)} · ${_escH(it.school)}${conc}${rit}</span></div>
+        <div class="text-muted mt-1" style="font-size:.75rem;">
+          <span>⏱ ${_escH(it.casting_time)}</span> &nbsp;
+          <span>↔ ${_escH(it.range_text)}</span> &nbsp;
+          <span>⧗ ${_escH(it.duration)}</span>
+        </div>
+        ${it.description ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 140))}</div>` : ''}
+      </div>`;
+    }
+    case 'weapons': {
+      const dmg = it.damage_dice ? it.damage_dice + (it.damage_type ? ' ' + it.damage_type : '') : '—';
+      const rng = it.weapon_range === 'Ranged' && it.range_normal ? ` · ${it.range_normal}/${it.range_long} ft` : '';
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          <span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.weapon_category)} ${_escH(it.weapon_range)}${rng}</span></div>
+        <div class="text-muted" style="font-size:.75rem;">
+          <span>⚔ ${_escH(dmg)}</span>
+          ${it.cost ? ` &nbsp; 💰 ${_escH(it.cost)}` : ''}
+          ${it.weight ? ` &nbsp; ⚖ ${it.weight} lb` : ''}
+        </div>
+        ${it.properties ? `<div style="font-size:.7rem;color:var(--sp-muted);">${_escH(it.properties)}</div>` : ''}
+      </div>`;
+    }
+    case 'armor': {
+      const acStr = it.armor_class_base
+        ? it.armor_class_base + (it.dex_bonus ? (it.max_dex_bonus !== null ? ` + DEX (max ${it.max_dex_bonus})` : ' + DEX') : '') + ' AC'
+        : '—';
+      const stlth = it.stealth_disadvantage ? ' · ⚠ Stealth disadv.' : '';
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          <span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.armor_category)}</span></div>
+        <div class="text-muted" style="font-size:.75rem;">
+          <span>🛡 ${_escH(acStr)}${stlth}</span>
+          ${it.str_minimum ? ` &nbsp; STR ${it.str_minimum}+` : ''}
+          ${it.cost ? ` &nbsp; 💰 ${_escH(it.cost)}` : ''}
+        </div>
+      </div>`;
+    }
+    case 'equipment': {
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          ${it.category ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.category)}${it.subcategory ? ' › ' + it.subcategory : ''}</span>` : ''}
+        </div>
+        <div class="text-muted" style="font-size:.75rem;">
+          ${it.cost ? `💰 ${_escH(it.cost)}` : ''}
+          ${it.weight ? ` &nbsp; ⚖ ${it.weight} lb` : ''}
+        </div>
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 120))}</div>` : ''}
+      </div>`;
+    }
+    case 'feats': {
+      return `<div style="${base}">
+        <div style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</div>
+        ${it.prerequisites ? `<div class="text-muted fst-italic" style="font-size:.75rem;">Req: ${_escH(it.prerequisites)}</div>` : ''}
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 160))}</div>` : ''}
+      </div>`;
+    }
+    case 'skills': {
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          ${it.ability_score ? `<span class="text-muted ms-2" style="font-size:.75rem;">(${_escH(it.ability_score)})</span>` : ''}
+        </div>
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 140))}</div>` : ''}
+      </div>`;
+    }
+    case 'races': {
+      const traits = (it.traits_text || '').split('\n').filter(Boolean).slice(0, 4);
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          ${it.size ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.size)} · ${it.speed} ft</span>` : ''}
+        </div>
+        ${it.ability_bonuses ? `<div style="font-size:.75rem;color:var(--ttrpg-accent);">${_escH(it.ability_bonuses)}</div>` : ''}
+        ${traits.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${traits.map(t => _escH(t)).join(' · ')}</div>` : ''}
+      </div>`;
+    }
+    case 'classes': {
+      const spellBadge = it.spellcasting_ability
+        ? `<span style="font-size:.68rem;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,#7c5cbf 18%,transparent);border:1px solid #7c5cbf;color:#c0aaff;">${_escH(it.spellcasting_ability)}</span>`
+        : '';
+      const subs = (it.subclasses || '').split(',').filter(Boolean).slice(0, 4);
+      return `<div style="${base}">
+        <div class="d-flex align-items-center gap-2">
+          <span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          <span style="font-size:.75rem;padding:1px 6px;border-radius:8px;border:1px solid var(--sp-border);color:var(--ttrpg-accent);">d${it.hit_die}</span>
+          ${spellBadge}
+        </div>
+        ${it.saving_throws ? `<div class="text-muted" style="font-size:.75rem;">Saves: ${_escH(it.saving_throws)}</div>` : ''}
+        ${it.skill_choices ? `<div style="font-size:.73rem;color:var(--sp-text);">${_escH(_trunc(it.skill_choices, 100))}</div>` : ''}
+        ${subs.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${subs.map(s => _escH(s.trim())).join(' · ')}</div>` : ''}
+      </div>`;
+    }
+    default: return '';
+  }
+}
 </script>
 {% endblock %}

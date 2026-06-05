@@ -181,8 +181,8 @@
         {% for scene in campaign_scenes %}
         <button class="btn btn-sm scene-btn"
                 data-scene-id="{{ scene.scene_ID }}"
-                data-scene-name="{{ scene.sceneName }}"
-                onclick="activateScene({{ scene.scene_ID }}, '{{ scene.sceneName | e }}')"
+                data-scene-name="{{ scene.sceneName | e }}"
+                onclick="activateScene(this)"
                 style="background:var(--ttrpg-primary);color:var(--ttrpg-text);
                        border:1px solid #444;">
           {{ scene.sceneName }}
@@ -412,20 +412,17 @@ setInterval(saveNotes, 30000);
 
 // ── Scene activation ────────────────────────────────────────────────────────
 
-function activateScene(sceneId, sceneName) {
+function activateScene(btn) {
+  const sceneId   = btn.dataset.sceneId;
+  const sceneName = btn.dataset.sceneName;
   fetch(`/activatescenes/?id=${sceneId}`)
     .then(() => {
-      // Highlight the active button
       document.querySelectorAll('.scene-btn').forEach(b => {
         b.style.borderColor = '#444';
         b.style.color = 'var(--ttrpg-text)';
       });
-      const btn = document.querySelector(`.scene-btn[data-scene-id="${sceneId}"]`);
-      if (btn) {
-        btn.style.borderColor = 'var(--ttrpg-accent)';
-        btn.style.color = 'var(--ttrpg-accent)';
-      }
-      // Show banner
+      btn.style.borderColor = 'var(--ttrpg-accent)';
+      btn.style.color = 'var(--ttrpg-accent)';
       document.getElementById('active-scene-name').textContent = sceneName;
       document.getElementById('active-scene-banner').style.display = '';
     });

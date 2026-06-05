@@ -439,3 +439,19 @@ class tblEquipmentLibrary(db.Model):
     description      = db.Column(db.Text, default='')
     source           = db.Column(db.Text, default='srd')
     created_at       = db.Column(db.Text, nullable=False)
+
+
+class tblClassesLibrary(db.Model):
+    __tablename__ = 'tblClassesLibrary'
+    class_lib_id         = db.Column(db.Integer, primary_key=True)
+    api_index            = db.Column(db.Text, unique=True, nullable=True)
+    name                 = db.Column(db.Text, nullable=False)
+    hit_die              = db.Column(db.Integer, default=8)      # 6, 8, 10, or 12
+    saving_throws        = db.Column(db.Text, default='')        # "STR, CON"
+    proficiencies        = db.Column(db.Text, default='')        # armor/weapon/tool profs
+    skill_choices        = db.Column(db.Text, default='')        # "Choose 2 from Acrobatics…"
+    subclasses           = db.Column(db.Text, default='')        # "Champion, Battle Master"
+    spellcasting_ability = db.Column(db.Text, default='')        # "INT" / "" if non-caster
+    description          = db.Column(db.Text, default='')
+    source               = db.Column(db.Text, default='srd')
+    created_at           = db.Column(db.Text, nullable=False)

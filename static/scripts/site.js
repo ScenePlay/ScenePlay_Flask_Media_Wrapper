@@ -43,21 +43,19 @@ function saveSceneFilter(json) {
 }
 
 
+let _volTimer = null;
 function volumeChange(){
-  const slideClick = function(volume){
-      fetch("/set_volume", {
-          method: "POST",
-          body: JSON.stringify({ volume }),
-          headers: {
-          "Content-Type": "application/json" 
-      }
-      }).then(response => response.text()).then(data => console.log(data));
-  }
-  const slider = document.getElementById("volume_slider");
-  const volume = slider.value;
-  const vElement = document.getElementById("volume");
-  vElement.textContent = "Master Volume: " + volume;
-  slideClick(volume)
+  const slider  = document.getElementById("volume_slider");
+  const volume  = slider.value;
+  document.getElementById("volume").textContent = "Master Volume: " + volume;
+  clearTimeout(_volTimer);
+  _volTimer = setTimeout(() => {
+    fetch("/set_volume", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ volume: parseInt(volume) })
+    });
+  }, 120);
 }
 
 function nextSong(){

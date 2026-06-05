@@ -67,10 +67,10 @@
        class="btn btn-outline-secondary btn-sm" title="Change API source">
       &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
     </a>
-    <form method="POST" action="{{ url_for('reference_bp.spells_sync') }}"
-          onsubmit="return confirm('Sync spells from the API? (existing entries are skipped)')">
-      <button class="btn btn-ttrpg btn-sm">&#8635; Sync SRD</button>
-    </form>
+    <button id="sync-btn-spells" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('spells','{{ url_for('reference_bp.spells_sync') }}','{{ url_for('reference_bp.sync_status', job_type='spells') }}')">
+      &#8635; Sync SRD
+    </button>
   </div>
 </div>
 
