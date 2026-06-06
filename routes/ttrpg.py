@@ -348,6 +348,26 @@ def upload_portrait(character_id):
     return redirect(url_for('ttrpg.character_sheet', character_id=character_id))
 
 
+@ttrpg.route('/character/<int:character_id>/portrait-paste', methods=['POST'])
+@login_required
+def portrait_paste(character_id):
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+    portrait = request.files.get('portrait')
+    if not portrait:
+        return jsonify({'ok': False, 'error': 'no file'}), 400
+    if char.portrait_path:
+        old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
+        if os.path.exists(old):
+            os.remove(old)
+    filename = f"{uuid.uuid4().hex}.png"
+    portrait.save(os.path.join(current_app.root_path, PORTRAIT_FOLDER, filename))
+    char.portrait_path = filename
+    db.session.commit()
+    return jsonify({'ok': True, 'url': url_for('static', filename='uploads/portraits/' + filename)})
+
+
 # ── Character delete ───────────────────────────────────────────────────────────
 
 @ttrpg.route('/character/<int:character_id>/delete', methods=['POST'])

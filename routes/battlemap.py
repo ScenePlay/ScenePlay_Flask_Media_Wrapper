@@ -176,6 +176,29 @@ def map_bg(map_id):
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
 
+@battlemap_bp.route('/<int:map_id>/bg-paste', methods=['POST'])
+@login_required
+@dm_required
+def map_bg_paste(map_id):
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    f = request.files.get('bg_image')
+    if not f:
+        return jsonify({'ok': False, 'error': 'no file'}), 400
+    ext = (request.form.get('ext') or 'png').lower()
+    if ext not in ALLOWED_EXT:
+        ext = 'png'
+    _delete_bg_file(bm.bg_image)
+    folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
+    os.makedirs(folder, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}.{ext}'
+    f.save(os.path.join(folder, filename))
+    bm.bg_image = filename
+    db.session.commit()
+    is_video = ext in VIDEO_EXT
+    url = url_for('static', filename='uploads/battlemaps/' + filename)
+    return jsonify({'ok': True, 'url': url, 'is_video': is_video, 'filename': filename})
+
+
 @battlemap_bp.route('/<int:map_id>/bg/clear', methods=['POST'])
 @login_required
 @dm_required

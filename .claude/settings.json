@@ -21,7 +21,9 @@
       "Bash(curl -s \"https://www.dnd5eapi.co/api/2014/classes/fighter\")",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('routes/reference.py'\\).read\\(\\)\\); print\\('reference.py OK'\\)\")",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('models/ttrpg.py'\\).read\\(\\)\\); print\\('models/ttrpg.py OK'\\)\")",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('routes/ttrpg.py'\\).read\\(\\)\\); print\\('ttrpg.py OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('routes/ttrpg.py'\\).read\\(\\)\\); print\\('ttrpg.py OK'\\)\")",
+      "Bash(python3 -c \"from PIL import Image; print\\('Pillow OK'\\)\")",
+      "Bash(pip list *)"
     ]
   }
 }

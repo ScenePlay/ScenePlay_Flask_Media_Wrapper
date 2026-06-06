@@ -307,8 +307,8 @@
       {% endif %}
       <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleMapDicePanel()" title="Dice Roller">&#127922; Dice</button>
-      <a href="{{ url_for('ttrpg.session_detail', session_id=sess.session_id) }}"
-         class="btn btn-sm btn-outline-secondary">Session</a>
+      <a href="{{ url_for('ttrpg.my_character') }}"
+         class="btn btn-sm btn-outline-secondary">Character(s)</a>
     </div>
   </div>
 
@@ -433,6 +433,22 @@
 
     <!-- Map viewport -->
     <div id="map-viewport">
+
+      <!-- Zoom controls (floating, visible to all) -->
+      <div style="position:fixed;bottom:18px;right:18px;z-index:200;
+                  display:flex;flex-direction:column;gap:4px;">
+        <button onclick="adjustCellPx(8)" title="Zoom in"
+                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                       background:rgba(20,20,35,.85);color:var(--ttrpg-accent);
+                       font-size:1.2rem;line-height:1;cursor:pointer;backdrop-filter:blur(4px);">+</button>
+        <button onclick="adjustCellPx(-8)" title="Zoom out"
+                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                       background:rgba(20,20,35,.85);color:var(--ttrpg-accent);
+                       font-size:1.2rem;line-height:1;cursor:pointer;backdrop-filter:blur(4px);">&minus;</button>
+        <div id="cell-px-label"
+             style="text-align:center;font-size:.65rem;color:var(--sp-muted);line-height:1.4;">{{ cell_px }}px</div>
+      </div>
+
       <div id="map-grid"
            style="width:{{ bm.grid_cols * cell_px }}px;
                   height:{{ bm.grid_rows * cell_px }}px;">
@@ -648,12 +664,13 @@
   <div id="tt-conditions" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;"></div>
   <div id="tt-skills" style="color:#aaa;font-size:.73rem;line-height:1.7;"></div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 const MAP_ID    = {{ bm.map_id }};
-const CELL_PX   = {{ cell_px }};
+let   CELL_PX   = {{ cell_px }};
 const GRID_COLS = {{ bm.grid_cols }};
 const GRID_ROWS = {{ bm.grid_rows }};
 const IS_DM     = {{ 'true' if current_user.is_dm() else 'false' }};
@@ -1923,5 +1940,52 @@ function mapActivateScene(btn) {
       if (banner) banner.style.display = '';
     });
 }
+
+// ── Grid cell size ─────────────────────────────────────────────────────────────
+
+function setCellPx(val) {
+  val = Math.max(32, Math.min(128, val));
+  CELL_PX = val;
+
+  const grid  = document.getElementById('map-grid');
+  const lines = document.getElementById('map-lines');
+  grid.style.width  = (GRID_COLS * CELL_PX) + 'px';
+  grid.style.height = (GRID_ROWS * CELL_PX) + 'px';
+  lines.style.backgroundSize = CELL_PX + 'px ' + CELL_PX + 'px';
+
+  for (const [tid, tok] of Object.entries(currentTokens)) {
+    const el = document.getElementById('tok-' + tid);
+    if (!el) continue;
+    el.style.transform = `translate(${tok.col * CELL_PX}px,${tok.row * CELL_PX}px)`;
+    el.style.width     = CELL_PX + 'px';
+    const portrait = el.querySelector('.token-portrait');
+    if (portrait) {
+      const sz = CELL_PX - 6;
+      portrait.style.width  = sz + 'px';
+      portrait.style.height = sz + 'px';
+    }
+  }
+
+  for (const eff of Object.values(currentEffects)) {
+    const g = document.getElementById('fx-' + eff.effect_id);
+    if (g) applyEffectGeometry(g, eff);
+  }
+
+  const label = document.getElementById('cell-px-label');
+  if (label)  label.textContent = val + 'px';
+
+  try { localStorage.setItem('bm_cell_px_' + MAP_ID, val); } catch(e) {}
+}
+
+function adjustCellPx(delta) { setCellPx(CELL_PX + delta); }
+
+// Restore saved grid size on load
+(function () {
+  try {
+    const saved = localStorage.getItem('bm_cell_px_' + MAP_ID);
+    if (saved) setCellPx(parseInt(saved));
+  } catch(e) {}
+})();
+
 </script>
 {% endblock %}

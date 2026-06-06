@@ -51,7 +51,7 @@
           <span class="badge ms-2" style="background:var(--ttrpg-accent);color:#1a1a2e;">Active</span>
           {% endif %}
         </div>
-        <div class="d-flex gap-1 flex-shrink-0">
+        <div class="d-flex gap-1 flex-shrink-0 flex-wrap justify-content-end">
           <a href="{{ url_for('battlemap_bp.map_view', map_id=m.map_id) }}"
              class="btn btn-ttrpg btn-sm">Open</a>
           {% if not m.is_active %}
@@ -61,6 +61,13 @@
           {% endif %}
           <button class="btn btn-outline-secondary btn-sm"
                   onclick="toggleMapEdit({{ m.map_id }})" title="Edit name / grid">&#9998;</button>
+          <button class="btn btn-outline-secondary btn-sm"
+                  data-map-id="{{ m.map_id }}"
+                  data-map-name="{{ m.name }}"
+                  data-map-cols="{{ m.grid_cols }}"
+                  data-map-rows="{{ m.grid_rows }}"
+                  onclick="openMapPromptModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
+                  title="Image Prompt">&#127748;</button>
           <form method="POST"
                 action="{{ url_for('battlemap_bp.map_delete', map_id=m.map_id) }}"
                 onsubmit="return confirm('Delete map \'{{ m.name }}\'?')">
@@ -100,28 +107,30 @@
 
       <!-- Background image / video -->
       <div class="mb-2">
-        {% if m.bg_image %}
-        {% set _bg_ext = m.bg_image.rsplit('.', 1)[1].lower() %}
-        <div class="d-flex align-items-center gap-2 mb-2">
-          {% if _bg_ext in ('mp4', 'webm', 'ogv') %}
-          <video src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
-                 style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;"
-                 muted loop autoplay playsinline></video>
-          {% else %}
-          <img src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
-               style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;" alt="">
-          {% endif %}
-          <div>
-            <div class="small text-muted">Background {{ 'video' if _bg_ext in ('mp4', 'webm', 'ogv') else 'image' }} set</div>
-            <form method="POST" action="{{ url_for('battlemap_bp.map_bg_clear', map_id=m.map_id) }}"
-                  class="d-inline">
-              <button class="btn btn-outline-secondary btn-sm py-0 px-1" style="font-size:.7rem;">
-                Remove
-              </button>
-            </form>
+        <div id="bg-preview-{{ m.map_id }}">
+          {% if m.bg_image %}
+          {% set _bg_ext = m.bg_image.rsplit('.', 1)[1].lower() %}
+          <div class="d-flex align-items-center gap-2 mb-2">
+            {% if _bg_ext in ('mp4', 'webm', 'ogv') %}
+            <video src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
+                   style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;"
+                   muted loop autoplay playsinline></video>
+            {% else %}
+            <img src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
+                 style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;" alt="">
+            {% endif %}
+            <div>
+              <div class="small text-muted">Background {{ 'video' if _bg_ext in ('mp4', 'webm', 'ogv') else 'image' }} set</div>
+              <form method="POST" action="{{ url_for('battlemap_bp.map_bg_clear', map_id=m.map_id) }}"
+                    class="d-inline">
+                <button class="btn btn-outline-secondary btn-sm py-0 px-1" style="font-size:.7rem;">
+                  Remove
+                </button>
+              </form>
+            </div>
           </div>
+          {% endif %}
         </div>
-        {% endif %}
         <form method="POST" action="{{ url_for('battlemap_bp.map_bg', map_id=m.map_id) }}"
               enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
           <input type="file" name="bg_image" accept="image/*,video/mp4,video/webm,video/ogg"
@@ -141,6 +150,169 @@
   <p>No maps yet. Create one above.</p>
 </div>
 {% endif %}
+
+<!-- ── Map Image Prompt Modal ────────────────────────────────────────────── -->
+<div class="modal fade" id="mapPromptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content"
+         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+      <div class="modal-header" style="border-color:var(--ttrpg-accent);">
+        <h5 class="modal-title" id="map-prompt-modal-title"
+            style="color:var(--ttrpg-accent);">&#127748; Battlemap Image Prompt</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Static / Live toggle -->
+        <div class="d-flex gap-2 mb-3">
+          <button id="mpt-static-btn" onclick="setMapPromptType('static')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
+            &#128444; Static Image
+          </button>
+          <button id="mpt-live-btn" onclick="setMapPromptType('live')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid #444;">
+            &#127916; Live Video
+          </button>
+        </div>
+
+        <!-- Scene options -->
+        <div class="row g-2 mb-2">
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Environment</label>
+            <select id="mpt-env" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+              <option value="">-- any --</option>
+              <option>Dungeon / Underground</option>
+              <option>Forest / Wilderness</option>
+              <option>Tavern / Inn</option>
+              <option>Cave / Cavern</option>
+              <option>City Street / Town</option>
+              <option>Ocean / Ship Deck</option>
+              <option>Mountain / Cliffside</option>
+              <option>Swamp / Marsh</option>
+              <option>Castle / Keep</option>
+              <option>Ancient Ruins</option>
+              <option>Hell / Abyss</option>
+              <option>Celestial / Ethereal Plane</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Time of Day</label>
+            <select id="mpt-time" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+              <option value="">-- any --</option>
+              <option>Dawn / Sunrise</option>
+              <option>Morning</option>
+              <option>Midday</option>
+              <option>Afternoon</option>
+              <option>Dusk / Sunset</option>
+              <option>Night</option>
+              <option>Midnight</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Weather / Atmosphere</label>
+            <select id="mpt-weather" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+              <option value="">-- any --</option>
+              <option>Clear</option>
+              <option>Overcast / Cloudy</option>
+              <option>Light Rain / Drizzle</option>
+              <option>Heavy Rain / Storm</option>
+              <option>Snow / Blizzard</option>
+              <option>Dense Fog / Mist</option>
+              <option>Magical / Arcane Atmosphere</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Lighting</label>
+            <select id="mpt-light" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+              <option value="">-- any --</option>
+              <option>Natural Sunlight</option>
+              <option>Torchlight / Firelight</option>
+              <option>Magical Glow</option>
+              <option>Dim / Near Dark</option>
+              <option>Moonlight</option>
+              <option>Multiple Mixed Sources</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Art Style</label>
+            <select id="mpt-style" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+              <option value="">-- any --</option>
+              <option>Painterly Fantasy</option>
+              <option>Dark and Gritty</option>
+              <option>Cartoon / Stylized</option>
+              <option>Watercolor</option>
+              <option>Pixel Art</option>
+              <option>Photorealistic</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Animated FX (Live video only) -->
+        <div id="mpt-fx-section" style="display:none;" class="mb-3 p-2"
+             style="background:var(--ttrpg-surface);border-radius:6px;border:1px solid #444;">
+          <div class="small text-muted mb-2">&#127916; Animated Elements</div>
+          <div class="d-flex flex-wrap gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="mpt-fx-fire">
+              <label class="form-check-label small" for="mpt-fx-fire">&#128293; Fire &amp; Torches</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="mpt-fx-water">
+              <label class="form-check-label small" for="mpt-fx-water">&#128167; Water</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="mpt-fx-fog">
+              <label class="form-check-label small" for="mpt-fx-fog">&#127787; Fog &amp; Smoke</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="mpt-fx-weather">
+              <label class="form-check-label small" for="mpt-fx-weather">&#10024; Weather &amp; Magic</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional details -->
+        <div class="mb-3">
+          <label class="form-label small text-muted mb-1">Additional Details <span class="text-muted">(optional)</span></label>
+          <textarea id="mpt-freetext" class="form-control form-control-sm" rows="2"
+                    placeholder="e.g. mossy stone walls, a large chasm in the center, blue magical runes on the floor"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;resize:vertical;"></textarea>
+        </div>
+
+        <!-- Generate button -->
+        <button class="btn btn-ttrpg btn-sm w-100 mb-3"
+                onclick="generateAndShowMapPrompt()">&#9889; Generate Prompt</button>
+
+        <!-- Output section -->
+        <div id="mpt-output-section" style="display:none;">
+          <hr style="border-color:#444;">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="small text-muted">Copy and paste into your AI image/video tool.</span>
+            <button class="btn btn-sm ms-auto"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="copyMapPrompt()">&#128203; Copy Prompt</button>
+          </div>
+          <textarea id="map-prompt-text" class="form-control" readonly
+                    style="font-family:monospace;font-size:.78rem;min-height:280px;
+                           background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                           border-color:var(--sp-border);resize:vertical;"></textarea>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="border-color:var(--ttrpg-accent);">
+        <span id="map-prompt-copy-fb" style="font-size:.8rem;color:var(--ttrpg-accent);display:none;">Copied!</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -148,6 +320,255 @@
 function toggleMapEdit(mapId) {
   const panel = document.getElementById('map-edit-' + mapId);
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── Image Prompt ──────────────────────────────────────────────────────────────
+
+let _mapPromptType  = 'static';
+let _activeMapId    = null;
+let _activeMapName  = '';
+let _activeMapCols  = 20;
+let _activeMapRows  = 20;
+
+const _mapBgPasteUrls = {
+  {% for m in maps %}
+  {{ m.map_id }}: {{ url_for('battlemap_bp.map_bg_paste', map_id=m.map_id) | tojson }},
+  {% endfor %}
+};
+
+function _updateModalTitle() {
+  const icon = _mapPromptType === 'live' ? '&#127916;' : '&#127748;';
+  document.getElementById('map-prompt-modal-title').innerHTML = icon + ' Image Prompt &mdash; ' + _activeMapName;
+}
+
+function openMapPromptModal(mapId, mapName, cols, rows) {
+  _activeMapId   = parseInt(mapId);
+  _activeMapName = mapName;
+  _activeMapCols = parseInt(cols) || 20;
+  _activeMapRows = parseInt(rows) || 20;
+  _updateModalTitle();
+  document.getElementById('mpt-output-section').style.display = 'none';
+  new bootstrap.Modal(document.getElementById('mapPromptModal')).show();
+}
+
+function setMapPromptType(type) {
+  _mapPromptType = type;
+  _updateModalTitle();
+  const staticBtn = document.getElementById('mpt-static-btn');
+  const liveBtn   = document.getElementById('mpt-live-btn');
+  const fxSection = document.getElementById('mpt-fx-section');
+  const accent = 'var(--ttrpg-accent)', surface = 'var(--ttrpg-surface)', text = 'var(--ttrpg-text)';
+  if (type === 'static') {
+    staticBtn.style.background = accent; staticBtn.style.color = 'var(--sp-on-accent)'; staticBtn.style.border = 'none';
+    liveBtn.style.background   = surface; liveBtn.style.color = text; liveBtn.style.border = '1px solid #444';
+    fxSection.style.display = 'none';
+  } else {
+    liveBtn.style.background   = accent; liveBtn.style.color = 'var(--sp-on-accent)'; liveBtn.style.border = 'none';
+    staticBtn.style.background = surface; staticBtn.style.color = text; staticBtn.style.border = '1px solid #444';
+    fxSection.style.display = '';
+  }
+}
+
+function _gv(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function _gc(id) { const el = document.getElementById(id); return el ? el.checked : false; }
+
+function _buildMapPrompt() {
+  const isLive    = _mapPromptType === 'live';
+  const env       = _gv('mpt-env');
+  const time      = _gv('mpt-time');
+  const weather   = _gv('mpt-weather');
+  const light     = _gv('mpt-light');
+  const style     = _gv('mpt-style');
+  const freetext  = _gv('mpt-freetext');
+  const fxFire    = _gc('mpt-fx-fire');
+  const fxWater   = _gc('mpt-fx-water');
+  const fxFog     = _gc('mpt-fx-fog');
+  const fxWeather = _gc('mpt-fx-weather');
+
+  const lines = [];
+
+  if (isLive) {
+    lines.push('Please generate a SHORT, SEAMLESSLY LOOPING video clip for use as a live TTRPG battlemap background.\n');
+  } else {
+    lines.push('Please generate a strictly TOP-DOWN TTRPG battlemap background image. Do NOT use isometric perspective — isometric does not align with a square grid overlay.\n');
+  }
+
+  lines.push('## SCENE');
+  if (env)      lines.push('Environment: ' + env);
+  if (time)     lines.push('Time of day: ' + time);
+  if (weather)  lines.push('Atmosphere: ' + weather);
+  if (light)    lines.push('Lighting: ' + light);
+  if (style)    lines.push('Art style: ' + style);
+  if (freetext) lines.push('Additional details: ' + freetext);
+  lines.push('Grid size: ' + _activeMapCols + ' squares wide × ' + _activeMapRows + ' squares tall (width × height)');
+  lines.push('Scale: 1 square = 5 feet of movement');
+  lines.push('');
+
+  if (isLive) {
+    const fxList = [];
+    if (fxFire)    fxList.push('fire and torches (flickering flames, dancing light)');
+    if (fxWater)   fxList.push('water (flowing rivers, rippling pools, waterfalls)');
+    if (fxFog)     fxList.push('fog and smoke (drifting mist, swirling tendrils)');
+    if (fxWeather) fxList.push('weather and magic (falling rain/snow, glowing particles, arcane effects)');
+
+    lines.push('## ANIMATION RULES (CRITICAL)');
+    lines.push('- The main terrain, walls, floors, furniture, and structures must be COMPLETELY STATIC — zero movement.');
+    lines.push('- Only the following elements should animate: ' + (fxList.length ? fxList.join(', ') : 'subtle ambient motion only') + '.');
+    lines.push('- The animated elements must look physically realistic — natural fluid motion, not cartoon.');
+    lines.push('');
+    lines.push('## VIDEO TECHNICAL REQUIREMENTS (CRITICAL)');
+    lines.push('- Resolution: LOW — 512×512 px or 768×512 px maximum. Do NOT render at high resolution.');
+    lines.push('- Duration: 2–4 seconds per loop. Short loops are preferred.');
+    lines.push('- SEAMLESS LOOP: The last frame must match the first frame perfectly with no visible cut or jump. The video must play continuously without any noticeable restart point.');
+    lines.push('- Format: MP4 (H.264) or WebM, no audio.');
+    lines.push('');
+  } else {
+    lines.push('## IMAGE TECHNICAL REQUIREMENTS');
+    lines.push('- Perspective: strictly top-down (birds-eye) overhead view — NO isometric angle. The image must align correctly when a square grid is overlaid.');
+    lines.push('- The image should tile or extend naturally so it can be cropped/scaled to any grid size.');
+    lines.push('- Rich detail in textures (stone, wood, earth, water) but NOT so busy that it obscures tokens placed on top.');
+    lines.push('- No characters, creatures, or figures — empty scene only.');
+    lines.push('');
+  }
+
+  lines.push('## COMPOSITION');
+  lines.push('- No text, watermarks, or UI elements in the image — except for the scale legend described below.');
+  lines.push('- Fill the entire frame — no borders, vignettes, or letterboxing.');
+  lines.push('- Optimised for use as a game board background that players will place miniature tokens on top of.');
+  lines.push('');
+  lines.push('## SCALE LEGEND (REQUIRED)');
+  lines.push('- In the TOP-LEFT corner of the image, draw a small, unobtrusive scale bar labelled "5 ft".');
+  lines.push('- The bar should span exactly one grid square in width, representing 5 feet of in-game movement.');
+  lines.push('- Style the legend to blend with the scene (e.g. engraved stone, aged parchment, subtle glow) — do not use a plain white box.');
+  lines.push('- Keep it small enough not to obstruct gameplay but legible at normal viewing size.');
+
+  return lines.join('\n');
+}
+
+function generateAndShowMapPrompt() {
+  _updateModalTitle();
+  document.getElementById('map-prompt-text').value = _buildMapPrompt();
+  document.getElementById('mpt-output-section').style.display = '';
+}
+
+function copyMapPrompt() {
+  const ta = document.getElementById('map-prompt-text');
+  const fb = document.getElementById('map-prompt-copy-fb');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => _mapFallbackCopy(ta, showFb));
+  } else {
+    _mapFallbackCopy(ta, showFb);
+  }
+}
+
+function _mapFallbackCopy(ta, onDone) {
+  ta.removeAttribute('readonly');
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); onDone(); } catch(e) {}
+  ta.setAttribute('readonly', '');
+  window.getSelection().removeAllRanges();
+}
+
+// ── Paste background ──────────────────────────────────────────────────────────
+
+async function pasteMapBackground() {
+  const btn = document.getElementById('map-paste-bg-btn');
+  btn.disabled = true;
+  btn.textContent = 'Reading clipboard…';
+
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          _uploadMapBg(blob, imageType.split('/')[1] || 'png');
+          return;
+        }
+        const videoType = item.types.find(t => t.startsWith('video/'));
+        if (videoType) {
+          const blob = await item.getType(videoType);
+          _uploadMapBg(blob, videoType.split('/')[1] || 'mp4');
+          return;
+        }
+      }
+      btn.textContent = 'No image in clipboard';
+      setTimeout(() => { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }, 2000);
+      return;
+    } catch(err) { /* fall through to keyboard paste */ }
+  }
+
+  btn.textContent = 'Now paste (Ctrl+V)…';
+  btn.disabled = false;
+  btn.style.color = 'var(--ttrpg-accent)';
+  btn.style.borderColor = 'var(--ttrpg-accent)';
+  const reset = () => {
+    btn.innerHTML = '&#128203; Paste as Background';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  };
+  const tid = setTimeout(reset, 15000);
+  document.addEventListener('paste', function handler(e) {
+    clearTimeout(tid);
+    document.removeEventListener('paste', handler);
+    reset();
+    const item = Array.from(e.clipboardData.items)
+      .find(i => i.type.startsWith('image/') || i.type.startsWith('video/'));
+    if (item) { e.preventDefault(); _uploadMapBg(item.getAsFile(), item.type.split('/')[1] || 'png'); }
+  }, { once: true });
+}
+
+function _uploadMapBg(blob, ext) {
+  if (ext === 'jpeg') ext = 'jpg';
+  const btn = document.getElementById('map-paste-bg-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
+  const pasteUrl = _mapBgPasteUrls[_activeMapId];
+  if (!pasteUrl) {
+    if (btn) { btn.textContent = 'Error: no map selected'; btn.disabled = false; }
+    return;
+  }
+  const fd = new FormData();
+  fd.append('bg_image', blob, 'bg.' + ext);
+  fd.append('ext', ext);
+  fetch(pasteUrl, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        const preview = document.getElementById('bg-preview-' + _activeMapId);
+        const isVideo = data.is_video;
+        const imgUrl  = data.url + '?t=' + Date.now();
+        const thumbStyle = 'width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;';
+        let media;
+        if (isVideo) {
+          media = document.createElement('video');
+          media.style.cssText = thumbStyle;
+          media.muted = true; media.loop = true; media.autoplay = true; media.playsInline = true;
+          const src = document.createElement('source');
+          src.src = imgUrl; media.appendChild(src);
+        } else {
+          media = document.createElement('img');
+          media.src = imgUrl; media.alt = '';
+          media.style.cssText = thumbStyle;
+        }
+        if (preview) {
+          const wrap = document.createElement('div');
+          wrap.className = 'd-flex align-items-center gap-2 mb-2';
+          const info = document.createElement('div');
+          info.innerHTML = '<div class="small text-muted">Background ' + (isVideo ? 'video' : 'image') + ' set</div>';
+          wrap.appendChild(media);
+          wrap.appendChild(info);
+          preview.innerHTML = '';
+          preview.appendChild(wrap);
+        }
+      }
+      if (btn) { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }
+    })
+    .catch(() => {
+      if (btn) { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }
+    });
 }
 </script>
 {% endblock %}

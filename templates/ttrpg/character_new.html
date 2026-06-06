@@ -4,7 +4,15 @@
 <div class="row justify-content-center">
   <div class="col-md-10 col-lg-8">
     <div class="ttrpg-card p-4">
-      <h3 style="color:var(--ttrpg-accent);">Create Character</h3>
+      <div class="d-flex align-items-center gap-3 mb-1">
+        <h3 style="color:var(--ttrpg-accent);margin:0;">Create Character</h3>
+        <button type="button" id="btn-randomize" onclick="randomizeCharacter()"
+                class="btn btn-sm"
+                style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);
+                       border:1px solid var(--ttrpg-accent);font-size:.8rem;">
+          &#127922; Randomize
+        </button>
+      </div>
       {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 
       <form method="POST" enctype="multipart/form-data">
@@ -18,11 +26,33 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label">Class</label>
-            <input type="text" name="char_class" class="form-control bg-dark text-light border-secondary" placeholder="Fighter, Wizard…">
+            <div style="position:relative;">
+              <input type="text" name="char_class" id="new-char-class"
+                     class="form-control bg-dark text-light border-secondary"
+                     placeholder="Fighter, Wizard…" autocomplete="off"
+                     oninput="newLibSearch('class', this.value)"
+                     onfocus="newLibSearch('class', this.value)">
+              <div id="new-class-suggestions"
+                   style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                          background:var(--sp-surface);border:1px solid var(--sp-border);
+                          border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;
+                          box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:220px;"></div>
+            </div>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Race</label>
-            <input type="text" name="race" class="form-control bg-dark text-light border-secondary" placeholder="Human, Elf…">
+            <div style="position:relative;">
+              <input type="text" name="race" id="new-race"
+                     class="form-control bg-dark text-light border-secondary"
+                     placeholder="Human, Elf…" autocomplete="off"
+                     oninput="newLibSearch('race', this.value)"
+                     onfocus="newLibSearch('race', this.value)">
+              <div id="new-race-suggestions"
+                   style="display:none;position:absolute;top:100%;left:0;right:0;z-index:300;
+                          background:var(--sp-surface);border:1px solid var(--sp-border);
+                          border-radius:0 0 6px 6px;max-height:220px;overflow-y:auto;
+                          box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:220px;"></div>
+            </div>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Level</label>
@@ -34,8 +64,24 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label">Portrait</label>
-            <input type="file" name="portrait" class="form-control bg-dark text-light border-secondary"
-                   accept="image/png,image/jpeg,image/gif,image/webp">
+            <input type="file" name="portrait" id="new-portrait-input"
+                   class="form-control bg-dark text-light border-secondary"
+                   accept="image/png,image/jpeg,image/gif,image/webp"
+                   onchange="previewNewPortrait(this)">
+            <div id="new-portrait-preview" style="display:none;margin-top:4px;">
+              <img id="new-portrait-img" src="" alt=""
+                   style="width:88px;height:88px;object-fit:cover;border-radius:6px;
+                          border:2px solid var(--ttrpg-accent);">
+            </div>
+            <button type="button" id="new-paste-btn"
+                    class="btn btn-sm btn-outline-secondary w-100 mt-1"
+                    style="font-size:.7rem;" onclick="activateNewPaste()">
+              &#128203; Paste Portrait
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1"
+                    style="font-size:.7rem;" onclick="openNewCharPrompt()">
+              &#127748; Image Prompt
+            </button>
           </div>
         </div>
 
@@ -102,4 +148,305 @@
     </div>
   </div>
 </div>
+<!-- Image Prompt Modal -->
+<div class="modal fade" id="newCharPromptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content"
+         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+      <div class="modal-header" style="border-color:var(--ttrpg-accent);">
+        <h5 class="modal-title" style="color:var(--ttrpg-accent);">&#127748; Image Prompt</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2">Copy this prompt and paste it into an image generation tool (Midjourney, DALL-E, Stable Diffusion) or ask Claude to generate the portrait.</p>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <button class="btn btn-sm ms-auto"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                  onclick="copyNewCharPrompt()">&#128203; Copy</button>
+        </div>
+        <textarea id="new-char-prompt-text" class="form-control"
+                  style="font-family:monospace;font-size:.78rem;min-height:360px;
+                         background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                         border-color:var(--sp-border);resize:vertical;"
+                  readonly></textarea>
+      </div>
+      <div class="modal-footer" style="border-color:var(--ttrpg-accent);">
+        <span id="new-char-copy-feedback" style="font-size:.8rem;color:var(--ttrpg-accent);display:none;">Copied!</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const _newLibUrls = {
+  'class': "{{ url_for('reference_bp.classes_search') }}",
+  'race':  "{{ url_for('reference_bp.races_search') }}"
+};
+const _newLibTimers = {};
+
+function newLibSearch(type, q) {
+  clearTimeout(_newLibTimers[type]);
+  const box = document.getElementById(type === 'class' ? 'new-class-suggestions' : 'new-race-suggestions');
+  _newLibTimers[type] = setTimeout(() => {
+    fetch(_newLibUrls[type] + '?q=' + encodeURIComponent(q))
+      .then(r => r.json())
+      .then(data => {
+        const results = Array.isArray(data) ? data : (data.results || []);
+        if (!results.length) { box.style.display = 'none'; return; }
+        box.innerHTML = results.map(it => {
+          let sub = '';
+          if (type === 'class') {
+            const saves = it.saving_throws || '';
+            sub = 'd' + (it.hit_die || '8') + (saves ? ' &middot; Saves: ' + _newEscHtml(saves) : '');
+          } else {
+            const parts = [];
+            if (it.size)            parts.push(_newEscHtml(it.size));
+            if (it.speed)           parts.push(it.speed + ' ft');
+            if (it.ability_bonuses) parts.push(_newEscHtml(it.ability_bonuses));
+            sub = parts.join(' &middot; ');
+          }
+          return '<div class="new-lib-row px-3 py-2" style="cursor:pointer;" '
+               + 'onmousedown="newLibPick(\'' + type + '\',\'' + it.name.replace(/'/g, "\\'") + '\')">'
+               + '<div style="font-weight:600;color:var(--ttrpg-accent);font-size:.88rem;">' + _newEscHtml(it.name) + '</div>'
+               + (sub ? '<div style="font-size:.75rem;color:var(--sp-muted);">' + sub + '</div>' : '')
+               + '</div>';
+        }).join('');
+        box.style.display = 'block';
+      })
+      .catch(() => { box.style.display = 'none'; });
+  }, 200);
+}
+
+function newLibPick(type, name) {
+  const input = document.getElementById(type === 'class' ? 'new-char-class' : 'new-race');
+  const box   = document.getElementById(type === 'class' ? 'new-class-suggestions' : 'new-race-suggestions');
+  input.value = name;
+  box.style.display = 'none';
+}
+
+function _newEscHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function randomizeCharacter() {
+  const btn = document.getElementById('btn-randomize');
+  btn.disabled = true;
+  btn.textContent = 'Rolling…';
+
+  try {
+    const [classData, raceData] = await Promise.all([
+      fetch(_newLibUrls['class'] + '?q=').then(r => r.json()),
+      fetch(_newLibUrls['race']  + '?q=').then(r => r.json())
+    ]);
+
+    const classes = Array.isArray(classData) ? classData : (classData.results || []);
+    const races   = Array.isArray(raceData)  ? raceData  : (raceData.results  || []);
+    const cls  = classes.length ? classes[Math.floor(Math.random() * classes.length)] : null;
+    const race = races.length  ? races[Math.floor(Math.random()  * races.length)]  : null;
+
+    function roll4d6() {
+      const dice = [0,1,2,3].map(() => Math.ceil(Math.random() * 6));
+      return dice.reduce((a, b) => a + b, 0) - Math.min(...dice);
+    }
+    function mod(score) { return Math.floor((score - 10) / 2); }
+
+    const str = roll4d6(), dex = roll4d6(), con = roll4d6();
+    const int = roll4d6(), wis = roll4d6(), cha = roll4d6();
+
+    const NAMES = [
+      'Aldric','Brynn','Caelum','Dara','Elowen','Fenn','Gareth','Hana','Ivor','Jessa',
+      'Kael','Lyra','Mira','Nolan','Oryn','Pira','Quill','Reva','Soren','Tara',
+      'Ulric','Vex','Wren','Xara','Yael','Zora','Aiden','Bex','Cora','Dwyn',
+      'Emric','Fyra','Gryn','Hex','Isha','Jorn','Kira','Lox','Myra','Nyx'
+    ];
+    const BACKGROUNDS = [
+      'Acolyte','Charlatan','Criminal','Entertainer','Folk Hero',
+      'Guild Artisan','Hermit','Noble','Outlander','Sage','Sailor','Soldier','Urchin'
+    ];
+
+    const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+    document.querySelector('[name="name"]').value       = pick(NAMES);
+    document.querySelector('[name="background"]').value = pick(BACKGROUNDS);
+    document.getElementById('new-char-class').value     = cls  ? cls.name  : '';
+    document.getElementById('new-race').value           = race ? race.name : '';
+
+    document.querySelector('[name="str_val"]').value = str;
+    document.querySelector('[name="dex_val"]').value = dex;
+    document.querySelector('[name="con_val"]').value = con;
+    document.querySelector('[name="int_val"]').value = int;
+    document.querySelector('[name="wis_val"]').value = wis;
+    document.querySelector('[name="cha_val"]').value = cha;
+
+    const hitDie = cls ? (cls.hit_die || 8) : 8;
+    document.querySelector('[name="hp_max"]').value           = hitDie + mod(con);
+    document.querySelector('[name="speed"]').value            = (race && race.speed) ? race.speed : 30;
+    document.querySelector('[name="ac"]').value               = 10 + mod(dex);
+    document.querySelector('[name="initiative_bonus"]').value = mod(dex);
+    document.querySelector('[name="passive_perception"]').value = 10 + mod(wis);
+  } catch(err) {
+    console.error('Randomize failed:', err);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '&#127922; Randomize';
+}
+
+document.addEventListener('click', e => {
+  ['new-class-suggestions','new-race-suggestions'].forEach(id => {
+    const box = document.getElementById(id);
+    if (box && !box.contains(e.target) &&
+        e.target.id !== 'new-char-class' && e.target.id !== 'new-race') {
+      box.style.display = 'none';
+    }
+  });
+});
+
+// ── Portrait paste / preview ──────────────────────────────────────────────────
+
+function previewNewPortrait(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('new-portrait-img').src = e.target.result;
+    document.getElementById('new-portrait-preview').style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function _applyPastedBlob(blob) {
+  const dt = new DataTransfer();
+  dt.items.add(new File([blob], 'pasted.png', { type: blob.type || 'image/png' }));
+  document.getElementById('new-portrait-input').files = dt.files;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('new-portrait-img').src = ev.target.result;
+    document.getElementById('new-portrait-preview').style.display = '';
+  };
+  reader.readAsDataURL(blob);
+}
+
+async function activateNewPaste() {
+  const btn = document.getElementById('new-paste-btn');
+  btn.disabled = true;
+  btn.textContent = 'Reading clipboard…';
+
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          _applyPastedBlob(blob);
+          btn.innerHTML = '&#128203; Paste Portrait';
+          btn.disabled = false;
+          return;
+        }
+      }
+      btn.textContent = 'No image in clipboard';
+      setTimeout(() => { btn.innerHTML = '&#128203; Paste Portrait'; btn.disabled = false; }, 2000);
+      return;
+    } catch(err) {
+      // Permission denied — fall through
+    }
+  }
+
+  // Fallback: keyboard paste
+  btn.textContent = 'Now paste (Ctrl+V)…';
+  btn.disabled = false;
+  btn.style.borderColor = 'var(--ttrpg-accent)';
+  btn.style.color = 'var(--ttrpg-accent)';
+  const reset = () => { btn.innerHTML = '&#128203; Paste Portrait'; btn.style.borderColor = ''; btn.style.color = ''; };
+  const tid = setTimeout(reset, 15000);
+  document.addEventListener('paste', function handler(e) {
+    clearTimeout(tid);
+    document.removeEventListener('paste', handler);
+    reset();
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); _applyPastedBlob(item.getAsFile()); }
+  }, { once: true });
+}
+
+function _buildNewCharPrompt() {
+  const fv = name => (document.querySelector('[name="' + name + '"]') || {}).value || '';
+  const fi = name => parseInt(fv(name)) || 0;
+
+  const name       = fv('name').trim() || 'the character';
+  const charClass  = document.getElementById('new-char-class').value.trim();
+  const race       = document.getElementById('new-race').value.trim();
+  const background = fv('background').trim();
+  const level      = fi('level') || 1;
+  const str = fi('str_val'), dex = fi('dex_val'), con = fi('con_val');
+  const wis = fi('wis_val'), cha = fi('cha_val');
+
+  function mod(s) { return Math.floor((s - 10) / 2); }
+
+  const lines = [];
+
+  lines.push('Please generate a close-up portrait of the following fantasy TTRPG character.\n');
+
+  const identity = [];
+  if (race)       identity.push(race);
+  if (charClass)  identity.push(charClass + ' (Level ' + level + ')');
+  if (background) identity.push(background + ' background');
+  lines.push('CHARACTER: ' + name + (identity.length ? ', a ' + identity.join(', ') : '') + '.');
+  lines.push('');
+
+  lines.push('PHYSICAL PRESENCE:');
+  const strMod = mod(str), dexMod = mod(dex), conMod = mod(con), chaMod = mod(cha);
+  if (strMod >= 3)       lines.push('- Powerfully built, heavily muscled');
+  else if (strMod >= 1)  lines.push('- Athletic, strong build');
+  else if (strMod <= -2) lines.push('- Slight, lean frame');
+  if (dexMod >= 3)       lines.push('- Graceful, nimble posture');
+  else if (dexMod >= 1)  lines.push('- Balanced, agile stance');
+  if (conMod >= 3)       lines.push('- Robust, hardy appearance');
+  if (chaMod >= 3)       lines.push('- Striking, commanding presence');
+  else if (chaMod <= -2) lines.push('- Unremarkable, plain features');
+  lines.push('');
+
+  lines.push('PORTRAIT STYLE:');
+  lines.push('- Close-up portrait, face and upper body filling the frame; the face must be centered in the image');
+  lines.push('- High quality digital fantasy RPG character art');
+  lines.push('- Dramatic lighting that highlights facial features and expression');
+  lines.push('- Detailed textures on skin, hair, and any visible armor or clothing');
+  lines.push('- Confident, characterful expression that reflects their background');
+  lines.push('- Epic fantasy illustration style');
+  lines.push('');
+
+  lines.push('Generate a vivid, detailed close-up portrait that captures the face, personality, and essence of ' + name + '.');
+
+  return lines.join('\n');
+}
+
+function openNewCharPrompt() {
+  document.getElementById('new-char-prompt-text').value = _buildNewCharPrompt();
+  new bootstrap.Modal(document.getElementById('newCharPromptModal')).show();
+}
+
+function copyNewCharPrompt() {
+  const ta = document.getElementById('new-char-prompt-text');
+  const fb = document.getElementById('new-char-copy-feedback');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => _ncFallbackCopy(ta, showFb));
+  } else {
+    _ncFallbackCopy(ta, showFb);
+  }
+}
+
+function _ncFallbackCopy(ta, onDone) {
+  ta.removeAttribute('readonly');
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); onDone(); } catch(e) {}
+  ta.setAttribute('readonly', '');
+  window.getSelection().removeAllRanges();
+}
+</script>
 {% endblock %}

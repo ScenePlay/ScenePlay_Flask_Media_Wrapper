@@ -81,15 +81,23 @@
     <div class="ttrpg-card p-3 d-flex gap-3 align-items-start flex-wrap">
       <!-- Portrait -->
       <div>
+        <div id="portrait-wrap">
         {% if char.portrait_path %}
-          <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+          <img id="portrait-img"
+               src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
                style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:2px solid var(--ttrpg-accent);" alt="">
         {% else %}
-          <div style="width:90px;height:90px;border-radius:8px;border:2px solid var(--ttrpg-accent);
+          <div id="portrait-img" style="width:90px;height:90px;border-radius:8px;border:2px solid var(--ttrpg-accent);
                       background:var(--ttrpg-primary);display:flex;align-items:center;
                       justify-content:center;font-size:2.5rem;color:var(--ttrpg-accent);">&#9876;</div>
         {% endif %}
+        </div>
+        <button class="btn btn-sm btn-outline-secondary w-100 mt-1" style="font-size:.7rem;"
+                onclick="openLlmPrompt()" title="Generate image prompt">&#127748; Image Prompt</button>
         {% if can_edit %}
+        <button class="btn btn-sm btn-outline-secondary w-100 mt-1" style="font-size:.7rem;"
+                id="paste-portrait-btn" onclick="activatePastePortrait()"
+                title="Paste an image from clipboard">&#128203; Paste Portrait</button>
         <form method="POST" action="{{ url_for('ttrpg.upload_portrait', character_id=char.character_id) }}"
               enctype="multipart/form-data" class="mt-1">
           <input type="file" name="portrait" id="portraitInput" class="d-none"
@@ -1579,6 +1587,60 @@
   {% endif %}
 </div><!-- row -->
 
+<!-- ── LLM Prompt Modal ─────────────────────────────────────── -->
+<div class="modal fade" id="llmPromptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content"
+         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+      <div class="modal-header" style="border-color:var(--ttrpg-accent);">
+        <h5 class="modal-title" style="color:var(--ttrpg-accent);">&#127748; Image Prompt — {{ char.name }}</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Portrait section (shown only if portrait exists) -->
+        {% if char.portrait_path %}
+        <div id="llm-img-section" class="mb-3">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="small text-muted text-uppercase" style="letter-spacing:.06em;">Portrait</span>
+            <span id="llm-img-size" class="small text-muted"></span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" style="font-size:.75rem;"
+                    onclick="downloadLlmImage()">&#11015; Download</button>
+          </div>
+          <img id="llm-img-preview"
+               src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+               style="max-height:120px;border-radius:6px;border:1px solid var(--ttrpg-accent);"
+               alt="Portrait">
+          <p class="small text-muted mt-1 mb-0">
+            Upload this image alongside the prompt text when using a multimodal LLM (Claude, GPT-4o, etc.).
+          </p>
+        </div>
+        <hr style="border-color:var(--sp-border);">
+        {% endif %}
+
+        <!-- Prompt text -->
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <span class="small text-muted text-uppercase" style="letter-spacing:.06em;">Prompt Text</span>
+          <button class="btn btn-sm ms-auto"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                  onclick="copyLlmPrompt()">&#128203; Copy</button>
+        </div>
+        <textarea id="llm-prompt-text" class="form-control"
+                  style="font-family:monospace;font-size:.78rem;min-height:420px;
+                         background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                         border-color:var(--sp-border);resize:vertical;"
+                  readonly></textarea>
+      </div>
+      <div class="modal-footer" style="border-color:var(--ttrpg-accent);">
+        <span id="llm-copy-feedback"
+              style="font-size:.8rem;color:var(--ttrpg-accent);display:none;">Copied!</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm"
+                data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -2802,5 +2864,336 @@ function _refCard(key, it) {
     default: return '';
   }
 }
+</script>
+
+<script>
+// ── LLM Prompt ────────────────────────────────────────────────────────────────
+
+const _llmChar = {
+  name:               {{ char.name | tojson }},
+  level:              {{ char.level }},
+  char_class:         {{ (char.char_class or '') | tojson }},
+  race:               {{ (char.race or '') | tojson }},
+  background:         {{ (char.background or '') | tojson }},
+  player:             {{ char.user.display_name | tojson }},
+  hp_current:         {{ char.hp_current }},
+  hp_max:             {{ char.hp_max }},
+  ac:                 {{ char.ac }},
+  speed:              {{ char.speed }},
+  initiative_bonus:   {{ char.initiative_bonus }},
+  passive_perception: {{ char.passive_perception }},
+  str_val:            {{ char.str_val }},
+  dex_val:            {{ char.dex_val }},
+  con_val:            {{ char.con_val }},
+  int_val:            {{ char.int_val }},
+  wis_val:            {{ char.wis_val }},
+  cha_val:            {{ char.cha_val }},
+  gold:               {{ char.gold }},
+  silver:             {{ char.silver }},
+  copper:             {{ char.copper }},
+  portrait_url:       {{ (url_for('static', filename='uploads/portraits/' ~ char.portrait_path) if char.portrait_path else '') | tojson }},
+  skills: [
+    {% for sk in char.skills | sort(attribute='order_by') %}
+    { name: {{ sk.skill_name | tojson }}, bonus: {{ sk.bonus }}, proficient: {{ sk.proficient | tojson }} },
+    {% endfor %}
+  ],
+  feats: [
+    {% for ft in char.feats | sort(attribute='order_by') %}
+    { name: {{ ft.feat_name | tojson }}, description: {{ (ft.description or '') | tojson }} },
+    {% endfor %}
+  ],
+  weapons: [
+    {% for wp in char.weapons | sort(attribute='order_by') %}
+    { name: {{ wp.weapon_name | tojson }},
+      damage: {{ ((wp.damage_dice or '') ~ ((' +' ~ wp.damage_bonus) if wp.damage_bonus else '') ~ ((' ' ~ wp.damage_type) if wp.damage_type else '')) | tojson }},
+      attack_bonus: {{ wp.attack_bonus or 0 }},
+      properties: {{ (wp.properties or '') | tojson }},
+      notes: {{ (wp.notes or '') | tojson }},
+      equipped: {{ wp.equipped | tojson }} },
+    {% endfor %}
+  ],
+  armor: [
+    {% for ar in char.armor | sort(attribute='order_by') %}
+    { name: {{ ar.armor_name | tojson }}, ac_total: {{ ar.armor_class_base + ar.ac_bonus }},
+      equipped: {{ ar.equipped | tojson }}, notes: {{ (ar.notes or '') | tojson }} },
+    {% endfor %}
+  ],
+  spells: [
+    {% for sp in char.spells | sort(attribute='spell_level') %}
+    { name: {{ sp.spell_name | tojson }}, level: {{ sp.spell_level }},
+      school: {{ (sp.school or '') | tojson }}, prepared: {{ sp.prepared | tojson }} },
+    {% endfor %}
+  ],
+  resources: [
+    {% for rs in char.resources | sort(attribute='order_by') %}
+    { name: {{ rs.resource_name | tojson }}, current: {{ rs.current_val }}, max: {{ rs.max_val }} },
+    {% endfor %}
+  ],
+  inventory: [
+    {% for iv in char.inventory | sort(attribute='order_by') %}
+    { name: {{ iv.item_name | tojson }}, qty: {{ iv.quantity }}, notes: {{ (iv.notes or '') | tojson }} },
+    {% endfor %}
+  ],
+  conditions: [
+    {% for cd in char.conditions %}
+    {{ cd.condition_name | tojson }},
+    {% endfor %}
+  ],
+  notes: [
+    {% for nt in char.notes | sort(attribute='created_at', reverse=True) %}
+    {{ nt.note_text | tojson }},
+    {% endfor %}
+  ],
+};
+
+let _llmCompressedDataUrl = null;
+
+function _sgn(n) { return (n >= 0 ? '+' : '') + n; }
+function _modStr(score) { return _sgn(Math.floor((score - 10) / 2)); }
+
+function _buildPrompt(c) {
+  const lines = [];
+
+  // Opening request
+  lines.push('Please generate a close-up portrait of the following fantasy TTRPG character.\n');
+
+  // Core identity — the most visually relevant facts first
+  const identity = [];
+  if (c.race)       identity.push(c.race);
+  if (c.char_class) identity.push(c.char_class + ' (Level ' + c.level + ')');
+  if (c.background) identity.push(c.background + ' background');
+  lines.push('CHARACTER: ' + c.name + (identity.length ? ', a ' + identity.join(', ') : '') + '.');
+  lines.push('');
+
+  // Stat-driven appearance hints
+  lines.push('PHYSICAL PRESENCE:');
+  const strMod = Math.floor((c.str_val - 10) / 2);
+  const dexMod = Math.floor((c.dex_val - 10) / 2);
+  const chaMod = Math.floor((c.cha_val - 10) / 2);
+  const conMod = Math.floor((c.con_val - 10) / 2);
+  if (strMod >= 3)       lines.push('- Powerfully built, heavily muscled');
+  else if (strMod >= 1)  lines.push('- Athletic, strong build');
+  else if (strMod <= -2) lines.push('- Slight, lean frame');
+  if (dexMod >= 3)       lines.push('- Graceful, agile posture');
+  else if (dexMod >= 1)  lines.push('- Nimble, balanced stance');
+  if (conMod >= 3)       lines.push('- Robust, hardy appearance');
+  if (chaMod >= 3)       lines.push('- Striking, commanding presence');
+  else if (chaMod <= -2) lines.push('- Unremarkable, plain features');
+  lines.push('');
+
+  // Equipped armor — what they are wearing
+  const wornArmor = c.armor.filter(a => a.equipped);
+  if (wornArmor.length) {
+    lines.push('WEARING:');
+    wornArmor.forEach(a => {
+      let desc = '- ' + a.name;
+      if (a.notes) desc += ' (' + a.notes + ')';
+      lines.push(desc);
+    });
+    lines.push('');
+  }
+
+  // Equipped weapons — what they are holding / at their side
+  const readyWeapons = c.weapons.filter(w => w.equipped);
+  if (readyWeapons.length) {
+    lines.push('CARRYING / WIELDING:');
+    readyWeapons.forEach(w => {
+      let desc = '- ' + w.name;
+      if (w.damage.trim()) desc += ' (' + w.damage.trim() + ')';
+      if (w.properties) desc += ' — ' + w.properties;
+      if (w.notes) desc += ' [' + w.notes + ']';
+      lines.push(desc);
+    });
+    lines.push('');
+  }
+
+  // Feats that hint at fighting style or appearance
+  if (c.feats.length) {
+    lines.push('NOTABLE ABILITIES (may influence pose/style):');
+    c.feats.forEach(f => lines.push('- ' + f.name));
+    lines.push('');
+  }
+
+  // Spells — hint at magical nature
+  const preparedSpells = c.spells.filter(s => s.prepared);
+  if (preparedSpells.length) {
+    lines.push('MAGIC (suggest arcane/divine visual elements):');
+    preparedSpells.slice(0, 5).forEach(s => {
+      const lbl = s.level === 0 ? 'Cantrip' : 'Level ' + s.level;
+      lines.push('- ' + s.name + ' (' + lbl + (s.school ? ', ' + s.school : '') + ')');
+    });
+    lines.push('');
+  }
+
+  // Character notes — may contain appearance descriptions
+  if (c.notes.length) {
+    lines.push('CHARACTER NOTES (may contain appearance details):');
+    c.notes.forEach(n => lines.push(n));
+    lines.push('');
+  }
+
+  // Style guidance
+  lines.push('PORTRAIT STYLE:');
+  lines.push('- Close-up portrait, face and upper body filling the frame; the face must be centered in the image');
+  lines.push('- High quality digital fantasy RPG character art');
+  lines.push('- Dramatic lighting that highlights facial features and expression');
+  lines.push('- Detailed textures on skin, hair, and any visible armor or clothing');
+  lines.push('- Confident, characterful expression that reflects their background');
+  lines.push('- Epic fantasy illustration style');
+  if (c.portrait_url) {
+    lines.push('- Reference the attached portrait image for facial features and likeness');
+  }
+  lines.push('');
+
+  lines.push('Generate a vivid, detailed close-up portrait that captures the face, personality, and power of ' + c.name + '.');
+
+  return lines.join('\n');
+}
+
+async function _compressPortrait(imgEl, maxBytes) {
+  return new Promise(resolve => {
+    const canvas = document.createElement('canvas');
+    let w = imgEl.naturalWidth || imgEl.width;
+    let h = imgEl.naturalHeight || imgEl.height;
+    const MAX_DIM = 1024;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      const s = Math.min(MAX_DIM / w, MAX_DIM / h);
+      w = Math.round(w * s);
+      h = Math.round(h * s);
+    }
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(imgEl, 0, 0, w, h);
+
+    let lo = 0.1, hi = 0.92, best = '';
+    for (let i = 0; i < 10; i++) {
+      const q = (lo + hi) / 2;
+      const url = canvas.toDataURL('image/jpeg', q);
+      const bytes = Math.round((url.length - 'data:image/jpeg;base64,'.length) * 3 / 4);
+      if (bytes <= maxBytes) { best = url; lo = q; }
+      else                   { hi = q; }
+    }
+    resolve(best || canvas.toDataURL('image/jpeg', 0.1));
+  });
+}
+
+async function openLlmPrompt() {
+  document.getElementById('llm-prompt-text').value = _buildPrompt(_llmChar);
+
+  const imgEl = document.getElementById('llm-img-preview');
+  if (imgEl && _llmChar.portrait_url) {
+    if (!_llmCompressedDataUrl) {
+      const sizeEl = document.getElementById('llm-img-size');
+      if (sizeEl) sizeEl.textContent = '(compressing…)';
+      _llmCompressedDataUrl = await _compressPortrait(imgEl, 900 * 1024);
+      if (sizeEl) {
+        const kb = Math.round((_llmCompressedDataUrl.length - 'data:image/jpeg;base64,'.length) * 3 / 4 / 1024);
+        sizeEl.textContent = kb + ' KB';
+      }
+    }
+    imgEl.src = _llmCompressedDataUrl;
+  }
+
+  new bootstrap.Modal(document.getElementById('llmPromptModal')).show();
+}
+
+function copyLlmPrompt() {
+  const ta = document.getElementById('llm-prompt-text');
+  const fb = document.getElementById('llm-copy-feedback');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => _fallbackCopy(ta, showFb));
+  } else {
+    _fallbackCopy(ta, showFb);
+  }
+}
+
+function _fallbackCopy(ta, onDone) {
+  ta.removeAttribute('readonly');
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); onDone(); } catch(e) {}
+  ta.setAttribute('readonly', '');
+  window.getSelection().removeAllRanges();
+}
+
+function downloadLlmImage() {
+  if (!_llmCompressedDataUrl) return;
+  const a = document.createElement('a');
+  a.href = _llmCompressedDataUrl;
+  a.download = (_llmChar.name.replace(/\s+/g, '_') || 'character') + '_portrait.jpg';
+  a.click();
+}
+
+// ── Portrait paste ────────────────────────────────────────────────────────────
+{% if can_edit %}
+const _pasteUploadUrl = {{ url_for('ttrpg.portrait_paste', character_id=char.character_id) | tojson }};
+
+function _uploadPortraitBlob(blob) {
+  const btn = document.getElementById('paste-portrait-btn');
+  if (btn) btn.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('portrait', blob, 'pasted.png');
+  fetch(_pasteUploadUrl, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        const img = document.getElementById('portrait-img');
+        if (img && img.tagName === 'IMG') {
+          img.src = data.url + '?t=' + Date.now();
+        } else {
+          location.reload();
+        }
+        _llmCompressedDataUrl = null;
+      }
+      if (btn) { btn.innerHTML = '&#128203; Paste Portrait'; btn.disabled = false; }
+    })
+    .catch(() => {
+      if (btn) { btn.innerHTML = '&#128203; Paste Portrait'; btn.disabled = false; }
+    });
+}
+
+async function activatePastePortrait() {
+  const btn = document.getElementById('paste-portrait-btn');
+  btn.disabled = true;
+  btn.textContent = 'Reading clipboard…';
+
+  // Modern clipboard API — works on mobile with a single tap
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          _uploadPortraitBlob(blob);
+          return;
+        }
+      }
+      // Clipboard had no image
+      btn.textContent = 'No image in clipboard';
+      setTimeout(() => { btn.innerHTML = '&#128203; Paste Portrait'; btn.disabled = false; }, 2000);
+      return;
+    } catch(err) {
+      // Permission denied or API unavailable — fall through to keyboard hint
+    }
+  }
+
+  // Fallback: listen for a Ctrl+V / long-press paste event
+  btn.textContent = 'Now paste (Ctrl+V)…';
+  btn.disabled = false;
+  btn.style.borderColor = 'var(--ttrpg-accent)';
+  btn.style.color = 'var(--ttrpg-accent)';
+  const reset = () => { btn.innerHTML = '&#128203; Paste Portrait'; btn.style.borderColor = ''; btn.style.color = ''; };
+  const tid = setTimeout(reset, 15000);
+  document.addEventListener('paste', function handler(e) {
+    clearTimeout(tid);
+    document.removeEventListener('paste', handler);
+    reset();
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); _uploadPortraitBlob(item.getAsFile()); }
+  }, { once: true });
+}
+{% endif %}
 </script>
 {% endblock %}
