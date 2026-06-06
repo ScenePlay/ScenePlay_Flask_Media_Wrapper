@@ -400,8 +400,11 @@ function _buildMapPrompt() {
   if (light)    lines.push('Lighting: ' + light);
   if (style)    lines.push('Art style: ' + style);
   if (freetext) lines.push('Additional details: ' + freetext);
+  const _widthFt  = _activeMapCols * 5;
+  const _heightFt = _activeMapRows * 5;
   lines.push('Grid size: ' + _activeMapCols + ' squares wide × ' + _activeMapRows + ' squares tall (width × height)');
-  lines.push('Scale: 1 square = 5 feet of movement');
+  lines.push('Physical dimensions: ' + _widthFt + ' ft wide × ' + _heightFt + ' ft tall (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m)');
+  lines.push('Scale: 1 square = 5 ft (≈ 1.5 m) — the floor space occupied by one standing human or Medium creature');
   lines.push('');
 
   if (isLive) {
@@ -431,6 +434,17 @@ function _buildMapPrompt() {
     lines.push('');
   }
 
+  lines.push('## SCALE CALIBRATION — assess before rendering');
+  lines.push('The total map is ' + _widthFt + ' ft × ' + _heightFt + ' ft (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m). Every element must be correctly sized against the 5-ft square:');
+  lines.push('  • 1 square (5 ft / 1.5 m) = floor space of one standing person — your primary size anchor');
+  lines.push('  • Standard door: ~3 ft wide (clearly less than 1 square)');
+  lines.push('  • Hallway or corridor: 5–10 ft wide (1–2 squares)');
+  lines.push('  • Barrel or crate: 2–3 ft across (well under half a square)');
+  lines.push('  • Dining table seating 6 people: ~3 ft × 6 ft (roughly 1 × 1 squares)');
+  lines.push('  • Large horse or wagon: ~10 ft long (2 squares)');
+  lines.push('  • A pillar or tree trunk: 1–2 ft wide (a small fraction of 1 square)');
+  lines.push('Before finalising, verify: do doorways look like a person can walk through? Do furniture pieces look human-scale? If any element is oversized or undersized relative to these anchors, correct it.');
+  lines.push('');
   lines.push('## COMPOSITION');
   lines.push('- No text, watermarks, or UI elements in the image — except for the scale legend described below.');
   lines.push('- Fill the entire frame — no borders, vignettes, or letterboxing.');
