@@ -66,7 +66,11 @@
                                 {{ 'Active' if u.active else 'Inactive' }}
                             </span>
                         </td>
-                        <td>
+                        <td class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-ttrpg"
+                                    onclick="openResetModal({{ u.user_id }}, '{{ u.display_name | replace("'", "\\'") }}')">
+                                Reset PW
+                            </button>
                             {% if u.role != 'dm' %}
                             <form method="POST" action="{{ url_for('auth.delete_user', user_id=u.user_id) }}"
                                   onsubmit="return confirm('Delete {{ u.display_name }}?')">
@@ -81,4 +85,38 @@
         </div>
     </div>
 </div>
+<!-- Reset Password Modal -->
+<div class="modal fade" id="resetPwModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" style="color:var(--ttrpg-accent);">Reset Password</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="resetPwForm" method="POST">
+                <div class="modal-body">
+                    <p id="resetPwLabel" class="mb-3 text-secondary"></p>
+                    <div class="mb-3">
+                        <label class="form-label">New Password</label>
+                        <input type="password" name="new_password" id="resetPwInput"
+                               class="form-control bg-dark text-light border-secondary" required>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-ttrpg btn-sm">Reset</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openResetModal(userId, displayName) {
+    document.getElementById('resetPwLabel').textContent = 'Set a new password for ' + displayName + '.';
+    document.getElementById('resetPwInput').value = '';
+    document.getElementById('resetPwForm').action = '/ttrpg/users/' + userId + '/reset-password';
+    new bootstrap.Modal(document.getElementById('resetPwModal')).show();
+}
+</script>
 {% endblock %}

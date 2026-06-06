@@ -153,9 +153,11 @@ def character_sheet(character_id):
         all_players = tblUsers.query.filter_by(active=1).order_by(tblUsers.display_name).all()
     races_lib   = {r.name.lower(): r for r in tblRacesLibrary.query.all()}
     classes_lib = {c.name.lower(): c for c in tblClassesLibrary.query.all()}
+    can_edit = current_user.is_dm() or char.user_id == current_user.user_id
     return render_template('ttrpg/character_sheet.html', char=char,
                            all_players=all_players, conditions=CONDITIONS,
-                           races_lib=races_lib, classes_lib=classes_lib)
+                           races_lib=races_lib, classes_lib=classes_lib,
+                           can_edit=can_edit)
 
 
 # ── Character sheet — inline field save (AJAX) ─────────────────────────────────

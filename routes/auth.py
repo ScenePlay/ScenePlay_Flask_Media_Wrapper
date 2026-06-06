@@ -121,3 +121,42 @@ def delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     return redirect(url_for('auth.register'))
+
+
+@auth.route('/ttrpg/users/<int:user_id>/reset-password', methods=['POST'])
+@login_required
+@dm_required
+def reset_password(user_id):
+    """DM-only: set a new password for any user."""
+    user = tblUsers.query.get_or_404(user_id)
+    new_password = request.form.get('new_password', '').strip()
+    if not new_password:
+        flash('Password cannot be empty.')
+        return redirect(url_for('auth.register'))
+    user.set_password(new_password)
+    db.session.commit()
+    flash(f'Password reset for {user.display_name}.')
+    return redirect(url_for('auth.register'))
+
+
+@auth.route('/ttrpg/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    """Any logged-in user can change their own password."""
+    error = None
+    success = None
+    if request.method == 'POST':
+        current_pw = request.form.get('current_password', '')
+        new_pw = request.form.get('new_password', '').strip()
+        confirm_pw = request.form.get('confirm_password', '').strip()
+        if not current_user.check_password(current_pw):
+            error = 'Current password is incorrect.'
+        elif not new_pw:
+            error = 'New password cannot be empty.'
+        elif new_pw != confirm_pw:
+            error = 'New passwords do not match.'
+        else:
+            current_user.set_password(new_pw)
+            db.session.commit()
+            success = 'Password updated successfully.'
+    return render_template('ttrpg/change_password.html', error=error, success=success)

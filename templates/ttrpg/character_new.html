@@ -248,14 +248,17 @@ async function randomizeCharacter() {
     const cls  = classes.length ? classes[Math.floor(Math.random() * classes.length)] : null;
     const race = races.length  ? races[Math.floor(Math.random()  * races.length)]  : null;
 
-    function roll4d6() {
-      const dice = [0,1,2,3].map(() => Math.ceil(Math.random() * 6));
-      return dice.reduce((a, b) => a + b, 0) - Math.min(...dice);
+    // Distribute exactly 27 points across 6 stats (each min 1)
+    function distribute27() {
+      const scores = [1, 1, 1, 1, 1, 1];
+      for (let p = 0; p < 21; p++) {
+        scores[Math.floor(Math.random() * 6)]++;
+      }
+      return scores;
     }
     function mod(score) { return Math.floor((score - 10) / 2); }
 
-    const str = roll4d6(), dex = roll4d6(), con = roll4d6();
-    const int = roll4d6(), wis = roll4d6(), cha = roll4d6();
+    const [str, dex, con, int, wis, cha] = distribute27();
 
     const NAMES = [
       'Aldric','Brynn','Caelum','Dara','Elowen','Fenn','Gareth','Hana','Ivor','Jessa',
@@ -283,7 +286,8 @@ async function randomizeCharacter() {
     document.querySelector('[name="cha_val"]').value = cha;
 
     const hitDie = cls ? (cls.hit_die || 8) : 8;
-    document.querySelector('[name="hp_max"]').value           = hitDie + mod(con);
+    const conMod = mod(con);
+    document.querySelector('[name="hp_max"]').value           = Math.max(hitDie + conMod, hitDie - 1);
     document.querySelector('[name="speed"]').value            = (race && race.speed) ? race.speed : 30;
     document.querySelector('[name="ac"]').value               = 10 + mod(dex);
     document.querySelector('[name="initiative_bonus"]').value = mod(dex);
