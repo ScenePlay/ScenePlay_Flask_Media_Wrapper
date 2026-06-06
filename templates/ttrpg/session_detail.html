@@ -12,6 +12,8 @@
     </span>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
+       class="btn btn-sm btn-ttrpg">&#9776; Battle Maps</a>
     {% set active_map = sess.battle_maps | selectattr('is_active', 'eq', 1) | first | default(none) %}
     {% if active_map %}
     <a href="{{ url_for('battlemap_bp.map_view', map_id=active_map.map_id) }}"
@@ -202,11 +204,7 @@
     <div class="ttrpg-card p-3">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h5 style="color:var(--ttrpg-accent);" class="mb-0">&#9876; Monsters</h5>
-        <div class="d-flex gap-2">
-      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
-         class="btn btn-sm btn-outline-secondary">&#9776; Battle Maps</a>
-      <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">Monster Library</a>
-    </div>
+        <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-ttrpg">Monster Library</a>
       </div>
 
       {% set alive   = sess.monsters | selectattr('is_alive','eq',1) | list %}
@@ -309,7 +307,7 @@
           {% for sm in dead %}
           <div class="d-flex align-items-center justify-content-between gap-2 py-1"
                style="border-top:1px solid #2a2a2a;">
-            <span class="text-muted text-decoration-line-through">{{ sm.display_name }}</span>
+            <span class="text-decoration-line-through" style="color:#aaa;">{{ sm.display_name }}</span>
             <div class="d-flex gap-1">
               <button class="btn btn-sm btn-outline-secondary py-0"
                       onclick="reviveMonster({{ sm.monster_id }})">Revive</button>

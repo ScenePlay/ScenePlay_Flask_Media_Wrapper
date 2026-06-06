@@ -221,24 +221,24 @@
                     </li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a></li>
                 {% endif %}
-
-                <!-- Theme picker -->
-                <li class="nav-item" style="position:relative;">
-                    <button id="sp-theme-btn" onclick="spTogglePicker()"
-                            class="btn nav-link" title="Color theme"
-                            style="background:none;border:none;cursor:pointer;
-                                   font-size:1.15rem;color:var(--ttrpg-accent);padding:.35rem .5rem;">
-                        &#9670;
-                    </button>
-                    <div id="sp-theme-panel"
-                         style="display:none;position:absolute;right:0;top:calc(100% + 4px);
-                                z-index:9999;padding:14px;width:226px;">
-                        <div class="sp-panel-title">Color Theme</div>
-                        <div id="sp-swatches"
-                             style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;"></div>
-                    </div>
-                </li>
             </ul>
+        </div>
+
+        <!-- Theme picker — after collapse so it sits at far right and is never clipped -->
+        <div style="position:relative;flex-shrink:0;">
+            <button id="sp-theme-btn" onclick="spTogglePicker()"
+                    class="btn nav-link" title="Color theme"
+                    style="background:none;border:none;cursor:pointer;
+                           font-size:1.15rem;color:var(--ttrpg-accent);padding:.35rem .5rem;">
+                &#9670;
+            </button>
+            <div id="sp-theme-panel"
+                 style="display:none;position:absolute;right:0;top:calc(100% + 4px);
+                        z-index:9999;padding:14px;width:290px;">
+                <div class="sp-panel-title">Color Theme</div>
+                <div id="sp-swatches"
+                     style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;"></div>
+            </div>
         </div>
     </div>
 </nav>
