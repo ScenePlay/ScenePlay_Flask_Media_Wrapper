@@ -768,6 +768,12 @@ function attachDrag(el, tokenId) {
   });
   el.addEventListener('mouseleave', hideTooltip);
 
+  const _tok     = currentTokens[tokenId] || {};
+  const _canMove = IS_DM ||
+    (_tok.entity_type === 'player' && _tok.user_id === CURRENT_USER_ID);
+
+  if (!_canMove) el.style.cursor = 'default';
+
   let _ctrlOnDown = false;
   let _startCol, _startRow;
   let _lastDown = 0;
@@ -782,7 +788,6 @@ function attachDrag(el, tokenId) {
     _lastDown = now;
     _ctrlOnDown = e.ctrlKey || isDbl;
 
-    // Cache grid rect once — avoids a reflow on every pointermove
     const gridRect = document.getElementById('map-grid').getBoundingClientRect();
     const tok = currentTokens[tokenId] || { col: 0, row: 0 };
     _startCol = tok.col;
@@ -790,20 +795,20 @@ function attachDrag(el, tokenId) {
 
     activeDrag = { tokenId, el, col: tok.col, row: tok.row, gridRect };
 
-    // Lift token visually; kill transition so movement is instant
-    el.style.transition = 'none';
-    el.style.zIndex     = '100';
-    el.style.cursor     = 'grabbing';
-    el.style.opacity    = '0.85';
+    if (_canMove) {
+      el.style.transition = 'none';
+      el.style.zIndex     = '100';
+      el.style.cursor     = 'grabbing';
+      el.style.opacity    = '0.85';
+    }
   });
 
   el.addEventListener('pointermove', e => {
-    if (!activeDrag || activeDrag.tokenId !== tokenId) return;
+    if (!activeDrag || activeDrag.tokenId !== tokenId || !_canMove) return;
 
     const col = clampCol(Math.floor((e.clientX - activeDrag.gridRect.left) / CELL_PX));
     const row = clampRow(Math.floor((e.clientY - activeDrag.gridRect.top)  / CELL_PX));
 
-    // Only touch the DOM when the snapped cell actually changes
     if (col !== activeDrag.col || row !== activeDrag.row) {
       activeDrag.col = col;
       activeDrag.row = row;
@@ -815,19 +820,22 @@ function attachDrag(el, tokenId) {
     if (!activeDrag || activeDrag.tokenId !== tokenId) return;
     const { col, row } = activeDrag;
 
-    // Restore CSS defaults
-    el.style.transition = '';
-    el.style.zIndex     = '10';
-    el.style.cursor     = '';
-    el.style.opacity    = '';
+    if (_canMove) {
+      el.style.transition = '';
+      el.style.zIndex     = '10';
+      el.style.cursor     = '';
+      el.style.opacity    = '';
+    }
 
     activeDrag = null;
 
-    // Ctrl+click: token didn't move → open sheet in new tab
+    // Ctrl+click or double-click: open sheet in new tab (works for everyone)
     if (_ctrlOnDown && col === _startCol && row === _startRow) {
       _ctrlOpenSheet(currentTokens[tokenId]);
       return;
     }
+
+    if (!_canMove) return;
 
     // Commit position locally so next poll doesn't snap it back
     if (currentTokens[tokenId]) {

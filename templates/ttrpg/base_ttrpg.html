@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScenePlay — TTRPG</title>
+    <title>{% block title %}ScenePlay — TTRPG{% endblock %}</title>
     <!-- themes.css first — defines --sp-* and --ttrpg-* aliases for all themes -->
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/themes.css') }}">
     <!-- theme.js sets data-theme immediately (no FOUC) and builds the swatch picker -->

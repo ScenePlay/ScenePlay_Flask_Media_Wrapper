@@ -402,6 +402,12 @@ def token_move(map_id):
     t    = tblBattleMapTokens.query.get_or_404(data.get('token_id'))
     if t.map_id != map_id:
         return jsonify({'ok': False}), 403
+    if not current_user.is_dm():
+        if t.entity_type != 'player':
+            return jsonify({'ok': False}), 403
+        char = tblCharacters.query.get(t.entity_id)
+        if not char or char.user_id != current_user.user_id:
+            return jsonify({'ok': False}), 403
     t.col = max(0, min(bm.grid_cols - 1, int(data.get('col', t.col))))
     t.row = max(0, min(bm.grid_rows - 1, int(data.get('row', t.row))))
     t.updated_at = _now()
