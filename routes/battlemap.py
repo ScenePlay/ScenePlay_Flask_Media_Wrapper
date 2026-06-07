@@ -329,6 +329,7 @@ def map_state(map_id):
                 'skills':      [{'name': s.skill_name, 'bonus': s.bonus, 'proficient': bool(s.proficient)}
                                 for s in sorted(char.skills, key=lambda x: x.order_by)],
                 'speed':       char.speed,
+                'user_id':     char.user_id,
             })
 
     effects = [{
@@ -477,3 +478,11 @@ def effect_clear(map_id):
     tblBattleMapEffects.query.filter_by(map_id=map_id).delete()
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/monster-redirect/<int:monster_id>')
+@login_required
+@dm_required
+def monster_redirect(monster_id):
+    sm = tblSessionMonsters.query.get_or_404(monster_id)
+    return redirect(url_for('monsters_bp.view', template_id=sm.template_id))

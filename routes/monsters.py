@@ -201,6 +201,15 @@ def detail(template_id):
                     'source': m.source})
 
 
+@monsters_bp.route('/<int:template_id>/view')
+@login_required
+@dm_required
+def view(template_id):
+    m = tblMonsterTemplates.query.get_or_404(template_id)
+    stats = json.loads(m.stats_json or '{}')
+    return render_template('ttrpg/monster_detail.html', m=m, stats=stats)
+
+
 # ── Add to session ────────────────────────────────────────────────────────────
 
 @monsters_bp.route('/<int:template_id>/add-to-session', methods=['POST'])

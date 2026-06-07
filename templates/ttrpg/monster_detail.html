@@ -1,0 +1,157 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+{% set s = stats %}
+
+{# Integer-division modifier, returns "+N" or "-N" string #}
+{% macro abmod(score) -%}
+  {%- set m = (score - 10) // 2 -%}
+  {{ ('+' ~ m) if m >= 0 else m }}
+{%- endmacro %}
+
+{# Join a dict or plain string into a readable speed/senses string #}
+{% macro kv_str(val) -%}
+  {%- if val is mapping -%}
+    {%- for k, v in val.items() -%}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{%- endfor -%}
+  {%- else -%}
+    {{ val }}
+  {%- endif -%}
+{%- endmacro %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-8 col-xl-7">
+    <div class="ttrpg-card p-4">
+
+      <!-- Header -->
+      <div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
+        {% if s.get('image') %}
+        <img src="https://www.dnd5eapi.co{{ s.image }}" alt=""
+             style="width:100px;height:100px;object-fit:contain;border-radius:6px;
+                    background:var(--ttrpg-primary);flex-shrink:0;">
+        {% endif %}
+        <div class="flex-grow-1">
+          <h3 style="color:var(--ttrpg-accent);" class="mb-0">{{ m.name }}</h3>
+          <span class="small text-muted d-block mb-2">
+            {% set meta = [] %}
+            {% if s.get('size')      %}{% set _ = meta.append(s.size)      %}{% endif %}
+            {% if s.get('type')      %}{% set _ = meta.append(s.type)      %}{% endif %}
+            {% if s.get('alignment') %}{% set _ = meta.append(s.alignment) %}{% endif %}
+            {{ meta | join(' ') }}
+          </span>
+          <div class="d-flex gap-2 flex-wrap">
+            <span class="badge" style="background:var(--ttrpg-primary);color:var(--ttrpg-accent);">CR {{ m.cr }}</span>
+            <span class="badge bg-secondary">HP {{ m.hp_max }}</span>
+            <span class="badge bg-secondary">AC {{ m.ac }}</span>
+            {% if m.source == 'homebrew' %}
+            <span class="badge bg-secondary">Homebrew</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Ability scores -->
+      {% set ab_pairs = [('STR','strength'),('DEX','dexterity'),('CON','constitution'),
+                         ('INT','intelligence'),('WIS','wisdom'),('CHA','charisma')] %}
+      {% if s.get('strength') is not none %}
+      <div class="row g-1 mb-3 text-center">
+        {% for label, key in ab_pairs %}
+        {% set val = s.get(key) %}
+        <div class="col">
+          <div class="ttrpg-card p-1" style="border-color:#444;">
+            <div class="small text-muted">{{ label }}</div>
+            <div class="fw-bold" style="color:var(--ttrpg-accent);">{{ val if val is not none else '—' }}</div>
+            {% if val is not none %}
+            <div class="small text-muted">{{ abmod(val) }}</div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Traits -->
+      <div class="small mb-3">
+        {% if s.get('speed') %}
+        <p class="mb-1"><strong>Speed:</strong> {{ kv_str(s.speed) }}</p>
+        {% endif %}
+        {% if s.get('senses') %}
+        <p class="mb-1"><strong>Senses:</strong> {{ kv_str(s.senses) }}</p>
+        {% endif %}
+        {% if s.get('languages') %}
+        <p class="mb-1"><strong>Languages:</strong> {{ s.languages }}</p>
+        {% endif %}
+        {% if s.get('xp') %}
+        <p class="mb-1"><strong>XP:</strong> {{ s.xp }}</p>
+        {% endif %}
+        {% if s.get('damage_immunities') %}
+        <p class="mb-1"><strong>Damage Immunities:</strong> {{ s.damage_immunities | join(', ') }}</p>
+        {% endif %}
+        {% if s.get('damage_resistances') %}
+        <p class="mb-1"><strong>Damage Resistances:</strong> {{ s.damage_resistances | join(', ') }}</p>
+        {% endif %}
+        {% if s.get('damage_vulnerabilities') %}
+        <p class="mb-1"><strong>Damage Vulnerabilities:</strong> {{ s.damage_vulnerabilities | join(', ') }}</p>
+        {% endif %}
+        {% if s.get('condition_immunities') %}
+        <p class="mb-1"><strong>Condition Immunities:</strong>
+          {% for ci in s.condition_immunities %}{{ ci.name if ci is mapping else ci }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </p>
+        {% endif %}
+      </div>
+
+      <!-- Special abilities -->
+      {% if s.get('special_abilities') %}
+      <div class="small mb-3">
+        {% for a in s.special_abilities %}
+        <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Actions -->
+      {% if s.get('actions') %}
+      <div class="mb-3">
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Actions</h6>
+        <div class="small">
+          {% for a in s.actions %}
+          <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Legendary actions -->
+      {% if s.get('legendary_actions') %}
+      <div class="mb-3">
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Legendary Actions</h6>
+        <div class="small">
+          {% for a in s.legendary_actions %}
+          <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Reactions -->
+      {% if s.get('reactions') %}
+      <div class="mb-3">
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Reactions</h6>
+        <div class="small">
+          {% for a in s.reactions %}
+          <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Back -->
+      <div class="mt-3">
+        <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">
+          &larr; Monster Library
+        </a>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

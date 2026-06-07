@@ -183,11 +183,11 @@
   #dice-map-panel {
     display: none;
     position: fixed;
-    bottom: 16px;
+    top: 80px;
     right: 16px;
     z-index: 400;
     width: 268px;
-    max-height: calc(100vh - 80px);
+    max-height: calc(100vh - 100px);
     overflow-y: auto;
     background: var(--ttrpg-primary);
     border: 1px solid var(--ttrpg-accent);
@@ -196,6 +196,13 @@
     font-size: .82rem;
     color: var(--ttrpg-text);
     box-shadow: 0 4px 24px rgba(0,0,0,.7);
+    user-select: none;
+  }
+  #dice-drag-handle {
+    cursor: grab;
+  }
+  #dice-drag-handle:active {
+    cursor: grabbing;
   }
   .map-dice-btn        { min-width: 32px; padding: 2px 4px; font-size: .78rem; }
   .map-dice-btn.active { background: var(--ttrpg-accent) !important;
@@ -231,30 +238,10 @@
     overflow: hidden;
   }
 
-  #sb-toggle {
-    position: absolute;
-    right: -18px;
-    top: 12px;
-    z-index: 50;
-    width: 18px;
-    height: 44px;
-    background: var(--ttrpg-primary);
-    border: 1px solid var(--ttrpg-accent);
-    border-left: none;
-    border-radius: 0 6px 6px 0;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--ttrpg-accent);
-    font-size: .65rem;
-    padding: 0;
-    line-height: 1;
-  }
   #sb-toggle:hover {
-    background: var(--sp-hover-bg);
-    color: var(--sp-hover-text);
-    border-color: var(--sp-hover-bg);
+    background: var(--sp-hover-bg) !important;
+    color: var(--sp-hover-text) !important;
+    border-color: var(--sp-hover-bg) !important;
   }
 
   .sidebar-section-title {
@@ -318,7 +305,6 @@
     <!-- DM sidebar -->
     {% if current_user.is_dm() %}
     <div id="sidebar-wrap">
-      <button id="sb-toggle" onclick="toggleSidebar()" title="Toggle panel">&#9664;</button>
     <div id="sidebar">
       <!-- Monsters -->
       <div class="sidebar-section-title">Monsters</div>
@@ -431,23 +417,33 @@
     </div><!-- /sidebar-wrap -->
     {% endif %}
 
-    <!-- Map viewport -->
-    <div id="map-viewport">
-
-      <!-- Zoom controls (floating, visible to all) -->
-      <div style="position:fixed;bottom:18px;right:18px;z-index:200;
-                  display:flex;flex-direction:column;gap:4px;">
+    <!-- Zoom controls strip (between sidebar and map) -->
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+                gap:6px;padding:8px 4px;flex-shrink:0;z-index:200;
+                background:var(--ttrpg-surface);border-right:1px solid #444;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+        {% if current_user.is_dm() %}
+        <button id="sb-toggle" onclick="toggleSidebar()" title="Toggle panel"
+                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:1rem;font-weight:900;line-height:1;cursor:pointer;">&#9664;</button>
+        <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
+        {% endif %}
         <button onclick="adjustCellPx(8)" title="Zoom in"
                 style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
-                       background:rgba(20,20,35,.85);color:var(--ttrpg-accent);
-                       font-size:1.2rem;line-height:1;cursor:pointer;backdrop-filter:blur(4px);">+</button>
-        <button onclick="adjustCellPx(-8)" title="Zoom out"
-                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
-                       background:rgba(20,20,35,.85);color:var(--ttrpg-accent);
-                       font-size:1.2rem;line-height:1;cursor:pointer;backdrop-filter:blur(4px);">&minus;</button>
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">+</button>
         <div id="cell-px-label"
              style="text-align:center;font-size:.65rem;color:var(--sp-muted);line-height:1.4;">{{ cell_px }}px</div>
+        <button onclick="adjustCellPx(-8)" title="Zoom out"
+                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">&minus;</button>
       </div>
+    </div>
+
+    <!-- Map viewport -->
+    <div id="map-viewport">
 
       <div id="map-grid"
            style="width:{{ bm.grid_cols * cell_px }}px;
@@ -588,9 +584,9 @@
 
 <!-- ── Dice Roller Panel ─────────────────────────────────────────────────── -->
 <div id="dice-map-panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+  <div id="dice-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
     <span style="font-weight:bold;color:var(--ttrpg-accent);">&#127922; Dice Roller</span>
-    <button class="fx-close-btn" onclick="toggleMapDicePanel()">&#10005;</button>
+    <button class="fx-close-btn" onclick="toggleMapDicePanel()" style="cursor:pointer;">&#10005;</button>
   </div>
 
   <!-- Die buttons -->
@@ -673,7 +669,8 @@ const MAP_ID    = {{ bm.map_id }};
 let   CELL_PX   = {{ cell_px }};
 const GRID_COLS = {{ bm.grid_cols }};
 const GRID_ROWS = {{ bm.grid_rows }};
-const IS_DM     = {{ 'true' if current_user.is_dm() else 'false' }};
+const IS_DM          = {{ 'true' if current_user.is_dm() else 'false' }};
+const CURRENT_USER_ID = {{ current_user.user_id }};
 
 let activeDrag    = null;  // { tokenId, el, col, row, gridRect }
 let currentTokens = {};    // token_id -> server data snapshot
@@ -751,6 +748,17 @@ function hideTooltip() { _tt.style.display = 'none'; }
 
 // ── Pointer drag handlers ─────────────────────────────────────────────────────
 
+function _ctrlOpenSheet(tok) {
+  if (!tok) return;
+  if (tok.entity_type === 'player') {
+    if (IS_DM || tok.user_id === CURRENT_USER_ID) {
+      window.open(`/ttrpg/character/${tok.entity_id}`, '_blank');
+    }
+  } else if (tok.entity_type === 'monster' && IS_DM) {
+    window.open(`/ttrpg/battlemap/monster-redirect/${tok.entity_id}`, '_blank');
+  }
+}
+
 function attachDrag(el, tokenId) {
   el.addEventListener('mouseenter', e => {
     if (!activeDrag) showTooltip(e, currentTokens[tokenId] || {});
@@ -760,14 +768,25 @@ function attachDrag(el, tokenId) {
   });
   el.addEventListener('mouseleave', hideTooltip);
 
+  let _ctrlOnDown = false;
+  let _startCol, _startRow;
+  let _lastDown = 0;
+
   el.addEventListener('pointerdown', e => {
     e.preventDefault();
     el.setPointerCapture(e.pointerId);
     hideTooltip();
 
+    const now = Date.now();
+    const isDbl = (now - _lastDown) < 300;
+    _lastDown = now;
+    _ctrlOnDown = e.ctrlKey || isDbl;
+
     // Cache grid rect once — avoids a reflow on every pointermove
     const gridRect = document.getElementById('map-grid').getBoundingClientRect();
     const tok = currentTokens[tokenId] || { col: 0, row: 0 };
+    _startCol = tok.col;
+    _startRow = tok.row;
 
     activeDrag = { tokenId, el, col: tok.col, row: tok.row, gridRect };
 
@@ -802,13 +821,19 @@ function attachDrag(el, tokenId) {
     el.style.cursor     = '';
     el.style.opacity    = '';
 
+    activeDrag = null;
+
+    // Ctrl+click: token didn't move → open sheet in new tab
+    if (_ctrlOnDown && col === _startCol && row === _startRow) {
+      _ctrlOpenSheet(currentTokens[tokenId]);
+      return;
+    }
+
     // Commit position locally so next poll doesn't snap it back
     if (currentTokens[tokenId]) {
       currentTokens[tokenId].col = col;
       currentTokens[tokenId].row = row;
     }
-
-    activeDrag = null;
 
     fetch(`/ttrpg/battlemap/${MAP_ID}/token/move`, {
       method:  'POST',
@@ -1726,6 +1751,55 @@ function clearAllEffects() {
     .then(() => pollState());
 }
 
+// ── Draggable panel ───────────────────────────────────────────────────────────
+function makeDraggable(panel, handle) {
+  let startX, startY, startLeft, startTop;
+
+  function onDown(clientX, clientY) {
+    const rect = panel.getBoundingClientRect();
+    // Snap to top/left coords so drag math is consistent
+    panel.style.right  = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left   = rect.left + 'px';
+    panel.style.top    = rect.top  + 'px';
+    startX    = clientX;
+    startY    = clientY;
+    startLeft = rect.left;
+    startTop  = rect.top;
+  }
+
+  function onMove(clientX, clientY) {
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+    const maxLeft = window.innerWidth  - panel.offsetWidth  - 4;
+    const maxTop  = window.innerHeight - panel.offsetHeight - 4;
+    panel.style.left = Math.min(Math.max(0, startLeft + dx), maxLeft) + 'px';
+    panel.style.top  = Math.min(Math.max(0, startTop  + dy), maxTop)  + 'px';
+  }
+
+  // Mouse
+  handle.addEventListener('mousedown', function(e) {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    onDown(e.clientX, e.clientY);
+    function mv(e) { onMove(e.clientX, e.clientY); }
+    function up() { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+
+  // Touch
+  handle.addEventListener('touchstart', function(e) {
+    if (e.target.closest('button')) return;
+    const t = e.touches[0];
+    onDown(t.clientX, t.clientY);
+    function mv(e) { e.preventDefault(); const t = e.touches[0]; onMove(t.clientX, t.clientY); }
+    function up() { handle.removeEventListener('touchmove', mv); handle.removeEventListener('touchend', up); }
+    handle.addEventListener('touchmove', mv, { passive: false });
+    handle.addEventListener('touchend', up);
+  }, { passive: true });
+}
+
 // ── Map Dice Roller ───────────────────────────────────────────────────────────
 const MAP_ROLLER_NAME = '{{ roller_name | e }}';
 let _mapDiceSel    = 20;
@@ -1907,6 +1981,7 @@ function clearMapDiceFeed() {
 }
 
 startPolling();
+makeDraggable(document.getElementById('dice-map-panel'), document.getElementById('dice-drag-handle'));
 
 // ── Volume ────────────────────────────────────────────────────────────────────
 let _mapVolTimer = null;
