@@ -750,15 +750,17 @@ def dice_roll():
         sides = 20
 
     if adv_mode in ('advantage', 'disadvantage'):
-        dice = [random.randint(1, sides), random.randint(1, sides)]
+        num  = max(2, count)
+        dice = [random.randint(1, sides) for _ in range(num)]
         kept = max(dice) if adv_mode == 'advantage' else min(dice)
         total = kept + modifier
     else:
         adv_mode = 'normal'
+        num  = count
         dice = [random.randint(1, sides) for _ in range(count)]
         total = sum(dice) + modifier
 
-    expr = f'{count}d{sides}'
+    expr = f'{num}d{sides}'
     if modifier > 0:  expr += f'+{modifier}'
     elif modifier < 0: expr += str(modifier)
 
