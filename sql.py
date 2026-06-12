@@ -343,6 +343,29 @@ def appsettingGetKeepMusicPlaying():
     conn.close()
     return int(row[0]) if row else 0
 
+def appsettingGet(name, default=None):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT value FROM tblAppSettings WHERE name = ?", (name,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return row[0] if row else default
+
+def appsettingSet(name, value, typevalue='text'):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT count(*) FROM tblAppSettings WHERE name = ?", (name,))
+    exists = c.fetchone()[0] > 0
+    if exists:
+        c.execute("UPDATE tblAppSettings SET value = ? WHERE name = ?", (str(value), name))
+    else:
+        c.execute("INSERT INTO tblAppSettings(name, value, typevalue) VALUES (?, ?, ?)",
+                  (name, str(value), typevalue))
+    conn.commit()
+    c.close()
+    conn.close()
+
 def appsettingSetKeepMusicPlaying(val):
     conn = sqlite3.connect(database)
     c = conn.cursor()

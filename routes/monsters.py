@@ -10,6 +10,7 @@ from models.ttrpg import tblMonsterTemplates, tblSessionMonsters, tblSessions
 from routes.auth import dm_required
 
 monsters_bp = Blueprint('monsters_bp', __name__, url_prefix='/ttrpg/monsters')
+import relay_broadcaster
 _sync_states = {}
 
 API_BASE = 'https://www.dnd5eapi.co/api/2014'
@@ -364,6 +365,9 @@ def instance_hp(monster_id):
     if sm.hp_current == 0:
         sm.is_alive = 0
     db.session.commit()
+    token_id = relay_broadcaster.find_token_id('monster', sm.monster_id)
+    if token_id:
+        relay_broadcaster.broadcast_token_health(token_id, sm.hp_current, sm.hp_max)
     return jsonify({'ok': True, 'hp_current': sm.hp_current, 'hp_pct': sm.hp_pct(),
                     'is_alive': sm.is_alive})
 
@@ -377,6 +381,9 @@ def instance_hp_set(monster_id):
     sm.hp_current = max(0, min(sm.hp_max, int(data.get('hp', sm.hp_current))))
     sm.is_alive = 0 if sm.hp_current == 0 else 1
     db.session.commit()
+    token_id = relay_broadcaster.find_token_id('monster', sm.monster_id)
+    if token_id:
+        relay_broadcaster.broadcast_token_health(token_id, sm.hp_current, sm.hp_max)
     return jsonify({'ok': True, 'hp_current': sm.hp_current, 'hp_pct': sm.hp_pct(),
                     'is_alive': sm.is_alive})
 
@@ -418,6 +425,9 @@ def instance_revive(monster_id):
     sm.is_alive = 1
     sm.hp_current = sm.hp_max
     db.session.commit()
+    token_id = relay_broadcaster.find_token_id('monster', sm.monster_id)
+    if token_id:
+        relay_broadcaster.broadcast_token_health(token_id, sm.hp_current, sm.hp_max)
     return jsonify({'ok': True})
 
 

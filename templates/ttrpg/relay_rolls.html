@@ -1,0 +1,49 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block title %}Roll Log — ScenePlay{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#127922; Session Roll Log</h4>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('relay_admin_bp.status') }}" class="btn btn-sm btn-outline-secondary">&larr; Relay Admin</a>
+      </div>
+    </div>
+
+    {% if not session_id %}
+    <div class="ttrpg-card p-3 text-muted">No active relay session.</div>
+    {% elif not entries %}
+    <div class="ttrpg-card p-3 text-muted">No rolls recorded for this session yet.</div>
+    {% else %}
+    <div class="ttrpg-card p-0">
+      <table class="table ttrpg-table mb-0" style="font-size:.9rem;">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Player</th>
+            <th>Roll</th>
+            <th class="text-end">Result</th>
+            <th>Breakdown</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+          <tr>
+            <td class="text-muted" style="white-space:nowrap;">{{ entry.rolled_at[11:16] if entry.rolled_at|length > 10 else entry.rolled_at }}</td>
+            <td class="fw-bold" style="color:var(--ttrpg-accent);">{{ entry.player_name }}</td>
+            <td><code style="color:var(--ttrpg-text);">{{ entry.roll_expr }}</code></td>
+            <td class="text-end fw-bold">{{ entry.result }}</td>
+            <td class="text-muted small">{{ entry.breakdown }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="small text-muted mt-2">Showing up to 200 most recent rolls. Max 500 stored per session.</div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

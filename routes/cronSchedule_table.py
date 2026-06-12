@@ -74,7 +74,7 @@ def update():
     data = request.get_json()
     if primeKey not in data:
         abort(400)
-    row = tbl.query.get(data[primeKey])
+    row = db.session.get(tbl, data[primeKey])
     if row is None:
         abort(404)
     for field in tblColumns:
@@ -107,7 +107,7 @@ def delrow():
     data = request.get_json()
     if primeKey not in data:
         abort(400)
-    row = tbl.query.get(data[primeKey])
+    row = db.session.get(tbl, data[primeKey])
     if row is None:
         abort(404)
     db.session.delete(row)

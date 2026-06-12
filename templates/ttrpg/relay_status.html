@@ -1,0 +1,159 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block title %}Relay Admin — ScenePlay{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#127760; Remote Relay</h4>
+      <a href="{{ url_for('relay_admin_bp.status') }}" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</a>
+    </div>
+
+    <!-- Status card -->
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <span class="fw-bold">Status:</span>
+          {% if cfg.enabled == '1' %}
+            <span class="badge bg-success ms-1">Enabled</span>
+          {% else %}
+            <span class="badge bg-secondary ms-1">Disabled</span>
+          {% endif %}
+          <span class="small text-muted ms-3">Last sync: {{ cfg.last_sync }}</span>
+        </div>
+        <form method="post" action="{{ url_for('relay_admin_bp.toggle') }}">
+          <button class="btn btn-sm {% if cfg.enabled == '1' %}btn-outline-danger{% else %}btn-ttrpg{% endif %}">
+            {% if cfg.enabled == '1' %}Disable Relay{% else %}Enable Relay{% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Join code card -->
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <span class="fw-bold">Join Code:</span>
+          {% if cfg.code %}
+            <span class="ms-2 fw-bold" style="font-size:1.6rem;color:var(--ttrpg-accent);letter-spacing:.2em;">
+              {{ cfg.code }}
+            </span>
+          {% else %}
+            <span class="text-muted ms-2">No active session</span>
+          {% endif %}
+        </div>
+        <form method="post" action="{{ url_for('relay_admin_bp.generate_code') }}">
+          <button class="btn btn-sm btn-outline-secondary">
+            &#8635; New Session
+          </button>
+        </form>
+      </div>
+      {% if cfg.code %}
+      <div class="small text-muted mt-1">Session ID: {{ cfg.session_id }}</div>
+      <div class="small text-muted">
+        Players log in at the relay portal with their ScenePlay username, password, and this code.
+        <strong>Clicking "New Session" clears all existing relay data and pushes fresh characters.</strong>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Logged-in players -->
+    {% if cfg.enabled == '1' and cfg.session_id %}
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-3">
+        &#128100; Players Online
+        <span class="badge {% if logged_in %}bg-success{% else %}bg-secondary{% endif %} ms-2">
+          {{ logged_in|length }}
+        </span>
+      </h6>
+      {% if not logged_in %}
+        <div class="small text-muted">No players have logged in yet. Share the join code above.</div>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm mb-0" style="color:var(--sp-text);">
+            <thead>
+              <tr>
+                <th class="small text-muted fw-normal">Username</th>
+                <th class="small text-muted fw-normal">Character</th>
+                <th class="small text-muted fw-normal">Class / Lv</th>
+                <th class="small text-muted fw-normal">HP</th>
+                <th class="small text-muted fw-normal">Joined</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in logged_in %}
+              <tr>
+                <td>
+                  <span class="badge bg-success me-1" style="font-size:.6rem;">&#9679;</span>
+                  {{ p.username }}
+                </td>
+                <td class="fw-bold" style="color:var(--ttrpg-accent);">{{ p.player_name }}</td>
+                <td class="small">{{ p.char_class }} Lv{{ p.level }}</td>
+                <td>
+                  <div class="d-flex align-items-center gap-1">
+                    <div style="width:60px;background:var(--sp-surface);border-radius:3px;height:8px;overflow:hidden;">
+                      <div style="width:{{ p.hp_pct }}%;height:8px;
+                                  background:{% if p.hp_pct > 50 %}#28a745{% elif p.hp_pct > 25 %}#ffc107{% else %}#dc3545{% endif %};"></div>
+                    </div>
+                    <span class="small">{{ p.hp_current }}/{{ p.hp_max }}</span>
+                  </div>
+                </td>
+                <td class="small text-muted">{{ p.joined_at }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Connection config -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
+      <form method="post" action="{{ url_for('relay_admin_bp.save_config') }}">
+        <div class="mb-2">
+          <label class="form-label small">Relay URL</label>
+          <input type="url" name="relay_url" class="form-control form-control-sm"
+                 placeholder="https://your-relay.onrender.com"
+                 value="{{ cfg.url }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">Shared Secret</label>
+          <input type="password" name="relay_secret" class="form-control form-control-sm"
+                 placeholder="leave blank to keep existing"
+                 value="">
+        </div>
+        <button type="submit" class="btn btn-sm btn-ttrpg">Save</button>
+      </form>
+    </div>
+
+    <!-- Sync characters -->
+    {% if cfg.enabled == '1' and cfg.session_id %}
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <span class="fw-bold">Party Sync</span>
+          <div class="small text-muted">Re-push all session characters without resetting the session.</div>
+        </div>
+        <form method="post" action="{{ url_for('relay_admin_bp.sync_characters') }}">
+          <button class="btn btn-sm btn-outline-secondary">&#8679; Sync Characters</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Quick links -->
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('relay_admin_bp.rolls') }}" class="btn btn-sm btn-outline-secondary">
+        &#127922; Roll Log
+      </a>
+      <a href="{{ url_for('ttrpg.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+        &larr; Dashboard
+      </a>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

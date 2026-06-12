@@ -18,6 +18,7 @@ from models.scenes import tblscenes
 from models.ttrpg import tblSessionMonsters as _tblSessionMonsters
 from routes.auth import dm_required
 from routes.monsters import CONDITIONS
+import relay_broadcaster
 
 ttrpg = Blueprint('ttrpg', __name__, url_prefix='/ttrpg')
 
@@ -186,6 +187,11 @@ def save_field(character_id):
         return jsonify({'ok': False, 'error': 'unknown field'}), 400
 
     db.session.commit()
+    if field in ('hp_current', 'hp_max'):
+        token_id = relay_broadcaster.find_token_id('player', char.character_id)
+        if token_id:
+            relay_broadcaster.broadcast_token_health(token_id, char.hp_current, char.hp_max)
+    relay_broadcaster.push_character(char)
     return jsonify({'ok': True, 'hp_pct': char.hp_pct()})
 
 
@@ -201,6 +207,10 @@ def hp_delta(character_id):
     delta = int(data.get('delta', 0))
     char.hp_current = max(0, min(char.hp_max, char.hp_current + delta))
     db.session.commit()
+    token_id = relay_broadcaster.find_token_id('player', char.character_id)
+    if token_id:
+        relay_broadcaster.broadcast_token_health(token_id, char.hp_current, char.hp_max)
+    relay_broadcaster.push_character(char)
     return jsonify({'ok': True, 'hp_current': char.hp_current, 'hp_pct': char.hp_pct()})
 
 
@@ -317,7 +327,7 @@ def character_assign(character_id):
     new_user_id = request.form.get('user_id', type=int)
     if new_user_id:
         from models.user import tblUsers
-        user = tblUsers.query.get(new_user_id)
+        user = db.session.get(tblUsers, new_user_id)
         if user:
             char.user_id = new_user_id
             db.session.commit()
@@ -787,6 +797,14 @@ def dice_roll():
         ).delete(synchronize_session=False)
     db.session.commit()
 
+    try:
+        import relay_broadcaster
+        relay_broadcaster.broadcast_roll(
+            char_name, expr, label, dice, modifier, total, adv_mode,
+        )
+    except Exception:
+        pass
+
     return jsonify({
         'ok': True, 'roll_id': roll.roll_id,
         'char_name': char_name, 'expression': expr, 'label': label,
@@ -970,6 +988,7 @@ def session_party_add(session_id):
             is_active=1, joined_at=_now())
         db.session.add(sp)
         db.session.commit()
+    relay_broadcaster.push_all_characters()
     return jsonify({'ok': True})
 
 
@@ -981,6 +1000,7 @@ def session_party_remove(session_id, char_id):
         session_id=session_id, character_id=char_id).first_or_404()
     db.session.delete(sp)
     db.session.commit()
+    relay_broadcaster.push_all_characters()
     return jsonify({'ok': True})
 
 

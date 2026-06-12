@@ -22,6 +22,7 @@ from routes.ttrpg import ttrpg
 from routes.monsters import monsters_bp
 from routes.battlemap import battlemap_bp
 from routes.reference import reference_bp
+from routes.relay_admin import relay_admin_bp
 
 from defaultData import *
 from sql import *
@@ -71,7 +72,7 @@ login_manager.login_view = 'auth.login'
 @login_manager.user_loader
 def load_user(user_id):
     from models.user import tblUsers
-    return tblUsers.query.get(int(user_id))
+    return db.session.get(tblUsers, int(user_id))
 
 import json as _json
 @app.template_filter('from_json')
@@ -110,9 +111,12 @@ app.register_blueprint(ttrpg)
 app.register_blueprint(monsters_bp)
 app.register_blueprint(battlemap_bp)
 app.register_blueprint(reference_bp)
+app.register_blueprint(relay_admin_bp)
 
 # Ensure new tables exist (idempotent; does not drop existing tables)
 with app.app_context():
+    import models.tblTokenPositions  # noqa: F401
+    import models.tblRollLog         # noqa: F401
     db.create_all()
 
 # Create upload directory for battle map backgrounds
@@ -189,6 +193,14 @@ def startTheadPlayer():
     time.sleep(3)
     appsettingAudioPlayFlagUpdatePID(999999)  # clear stale PID so threader starts fresh
     queue_next()
+
+    # Start relay receiver and push current party to relay
+    if appsettingGet('relay_enabled', '0') == '1':
+        import relay_receiver
+        relay_receiver.start(app)
+        with app.app_context():
+            import relay_broadcaster
+            relay_broadcaster.push_all_characters()
     
     
 if arr[0] > 0:

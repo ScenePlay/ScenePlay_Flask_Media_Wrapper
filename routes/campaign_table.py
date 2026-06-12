@@ -69,7 +69,7 @@ def update():
     #print(data)
     if primeKey not in data:
         abort(400)
-    TSP = tbl.query.get(data[primeKey])
+    TSP = db.session.get(tbl, data[primeKey])
     for field in tblColumns: 
         if field in data:
             setattr(TSP, field, data[field])
@@ -90,7 +90,7 @@ def campaigndelrow():
     data = request.get_json()
     if primeKey not in data:
         abort(400)
-    TSP = tbl.query.get(data[primeKey])
+    TSP = db.session.get(tbl, data[primeKey])
     db.session.delete(TSP)
     db.session.commit()  
     return 'tblCampaign row ' + data[primeKey] + ' has been deleted'

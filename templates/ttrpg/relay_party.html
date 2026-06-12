@@ -1,0 +1,80 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block title %}Party View — ScenePlay{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#128101; Remote Party</h4>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('relay_admin_bp.party') }}" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</a>
+        <a href="{{ url_for('relay_admin_bp.status') }}" class="btn btn-sm btn-outline-secondary">&larr; Relay Admin</a>
+      </div>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-warning py-2">Could not reach relay: {{ error }}</div>
+    {% endif %}
+
+    {% if not cfg.session_id %}
+    <div class="ttrpg-card p-3 text-muted">No active relay session. Generate a join code first.</div>
+    {% elif not party %}
+    <div class="ttrpg-card p-3 text-muted">No players have logged into the relay session yet. Characters are pre-registered — they will appear here once each player signs in.</div>
+    {% else %}
+    <div class="row g-3">
+      {% for char in party %}
+      {% set sheet = char.sheet %}
+      <div class="col-md-6 col-xl-4">
+        <div class="ttrpg-card p-3 h-100">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;
+                        background:var(--ttrpg-primary);border:2px solid var(--ttrpg-accent);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:1.1rem;color:var(--ttrpg-accent);">&#9919;</div>
+            <div class="flex-grow-1 overflow-hidden">
+              <div class="fw-bold text-truncate" style="color:var(--ttrpg-accent);">
+                {{ sheet.name or char.player_name }}
+              </div>
+              <div class="small text-muted">
+                {{ sheet.get('class', '—') }}
+                {% if sheet.get('level') %}Lv{{ sheet.level }}{% endif %}
+                {% if sheet.get('race') %}&middot; {{ sheet.race }}{% endif %}
+              </div>
+            </div>
+          </div>
+
+          <!-- HP bar -->
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="small text-muted" style="min-width:24px;">HP</span>
+            <div class="flex-grow-1" style="background:var(--sp-surface);border-radius:4px;height:14px;overflow:hidden;">
+              <div style="width:{{ char.hp_pct }}%;
+                          background:{% if char.hp_pct > 50 %}#28a745{% elif char.hp_pct > 25 %}#ffc107{% else %}#dc3545{% endif %};
+                          height:14px;">
+              </div>
+            </div>
+            <span class="small fw-bold" style="min-width:52px;text-align:right;">
+              {{ char.hp_current }}/{{ char.hp_max }}
+            </span>
+          </div>
+
+          {% if sheet.get('ac') or sheet.get('speed') or sheet.get('passive_perception') %}
+          <div class="small d-flex gap-3">
+            {% if sheet.get('ac') %}<span><span class="text-muted">AC</span> <strong>{{ sheet.ac }}</strong></span>{% endif %}
+            {% if sheet.get('speed') %}<span><span class="text-muted">Spd</span> <strong>{{ sheet.speed }}</strong></span>{% endif %}
+            {% if sheet.get('passive_perception') %}<span><span class="text-muted">PP</span> <strong>{{ sheet.passive_perception }}</strong></span>{% endif %}
+          </div>
+          {% endif %}
+
+          <div class="small text-muted mt-2">
+            Joined {{ char.joined_at or char.updated_at }}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

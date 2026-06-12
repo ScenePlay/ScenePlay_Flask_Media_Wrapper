@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import (Blueprint, render_template, redirect, url_for,
                    request, flash, jsonify, current_app)
@@ -13,6 +13,7 @@ from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects
                            tblSessionMonsters, tblCharacters)
 from models.scenes import tblscenes
 from routes.auth import dm_required
+import relay_broadcaster
 
 battlemap_bp = Blueprint('battlemap_bp', __name__, url_prefix='/ttrpg/battlemap')
 
@@ -24,6 +25,77 @@ CELL_PX       = 64
 
 def _now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _token_relay_payload(t, bm):
+    data = {
+        'token_id':    t.token_id,
+        'entity_type': t.entity_type,
+        'entity_id':   t.entity_id,
+        'col':         t.col,
+        'row':         t.row,
+        'x_pct':       t.col / max(1, bm.grid_cols - 1),
+        'y_pct':       t.row / max(1, bm.grid_rows - 1),
+        'label':       '',
+        'token_type':  t.entity_type,
+        'character_id': None,
+        'image_url':   '',
+    }
+    if t.entity_type == 'player':
+        char = db.session.get(tblCharacters, t.entity_id)
+        if char:
+            data['label']      = char.name
+            data['character_id'] = t.entity_id
+            data['hp_current'] = char.hp_current
+            data['hp_max']     = char.hp_max
+    elif t.entity_type == 'monster':
+        sm = db.session.get(tblSessionMonsters, t.entity_id)
+        if sm:
+            data['label']      = sm.display_name
+            data['hp_current'] = sm.hp_current
+            data['hp_max']     = sm.hp_max
+            data['conditions'] = json.loads(sm.conditions or '[]')
+            try:
+                raw = json.loads(sm.template.stats_json or '{}')
+                if raw.get('image'):
+                    data['image_url'] = 'https://www.dnd5eapi.co' + raw['image']
+                # speed
+                raw_spd = raw.get('speed', {})
+                walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
+                if isinstance(walk, str):
+                    walk = walk.replace(' ft.', '').strip()
+                try:
+                    walk = int(walk)
+                except (ValueError, TypeError):
+                    walk = 0
+                data['speed'] = walk
+                data['type']  = raw.get('type', '')
+                data['ac']    = raw.get('armor_class', 0)
+            except Exception:
+                pass
+    return data
+
+
+def _push_map_state(bm):
+    bg_url = (url_for('static', filename=f'uploads/battlemaps/{bm.bg_image}', _external=True)
+              if bm.bg_image else '')
+    effects = [{
+        'effect_id':    e.effect_id,
+        'shape':        e.shape,
+        'label':        e.label or '',
+        'anchor_x':     e.anchor_x,
+        'anchor_y':     e.anchor_y,
+        'size_ft':      e.size_ft,
+        'angle':        e.angle,
+        'fill_color':   e.fill_color,
+        'fill_opacity': e.fill_opacity,
+        'border_color': e.border_color,
+    } for e in bm.effects]
+    relay_broadcaster.broadcast_map_update(
+        bg_url, bm.grid_cols, bm.grid_rows,
+        [_token_relay_payload(t, bm) for t in bm.tokens],
+        effects=effects,
+    )
 
 
 def _allowed(filename):
@@ -112,6 +184,17 @@ def map_activate(map_id):
     tblBattleMaps.query.filter_by(session_id=bm.session_id).update({'is_active': 0})
     bm.is_active = 1
     db.session.commit()
+
+    _push_map_state(bm)
+
+    # Stamp all tokens on the newly active map with the current time (ISO UTC).
+    # relay_receiver uses this to detect which relay positions predate this activation
+    # and must not overwrite the map's explicit token placements.
+    activation_ts = datetime.now(timezone.utc).isoformat()
+    for t in bm.tokens:
+        t.updated_at = activation_ts
+    db.session.commit()
+
     flash(f'"{bm.name}" is now the active map.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
@@ -151,8 +234,9 @@ def map_edit(map_id):
             t.row = rows - 1
             changed = True
         if changed:
-            t.updated_at = _now()
+            t.updated_at = datetime.now(timezone.utc).isoformat()
     db.session.commit()
+    _push_map_state(bm)
     flash(f'Map "{bm.name}" updated.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
@@ -172,6 +256,7 @@ def map_bg(map_id):
         f.save(os.path.join(folder, filename))
         bm.bg_image = filename
         db.session.commit()
+        _push_map_state(bm)
         flash('Background image updated.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
@@ -196,6 +281,7 @@ def map_bg_paste(map_id):
     db.session.commit()
     is_video = ext in VIDEO_EXT
     url = url_for('static', filename='uploads/battlemaps/' + filename)
+    _push_map_state(bm)
     return jsonify({'ok': True, 'url': url, 'is_video': is_video, 'filename': filename})
 
 
@@ -216,7 +302,7 @@ def map_bg_clear(map_id):
 @login_required
 def map_view(map_id):
     bm   = tblBattleMaps.query.get_or_404(map_id)
-    sess = tblSessions.query.get(bm.session_id)
+    sess = db.session.get(tblSessions, bm.session_id)
 
     monsters = []
     party    = []
@@ -255,6 +341,9 @@ def map_view(map_id):
                 roller_name = sp.character.name
                 break
 
+    if current_user.is_dm() and bm.is_active:
+        _push_map_state(bm)
+
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
                            monsters=monsters, party=party,
@@ -276,7 +365,7 @@ def map_state(map_id):
 
     for t in bm.tokens:
         if t.entity_type == 'monster':
-            sm = tblSessionMonsters.query.get(t.entity_id)
+            sm = db.session.get(tblSessionMonsters, t.entity_id)
             if not sm:
                 continue
             raw  = json.loads(sm.template.stats_json or '{}')
@@ -307,7 +396,7 @@ def map_state(map_id):
                 'speed':       walk,
             })
         elif t.entity_type == 'player':
-            char = tblCharacters.query.get(t.entity_id)
+            char = db.session.get(tblCharacters, t.entity_id)
             if not char:
                 continue
             img = (url_for('static', filename=f'uploads/portraits/{char.portrait_path}')
@@ -374,10 +463,12 @@ def token_add(map_id):
 
     t = tblBattleMapTokens(
         map_id=map_id, entity_type=entity_type, entity_id=entity_id,
-        col=0, row=0, updated_at=_now(),
+        col=0, row=0, updated_at=datetime.now(timezone.utc).isoformat(),
     )
     db.session.add(t)
     db.session.commit()
+
+    _push_map_state(bm)
     return jsonify({'ok': True, 'token_id': t.token_id})
 
 
@@ -391,6 +482,10 @@ def token_remove(map_id):
         return jsonify({'ok': False}), 403
     db.session.delete(t)
     db.session.commit()
+
+    bm = db.session.get(tblBattleMaps, map_id)
+    if bm:
+        _push_map_state(bm)
     return jsonify({'ok': True})
 
 
@@ -405,13 +500,31 @@ def token_move(map_id):
     if not current_user.is_dm():
         if t.entity_type != 'player':
             return jsonify({'ok': False}), 403
-        char = tblCharacters.query.get(t.entity_id)
+        char = db.session.get(tblCharacters, t.entity_id)
         if not char or char.user_id != current_user.user_id:
             return jsonify({'ok': False}), 403
     t.col = max(0, min(bm.grid_cols - 1, int(data.get('col', t.col))))
     t.row = max(0, min(bm.grid_rows - 1, int(data.get('row', t.row))))
-    t.updated_at = _now()
+    t.updated_at = datetime.now(timezone.utc).isoformat()
     db.session.commit()
+
+    label = ''
+    character_id = None
+    if t.entity_type == 'player':
+        char = db.session.get(tblCharacters, t.entity_id)
+        if char:
+            label = char.name
+            character_id = t.entity_id
+    elif t.entity_type == 'monster':
+        sm = db.session.get(tblSessionMonsters, t.entity_id)
+        if sm:
+            label = sm.display_name
+    x_pct = t.col / max(1, bm.grid_cols - 1)
+    y_pct = t.row / max(1, bm.grid_rows - 1)
+    relay_broadcaster.broadcast_token_move(
+        t.token_id, x_pct, y_pct,
+        label=label, token_type=t.entity_type, character_id=character_id,
+    )
     return jsonify({'ok': True, 'col': t.col, 'row': t.row})
 
 
@@ -441,6 +554,7 @@ def effect_add(map_id):
     )
     db.session.add(e)
     db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))
     return jsonify({'ok': True, 'effect_id': e.effect_id})
 
 
@@ -461,6 +575,7 @@ def effect_update(map_id, effect_id):
     if 'border_color' in data: e.border_color = data['border_color']
     if 'label'        in data: e.label        = data['label'].strip()[:40]
     db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))
     return jsonify({'ok': True})
 
 
@@ -473,6 +588,7 @@ def effect_delete(map_id, effect_id):
         return jsonify({'ok': False}), 403
     db.session.delete(e)
     db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))
     return jsonify({'ok': True})
 
 
@@ -483,6 +599,7 @@ def effect_clear(map_id):
     tblBattleMaps.query.get_or_404(map_id)
     tblBattleMapEffects.query.filter_by(map_id=map_id).delete()
     db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))
     return jsonify({'ok': True})
 
 
