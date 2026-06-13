@@ -2481,6 +2481,9 @@ let _diceSelected = 20;
 let _advMode      = 'normal';
 let _diceLastId   = 0;
 let _dicePollTimer = null;
+let _relayLastRollId = 0;
+let _seenRolledAts = new Set();
+function _rollKey(ts) { return (ts || '').slice(0, 19).replace('T', ' '); }
 
 function toggleDicePanel() {
   const p = document.getElementById('dice-panel');
@@ -2644,6 +2647,21 @@ function renderFeedEntry(d, prepend) {
   }
 }
 
+function renderRelayFeedEntry(r, prepend) {
+  if (r.rolled_at && _seenRolledAts.has(_rollKey(r.rolled_at))) return;
+  if (r.rolled_at) _seenRolledAts.add(_rollKey(r.rolled_at));
+  const html = `<div class="feed-entry" data-relay-rid="${r.id}">
+    <span style="color:#4a9eff;font-weight:600;">&#127760; ${_escH(r.player_name)}</span>
+    <span class="expr"> ${_escH(r.roll_expr)}</span>
+    <div><span style="opacity:.6;">&#8594;</span> <span class="tot">${r.result}</span></div>
+  </div>`;
+  const list = document.getElementById('dice-feed-list');
+  const empty = list.querySelector('p.text-muted');
+  if (empty) empty.remove();
+  if (prepend) list.insertAdjacentHTML('afterbegin', html);
+  else         list.insertAdjacentHTML('beforeend', html);
+}
+
 function fetchDiceFeed() {
   fetch('/ttrpg/dice/feed')
     .then(r => r.json()).then(rolls => {
@@ -2651,7 +2669,6 @@ function fetchDiceFeed() {
       list.innerHTML = '';
       if (!rolls.length) { list.innerHTML = '<p class="small text-muted">No rolls yet.</p>'; return; }
       rolls.forEach(d => { renderFeedEntry(d, false); _diceLastId = Math.max(_diceLastId, d.roll_id); });
-      // scroll to bottom (most recent at top via prepend in poll)
     });
 }
 

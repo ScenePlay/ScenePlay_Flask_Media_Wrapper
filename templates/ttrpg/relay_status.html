@@ -144,6 +144,34 @@
     </div>
     {% endif %}
 
+    <!-- Roll history reset -->
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+        <div>
+          <span class="fw-bold">&#127922; Roll History Reset</span>
+          <div class="small text-muted mt-1">
+            Clears local roll history, creates a new relay session to wipe the relay roll log,
+            and re-pushes all characters. Players will need to re-join with the new join code.
+          </div>
+          {% if cfg.roll_cleared_at %}
+          <div class="small text-muted mt-1">
+            Last cleared: <span style="color:var(--ttrpg-accent);">{{ cfg.roll_cleared_at[:19].replace('T',' ') }} UTC</span>
+          </div>
+          {% endif %}
+        </div>
+        <form method="post" action="{{ url_for('relay_admin_bp.clear_rolls') }}"
+              onsubmit="return confirm('This will clear local roll history AND create a new relay session, which clears the relay roll log.\n\nPlayers will need to re-join with the new code.\n\nContinue?');">
+          <button class="btn btn-sm btn-outline-danger">&#128465; Clear Roll History</button>
+        </form>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <div class="alert alert-{{ 'success' if category == 'success' else 'warning' }} py-2 small">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
     <!-- Quick links -->
     <div class="d-flex gap-2 flex-wrap">
       <a href="{{ url_for('relay_admin_bp.rolls') }}" class="btn btn-sm btn-outline-secondary">

@@ -1985,6 +1985,8 @@ let _mapAdvMode    = 'normal';
 let _mapLastRollId      = 0;
 let _mapLastRelayRollId = 0;
 let _mapDicePoll        = null;
+let _mapSeenRolledAts   = new Set();
+function _mapRollKey(ts) { return (ts || '').slice(0, 19).replace('T', ' '); }
 
 function toggleMapDicePanel() {
   const p   = document.getElementById('dice-map-panel');
@@ -2136,6 +2138,8 @@ function _mapRenderEntry(d, prepend) {
 
 function _mapRenderRelayEntry(r, prepend) {
   if (document.querySelector(`[data-relay-rid="${r.id}"]`)) return;
+  if (r.rolled_at && _mapSeenRolledAts.has(_mapRollKey(r.rolled_at))) return;
+  if (r.rolled_at) _mapSeenRolledAts.add(_mapRollKey(r.rolled_at));
   const modMatch = r.breakdown.match(/([+-]\d+)$/);
   const modVal   = modMatch ? parseInt(modMatch[1]) : 0;
   const diceStr  = r.breakdown.replace(/[+-]\d+$/, '');
@@ -2171,11 +2175,6 @@ function mapFetchFeed() {
     if (!rolls.length) { feed.innerHTML = '<p class="fx-label">No rolls yet.</p>'; return; }
     rolls.forEach(d => { _mapRenderEntry(d, false); _mapLastRollId = Math.max(_mapLastRollId, d.roll_id); });
   });
-  {% if current_user.is_dm() %}
-  fetch('/ttrpg/battlemap/relay-rolls?since_id=0').then(r => r.json()).then(d => {
-    (d.rolls || []).forEach(r => { _mapRenderRelayEntry(r, false); _mapLastRelayRollId = Math.max(_mapLastRelayRollId, r.id); });
-  }).catch(() => {});
-  {% endif %}
 }
 
 function mapPollFeed() {
@@ -2186,11 +2185,6 @@ function mapPollFeed() {
       _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
     });
   });
-  {% if current_user.is_dm() %}
-  fetch(`/ttrpg/battlemap/relay-rolls?since_id=${_mapLastRelayRollId}`).then(r => r.json()).then(d => {
-    (d.rolls || []).reverse().forEach(r => { _mapRenderRelayEntry(r, true); _mapLastRelayRollId = Math.max(_mapLastRelayRollId, r.id); });
-  }).catch(() => {});
-  {% endif %}
 }
 
 function mapResetDice() {

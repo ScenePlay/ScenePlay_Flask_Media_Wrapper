@@ -371,7 +371,6 @@ def relay_presence():
 
 @battlemap_bp.route('/relay-rolls')
 @login_required
-@dm_required
 def relay_rolls():
     since_id = request.args.get('since_id', 0, type=int)
     rolls = relay_broadcaster.get_relay_rolls(since_id)
