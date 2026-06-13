@@ -119,8 +119,9 @@ with app.app_context():
     import models.tblRollLog         # noqa: F401
     db.create_all()
 
-# Create upload directory for battle map backgrounds
-os.makedirs(os.path.join(app.root_path, 'static', 'uploads', 'battlemaps'), exist_ok=True)
+# Ensure all upload directories exist
+for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor'):
+    os.makedirs(os.path.join(app.root_path, 'static', 'uploads', _upload_dir), exist_ok=True)
 
 num = Value('i', 1)
 arr = Array('i', range(15))
@@ -204,7 +205,8 @@ def startTheadPlayer():
     
     
 if arr[0] > 0:
-    startTheadPlayer()
+    if __name__ == '__main__':
+        startTheadPlayer()
     
     
 if __name__ == '__main__':

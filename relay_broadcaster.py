@@ -129,17 +129,23 @@ def broadcast_token_health(token_id, hp_current, hp_max):
     _fire(_go)
 
 
-def _portrait_url(char):
-    """Return an absolute URL to the character portrait, or empty string."""
+def _portrait_data(char):
+    """Return (filename, base64_data) for the character portrait, or (None, None)."""
     if not char.portrait_path:
-        return ''
+        return None, None
+    import base64, os
     try:
-        from flask import url_for
-        return url_for('static',
-                       filename=f'uploads/portraits/{char.portrait_path}',
-                       _external=True)
+        from flask import current_app
+        path = os.path.join(current_app.root_path, 'static', 'uploads', 'portraits', char.portrait_path)
     except RuntimeError:
-        return ''
+        return None, None
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, 'rb') as f:
+            return char.portrait_path, base64.b64encode(f.read()).decode('ascii')
+    except Exception:
+        return None, None
 
 
 def _char_to_payload(char):
@@ -213,15 +219,18 @@ def _char_to_payload(char):
         ],
     }
     user = char.user
+    portrait_filename, portrait_b64 = _portrait_data(char)
     return {
-        'player_name':   char.name,
-        'username':      user.username      if user else '',
-        'display_name':  user.display_name  if user else char.name,
-        'password_hash': user.password_hash if user else '',
-        'portrait_url':  _portrait_url(char),
-        'sheet_json':    _json.dumps(sheet),
-        'hp_current':    char.hp_current,
-        'hp_max':        char.hp_max,
+        'player_name':     char.name,
+        'username':        user.username      if user else '',
+        'display_name':    user.display_name  if user else char.name,
+        'password_hash':   user.password_hash if user else '',
+        'portrait_url':    '',
+        'portrait_data':   portrait_b64 or '',
+        'portrait_ext':    portrait_filename.rsplit('.', 1)[-1] if portrait_filename else '',
+        'sheet_json':      _json.dumps(sheet),
+        'hp_current':      char.hp_current,
+        'hp_max':          char.hp_max,
     }
 
 

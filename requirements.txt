@@ -1,0 +1,18 @@
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Login
+Flask-Bcrypt
+waitress
+requests
+SQLAlchemy
+python-crontab
+gTTS
+psutil
+pulsectl
+pyalsaaudio
+
+# Raspberry Pi / LED (install only on Pi hardware)
+# rpi_ws281x
+# adafruit-circuitpython-neopixel
+# adafruit-blinka

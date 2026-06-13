@@ -139,6 +139,21 @@
         .navbar-toggler { border-color: var(--ttrpg-accent); }
         .navbar-toggler-icon { filter: invert(1); }
 
+        /* ── Attributes dropdown dark theme ────────────────────────── */
+        .ttrpg-nav .dropdown-menu {
+            background-color: var(--ttrpg-primary);
+            border: 1px solid var(--ttrpg-accent);
+            border-radius: 6px;
+        }
+        .ttrpg-nav .dropdown-item {
+            color: var(--ttrpg-accent);
+        }
+        .ttrpg-nav .dropdown-item:hover,
+        .ttrpg-nav .dropdown-item:focus {
+            background-color: color-mix(in srgb, var(--sp-accent) 18%, transparent);
+            color: var(--ttrpg-accent);
+        }
+
         /* ── Themed table (replaces table-dark everywhere) ─────────── */
         .ttrpg-table {
             background: var(--sp-surface);
@@ -194,14 +209,20 @@
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.sessions_list') }}">Sessions</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.all_maps') }}">Maps</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.characters') }}">Characters</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.armor_library') }}">Armor</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.equipment_library') }}">Equipment</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.feats_library') }}">Feats</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.weapons_library') }}">Weapons</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.spells_library') }}">Spells</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.skills_library') }}">Skills</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.races_library') }}">Races</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.classes_library') }}">Classes</a></li>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="attributesDropdown"
+                               role="button" data-bs-toggle="dropdown" aria-expanded="false">Attributes</a>
+                            <ul class="dropdown-menu" aria-labelledby="attributesDropdown">
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.armor_library') }}">Armor</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.classes_library') }}">Classes</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.equipment_library') }}">Equipment</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.feats_library') }}">Feats</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.races_library') }}">Races</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.skills_library') }}">Skills</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.spells_library') }}">Spells</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('reference_bp.weapons_library') }}">Weapons</a></li>
+                            </ul>
+                        </li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('relay_admin_bp.status') }}">&#127760; Relay</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>

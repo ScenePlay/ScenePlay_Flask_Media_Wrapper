@@ -132,13 +132,17 @@
     border: 1px solid var(--ttrpg-accent);
     border-radius: 8px;
     padding: 10px 12px;
-    min-width: 180px;
-    max-width: 240px;
+    min-width: 200px;
+    max-width: 300px;
     pointer-events: none;
     font-size: .8rem;
     color: var(--ttrpg-text);
     box-shadow: 0 4px 20px rgba(0,0,0,.7);
   }
+  #tt-layout      { display: flex; gap: 10px; align-items: flex-start; }
+  #tt-portrait    { width: 114px; height: 114px; object-fit: cover; border-radius: 6px;
+                    border: 2px solid var(--ttrpg-accent); flex-shrink: 0; display: none; }
+  #tt-body        { flex: 1; min-width: 0; }
   #tt-hp-bar-wrap { height: 5px; background: #333; border-radius: 3px; margin-bottom: 6px; }
   #tt-hp-bar      { height: 100%; border-radius: 3px; transition: width .3s; }
 
@@ -226,6 +230,8 @@
   #dice-drag-handle:active {
     cursor: grabbing;
   }
+  #dice-map-panel.minimized > *:not(#dice-drag-handle) { display: none !important; }
+  #dice-map-panel.minimized { overflow-y: hidden; }
   .map-dice-btn        { min-width: 32px; padding: 2px 4px; font-size: .78rem; }
   .map-dice-btn.active { background: var(--ttrpg-accent) !important;
                          border-color: var(--ttrpg-accent) !important;
@@ -608,7 +614,10 @@
 <div id="dice-map-panel">
   <div id="dice-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
     <span style="font-weight:bold;color:var(--ttrpg-accent);">&#127922; Dice Roller</span>
-    <button class="fx-close-btn" onclick="toggleMapDicePanel()" style="cursor:pointer;">&#10005;</button>
+    <div style="display:flex;gap:4px;">
+      <button id="map-dice-minimize-btn" class="fx-close-btn" onclick="minimizeMapDicePanel()" style="cursor:pointer;" title="Minimize">&#8722;</button>
+      <button class="fx-close-btn" onclick="toggleMapDicePanel()" style="cursor:pointer;" title="Close">&#10005;</button>
+    </div>
   </div>
 
   <!-- Die buttons -->
@@ -672,15 +681,20 @@
 
 <!-- Token hover tooltip -->
 <div id="tok-tooltip">
-  <div id="tt-name" style="font-weight:bold;color:var(--ttrpg-accent);margin-bottom:4px;font-size:.85rem;"></div>
-  <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:3px;">
-    <span id="tt-hp"></span>
-    <span id="tt-hp-pct" style="color:#aaa;"></span>
+  <div id="tt-layout">
+    <img id="tt-portrait" alt="">
+    <div id="tt-body">
+      <div id="tt-name" style="font-weight:bold;color:var(--ttrpg-accent);margin-bottom:4px;font-size:.85rem;"></div>
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:3px;">
+        <span id="tt-hp"></span>
+        <span id="tt-hp-pct" style="color:#aaa;"></span>
+      </div>
+      <div id="tt-hp-bar-wrap"><div id="tt-hp-bar"></div></div>
+      <div id="tt-speed" style="font-size:.73rem;color:#aaa;margin-bottom:3px;"></div>
+      <div id="tt-conditions" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;"></div>
+      <div id="tt-skills" style="color:#aaa;font-size:.73rem;line-height:1.7;"></div>
+    </div>
   </div>
-  <div id="tt-hp-bar-wrap"><div id="tt-hp-bar"></div></div>
-  <div id="tt-speed" style="font-size:.73rem;color:#aaa;margin-bottom:3px;"></div>
-  <div id="tt-conditions" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;"></div>
-  <div id="tt-skills" style="color:#aaa;font-size:.73rem;line-height:1.7;"></div>
 </div>
 
 {% endblock %}
@@ -720,6 +734,16 @@ function showTooltip(e, tok) {
   const typeColor = tok.entity_type === 'player' ? '#4a9eff' : '#cc3333';
   _tt.style.borderColor = typeColor;
   _tt.style.background  = `color-mix(in srgb, ${typeColor} 10%, var(--ttrpg-primary))`;
+
+  const portrait = document.getElementById('tt-portrait');
+  if (tok.image_url) {
+    portrait.src = tok.image_url;
+    portrait.style.borderColor = typeColor;
+    portrait.style.display = 'block';
+  } else {
+    portrait.style.display = 'none';
+  }
+
   const nameEl = document.getElementById('tt-name');
   nameEl.textContent   = tok.name;
   nameEl.style.color   = typeColor;
@@ -1858,6 +1882,14 @@ function toggleMapDicePanel() {
     btn.classList.replace('btn-ttrpg', 'btn-outline-secondary');
     clearInterval(_mapDicePoll);
   }
+}
+
+function minimizeMapDicePanel() {
+  const p = document.getElementById('dice-map-panel');
+  const btn = document.getElementById('map-dice-minimize-btn');
+  const min = p.classList.toggle('minimized');
+  btn.textContent = min ? '+' : '−';
+  btn.title = min ? 'Restore' : 'Minimize';
 }
 
 function mapSelectDie(s) {
