@@ -414,6 +414,9 @@ def instance_condition(monster_id):
         conds.remove(condition)
     sm.conditions = json.dumps(conds)
     db.session.commit()
+    tok_id = relay_broadcaster.find_token_id('monster', monster_id)
+    if tok_id is not None:
+        relay_broadcaster.broadcast_condition_update(conds, token_id=tok_id)
     return jsonify({'ok': True, 'conditions': conds})
 
 

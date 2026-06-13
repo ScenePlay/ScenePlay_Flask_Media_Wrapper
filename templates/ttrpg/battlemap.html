@@ -10,6 +10,8 @@
     background: #0d1117;
     position: relative;
     cursor: grab;
+    touch-action: none;
+    overscroll-behavior: none;
   }
 
   #map-grid {
@@ -183,11 +185,16 @@
     font-size: .95rem;
     padding: 0;
     line-height: 1;
+    min-width: 32px;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
-  .fx-close-btn:hover { color: #fff; }
+  .fx-close-btn:hover, .fx-close-btn:active { color: #fff; }
   .fx-shape-btn {
     flex: 1;
-    padding: 4px 0;
+    padding: 8px 0;
     background: var(--ttrpg-surface);
     border: 1px solid #555;
     border-radius: 5px;
@@ -232,7 +239,8 @@
   }
   #dice-map-panel.minimized > *:not(#dice-drag-handle) { display: none !important; }
   #dice-map-panel.minimized { overflow-y: hidden; }
-  .map-dice-btn        { min-width: 32px; padding: 2px 4px; font-size: .78rem; }
+  .map-dice-btn        { min-width: 36px; padding: 6px 4px; font-size: .78rem; }
+  .sidebar-btn         { min-height: 36px; min-width: 36px; }
   .map-dice-btn.active { background: var(--ttrpg-accent) !important;
                          border-color: var(--ttrpg-accent) !important;
                          color: var(--sp-on-accent) !important; }
@@ -299,6 +307,18 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     max-width: 110px;
+  }
+  .presence-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; flex-shrink: 0;
+    background: #444; border: 1px solid #555;
+    transition: background .4s, box-shadow .4s;
+    vertical-align: middle; margin-right: 3px;
+  }
+  .presence-dot.online {
+    background: #28a745;
+    border-color: #28a745;
+    box-shadow: 0 0 5px rgba(40,167,69,.7);
   }
 </style>
 {% endblock %}
@@ -375,7 +395,7 @@
            data-entity-type="player"
            data-entity-id="{{ char.character_id }}">
         <div class="sidebar-entity-row">
-          <span>{{ char.name }}</span>
+          <span><span class="presence-dot" data-presence="{{ char.name | e }}" title="Offline"></span>{{ char.name }}</span>
           <button class="sidebar-btn btn btn-sm py-0 px-1
                          {% if char.character_id in on_map_player_ids %}btn-outline-danger{% else %}btn-outline-secondary{% endif %}">
             {% if char.character_id in on_map_player_ids %}&#10005;{% else %}+{% endif %}
@@ -452,19 +472,19 @@
       <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
         {% if current_user.is_dm() %}
         <button id="sb-toggle" onclick="toggleSidebar()" title="Toggle panel"
-                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1rem;font-weight:900;line-height:1;cursor:pointer;">&#9664;</button>
         <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
         {% endif %}
         <button onclick="adjustCellPx(8)" title="Zoom in"
-                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">+</button>
         <div id="cell-px-label"
              style="text-align:center;font-size:.65rem;color:var(--sp-muted);line-height:1.4;">{{ cell_px }}px</div>
         <button onclick="adjustCellPx(-8)" title="Zoom out"
-                style="width:36px;height:36px;border-radius:8px;border:1px solid #555;
+                style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">&minus;</button>
       </div>
@@ -505,7 +525,7 @@
         <!-- Transparent draw overlay — active only in FX / cloud draw mode (z:20) -->
         <div id="fx-draw-overlay"
              style="position:absolute;top:0;left:0;width:100%;height:100%;
-                    z-index:20;display:none;cursor:crosshair;"></div>
+                    z-index:20;display:none;cursor:crosshair;touch-action:none;"></div>
 
         <!-- Tokens injected by JS -->
       </div>
@@ -647,12 +667,24 @@
   <!-- Modifier + Label -->
   <div class="d-flex align-items-center gap-2 mb-2">
     <label class="fx-label mb-0">Mod</label>
+    <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+            onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)-1">&#8722;</button>
     <input type="number" id="map-dice-mod" value="0"
            class="form-control form-control-sm bg-dark text-light border-secondary text-center"
-           style="width:58px;">
+           style="width:52px;">
+    <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+            onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)+1">+</button>
     <input type="text" id="map-dice-label"
            class="form-control form-control-sm bg-dark text-light border-secondary"
            placeholder="Label…" style="flex:1;">
+  </div>
+  <div class="d-flex gap-1 mb-2 flex-wrap">
+    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+            onclick="document.getElementById('map-dice-label').value='Initiative'">Initiative</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+            onclick="document.getElementById('map-dice-label').value='Attack'">Attack</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+            onclick="document.getElementById('map-dice-label').value='Saving Throw'">Saving Throw</button>
   </div>
 
   <!-- Roll button -->
@@ -806,6 +838,7 @@ function _ctrlOpenSheet(tok) {
 }
 
 function attachDrag(el, tokenId) {
+  // Mouse tooltip (unchanged)
   el.addEventListener('mouseenter', e => {
     if (!activeDrag) showTooltip(e, currentTokens[tokenId] || {});
   });
@@ -822,7 +855,10 @@ function attachDrag(el, tokenId) {
 
   let _ctrlOnDown = false;
   let _startCol, _startRow;
-  let _lastDown = 0;
+  let _lastDown  = 0;
+  let _lpTimer   = null;  // long-press tooltip timer (touch)
+  let _downPos   = null;  // pointer coords at touchstart
+  let _hasMoved  = false; // true once finger moves >8px
 
   el.addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -832,12 +868,15 @@ function attachDrag(el, tokenId) {
     const now = Date.now();
     const isDbl = (now - _lastDown) < 300;
     _lastDown = now;
+    // Double-click (mouse) or double-tap (touch) opens character sheet
     _ctrlOnDown = e.ctrlKey || isDbl;
 
     const gridRect = document.getElementById('map-grid').getBoundingClientRect();
     const tok = currentTokens[tokenId] || { col: 0, row: 0 };
-    _startCol = tok.col;
-    _startRow = tok.row;
+    _startCol  = tok.col;
+    _startRow  = tok.row;
+    _hasMoved  = false;
+    _downPos   = { clientX: e.clientX, clientY: e.clientY };
 
     activeDrag = { tokenId, el, col: tok.col, row: tok.row, gridRect };
 
@@ -847,10 +886,37 @@ function attachDrag(el, tokenId) {
       el.style.cursor     = 'grabbing';
       el.style.opacity    = '0.85';
     }
+
+    // Touch: show tooltip after 500ms hold without movement
+    if (e.pointerType === 'touch') {
+      clearTimeout(_lpTimer);
+      _lpTimer = setTimeout(() => {
+        if (!_hasMoved) {
+          // Show tooltip above the thumb
+          const ttPos = { clientX: _downPos.clientX, clientY: _downPos.clientY - 120 };
+          showTooltip(ttPos, currentTokens[tokenId] || {});
+          setTimeout(hideTooltip, 3000);
+        }
+      }, 500);
+    }
   });
 
   el.addEventListener('pointermove', e => {
+    // Track movement to cancel long-press and enforce drag threshold on touch
+    if (e.pointerType === 'touch' && _downPos && !_hasMoved) {
+      const dx = e.clientX - _downPos.clientX;
+      const dy = e.clientY - _downPos.clientY;
+      if (Math.sqrt(dx * dx + dy * dy) > 8) {
+        _hasMoved = true;
+        clearTimeout(_lpTimer);
+        _lpTimer = null;
+        hideTooltip();
+      }
+    }
+
     if (!activeDrag || activeDrag.tokenId !== tokenId || !_canMove) return;
+    // Touch: don't move token until finger has clearly moved (prevents accidental moves)
+    if (e.pointerType === 'touch' && !_hasMoved) return;
 
     const col = clampCol(Math.floor((e.clientX - activeDrag.gridRect.left) / CELL_PX));
     const row = clampRow(Math.floor((e.clientY - activeDrag.gridRect.top)  / CELL_PX));
@@ -863,6 +929,8 @@ function attachDrag(el, tokenId) {
   });
 
   function endDrag() {
+    clearTimeout(_lpTimer);
+    _lpTimer = null;
     if (!activeDrag || activeDrag.tokenId !== tokenId) return;
     const { col, row } = activeDrag;
 
@@ -1117,14 +1185,51 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// ── Map pan (click-and-drag on background) ────────────────────────────────────
+// ── Relay presence polling (DM only) ─────────────────────────────────────────
+{% if current_user.is_dm() %}
+function pollRelayPresence() {
+  fetch('/ttrpg/battlemap/relay-presence')
+    .then(r => r.ok ? r.json() : { presence: {} })
+    .then(data => {
+      const presence = data.presence || {};
+      document.querySelectorAll('.presence-dot[data-presence]').forEach(dot => {
+        const name = dot.dataset.presence;
+        const secsAgo = presence.hasOwnProperty(name) ? presence[name] : null;
+        const online = secsAgo !== null && secsAgo < 90;
+        dot.classList.toggle('online', online);
+        dot.title = online
+          ? `Online (${secsAgo < 5 ? 'just now' : Math.round(secsAgo) + 's ago'})`
+          : 'Offline';
+      });
+    })
+    .catch(() => {});
+}
+setInterval(pollRelayPresence, 15000);
+setTimeout(pollRelayPresence, 3000); // initial poll shortly after page load
+{% endif %}
+
+// ── Map pan + pinch-to-zoom (background touch/mouse drag) ────────────────────
 (function() {
   const vp = document.getElementById('map-viewport');
+  const activePointers = new Map(); // pointerId → {x, y}
+  let pinch = null; // { dist, cellPx } — active pinch state
 
   vp.addEventListener('pointerdown', e => {
-    // Only pan on left-button clicks on the viewport background itself
-    // (tokens and fx elements stop propagation or are handled separately)
-    if (e.button !== 0) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size >= 2) {
+      // Second finger: switch to pinch-to-zoom
+      activePan = null;
+      vp.style.cursor = '';
+      const pts = [...activePointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      pinch = { dist, cellPx: CELL_PX };
+      vp.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // Single pointer: pan on background only
+    if (e.button !== 0 && e.pointerType !== 'touch') return;
     if (e.target !== vp && e.target !== document.getElementById('map-grid') &&
         e.target !== document.getElementById('map-lines') &&
         e.target !== document.getElementById('map-bg')) return;
@@ -1135,15 +1240,29 @@ document.addEventListener('visibilitychange', () => {
   });
 
   vp.addEventListener('pointermove', e => {
+    if (activePointers.has(e.pointerId)) {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    if (pinch && activePointers.size >= 2) {
+      const pts = [...activePointers.values()];
+      const newDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (newDist > 0) setCellPx(Math.round(pinch.cellPx * newDist / pinch.dist));
+      return;
+    }
+
     if (!activePan) return;
     vp.scrollLeft = activePan.scrollLeft - (e.clientX - activePan.startX);
     vp.scrollTop  = activePan.scrollTop  - (e.clientY - activePan.startY);
   });
 
-  function endPan() {
-    if (!activePan) return;
-    activePan = null;
-    vp.style.cursor = '';
+  function endPan(e) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinch = null;
+    if (activePointers.size === 0) {
+      activePan = null;
+      vp.style.cursor = '';
+    }
   }
 
   vp.addEventListener('pointerup',     endPan);
@@ -1863,8 +1982,9 @@ function makeDraggable(panel, handle) {
 const MAP_ROLLER_NAME = '{{ roller_name | e }}';
 let _mapDiceSel    = 20;
 let _mapAdvMode    = 'normal';
-let _mapLastRollId = 0;
-let _mapDicePoll   = null;
+let _mapLastRollId      = 0;
+let _mapLastRelayRollId = 0;
+let _mapDicePoll        = null;
 
 function toggleMapDicePanel() {
   const p   = document.getElementById('dice-map-panel');
@@ -2014,6 +2134,36 @@ function _mapRenderEntry(d, prepend) {
   prepend ? feed.insertAdjacentHTML('afterbegin', html) : feed.insertAdjacentHTML('beforeend', html);
 }
 
+function _mapRenderRelayEntry(r, prepend) {
+  if (document.querySelector(`[data-relay-rid="${r.id}"]`)) return;
+  const modMatch = r.breakdown.match(/([+-]\d+)$/);
+  const modVal   = modMatch ? parseInt(modMatch[1]) : 0;
+  const diceStr  = r.breakdown.replace(/[+-]\d+$/, '');
+  const dice     = diceStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  if (!dice.length) dice.push(r.result - modVal || r.result);
+  const exprMatch = r.roll_expr.match(/^(\S+)/);
+  const expr      = exprMatch ? exprMatch[1] : r.roll_expr;
+  const label     = r.roll_expr.slice(expr.length).trim();
+  const sides     = parseInt((expr.match(/d(\d+)/) || ['','20'])[1]);
+  const dh = dice.map(v => {
+    let cls = 'map-die-val';
+    if (sides === 20 && v === 20) cls += ' nat20';
+    else if (sides === 20 && v === 1) cls += ' nat1';
+    return `<span class="${cls}">${v}</span>`;
+  }).join(' ');
+  const mod  = modVal !== 0 ? ` ${modVal >= 0 ? '+' : ''}${modVal}` : '';
+  const html = `<div class="map-feed-entry" data-relay-rid="${r.id}">
+    <span style="color:#4a9eff;font-weight:600;">${_mEsc(r.player_name)}</span>
+    ${label ? `<span style="color:#888;"> — ${_mEsc(label)}</span>` : ''}
+    <span style="color:#555;"> ${_mEsc(expr)}</span>
+    <div>${dh}${mod ? `<span style="color:#888;">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${r.result}</span></div>
+  </div>`;
+  const feed  = document.getElementById('map-dice-feed');
+  const empty = feed.querySelector('p.fx-label');
+  if (empty) empty.remove();
+  prepend ? feed.insertAdjacentHTML('afterbegin', html) : feed.insertAdjacentHTML('beforeend', html);
+}
+
 function mapFetchFeed() {
   fetch('/ttrpg/dice/feed').then(r => r.json()).then(rolls => {
     const feed = document.getElementById('map-dice-feed');
@@ -2021,6 +2171,11 @@ function mapFetchFeed() {
     if (!rolls.length) { feed.innerHTML = '<p class="fx-label">No rolls yet.</p>'; return; }
     rolls.forEach(d => { _mapRenderEntry(d, false); _mapLastRollId = Math.max(_mapLastRollId, d.roll_id); });
   });
+  {% if current_user.is_dm() %}
+  fetch('/ttrpg/battlemap/relay-rolls?since_id=0').then(r => r.json()).then(d => {
+    (d.rolls || []).forEach(r => { _mapRenderRelayEntry(r, false); _mapLastRelayRollId = Math.max(_mapLastRelayRollId, r.id); });
+  }).catch(() => {});
+  {% endif %}
 }
 
 function mapPollFeed() {
@@ -2031,6 +2186,11 @@ function mapPollFeed() {
       _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
     });
   });
+  {% if current_user.is_dm() %}
+  fetch(`/ttrpg/battlemap/relay-rolls?since_id=${_mapLastRelayRollId}`).then(r => r.json()).then(d => {
+    (d.rolls || []).reverse().forEach(r => { _mapRenderRelayEntry(r, true); _mapLastRelayRollId = Math.max(_mapLastRelayRollId, r.id); });
+  }).catch(() => {});
+  {% endif %}
 }
 
 function mapResetDice() {

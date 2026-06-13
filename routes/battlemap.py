@@ -355,6 +355,29 @@ def map_view(map_id):
                            current_vol=current_vol)
 
 
+# ── Relay presence endpoint ──────────────────────────────────────────────────
+
+@battlemap_bp.route('/relay-presence')
+@login_required
+def relay_presence():
+    if not current_user.is_dm():
+        from flask import abort
+        abort(403)
+    presence = relay_broadcaster.get_presence()
+    return jsonify({'presence': presence})
+
+
+# ── Relay roll feed proxy ─────────────────────────────────────────────────────
+
+@battlemap_bp.route('/relay-rolls')
+@login_required
+@dm_required
+def relay_rolls():
+    since_id = request.args.get('since_id', 0, type=int)
+    rolls = relay_broadcaster.get_relay_rolls(since_id)
+    return jsonify({'rolls': rolls})
+
+
 # ── State poll endpoint ───────────────────────────────────────────────────────
 
 @battlemap_bp.route('/<int:map_id>/state')

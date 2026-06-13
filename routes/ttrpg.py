@@ -243,6 +243,7 @@ def character_condition(character_id):
             db.session.commit()
 
     conds = [c.condition_name for c in char.conditions]
+    relay_broadcaster.broadcast_condition_update(conds, player_name=char.name)
     return jsonify({'ok': True, 'conditions': conds})
 
 

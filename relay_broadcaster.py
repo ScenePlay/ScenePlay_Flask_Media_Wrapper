@@ -129,6 +129,26 @@ def broadcast_token_health(token_id, hp_current, hp_max):
     _fire(_go)
 
 
+def broadcast_condition_update(conditions, token_id=None, player_name=None):
+    """POST /api/v1/session/{id}/condition-update — push condition list change via SSE."""
+    cfg = _active()
+    if not cfg:
+        return
+    body = {'conditions': conditions}
+    if token_id is not None:
+        body['token_id'] = str(token_id)
+    if player_name is not None:
+        body['player_name'] = player_name
+
+    def _go():
+        try:
+            _post(f'/api/v1/session/{cfg["session_id"]}/condition-update', body, cfg)
+        except Exception as e:
+            log.warning('relay broadcast_condition_update failed: %s', e)
+
+    _fire(_go)
+
+
 def _portrait_data(char):
     """Return (filename, base64_data) for the character portrait, or (None, None)."""
     if not char.portrait_path:
@@ -286,6 +306,39 @@ def push_character(char):
             log.warning('push_character failed: %s', e)
 
     _fire(_go)
+
+
+def get_relay_rolls(since_id=0):
+    """GET /api/v1/session/{id}/rolls — fetch relay roll log entries newer than since_id."""
+    cfg = _active()
+    if not cfg:
+        return []
+    try:
+        import requests
+        url = cfg['url'].rstrip('/') + f'/api/v1/session/{cfg["session_id"]}/rolls'
+        resp = requests.get(url, params={'since_id': since_id},
+                            headers={'X-Relay-Secret': cfg['secret']}, timeout=5)
+        if resp.ok:
+            return resp.json().get('rolls', [])
+    except Exception as e:
+        log.warning('get_relay_rolls failed: %s', e)
+    return []
+
+
+def get_presence():
+    """GET /api/v1/session/{id}/presence — {player_name: seconds_since_last_seen}."""
+    cfg = _active()
+    if not cfg:
+        return {}
+    try:
+        import requests
+        url = cfg['url'].rstrip('/') + f'/api/v1/session/{cfg["session_id"]}/presence'
+        resp = requests.get(url, headers={'X-Relay-Secret': cfg['secret']}, timeout=5)
+        if resp.ok:
+            return resp.json().get('presence', {})
+    except Exception as e:
+        log.warning('get_presence failed: %s', e)
+    return {}
 
 
 def find_token_id(entity_type, entity_id):

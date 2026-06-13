@@ -319,8 +319,12 @@
           <!-- Modifier row -->
           <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <label class="small text-muted mb-0">Mod</label>
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+                    onclick="var i=document.getElementById('dice-modifier');i.value=(parseInt(i.value)||0)-1">&#8722;</button>
             <input type="number" id="dice-modifier" value="0"
-                   class="form-control form-control-sm text-center" style="width:68px;">
+                   class="form-control form-control-sm text-center" style="width:58px;">
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+                    onclick="var i=document.getElementById('dice-modifier');i.value=(parseInt(i.value)||0)+1">+</button>
             {% set pb = ((char.level - 1) // 4) + 2 %}
             {% for label, val in [
                 ('STR', char.modifier(char.str_val)),
@@ -345,6 +349,14 @@
             <button class="btn btn-ttrpg" onclick="doRoll()">&#127922; Roll</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="resetDice()" title="Reset to 1d20 +0">&#8635;</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="clearDiceFeed()" title="Clear feed">&#128465;</button>
+          </div>
+          <div class="d-flex gap-1 mt-1 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+                    onclick="document.getElementById('dice-label').value='Initiative'">Initiative</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+                    onclick="document.getElementById('dice-label').value='Attack'">Attack</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
+                    onclick="document.getElementById('dice-label').value='Saving Throw'">Saving Throw</button>
           </div>
 
           <!-- Local result display -->
