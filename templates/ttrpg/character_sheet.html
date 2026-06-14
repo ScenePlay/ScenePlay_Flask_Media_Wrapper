@@ -272,9 +272,9 @@
                 data-sdesc="{{ (lib.description[:280] if lib and lib.description else cs.notes) | e }}"
                 data-sdesc-long="{{ '1' if lib and lib.description and lib.description | length > 280 else '0' }}"
                 style="display:inline-block;font-size:.75rem;padding:2px 8px;border-radius:10px;
-                       background:color-mix(in srgb, #8888ff 12%, transparent);
-                       border:1px solid color-mix(in srgb, #8888ff 40%, transparent);
-                       color:#aaaaff;cursor:help;white-space:nowrap;">
+                       background:color-mix(in srgb, #7755cc 12%, transparent);
+                       border:1px solid color-mix(in srgb, #7755cc 50%, transparent);
+                       color:#4b2b96;cursor:help;white-space:nowrap;">
             &#10024; {{ cs.spell_name }}
             <span style="font-size:.68rem;opacity:.75;">{{ lvl_label }}</span>
           </span>
@@ -294,8 +294,14 @@
         <div style="flex:1 1 320px;">
           <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <label class="small text-muted mb-0">Count</label>
-            <input type="number" id="dice-count" value="1" min="1" max="20"
-                   class="form-control form-control-sm text-center" style="width:58px;">
+            <div class="d-flex align-items-center" style="gap:2px;">
+              <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+                      onclick="stepDiceCount(-1)" style="line-height:1.6;">&#8722;</button>
+              <input type="number" id="dice-count" value="1" min="1" max="20"
+                     class="form-control form-control-sm text-center" style="width:52px;">
+              <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+                      onclick="stepDiceCount(1)" style="line-height:1.6;">&#43;</button>
+            </div>
             <label class="small text-muted mb-0 ms-1">Die</label>
             {% for s in [4,6,8,10,12,20,100,2] %}
             <button class="btn btn-sm btn-outline-secondary dice-btn" data-sides="{{ s }}"
@@ -1313,7 +1319,7 @@
                   {% endif %}
                   {% if lib and lib.concentration %}
                   <span style="font-size:.68rem;padding:1px 5px;border-radius:8px;
-                               border:1px solid #4466cc;color:#88aaff;">Conc</span>
+                               border:1px solid #2244aa;color:#1a3488;">Conc</span>
                   {% endif %}
                   {% if lib and lib.ritual %}
                   <span style="font-size:.68rem;padding:1px 5px;border-radius:8px;
@@ -1501,7 +1507,7 @@
                 <div class="d-flex gap-3 small text-muted mt-1 flex-wrap">
                   {% if my_class.saving_throws %}<span>Saves: <span style="color:var(--ttrpg-accent);">{{ my_class.saving_throws }}</span></span>{% endif %}
                   {% if my_class.spellcasting_ability %}<span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
-                    background:color-mix(in srgb, #7c5cbf 18%, transparent);border:1px solid #7c5cbf;color:#c0aaff;">
+                    background:color-mix(in srgb, #7c5cbf 15%, transparent);border:1px solid #7c5cbf;color:#4b2b8c;">
                     {{ my_class.spellcasting_ability }}</span>{% endif %}
                 </div>
                 {% if my_class.skill_choices %}
@@ -2493,6 +2499,11 @@ function toggleDicePanel() {
   else       { stopDicePoll(); }
 }
 
+function stepDiceCount(delta) {
+  const el = document.getElementById('dice-count');
+  el.value = Math.min(20, Math.max(1, (parseInt(el.value) || 1) + delta));
+}
+
 function selectDie(s) {
   _diceSelected = s;
   document.querySelectorAll('.dice-btn').forEach(b => {
@@ -2651,7 +2662,7 @@ function renderRelayFeedEntry(r, prepend) {
   if (r.rolled_at && _seenRolledAts.has(_rollKey(r.rolled_at))) return;
   if (r.rolled_at) _seenRolledAts.add(_rollKey(r.rolled_at));
   const html = `<div class="feed-entry" data-relay-rid="${r.id}">
-    <span style="color:#4a9eff;font-weight:600;">&#127760; ${_escH(r.player_name)}</span>
+    <span style="color:var(--ttrpg-accent);font-weight:600;">&#127760; ${_escH(r.player_name)}</span>
     <span class="expr"> ${_escH(r.roll_expr)}</span>
     <div><span style="opacity:.6;">&#8594;</span> <span class="tot">${r.result}</span></div>
   </div>`;
@@ -2878,7 +2889,7 @@ function _refCard(key, it) {
     }
     case 'classes': {
       const spellBadge = it.spellcasting_ability
-        ? `<span style="font-size:.68rem;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,#7c5cbf 18%,transparent);border:1px solid #7c5cbf;color:#c0aaff;">${_escH(it.spellcasting_ability)}</span>`
+        ? `<span style="font-size:.68rem;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,#7c5cbf 15%,transparent);border:1px solid #7c5cbf;color:#4b2b8c;">${_escH(it.spellcasting_ability)}</span>`
         : '';
       const subs = (it.subclasses || '').split(',').filter(Boolean).slice(0, 4);
       return `<div style="${base}">

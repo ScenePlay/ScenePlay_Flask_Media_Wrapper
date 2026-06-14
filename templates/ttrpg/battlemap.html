@@ -145,7 +145,7 @@
   #tt-portrait    { width: 114px; height: 114px; object-fit: cover; border-radius: 6px;
                     border: 2px solid var(--ttrpg-accent); flex-shrink: 0; display: none; }
   #tt-body        { flex: 1; min-width: 0; }
-  #tt-hp-bar-wrap { height: 5px; background: #333; border-radius: 3px; margin-bottom: 6px; }
+  #tt-hp-bar-wrap { height: 5px; background: rgba(0,0,0,0.25); border-radius: 3px; margin-bottom: 6px; }
   #tt-hp-bar      { height: 100%; border-radius: 3px; transition: width .3s; }
 
   .token-dead {
@@ -180,7 +180,7 @@
   .fx-close-btn {
     background: none;
     border: none;
-    color: #aaa;
+    color: color-mix(in srgb, var(--ttrpg-text) 70%, transparent);
     cursor: pointer;
     font-size: .95rem;
     padding: 0;
@@ -191,24 +191,24 @@
     align-items: center;
     justify-content: center;
   }
-  .fx-close-btn:hover, .fx-close-btn:active { color: #fff; }
+  .fx-close-btn:hover, .fx-close-btn:active { color: var(--ttrpg-accent); }
   .fx-shape-btn {
     flex: 1;
     padding: 8px 0;
     background: var(--ttrpg-surface);
-    border: 1px solid #555;
+    border: 1px solid var(--sp-border);
     border-radius: 5px;
-    color: #ccc;
+    color: var(--ttrpg-text);
     cursor: pointer;
     font-size: 1rem;
     transition: background .15s, border-color .15s;
   }
   .fx-shape-btn:hover  { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
   .fx-shape-btn.active { background: rgba(201,168,76,.18); border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
-  .fx-label  { font-size: .75rem; color: #aaa; }
+  .fx-label  { font-size: .75rem; color: color-mix(in srgb, var(--ttrpg-text) 72%, transparent); }
   .fx-color-input {
     width: 36px; height: 24px;
-    padding: 1px; border: 1px solid #555; border-radius: 3px;
+    padding: 1px; border: 1px solid var(--sp-border); border-radius: 3px;
     background: none; cursor: pointer;
   }
 
@@ -557,7 +557,7 @@
            style="width:62px;"
            oninput="fxSizeFt = Math.max(5, parseInt(this.value)||20); updateFxCellLabel()">
     <span class="fx-label">ft</span>
-    <span id="fx-cell-label" class="fx-label" style="color:#888;">= 4 cells</span>
+    <span id="fx-cell-label" class="fx-label">= 4 cells</span>
   </div>
 
   <!-- Preset palette -->
@@ -594,7 +594,7 @@
            oninput="fxLabel = this.value">
   </div>
 
-  <hr style="border-color:#333;margin:6px 0;">
+  <hr style="border-color:var(--sp-border);margin:6px 0;">
 
   <!-- Draw mode + clear -->
   <div class="d-flex gap-2 mb-2">
@@ -605,7 +605,7 @@
   </div>
 
   <!-- Cloud of War -->
-  <hr style="border-color:#333;margin:8px 0;">
+  <hr style="border-color:var(--sp-border);margin:8px 0;">
   <div class="fx-label mb-1" style="letter-spacing:.05em;">&#9608; Cloud of War</div>
   <div class="fx-label mb-1" style="color:#666;font-size:.68rem;">Drag to paint &bull; Eraser to uncover</div>
   <div class="d-flex gap-2 mb-1">
@@ -619,7 +619,7 @@
 
   <!-- Selected effect controls -->
   <div id="fx-selected" style="display:none;">
-    <hr style="border-color:#333;margin:6px 0;">
+    <hr style="border-color:var(--sp-border);margin:6px 0;">
     <div class="fx-label mb-1">Selected</div>
     <div id="fx-selected-name"
          style="color:var(--ttrpg-accent);font-weight:600;font-size:.8rem;
@@ -651,9 +651,15 @@
   <!-- Count + Mode -->
   <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
     <label class="fx-label mb-0">Count</label>
-    <input type="number" id="map-dice-count" value="1" min="1" max="20"
-           class="form-control form-control-sm bg-dark text-light border-secondary text-center"
-           style="width:52px;">
+    <div class="d-flex align-items-center" style="gap:2px;">
+      <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+              onclick="stepMapDiceCount(-1)" style="line-height:1.6;">&#8722;</button>
+      <input type="number" id="map-dice-count" value="1" min="1" max="20"
+             class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+             style="width:52px;">
+      <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+              onclick="stepMapDiceCount(1)" style="line-height:1.6;">&#43;</button>
+    </div>
     <div class="btn-group btn-group-sm ms-1">
       <button id="map-adv-normal" class="btn btn-sm btn-outline-secondary"
               onclick="mapSetAdvMode('normal')">Normal</button>
@@ -671,7 +677,7 @@
             onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)-1">&#8722;</button>
     <input type="number" id="map-dice-mod" value="0"
            class="form-control form-control-sm bg-dark text-light border-secondary text-center"
-           style="width:52px;">
+           style="width:72px;">
     <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
             onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)+1">+</button>
     <input type="text" id="map-dice-label"
@@ -701,7 +707,7 @@
   </div>
 
   <!-- Shared feed -->
-  <hr style="border-color:#333;margin:6px 0;">
+  <hr style="border-color:var(--sp-border);margin:6px 0;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
     <span class="fx-label">Roll Feed</span>
     <button class="fx-close-btn" style="font-size:.7rem;" onclick="clearMapDiceFeed()">&#128465;</button>
@@ -719,12 +725,12 @@
       <div id="tt-name" style="font-weight:bold;color:var(--ttrpg-accent);margin-bottom:4px;font-size:.85rem;"></div>
       <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:3px;">
         <span id="tt-hp"></span>
-        <span id="tt-hp-pct" style="color:#aaa;"></span>
+        <span id="tt-hp-pct" style="color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);"></span>
       </div>
       <div id="tt-hp-bar-wrap"><div id="tt-hp-bar"></div></div>
-      <div id="tt-speed" style="font-size:.73rem;color:#aaa;margin-bottom:3px;"></div>
+      <div id="tt-speed" style="font-size:.73rem;color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);margin-bottom:3px;"></div>
       <div id="tt-conditions" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;"></div>
-      <div id="tt-skills" style="color:#aaa;font-size:.73rem;line-height:1.7;"></div>
+      <div id="tt-skills" style="color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);font-size:.73rem;line-height:1.7;"></div>
     </div>
   </div>
 </div>
@@ -2032,6 +2038,11 @@ function mapSelectDie(s) {
   mapSetAdvMode(_mapAdvMode);
 }
 
+function stepMapDiceCount(delta) {
+  const el = document.getElementById('map-dice-count');
+  el.value = Math.min(20, Math.max(1, (parseInt(el.value) || 1) + delta));
+}
+
 function mapSetAdvMode(mode) {
   _mapAdvMode = mode;
   const cfg = {
@@ -2105,9 +2116,9 @@ function _mapShowResult(d) {
     dh = d.dice.map(v => _mapDieHtml(v, sides, 'normal', 0, 0)).join(' ');
   }
   const mod = d.modifier !== 0 ? ` ${d.modifier > 0 ? '+' : ''}${d.modifier}` : '';
-  const lbl = d.label ? `<div style="color:#aaa;font-size:.7rem;">${_mEsc(d.label)}</div>` : '';
+  const lbl = d.label ? `<div style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);font-size:.7rem;">${_mEsc(d.label)}</div>` : '';
   document.getElementById('map-dice-result-inner').innerHTML =
-    `${lbl}${_mapAdvLabel(d.adv_mode)}<div>${dh}${mod ? `<span style="color:#aaa;margin-left:3px;">${mod}</span>` : ''} <span style="opacity:.5;">&#8594;</span> <span style="color:var(--ttrpg-accent);font-weight:bold;font-size:1rem;">${d.total}</span></div>`;
+    `${lbl}${_mapAdvLabel(d.adv_mode)}<div>${dh}${mod ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);margin-left:3px;">${mod}</span>` : ''} <span style="opacity:.5;">&#8594;</span> <span style="color:var(--ttrpg-accent);font-weight:bold;font-size:1rem;">${d.total}</span></div>`;
   document.getElementById('map-dice-result').style.display = '';
 }
 
@@ -2126,9 +2137,9 @@ function _mapRenderEntry(d, prepend) {
                                   : ' <span style="color:#fd7e14;font-size:.65rem;">&#9660;</span>') : '';
   const html = `<div class="map-feed-entry" data-rid="${d.roll_id}">
     <span style="color:var(--ttrpg-accent);font-weight:600;">${_mEsc(d.char_name)}</span>
-    ${d.label ? `<span style="color:#888;"> — ${_mEsc(d.label)}</span>` : ''}
-    <span style="color:#555;"> ${_mEsc(d.expression)}</span>${modeTag}
-    <div>${dh}${mod ? `<span style="color:#888;">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${d.total}</span></div>
+    ${d.label ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);"> — ${_mEsc(d.label)}</span>` : ''}
+    <span style="color:var(--ttrpg-text);"> ${_mEsc(d.expression)}</span>${modeTag}
+    <div>${dh}${mod ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${d.total}</span></div>
   </div>`;
   const feed  = document.getElementById('map-dice-feed');
   const empty = feed.querySelector('p.fx-label');
@@ -2157,10 +2168,10 @@ function _mapRenderRelayEntry(r, prepend) {
   }).join(' ');
   const mod  = modVal !== 0 ? ` ${modVal >= 0 ? '+' : ''}${modVal}` : '';
   const html = `<div class="map-feed-entry" data-relay-rid="${r.id}">
-    <span style="color:#4a9eff;font-weight:600;">${_mEsc(r.player_name)}</span>
-    ${label ? `<span style="color:#888;"> — ${_mEsc(label)}</span>` : ''}
-    <span style="color:#555;"> ${_mEsc(expr)}</span>
-    <div>${dh}${mod ? `<span style="color:#888;">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${r.result}</span></div>
+    <span style="color:var(--ttrpg-accent);font-weight:600;">&#127760; ${_mEsc(r.player_name)}</span>
+    ${label ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);"> — ${_mEsc(label)}</span>` : ''}
+    <span style="color:var(--ttrpg-text);"> ${_mEsc(expr)}</span>
+    <div>${dh}${mod ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);">${mod}</span>` : ''} <span style="opacity:.4;">&#8594;</span> <span class="tot">${r.result}</span></div>
   </div>`;
   const feed  = document.getElementById('map-dice-feed');
   const empty = feed.querySelector('p.fx-label');

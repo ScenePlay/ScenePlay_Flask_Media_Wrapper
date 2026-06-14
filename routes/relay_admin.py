@@ -211,46 +211,12 @@ def clear_rolls():
     from extensions import db
     from models.tblRollLog import tblRollLog
     from models.ttrpg import tblDiceRolls
-
-    # 1. Clear local tables and set watermark
     watermark = datetime.now(timezone.utc).isoformat()
     appsettingSet('relay_roll_cleared_at', watermark)
     tblDiceRolls.query.delete()
     tblRollLog.query.delete()
     db.session.commit()
-
-    # 2. Create a new relay session (the only way to clear relay roll history)
-    cfg = _relay_cfg()
-    if cfg['url'] and cfg['secret'] and cfg['enabled'] == '1':
-        try:
-            resp = requests.post(
-                cfg['url'].rstrip('/') + '/api/v1/session/create',
-                headers={'X-Relay-Secret': cfg['secret'], 'Content-Type': 'application/json'},
-                json={},
-                timeout=8,
-            )
-            resp.raise_for_status()
-            data       = resp.json()
-            code       = data.get('code', '')
-            session_id = data.get('session_id', '')
-            if code and session_id:
-                appsettingSet('relay_session_code', code)
-                appsettingSet('relay_session_id',   session_id)
-                import relay_broadcaster
-                relay_broadcaster.push_all_characters()
-                flash(
-                    f'Roll history cleared. New relay session created — new join code: '
-                    f'<strong>{code}</strong>. Players will need to re-join.',
-                    'success'
-                )
-            else:
-                flash('Local roll history cleared. Could not create new relay session (unexpected response).', 'warning')
-        except Exception as e:
-            log.warning('clear_rolls relay session error: %s', e)
-            flash(f'Local roll history cleared. Could not reach relay to reset session: {e}', 'warning')
-    else:
-        flash('Local roll history cleared. Relay is disabled — relay data was not cleared.', 'success')
-
+    flash('Local roll history cleared. The receiver will ignore relay rolls made before this point.', 'success')
     return redirect(url_for('relay_admin_bp.status'))
 
 

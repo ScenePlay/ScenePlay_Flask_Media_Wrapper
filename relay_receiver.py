@@ -157,6 +157,24 @@ def _poll():
         relay_total = roll.get('result', 0)
         ts_norm = (rolled_at[:10] + ' ' + rolled_at[11:19]
                    if rolled_at and 'T' in rolled_at else (rolled_at or '')[:19])
+
+        # Parse expr_base and label out of relay_expr.
+        # Portal format: "{count}d{sides}{mod} [{mode}] {label}"
+        # e.g. "2d6+3 [advantage] Attack" → expr_base="2d6+3", label="Attack"
+        import re as _re
+        _m = _re.match(
+            r'^(\d*d\d+(?:[+-]\d+)?)'          # dice expression
+            r'(?:\s*\[(?:advantage|disadvantage)\])?'  # optional mode tag
+            r'(?:\s+(.+))?$',                   # optional label
+            relay_expr, _re.IGNORECASE
+        )
+        if _m:
+            expr_base = _m.group(1) or ''
+            roll_label = (_m.group(2) or '').strip()
+        else:
+            expr_base  = relay_expr.split()[0] if relay_expr else ''
+            roll_label = ''
+
         # Primary dedup: normalized timestamp + char_name
         existing_dr = tblDiceRolls.query.filter_by(
             char_name = player_name,
@@ -164,7 +182,6 @@ def _poll():
         ).first()
         # Fallback dedup: same char, same result, same base expression (catches ±1s clock skew)
         if not existing_dr:
-            expr_base = relay_expr.split()[0] if relay_expr else ''
             existing_dr = (tblDiceRolls.query
                 .filter_by(char_name=player_name, total=relay_total)
                 .filter(tblDiceRolls.expression == expr_base)
@@ -178,7 +195,7 @@ def _poll():
             db.session.add(tblDiceRolls(
                 char_name  = player_name,
                 expression = expr_base or relay_expr,
-                label      = '',
+                label      = roll_label,
                 dice_json  = _json.dumps(dice_list),
                 modifier   = 0,
                 total      = relay_total,

@@ -150,8 +150,9 @@
         <div>
           <span class="fw-bold">&#127922; Roll History Reset</span>
           <div class="small text-muted mt-1">
-            Clears local roll history, creates a new relay session to wipe the relay roll log,
-            and re-pushes all characters. Players will need to re-join with the new join code.
+            Clears local roll history and sets a watermark so the receiver ignores relay rolls
+            made before this moment. New rolls made after clicking will sync normally.
+            To also clear the relay's roll log, use <strong>New Session</strong> above.
           </div>
           {% if cfg.roll_cleared_at %}
           <div class="small text-muted mt-1">
@@ -160,7 +161,7 @@
           {% endif %}
         </div>
         <form method="post" action="{{ url_for('relay_admin_bp.clear_rolls') }}"
-              onsubmit="return confirm('This will clear local roll history AND create a new relay session, which clears the relay roll log.\n\nPlayers will need to re-join with the new code.\n\nContinue?');">
+              onsubmit="return confirm('Clear all local roll history? The receiver will ignore old relay rolls after this point.');">
           <button class="btn btn-sm btn-outline-danger">&#128465; Clear Roll History</button>
         </form>
       </div>
