@@ -132,9 +132,10 @@ def generate_code():
         appsettingSet('relay_session_code', code)
         appsettingSet('relay_session_id',   session_id)
 
-        # Push all current party characters into the fresh session immediately
+        # Push all current party characters and D&D library into the fresh session immediately
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
+        relay_broadcaster.push_library()
 
         flash(f'New session created — join code: {code}. Party pushed to relay.')
     except Exception as e:
@@ -150,7 +151,8 @@ def generate_code():
 def sync_characters():
     import relay_broadcaster
     relay_broadcaster.push_all_characters()
-    flash('Party characters pushed to relay.')
+    relay_broadcaster.push_library()
+    flash('Party characters and library pushed to relay.')
     return redirect(url_for('relay_admin_bp.status'))
 
 

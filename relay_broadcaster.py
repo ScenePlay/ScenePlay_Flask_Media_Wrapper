@@ -196,7 +196,8 @@ def _char_to_payload(char):
             for r in sorted(char.resources, key=lambda x: x.order_by)
         ],
         'inventory': [
-            {'name': i.item_name, 'qty': i.quantity, 'equipped': bool(i.equipped)}
+            {'name': i.item_name, 'qty': i.quantity, 'weight': i.weight or '',
+             'notes': i.notes or '', 'equipped': bool(i.equipped)}
             for i in sorted(char.inventory, key=lambda x: x.order_by)
         ],
         'feats': [
@@ -206,36 +207,58 @@ def _char_to_payload(char):
         'conditions': [c.condition_name for c in char.conditions],
         'weapons': [
             {
-                'name':         w.weapon_name,
-                'damage_dice':  w.damage_dice  or '',
-                'damage_type':  w.damage_type  or '',
-                'damage_bonus': w.damage_bonus or 0,
-                'attack_bonus': w.attack_bonus or 0,
-                'equipped':     bool(w.equipped),
+                'name':                  w.weapon_name,
+                'category':              w.weapon_category  or '',
+                'range':                 w.weapon_range     or '',
+                'damage_dice':           w.damage_dice      or '',
+                'damage_type':           w.damage_type      or '',
+                'two_handed_damage_dice': w.two_handed_damage_dice or '',
+                'two_handed_damage_type': w.two_handed_damage_type or '',
+                'range_normal':          w.range_normal     or 0,
+                'range_long':            w.range_long       or 0,
+                'properties':            w.properties       or '',
+                'damage_bonus':          w.damage_bonus     or 0,
+                'attack_bonus':          w.attack_bonus     or 0,
+                'notes':                 w.notes            or '',
+                'equipped':              bool(w.equipped),
             }
             for w in sorted(char.weapons, key=lambda x: x.order_by)
         ],
         'armor': [
             {
-                'name':      a.armor_name,
-                'category':  a.armor_category or '',
-                'ac_base':   a.armor_class_base,
-                'ac_bonus':  a.ac_bonus or 0,
-                'dex_bonus': bool(a.dex_bonus),
-                'equipped':  bool(a.equipped),
-                'is_shield': a.armor_category == 'Shield',
+                'name':          a.armor_name,
+                'category':      a.armor_category   or '',
+                'ac_base':       a.armor_class_base,
+                'ac_bonus':      a.ac_bonus          or 0,
+                'dex_bonus':     bool(a.dex_bonus),
+                'max_dex_bonus': a.max_dex_bonus,
+                'notes':         a.notes             or '',
+                'equipped':      bool(a.equipped),
+                'is_shield':     a.armor_category == 'Shield',
             }
             for a in sorted(char.armor, key=lambda x: x.order_by)
         ],
         'spells': [
             {
-                'name':     cs.spell_name,
-                'level':    cs.spell_level,
-                'school':   cs.school or '',
-                'prepared': bool(cs.prepared),
-                'notes':    cs.notes or '',
+                'name':         cs.spell_name,
+                'level':        cs.spell_level,
+                'school':       cs.school        or '',
+                'casting_time': (cs.lib_spell.casting_time if cs.lib_spell else '') or '',
+                'range':        (cs.lib_spell.range_text   if cs.lib_spell else '') or '',
+                'components':   (cs.lib_spell.components   if cs.lib_spell else '') or '',
+                'duration':     (cs.lib_spell.duration     if cs.lib_spell else '') or '',
+                'concentration': bool(cs.lib_spell.concentration if cs.lib_spell else False),
+                'ritual':       bool(cs.lib_spell.ritual   if cs.lib_spell else False),
+                'classes':      (cs.lib_spell.classes_text if cs.lib_spell else '') or '',
+                'description':  (cs.lib_spell.description  if cs.lib_spell else '') or '',
+                'prepared':     bool(cs.prepared),
+                'notes':        cs.notes         or '',
             }
             for cs in sorted(char.spells, key=lambda x: (x.spell_level, x.order_by))
+        ],
+        'notes': [
+            {'text': n.note_text, 'created_at': n.created_at}
+            for n in sorted(char.notes, key=lambda x: x.created_at)
         ],
     }
     user = char.user
@@ -304,6 +327,100 @@ def push_character(char):
             _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
         except Exception as e:
             log.warning('push_character failed: %s', e)
+
+    _fire(_go)
+
+
+def push_character_and_broadcast(char):
+    """Push a character update then trigger a sheet-updated SSE event on the relay portal."""
+    cfg = _active()
+    if not cfg:
+        return
+    payload = {'characters': [_char_to_payload(char)]}
+    player_name = char.name
+
+    def _go():
+        try:
+            _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
+            _post(f'/api/v1/session/{cfg["session_id"]}/character-sheet-broadcast',
+                  {'player_name': player_name}, cfg)
+        except Exception as e:
+            log.warning('push_character_and_broadcast failed: %s', e)
+
+    _fire(_go)
+
+
+def push_library():
+    """Push all D&D library tables to relay so portal can search them during character edit."""
+    cfg = _active()
+    if not cfg:
+        return
+
+    from models.ttrpg import (tblSpellsLibrary, tblFeatsLibrary, tblWeaponsLibrary,
+                               tblArmorLibrary, tblEquipmentLibrary, tblSkillsLibrary,
+                               tblRacesLibrary, tblClassesLibrary)
+
+    payload = {
+        'spells': [
+            {'name': s.name, 'level': s.level, 'school': s.school or '',
+             'casting_time': s.casting_time or '', 'range': s.range_text or '',
+             'components': s.components or '', 'duration': s.duration or '',
+             'concentration': bool(s.concentration), 'ritual': bool(s.ritual),
+             'description': s.description or '', 'classes': s.classes_text or ''}
+            for s in tblSpellsLibrary.query.order_by(
+                tblSpellsLibrary.level, tblSpellsLibrary.name).all()
+        ],
+        'feats': [
+            {'name': f.name, 'prerequisites': f.prerequisites or '',
+             'description': f.description or ''}
+            for f in tblFeatsLibrary.query.order_by(tblFeatsLibrary.name).all()
+        ],
+        'weapons': [
+            {'name': w.name, 'category': w.weapon_category or '',
+             'range': w.weapon_range or '', 'damage_dice': w.damage_dice or '',
+             'damage_type': w.damage_type or '',
+             'two_handed_damage_dice': w.two_handed_damage_dice or '',
+             'properties': w.properties or ''}
+            for w in tblWeaponsLibrary.query.order_by(tblWeaponsLibrary.name).all()
+        ],
+        'armor': [
+            {'name': a.name, 'category': a.armor_category or '',
+             'ac_base': a.armor_class_base, 'dex_bonus': bool(a.dex_bonus),
+             'max_dex_bonus': a.max_dex_bonus, 'str_minimum': a.str_minimum,
+             'stealth_disadvantage': bool(a.stealth_disadvantage)}
+            for a in tblArmorLibrary.query.order_by(tblArmorLibrary.name).all()
+        ],
+        'equipment': [
+            {'name': e.name, 'category': e.category or '',
+             'subcategory': e.subcategory or '', 'weight': e.weight,
+             'cost': e.cost or '', 'description': e.description or ''}
+            for e in tblEquipmentLibrary.query.order_by(tblEquipmentLibrary.name).all()
+        ],
+        'skills': [
+            {'name': sk.name, 'ability': sk.ability_score or '',
+             'description': sk.description or ''}
+            for sk in tblSkillsLibrary.query.order_by(tblSkillsLibrary.name).all()
+        ],
+        'races': [
+            {'name': r.name, 'speed': r.speed, 'size': r.size or '',
+             'ability_bonuses': r.ability_bonuses or '', 'traits': r.traits_text or ''}
+            for r in tblRacesLibrary.query.order_by(tblRacesLibrary.name).all()
+        ],
+        'classes': [
+            {'name': c.name, 'hit_die': c.hit_die,
+             'saving_throws': c.saving_throws or '',
+             'spellcasting_ability': c.spellcasting_ability or '',
+             'description': c.description or ''}
+            for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()
+        ],
+    }
+
+    def _go():
+        try:
+            _post(f'/api/v1/session/{cfg["session_id"]}/library', payload, cfg)
+            log.info('push_library: pushed library data to relay')
+        except Exception as e:
+            log.warning('push_library failed: %s', e)
 
     _fire(_go)
 
