@@ -29,8 +29,17 @@ else
   table=$(echo $6)
 fi
 
-git clone https://github.com/yt-dlp/yt-dlp.git
-git -C yt-dlp pull
+# Ensure yt-dlp is available: clone once, update if we can, but never proceed without it
+if [ -d "yt-dlp/.git" ]; then
+  git -C yt-dlp pull || echo "$0: warning: could not update yt-dlp, using existing copy" >&2
+else
+  git clone https://github.com/yt-dlp/yt-dlp.git || { echo "$0: ERROR: failed to clone yt-dlp" >&2; exit 1; }
+fi
+
+if [ ! -f "yt-dlp/yt-dlp.sh" ]; then
+  echo "$0: ERROR: yt-dlp/yt-dlp.sh not found - cannot download (check network/git on this server)" >&2
+  exit 1
+fi
 
 if [ "$mediaType" = "mp3" ]; then
   bash yt-dlp/./yt-dlp.sh -i -x --audio-format $mediaType --output $name $http --proxy ""

@@ -39,8 +39,10 @@ def home():
     scenes = get_Scenes()
     campaigns = CRUD_tblCampaigns([], "Selected")
     campaignRow = appsettingGetCampaignSelected()
-    campaignSelected = campaignRow[0][0]
-    campaignSelectedInt = int(campaignSelected) 
+    try:
+        campaignSelectedInt = int(campaignRow[0][0])
+    except (IndexError, TypeError, ValueError):
+        campaignSelectedInt = 0
     #print(campaignSelectedInt)
     # if request.method == 'POST':
     #     if request.form['submit'] == 'Next Song':
@@ -263,7 +265,8 @@ def killqueue():
 def isAlive():
 
     rowWatchManage = CRUD_tblAppSettings(['WatchManage'],"byName")
-    return jsonify({'isAlive': 'true', 'pid': arr[0], 'WatchManage': rowWatchManage[0][2]})
+    watchManage = rowWatchManage[0][2] if rowWatchManage else 1
+    return jsonify({'isAlive': 'true', 'pid': arr[0], 'WatchManage': watchManage})
 
 
 @main.route('/video_seek', methods=['POST'])

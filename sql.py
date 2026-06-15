@@ -163,22 +163,9 @@ def appsettingGetCampaignSelected():
     conn.commit()
     c.close()
     conn.close()
-    #for r in data:
-    #   row = r
-    return data
-
-
-def appsettingGetCampaignSelected():
-    conn = sqlite3.connect(database)
-    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
-    c = conn.cursor()
-    c.execute("select value from tblAppSettings where name = 'ShowCampaign'")
-    data = c.fetchall()
-    conn.commit()
-    c.close()
-    conn.close()
-    #for r in data:
-    #   row = r
+    # Fresh install / unseeded setting: guarantee callers a valid [0][0] default
+    if not data or data[0][0] is None:
+        return [(0,)]
     return data
 
 def appsettingGetSceneFilter():
@@ -190,6 +177,9 @@ def appsettingGetSceneFilter():
     conn.commit()
     c.close()
     conn.close()
+    # Fresh install / unseeded setting: guarantee callers a valid [0][0] default
+    if not data or data[0][0] is None:
+        return [(0,)]
     return data
 
 def appsettingSetSceneFilter(val):
@@ -413,7 +403,11 @@ def get_Scenes():
     
     camppaignids = "("
     testCampaignID = appsettingGetCampaignSelected()
-    if int(testCampaignID[0][0]) != 0:
+    try:
+        selectedCampaign = int(testCampaignID[0][0])
+    except (IndexError, TypeError, ValueError):
+        selectedCampaign = 0
+    if selectedCampaign != 0:
         campaignsNotSelected = appsettingGetNotCampaignSelected()
         if len(campaignsNotSelected) != 0:
             for row in campaignsNotSelected:

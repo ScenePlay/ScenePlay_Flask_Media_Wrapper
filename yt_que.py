@@ -33,14 +33,15 @@ def YTQue_threader():
     while(breaker == 1):
       YT_QueFlag = appsettingYT_QueFlag()
       time.sleep(2)
-      if int(YT_QueFlag[0][2]) == 1:
+      queSwitch = YT_QueFlag[0][2] if YT_QueFlag and YT_QueFlag[0][2] is not None else 0
+      if int(queSwitch) == 1:
             fi = select_YT_Que_Next()
             if len(fi) == 0:
                pass
                appsettingYT_QuePlayFlagUpdate(0)
             else:
                YT_QueInfo = appsettingYT_QuePID()
-               YT_QuePID = int(YT_QueInfo[0][2])
+               YT_QuePID = int(YT_QueInfo[0][2]) if YT_QueInfo and YT_QueInfo[0][2] is not None else 0
                try:
                   if(os.kill(YT_QuePID, 0) is None):
                      pass
