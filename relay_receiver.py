@@ -29,6 +29,13 @@ def _run(app):
                 _poll()
             except Exception as e:
                 log.warning('Relay receiver poll error: %s', e)
+                # Recover the session so a transient flush error doesn't wedge
+                # every subsequent poll ("transaction has been rolled back").
+                try:
+                    from extensions import db
+                    db.session.rollback()
+                except Exception:
+                    pass
             _stop.wait(2)
 
 

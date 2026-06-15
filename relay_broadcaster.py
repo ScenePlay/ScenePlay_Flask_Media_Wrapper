@@ -61,7 +61,7 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
     _fire(_go)
 
 
-def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None):
+def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None, movement_scale=1.0):
     """POST /api/v1/session/push  body: { session_id, map: { url, ... } }"""
     cfg = _active()
     if not cfg:
@@ -74,6 +74,7 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None):
             'grid_rows': grid_rows,
             'tokens':    tokens,
             'effects':   effects or [],
+            'movement_scale': movement_scale,
         },
     }
 

@@ -95,6 +95,7 @@ def _push_map_state(bm):
         bg_url, bm.grid_cols, bm.grid_rows,
         [_token_relay_payload(t, bm) for t in bm.tokens],
         effects=effects,
+        movement_scale=bm.movement_scale or 1.0,
     )
 
 
@@ -548,6 +549,24 @@ def token_move(map_id):
         label=label, token_type=t.entity_type, character_id=character_id,
     )
     return jsonify({'ok': True, 'col': t.col, 'row': t.row})
+
+
+@battlemap_bp.route('/<int:map_id>/movement-scale', methods=['POST'])
+@login_required
+def set_movement_scale(map_id):
+    """GM-only: save the per-map feet-per-square multiplier for the move radius."""
+    if not current_user.is_dm():
+        return jsonify({'ok': False}), 403
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    try:
+        scale = float(request.get_json().get('movement_scale', 1.0))
+    except (TypeError, ValueError, AttributeError):
+        scale = 1.0
+    bm.movement_scale = max(0.05, min(20.0, scale))
+    db.session.commit()
+    if bm.is_active:
+        _push_map_state(bm)
+    return jsonify({'ok': True, 'movement_scale': bm.movement_scale})
 
 
 # ── Effect CRUD ───────────────────────────────────────────────────────────────

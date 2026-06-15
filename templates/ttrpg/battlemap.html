@@ -320,6 +320,17 @@
     border-color: #28a745;
     box-shadow: 0 0 5px rgba(40,167,69,.7);
   }
+  /* Movement radius drawn while dragging a token */
+  .move-radius {
+    position: absolute; border: 2px dashed #4a9eff; border-radius: 50%;
+    background: rgba(74,158,255,.10); box-sizing: border-box;
+    pointer-events: none; z-index: 50;
+  }
+  .move-radius-label {
+    position: absolute; transform: translate(-50%,-50%);
+    background: rgba(20,30,50,.82); color: #fff; font-size: .8rem; font-weight: 700;
+    padding: 1px 7px; border-radius: 4px; pointer-events: none; z-index: 51; white-space: nowrap;
+  }
 </style>
 {% endblock %}
 
@@ -487,6 +498,15 @@
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">&minus;</button>
+        {% if current_user.is_dm() %}
+        <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
+        <div style="text-align:center;font-size:.6rem;color:var(--sp-muted);line-height:1.3;" title="Feet per square = 5 × this. Tune so the move radius reads correctly on this map.">Move&nbsp;scale</div>
+        <input type="number" id="move-scale-input" value="{{ bm.movement_scale or 1.0 }}"
+               step="0.1" min="0.1" max="20" onchange="saveMoveScale(this.value)"
+               style="width:44px;height:30px;text-align:center;border-radius:6px;border:1px solid #555;
+                      background:var(--sp-input-bg);color:var(--ttrpg-text);font-size:.85rem;"
+               title="Feet per square = 5 × scale">
+        {% endif %}
       </div>
     </div>
 
@@ -745,6 +765,7 @@ const GRID_COLS = {{ bm.grid_cols }};
 const GRID_ROWS = {{ bm.grid_rows }};
 const IS_DM          = {{ 'true' if current_user.is_dm() else 'false' }};
 const CURRENT_USER_ID = {{ current_user.user_id }};
+let   MOVE_SCALE     = {{ bm.movement_scale or 1.0 }};  // feet = squares × 5 × MOVE_SCALE
 
 let activeDrag    = null;  // { tokenId, el, col, row, gridRect }
 let currentTokens = {};    // token_id -> server data snapshot
@@ -843,6 +864,48 @@ function _ctrlOpenSheet(tok) {
   }
 }
 
+// ── Movement radius (distance circle shown while dragging a token) ────────────
+let _moveRing = null, _moveLabel = null, _moveCx = 0, _moveCy = 0;
+function _showMoveRing(cx, cy) {
+  _removeMoveRing();
+  const grid = document.getElementById('map-grid');
+  if (!grid) return;
+  _moveCx = cx; _moveCy = cy;
+  _moveRing = document.createElement('div');
+  _moveRing.className = 'move-radius';
+  grid.appendChild(_moveRing);
+  _moveLabel = document.createElement('div');
+  _moveLabel.className = 'move-radius-label';
+  _moveLabel.style.left = cx + 'px';
+  _moveLabel.style.top  = cy + 'px';
+  _moveLabel.textContent = '0 ft';
+  grid.appendChild(_moveLabel);
+}
+function _updateMoveRing(cx, cy) {
+  if (!_moveRing) return;
+  const r = Math.hypot(cx - _moveCx, cy - _moveCy);
+  const feet = Math.round((r / CELL_PX) * 5 * MOVE_SCALE);
+  _moveRing.style.left   = (_moveCx - r) + 'px';
+  _moveRing.style.top    = (_moveCy - r) + 'px';
+  _moveRing.style.width  = (2 * r) + 'px';
+  _moveRing.style.height = (2 * r) + 'px';
+  _moveLabel.textContent = feet + ' ft';
+}
+function _removeMoveRing() {
+  if (_moveRing)  _moveRing.remove();
+  if (_moveLabel) _moveLabel.remove();
+  _moveRing = _moveLabel = null;
+}
+
+// GM-only: save the per-map feet-per-square scale (5 ft × scale per square).
+function saveMoveScale(val) {
+  MOVE_SCALE = Math.max(0.05, Math.min(20, parseFloat(val) || 1));
+  fetch(`/ttrpg/battlemap/${MAP_ID}/movement-scale`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ movement_scale: MOVE_SCALE }),
+  });
+}
+
 function attachDrag(el, tokenId) {
   // Mouse tooltip (unchanged)
   el.addEventListener('mouseenter', e => {
@@ -891,6 +954,7 @@ function attachDrag(el, tokenId) {
       el.style.zIndex     = '100';
       el.style.cursor     = 'grabbing';
       el.style.opacity    = '0.85';
+      _showMoveRing((_startCol + 0.5) * CELL_PX, (_startRow + 0.5) * CELL_PX);
     }
 
     // Touch: show tooltip after 500ms hold without movement
@@ -931,12 +995,14 @@ function attachDrag(el, tokenId) {
       activeDrag.col = col;
       activeDrag.row = row;
       el.style.transform = `translate(${col * CELL_PX}px,${row * CELL_PX}px)`;
+      _updateMoveRing((col + 0.5) * CELL_PX, (row + 0.5) * CELL_PX);
     }
   });
 
   function endDrag() {
     clearTimeout(_lpTimer);
     _lpTimer = null;
+    _removeMoveRing();
     if (!activeDrag || activeDrag.tokenId !== tokenId) return;
     const { col, row } = activeDrag;
 

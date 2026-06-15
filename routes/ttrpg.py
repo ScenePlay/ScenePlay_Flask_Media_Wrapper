@@ -26,6 +26,63 @@ PORTRAIT_FOLDER = os.path.join('static', 'uploads', 'portraits')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
+# ── Relay sync: mirror every local character edit to the relay ────────────────
+# During a web request, record which characters are touched (at flush time, which
+# emits no SQL), then AFTER the response push them to the relay so player-facing
+# data stays in sync — covering all edit routes (DM or player) in one place.
+# The push (and its SQL) runs in after_request — normal request context — never
+# inside a session event, so it can't disrupt a flush/commit. Best-effort: any
+# failure is swallowed and never affects the local edit.
+from sqlalchemy import event as _sa_event
+
+_RELAY_CHAR_SUBITEMS = (
+    tblCharacterResources, tblCharacterConditions, tblCharacterInventory,
+    tblCharacterSkills, tblCharacterNotes, tblCharacterFeats,
+    tblCharacterArmor, tblCharacterWeapons, tblCharacterSpells,
+)
+
+
+def _relay_collect_chars(session, flush_context):
+    """after_flush(session, flush_context): record touched character ids.
+    Web requests only; reads cached attributes only (emits no SQL)."""
+    from flask import has_request_context
+    if not has_request_context():
+        return
+    try:
+        ids = session.info.setdefault('_relay_char_ids', set())
+        for obj in set(session.new) | set(session.dirty) | set(session.deleted):
+            if isinstance(obj, tblCharacters):
+                if obj.character_id:
+                    ids.add(obj.character_id)
+            elif isinstance(obj, _RELAY_CHAR_SUBITEMS):
+                cid = getattr(obj, 'character_id', None)
+                if cid:
+                    ids.add(cid)
+    except Exception:
+        pass
+
+
+_sa_event.listen(db.session, 'after_flush', _relay_collect_chars)
+
+
+@ttrpg.after_request
+def _relay_push_dirty_chars(response):
+    """After the response (commit done, normal context), push edited characters."""
+    try:
+        ids = db.session.info.pop('_relay_char_ids', None)
+        if ids:
+            for cid in ids:
+                try:
+                    char = db.session.get(tblCharacters, cid)
+                    if char is not None:
+                        relay_broadcaster.push_character_and_broadcast(char)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return response
+
+
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 

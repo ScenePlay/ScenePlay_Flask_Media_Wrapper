@@ -398,7 +398,7 @@ def feats_search():
     q = request.args.get('q', '').strip()
     feats = tblFeatsLibrary.query.filter(
         tblFeatsLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblFeatsLibrary.name).limit(20).all()
+    ).order_by(tblFeatsLibrary.name).limit(500).all()
     return jsonify([{
         'feat_lib_id':   f.feat_lib_id,
         'name':          f.name,
@@ -540,7 +540,7 @@ def weapons_search():
     q = request.args.get('q', '').strip()
     weapons = tblWeaponsLibrary.query.filter(
         tblWeaponsLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblWeaponsLibrary.name).limit(20).all()
+    ).order_by(tblWeaponsLibrary.name).limit(500).all()
     return jsonify([{
         'weapon_lib_id':          w.weapon_lib_id,
         'name':                   w.name,
@@ -775,7 +775,7 @@ def armor_search():
     q = request.args.get('q', '').strip()
     armor = tblArmorLibrary.query.filter(
         tblArmorLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblArmorLibrary.name).limit(20).all()
+    ).order_by(tblArmorLibrary.name).limit(500).all()
     return jsonify([{
         'armor_lib_id':      a.armor_lib_id,
         'name':              a.name,
@@ -1428,7 +1428,7 @@ def equipment_search():
     q = request.args.get('q', '').strip()
     items = tblEquipmentLibrary.query.filter(
         tblEquipmentLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblEquipmentLibrary.name).limit(25).all()
+    ).order_by(tblEquipmentLibrary.name).limit(500).all()
     return jsonify([{
         'equipment_lib_id': i.equipment_lib_id,
         'name':             i.name,
@@ -1598,7 +1598,7 @@ def races_search():
     q = request.args.get('q', '').strip()
     races = tblRacesLibrary.query.filter(
         tblRacesLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblRacesLibrary.name).limit(20).all()
+    ).order_by(tblRacesLibrary.name).limit(500).all()
     return jsonify([{
         'race_lib_id':    r.race_lib_id,
         'name':           r.name,
@@ -1617,7 +1617,7 @@ def classes_search():
     q = request.args.get('q', '').strip()
     classes = tblClassesLibrary.query.filter(
         tblClassesLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblClassesLibrary.name).limit(20).all()
+    ).order_by(tblClassesLibrary.name).limit(500).all()
     return jsonify([{
         'class_lib_id':         c.class_lib_id,
         'name':                 c.name,

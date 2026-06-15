@@ -4,21 +4,65 @@
 
 {% block head %}
 <style>
+  /* Attribute boxes — relay-style compact grid that stretches edge-to-edge */
   .attr-box {
-    background: color-mix(in srgb, var(--sp-accent) 25%, transparent);
+    background: color-mix(in srgb, var(--sp-accent) 12%, transparent);
     border: 1px solid var(--ttrpg-accent);
-    border-radius: 8px;
+    border-radius: 6px;
     text-align: center;
     padding: 6px 4px;
-    min-width: 60px;
+    flex: 1 1 56px;
+    min-width: 56px;
   }
-  .attr-box .score { font-size: 1.5rem; font-weight: bold; color: var(--ttrpg-accent); }
-  .attr-box .mod   { font-size: 0.8rem; color: var(--sp-muted); }
-  .attr-box .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sp-muted); }
+  .attr-box .score { font-size: 1.3rem; font-weight: bold; color: var(--ttrpg-accent); line-height: 1.15; }
+  .attr-box .mod   { font-size: 0.72rem; color: var(--sp-muted); }
+  .attr-box .label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sp-muted); }
   .editable { cursor: pointer; border-bottom: 1px dashed var(--ttrpg-accent); }
   .editable:hover { background: color-mix(in srgb, var(--sp-accent) 10%, transparent); border-radius: 3px; }
-  .hp-bar-wrap { height: 22px; background: var(--sp-border); border-radius: 6px; overflow: hidden; }
-  .hp-bar-fill { height: 100%; transition: width .4s, background .4s; border-radius: 6px; }
+  /* Attribute −/+ steppers */
+  .attr-step { display: flex; align-items: center; justify-content: center; gap: 3px; }
+  .attr-step .score, .attr-step .mod { min-width: 24px; }
+  .attr-stepbtn {
+    width: 18px; height: 18px; padding: 0; line-height: 1; font-size: .85rem; flex-shrink: 0;
+    color: var(--sp-muted); background: transparent; border: 1px solid var(--sp-border);
+    border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .attr-stepbtn:hover { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
+  /* HP bar — relay-style slim track */
+  .hp-bar-wrap { height: 16px; background: var(--sp-border); border-radius: 4px; overflow: hidden; }
+  .hp-bar-fill { height: 100%; transition: width .4s, background .4s; border-radius: 4px; }
+
+  /* ── Relay-style sheet sub-tab bar ──────────────────────────────
+     Flatten Bootstrap's boxed nav-tabs into the portal's scrollable
+     button bar: muted inactive tabs, accent underline on the active. */
+  #sheetTabs.nav-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0;
+    border-bottom: 1px solid var(--sp-border);
+    scrollbar-width: none;
+  }
+  #sheetTabs.nav-tabs::-webkit-scrollbar { display: none; }
+  #sheetTabs .nav-item { flex-shrink: 0; margin-bottom: 0; }
+  #sheetTabs .nav-link {
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--sp-muted) !important;
+    font-size: .78rem;
+    font-weight: 600;
+    padding: 9px 13px;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    transition: color .15s, border-color .15s;
+  }
+  #sheetTabs .nav-link:hover { color: var(--ttrpg-text) !important; }
+  #sheetTabs .nav-link.active {
+    color: var(--ttrpg-accent) !important;
+    border-bottom-color: var(--ttrpg-accent) !important;
+    background: transparent !important;
+  }
   .feat-chip {
     display: inline-block;
     font-size: .75rem;
@@ -70,6 +114,28 @@
     white-space: normal;
     line-height: 1.4;
   }
+  /* ── Dice roller quick reference ─────────────────────────────── */
+  .dice-quickref { border-top: 1px solid var(--sp-border); padding-top: 8px; margin-top: 10px; }
+  .qref-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--sp-muted); font-weight: 600; margin-bottom: 6px; }
+  .qref-hint  { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .68rem; }
+  .qref-row   { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 5px; }
+  .qref-label { flex-shrink: 0; width: 56px; font-size: .62rem; text-transform: uppercase; color: var(--sp-muted); padding-top: 3px; letter-spacing: .04em; }
+  .qref-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+  .qref-chip  { display: inline-flex; align-items: center; gap: 3px; font-size: .72rem; padding: 2px 7px;
+                border-radius: 10px; border: 1px solid var(--sp-border); color: var(--ttrpg-text);
+                background: var(--ttrpg-surface); white-space: nowrap; }
+  .qref-sub   { color: var(--sp-muted); font-size: .66rem; }
+  .qref-click { cursor: pointer; }
+  .qref-click:hover { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
+  .qref-click:hover .qref-sub { color: var(--ttrpg-accent); }
+  /* ── High-contrast text: all character-sheet fonts = theme text colour (the
+     opposite of the light card backgrounds) so nothing washes out. :where()
+     keeps zero specificity so the exceptions (text on coloured fills) win. ── */
+  :where(.ttrpg-card) * { color: var(--ttrpg-text) !important; }
+  .ttrpg-card .btn-ttrpg { color: var(--sp-on-accent) !important; }
+  .ttrpg-card .badge     { color: var(--sp-on-accent) !important; }
+  .ttrpg-card .die-val.nat20 { color: #fff200 !important; }
+  .ttrpg-card .die-val.nat1  { color: #ffaaaa !important; }
 </style>
 {% endblock %}
 
@@ -385,6 +451,65 @@
         </div>
 
       </div>
+
+      <!-- Quick reference: skills / weapons / spells / armor / feats -->
+      {% if char.skills or char.weapons or char.spells or char.armor or char.feats %}
+      <div class="dice-quickref">
+        <div class="qref-title">Quick Reference <span class="qref-hint">&#8212; click a skill or weapon to load the roll</span></div>
+        {% if char.skills %}
+        <div class="qref-row">
+          <span class="qref-label">Skills</span>
+          <div class="qref-chips">
+            {% for s in char.skills | sort(attribute='order_by') %}
+            <button class="qref-chip qref-click" onclick='diceQuickSet({{ s.bonus or 0 }}, {{ s.skill_name | tojson }})'
+                    title="Roll {{ s.skill_name }} check (d20 {{ '%+d' % (s.bonus or 0) }})">{% if s.proficient %}&#9733; {% endif %}{{ s.skill_name }} <span class="qref-sub">{{ '%+d' % (s.bonus or 0) }}</span></button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if char.weapons %}
+        <div class="qref-row">
+          <span class="qref-label">Weapons</span>
+          <div class="qref-chips">
+            {% for w in char.weapons | sort(attribute='order_by') %}
+            <button class="qref-chip qref-click" onclick='diceQuickSet({{ w.attack_bonus or 0 }}, {{ (w.weapon_name ~ " attack") | tojson }})'
+                    title="Attack with {{ w.weapon_name }}{% if w.damage_dice %} &#8212; {{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% endif %}">&#9876; {{ w.weapon_name }} <span class="qref-sub">{{ '%+d' % (w.attack_bonus or 0) }}{% if w.damage_dice %} &bull; {{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% endif %}</span></button>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if char.spells %}
+        <div class="qref-row">
+          <span class="qref-label">Spells</span>
+          <div class="qref-chips">
+            {% for cs in char.spells | sort(attribute='spell_level') %}
+            <span class="qref-chip" title="{% if cs.spell_level == 0 %}Cantrip{% else %}Level {{ cs.spell_level }}{% endif %}{% if cs.school %} &middot; {{ cs.school }}{% endif %}">&#10039; {{ cs.spell_name }} <span class="qref-sub">{% if cs.spell_level == 0 %}C{% else %}L{{ cs.spell_level }}{% endif %}{% if cs.prepared %} &#10003;{% endif %}</span></span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if char.armor %}
+        <div class="qref-row">
+          <span class="qref-label">Armor</span>
+          <div class="qref-chips">
+            {% for a in char.armor %}
+            <span class="qref-chip" title="{{ a.armor_category }}">{% if a.armor_category == 'Shield' %}&#9694;{% else %}&#9651;{% endif %} {{ a.armor_name }} <span class="qref-sub">{{ a.armor_class_base + a.ac_bonus }} AC{% if a.equipped %} &#10003;{% endif %}</span></span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if char.feats %}
+        <div class="qref-row">
+          <span class="qref-label">Feats</span>
+          <div class="qref-chips">
+            {% for f in char.feats | sort(attribute='order_by') %}
+            <span class="qref-chip" title="{{ f.description | e if f.description else '' }}">&#10022; {{ f.feat_name }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -402,10 +527,21 @@
             ('CHA','cha_val',char.cha_val)] %}
         <div class="attr-box">
           <div class="label">{{ label }}</div>
-          <div class="score{% if can_edit %} editable{% endif %}" data-field="{{ field }}"
-               {% if can_edit %}onclick="startAttrEdit(this, false)"{% endif %}>{{ score }}</div>
-          <div class="mod{% if can_edit %} editable{% endif %}" data-field="{{ field }}"
-               {% if can_edit %}onclick="startAttrEdit(this, true)"{% endif %}>{{ '%+d' % mod(score) }}</div>
+          {% if can_edit %}
+          <div class="attr-step">
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','score',-1,this)" title="&#8722;1">&minus;</button>
+            <div class="score editable" data-field="{{ field }}" onclick="startAttrEdit(this, false)">{{ score }}</div>
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','score',1,this)" title="+1">+</button>
+          </div>
+          <div class="attr-step">
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','mod',-1,this)" title="&#8722;1 modifier">&minus;</button>
+            <div class="mod editable" data-field="{{ field }}" onclick="startAttrEdit(this, true)">{{ '%+d' % mod(score) }}</div>
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','mod',1,this)" title="+1 modifier">+</button>
+          </div>
+          {% else %}
+          <div class="score" data-field="{{ field }}">{{ score }}</div>
+          <div class="mod" data-field="{{ field }}">{{ '%+d' % mod(score) }}</div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
@@ -416,17 +552,17 @@
   <div class="col-12">
     <div class="ttrpg-card p-3">
       <ul class="nav nav-tabs mb-3" id="sheetTabs">
-        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-resources" style="color:var(--ttrpg-accent);">Resources</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-skills" style="color:var(--ttrpg-accent);">Skills</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-inventory" style="color:var(--ttrpg-accent);">Inventory</button></li>
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-resources" style="color:var(--ttrpg-accent);">Resources{% if char.resources %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.resources|length }}</span>{% endif %}</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-skills" style="color:var(--ttrpg-accent);">Skills{% if char.skills %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.skills|length }}</span>{% endif %}</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-inventory" style="color:var(--ttrpg-accent);">Inventory{% if char.inventory %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.inventory|length }}</span>{% endif %}</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-weapons" style="color:var(--ttrpg-accent);">
-          Weapons{% set equipped_weapons = char.weapons | selectattr('equipped', 'equalto', 1) | list %}{% if equipped_weapons %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ equipped_weapons|length }}</span>{% endif %}
+          Weapons{% if char.weapons %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.weapons|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-armor" style="color:var(--ttrpg-accent);">
-          Armor{% set equipped_armor = char.armor | selectattr('equipped', 'equalto', 1) | list %}{% if equipped_armor %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ equipped_armor|length }}</span>{% endif %}
+          Armor{% if char.armor %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.armor|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">Currency</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes{% if char.notes %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.notes|length }}</span>{% endif %}</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-feats" style="color:var(--ttrpg-accent);">
           Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
         </button></li>
@@ -444,10 +580,19 @@
         <!-- Resources -->
         <div class="tab-pane fade show active" id="tab-resources">
           {% if can_edit %}
-          <div class="d-flex gap-2 mb-3 flex-wrap">
-            <input type="text" id="new_res_name" class="form-control form-control-sm" placeholder="Resource name" style="max-width:180px;">
-            <input type="number" id="new_res_cur" class="form-control form-control-sm" placeholder="Current" style="max-width:90px;" value="0">
-            <input type="number" id="new_res_max" class="form-control form-control-sm" placeholder="Max" style="max-width:90px;" value="0">
+          <div class="d-flex gap-2 mb-3 flex-wrap align-items-end">
+            <div>
+              <label class="form-label small text-muted mb-1">Resource name</label>
+              <input type="text" id="new_res_name" class="form-control form-control-sm" placeholder="e.g. Spell Slots" style="max-width:180px;">
+            </div>
+            <div>
+              <label class="form-label small text-muted mb-1">Qty.</label>
+              <input type="number" id="new_res_cur" class="form-control form-control-sm text-center" style="max-width:90px;" value="0">
+            </div>
+            <div>
+              <label class="form-label small text-muted mb-1">Total</label>
+              <input type="number" id="new_res_max" class="form-control form-control-sm text-center" style="max-width:90px;" value="0">
+            </div>
             <button class="btn btn-ttrpg btn-sm" onclick="addResource()">Add</button>
           </div>
           {% endif %}
@@ -704,7 +849,8 @@
                        class="form-control form-control-sm"
                        placeholder="Weapon name or search library…"
                        autocomplete="off"
-                       oninput="weapLibSearch(this.value)">
+                       oninput="weapLibSearch(this.value)"
+                       onfocus="weapLibSearch(this.value)">
                 <div id="weap-suggestions"
                      style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
                             background:var(--sp-surface);border:1px solid var(--sp-border);
@@ -970,7 +1116,8 @@
                        class="form-control form-control-sm"
                        placeholder="Armor name — or search library…"
                        autocomplete="off"
-                       oninput="armorLibSearch(this.value)">
+                       oninput="armorLibSearch(this.value)"
+                       onfocus="armorLibSearch(this.value)">
                 <div id="armor-suggestions"
                      style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
                             background:var(--sp-surface);border:1px solid var(--sp-border);
@@ -1145,7 +1292,8 @@
                        class="form-control form-control-sm"
                        placeholder="Feat name — or search library…"
                        autocomplete="off"
-                       oninput="featLibSearch(this.value)">
+                       oninput="featLibSearch(this.value)"
+                       onfocus="featLibSearch(this.value)">
                 <div id="feat-suggestions"
                      style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
                             background:var(--sp-surface);border:1px solid var(--sp-border);
@@ -1209,7 +1357,8 @@
                        class="form-control form-control-sm"
                        placeholder="Spell name — or search library…"
                        autocomplete="off"
-                       oninput="spellLibSearch(this.value)">
+                       oninput="spellLibSearch(this.value)"
+                       onfocus="spellLibSearch(this.value)">
                 <div id="spell-suggestions"
                      style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;
                             background:var(--sp-surface);border:1px solid var(--sp-border);
@@ -1810,6 +1959,27 @@ function saveField(field, value, cb) {
   }).then(r => r.json()).then(data => { if (cb) cb(data); });
 }
 
+// ── Attribute steppers (−/+) ──────────────────────────────────
+// which='score' adjusts the score by ±1; which='mod' adjusts the modifier by ±1
+// (i.e. score by ±2). Updates both displayed values and saves (no reload).
+function stepAttr(field, which, delta, btn) {
+  const box = btn.closest('.attr-box');
+  if (!box) return;
+  const scoreEl = box.querySelector('.score');
+  const modEl   = box.querySelector('.mod');
+  let score = parseInt(scoreEl.textContent) || 10;
+  if (which === 'mod') {
+    score = (Math.floor((score - 10) / 2) + delta) * 2 + 10;
+  } else {
+    score = score + delta;
+  }
+  score = Math.max(1, Math.min(30, score));
+  const m = Math.floor((score - 10) / 2);
+  scoreEl.textContent = score;
+  modEl.textContent   = (m >= 0 ? '+' : '') + m;
+  saveField(field, score);   // persist; no page reload
+}
+
 // ── Attribute inline edit ─────────────────────────────────────
 function startAttrEdit(el, isMod) {
   if (el.querySelector('input')) return; // already editing
@@ -2018,7 +2188,7 @@ let _featResults = [];
 function featLibSearch(q) {
   clearTimeout(_featSearchTimer);
   const box = document.getElementById('feat-suggestions');
-  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _featSearchTimer = setTimeout(() => {
     fetch(`/ttrpg/reference/feats/search?q=${encodeURIComponent(q)}`)
       .then(r => r.json()).then(results => {
@@ -2095,7 +2265,7 @@ let _weapResults = [];
 function weapLibSearch(q) {
   clearTimeout(_weapSearchTimer);
   const box = document.getElementById('weap-suggestions');
-  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _weapSearchTimer = setTimeout(() => {
     fetch(`/ttrpg/reference/weapons/search?q=${encodeURIComponent(q)}`)
       .then(r => r.json()).then(results => {
@@ -2276,7 +2446,7 @@ let _armorResults = [];
 function armorLibSearch(q) {
   clearTimeout(_armorSearchTimer);
   const box = document.getElementById('armor-suggestions');
-  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _armorSearchTimer = setTimeout(() => {
     fetch(`/ttrpg/reference/armor/search?q=${encodeURIComponent(q)}`)
       .then(r => r.json()).then(results => {
@@ -2371,9 +2541,9 @@ let _spellResults = [];
 function spellLibSearch(q) {
   clearTimeout(_spellSearchTimer);
   const box = document.getElementById('spell-suggestions');
-  if (!q || q.length < 2) { box.style.display = 'none'; return; }
+  // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _spellSearchTimer = setTimeout(() => {
-    fetch(`/ttrpg/reference/spells/search?q=${encodeURIComponent(q)}&limit=10`)
+    fetch(`/ttrpg/reference/spells/search?q=${encodeURIComponent(q)}&limit=500`)
       .then(r => r.json()).then(results => {
         if (!results.length) { box.style.display = 'none'; return; }
         _spellResults = results;
@@ -2550,6 +2720,13 @@ function setAdvMode(mode) {
 
 function setMod(val) {
   document.getElementById('dice-modifier').value = val;
+}
+
+// Quick reference: click a skill/weapon chip to load it into the roller (d20 + mod + label).
+function diceQuickSet(modVal, label) {
+  document.getElementById('dice-modifier').value = modVal;
+  document.getElementById('dice-label').value    = label;
+  selectDie(20);
 }
 
 function doRoll() {
