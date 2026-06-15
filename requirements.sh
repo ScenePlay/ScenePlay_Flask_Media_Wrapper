@@ -33,19 +33,20 @@ BREAK_SYSTEM_PACKAGES=""
 if is_raspberry_pi; then
     BREAK_SYSTEM_PACKAGES="--break-system-packages"
 fi
-pip3 install waitress $BREAK_SYSTEM_PACKAGES
-pip3 install pathlib $BREAK_SYSTEM_PACKAGES
-pip3 install flask $BREAK_SYSTEM_PACKAGES 
-pip3 install gtts $BREAK_SYSTEM_PACKAGES
-pip3 install pyalsaaudio $BREAK_SYSTEM_PACKAGES
-pip3 install flask_sqlalchemy $BREAK_SYSTEM_PACKAGES 
-pip3 install flask_migrate $BREAK_SYSTEM_PACKAGES
-pip3 install gtts $BREAK_SYSTEM_PACKAGES
-pip3 install psutil $BREAK_SYSTEM_PACKAGES
-pip3 install pulsectl $BREAK_SYSTEM_PACKAGES
-pip3 install python-crontab $BREAK_SYSTEM_PACKAGES
-pip3 install flask_login $BREAK_SYSTEM_PACKAGES
-pip3 install flask_bcrypt $BREAK_SYSTEM_PACKAGES
+pip3 -r ~/ScenePlay/requirements.txt $BREAK_SYSTEM_PACKAGES
+
+#pip3 install waitress $BREAK_SYSTEM_PACKAGES
+#pip3 install pathlib $BREAK_SYSTEM_PACKAGES
+#pip3 install flask $BREAK_SYSTEM_PACKAGES 
+#pip3 install gtts $BREAK_SYSTEM_PACKAGES
+#pip3 install pyalsaaudio $BREAK_SYSTEM_PACKAGES
+#pip3 install flask_sqlalchemy $BREAK_SYSTEM_PACKAGES 
+#pip3 install flask_migrate $BREAK_SYSTEM_PACKAGES
+#pip3 install psutil $BREAK_SYSTEM_PACKAGES
+#pip3 install pulsectl $BREAK_SYSTEM_PACKAGES
+#pip3 install python-crontab $BREAK_SYSTEM_PACKAGES
+#pip3 install flask_login $BREAK_SYSTEM_PACKAGES
+#pip3 install flask_bcrypt $BREAK_SYSTEM_PACKAGES
 python3 -m ensurepip
 sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel $BREAK_SYSTEM_PACKAGES
 sudo python3 -m pip install --force-reinstall adafruit-blinka $BREAK_SYSTEM_PACKAGES

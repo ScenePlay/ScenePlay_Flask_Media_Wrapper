@@ -11,6 +11,7 @@ gTTS
 psutil
 pulsectl
 pyalsaaudio
+pathlib
 
 # Raspberry Pi / LED (install only on Pi hardware)
 # rpi_ws281x
