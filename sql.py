@@ -1301,8 +1301,8 @@ def queue_kill():
     if not keep_music:
         c.execute("UPDATE tblMusic SET  que = 0 where que = 1")
         conn.commit()
-    # c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
-    # conn.commit()
+        c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
+        conn.commit()
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")

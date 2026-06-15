@@ -33,7 +33,7 @@ BREAK_SYSTEM_PACKAGES=""
 if is_raspberry_pi; then
     BREAK_SYSTEM_PACKAGES="--break-system-packages"
 fi
-pip3 -r ~/ScenePlay/requirements.txt $BREAK_SYSTEM_PACKAGES
+pip3 install -r ~/ScenePlay/requirements.txt $BREAK_SYSTEM_PACKAGES
 
 #pip3 install waitress $BREAK_SYSTEM_PACKAGES
 #pip3 install pathlib $BREAK_SYSTEM_PACKAGES
