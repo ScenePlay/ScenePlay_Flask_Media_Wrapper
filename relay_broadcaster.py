@@ -356,10 +356,28 @@ def push_all_characters():
     _fire(_go)
 
 
+def _in_active_session(char):
+    """True only if `char` is a party member of the currently active session.
+
+    Gates single-character relay pushes so edits to characters outside the
+    live session never leak to remote players."""
+    if char is None:
+        return False
+    from models.ttrpg import tblSessions, tblSessionParty
+    sess = tblSessions.query.filter_by(status='active').first()
+    if not sess:
+        return False
+    return (tblSessionParty.query
+            .filter_by(session_id=sess.session_id, character_id=char.character_id)
+            .first() is not None)
+
+
 def push_character(char):
     """Push a single character update to the relay (e.g. after HP change or sheet edit)."""
     cfg = _active()
     if not cfg:
+        return
+    if not _in_active_session(char):
         return
     payload = {'characters': [_char_to_payload(char)]}
 
@@ -376,6 +394,8 @@ def push_character_and_broadcast(char):
     """Push a character update then trigger a sheet-updated SSE event on the relay portal."""
     cfg = _active()
     if not cfg:
+        return
+    if not _in_active_session(char):
         return
     payload = {'characters': [_char_to_payload(char)]}
     player_name = char.name

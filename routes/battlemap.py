@@ -76,7 +76,24 @@ def _token_relay_payload(t, bm):
     return data
 
 
+def _is_live_map(bm):
+    """True only if bm is the active map of the currently ACTIVE session.
+
+    bm.is_active alone just means 'the active map within its own session' — a
+    non-active session can still have one. The relay must only ever mirror the
+    active session's active map, so both conditions are required."""
+    if not bm or not bm.is_active:
+        return False
+    active_session = tblSessions.query.filter_by(status='active').first()
+    return bool(active_session and bm.session_id == active_session.session_id)
+
+
 def _push_map_state(bm):
+    # Only the live map of the ACTIVE session is mirrored to the relay. Editing
+    # any other map (incl. another session's own active map) must not push to
+    # players, or it would clobber their view of the live session.
+    if not _is_live_map(bm):
+        return
     bg_url = (url_for('static', filename=f'uploads/battlemaps/{bm.bg_image}', _external=True)
               if bm.bg_image else '')
     effects = [{
@@ -305,6 +322,24 @@ def map_bg_clear(map_id):
 def map_view(map_id):
     bm   = tblBattleMaps.query.get_or_404(map_id)
     sess = db.session.get(tblSessions, bm.session_id)
+
+    # Players may only open the LIVE map of the ACTIVE session, and only if they
+    # belong to its party. Anything else bounces to the active-map redirect
+    # (which shows a friendly message when nothing is live). DMs see all maps.
+    if not current_user.is_dm():
+        active_session = tblSessions.query.filter_by(status='active').first()
+        in_party = bool(active_session and (
+            tblSessionParty.query
+            .join(tblCharacters, tblCharacters.character_id == tblSessionParty.character_id)
+            .filter(tblSessionParty.session_id == active_session.session_id,
+                    tblCharacters.user_id == current_user.user_id)
+            .first()))
+        if (not active_session
+                or sess is None
+                or sess.session_id != active_session.session_id
+                or not bm.is_active
+                or not in_party):
+            return redirect(url_for('battlemap_bp.active_map'))
 
     monsters = []
     party    = []
@@ -545,10 +580,13 @@ def token_move(map_id):
             label = sm.display_name
     x_pct = t.col / max(1, bm.grid_cols - 1)
     y_pct = t.row / max(1, bm.grid_rows - 1)
-    relay_broadcaster.broadcast_token_move(
-        t.token_id, x_pct, y_pct,
-        label=label, token_type=t.entity_type, character_id=character_id,
-    )
+    # Only mirror moves on the active session's live map; positioning tokens on
+    # any other map must not reach the relay.
+    if _is_live_map(bm):
+        relay_broadcaster.broadcast_token_move(
+            t.token_id, x_pct, y_pct,
+            label=label, token_type=t.entity_type, character_id=character_id,
+        )
     return jsonify({'ok': True, 'col': t.col, 'row': t.row})
 
 

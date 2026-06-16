@@ -176,7 +176,10 @@
     margin-bottom: 10px;
     font-weight: bold;
     color: var(--ttrpg-accent);
+    cursor: grab;
+    user-select: none;
   }
+  .fx-panel-header:active { cursor: grabbing; }
   .fx-close-btn {
     background: none;
     border: none;
@@ -556,7 +559,7 @@
 {% if current_user.is_dm() %}
 <!-- ── Effects floating panel ─────────────────────────────────────────────── -->
 <div id="fx-panel">
-  <div class="fx-panel-header">
+  <div class="fx-panel-header" id="fx-drag-handle">
     <span>&#10022; Effects</span>
     <button class="fx-close-btn" onclick="closeFxPanel()">&#10005;</button>
   </div>
@@ -586,16 +589,20 @@
     <div class="d-flex flex-wrap gap-1" id="fx-presets"></div>
   </div>
 
-  <!-- Fill + opacity -->
+  <!-- Fill -->
   <div class="d-flex align-items-center gap-2 mb-1">
     <label class="fx-label" style="min-width:36px;">Fill</label>
     <input type="color" id="fx-fill-color" value="#ff4400" class="fx-color-input"
            oninput="fxFillColor = this.value">
-    <label class="fx-label">Opacity</label>
+  </div>
+
+  <!-- Opacity -->
+  <div class="d-flex align-items-center gap-2 mb-1">
+    <label class="fx-label" style="min-width:36px;">Opacity</label>
     <input type="range" id="fx-opacity" min="10" max="100" value="35"
-           style="flex:1;accent-color:var(--ttrpg-accent);"
+           style="flex:1;min-width:0;accent-color:var(--ttrpg-accent);"
            oninput="fxOpacity = parseInt(this.value); document.getElementById('fx-opacity-val').textContent = fxOpacity + '%'">
-    <span id="fx-opacity-val" class="fx-label" style="min-width:28px;">35%</span>
+    <span id="fx-opacity-val" class="fx-label" style="min-width:32px;text-align:right;">35%</span>
   </div>
 
   <!-- Border -->
@@ -2280,6 +2287,7 @@ function clearMapDiceFeed() {
 
 startPolling();
 makeDraggable(document.getElementById('dice-map-panel'), document.getElementById('dice-drag-handle'));
+makeDraggable(document.getElementById('fx-panel'), document.getElementById('fx-drag-handle'));
 
 // ── Volume ────────────────────────────────────────────────────────────────────
 let _mapVolTimer = null;
