@@ -1,0 +1,60 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 style="color:var(--ttrpg-accent);" class="mb-0">&#128218; Library</h3>
+  <span class="small text-muted">Reference only &mdash; spells, gear, feats, races &amp; more.</span>
+</div>
+
+<div class="accordion" id="libAccordion">
+  {% for key, label, items in categories %}
+  <div class="accordion-item" style="background:var(--ttrpg-surface);border-color:var(--sp-border);">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button"
+              style="background:var(--ttrpg-surface);color:var(--ttrpg-text);box-shadow:none;"
+              data-bs-toggle="collapse" data-bs-target="#lib-{{ key }}"
+              aria-expanded="false" aria-controls="lib-{{ key }}">
+        {{ label }}
+        <span class="badge ms-2" style="background:var(--ttrpg-accent);color:#111;">{{ items | length }}</span>
+      </button>
+    </h2>
+    <div id="lib-{{ key }}" class="accordion-collapse collapse" data-bs-parent="#libAccordion">
+      <div class="accordion-body">
+        {% if items %}
+        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary mb-2"
+               placeholder="Search {{ label }}&hellip;" oninput="filterLib('list-{{ key }}', this.value)">
+        <div id="list-{{ key }}">
+          {% for it in items %}
+          <div class="lib-item ttrpg-card p-2 mb-2" data-name="{{ it.name | lower }}" style="border-color:var(--sp-border);">
+            <div class="fw-bold" style="color:var(--ttrpg-accent);">{{ it.name }}</div>
+            {% if it.sub %}<div class="small text-muted">{{ it.sub }}</div>{% endif %}
+            {% if it.desc %}<div class="small mt-1" style="white-space:pre-wrap;">{{ it.desc }}</div>{% endif %}
+          </div>
+          {% endfor %}
+          <p class="lib-empty text-muted small mb-0" style="display:none;">No matches.</p>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">Nothing in this library yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+function filterLib(listId, q) {
+  q = (q || '').toLowerCase().trim();
+  const list = document.getElementById(listId);
+  if (!list) return;
+  let shown = 0;
+  list.querySelectorAll('.lib-item').forEach(el => {
+    const match = !q || el.dataset.name.includes(q);
+    el.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  const empty = list.querySelector('.lib-empty');
+  if (empty) empty.style.display = shown ? 'none' : '';
+}
+</script>
+{% endblock %}

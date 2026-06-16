@@ -23,7 +23,7 @@
   --sp-accent-glow: rgba(201,168,76,.30);
   --sp-link:        #504030;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -46,7 +46,7 @@
   --sp-accent-glow: rgba(0,229,200,.30);
   --sp-link:        #272752;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -69,7 +69,7 @@
   --sp-accent-glow: rgba(110,207,128,.30);
   --sp-link:        #274033;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -92,7 +92,7 @@
   --sp-accent-glow: rgba(240,80,80,.30);
   --sp-link:        #421212;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -115,7 +115,7 @@
   --sp-accent-glow: rgba(24,200,232,.30);
   --sp-link:        #0f2952;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -138,7 +138,7 @@
   --sp-accent-glow: rgba(255,160,32,.30);
   --sp-link:        #361b00;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -161,7 +161,7 @@
   --sp-accent-glow: rgba(184,136,255,.30);
   --sp-link:        #311a52;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -184,7 +184,7 @@
   --sp-accent-glow: rgba(144,216,248,.30);
   --sp-link:        #1c2e48;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -207,7 +207,7 @@
   --sp-accent-glow: rgba(154,188,212,.30);
   --sp-link:        #2c333e;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);
@@ -230,7 +230,7 @@
   --sp-accent-glow: rgba(224,184,96,.30);
   --sp-link:        #36291b;
 
-  --ttrpg-primary: var(--sp-primary);
+  --ttrpg-primary: var(--sp-surface);
   --ttrpg-accent:  var(--sp-accent);
   --ttrpg-bg:      var(--sp-bg);
   --ttrpg-surface: var(--sp-surface);

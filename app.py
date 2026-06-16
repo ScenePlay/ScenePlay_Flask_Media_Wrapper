@@ -195,13 +195,14 @@ def startTheadPlayer():
     appsettingAudioPlayFlagUpdatePID(999999)  # clear stale PID so threader starts fresh
     queue_next()
 
-    # Start relay receiver and push current party to relay
+    # Start relay receiver and push current party + library to relay
     if appsettingGet('relay_enabled', '0') == '1':
         import relay_receiver
         relay_receiver.start(app)
         with app.app_context():
             import relay_broadcaster
             relay_broadcaster.push_all_characters()
+            relay_broadcaster.push_library()
     
     
 if arr[0] > 0:

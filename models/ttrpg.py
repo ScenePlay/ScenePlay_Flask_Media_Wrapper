@@ -369,6 +369,8 @@ class tblSpellsLibrary(db.Model):
     ritual        = db.Column(db.Integer, default=0)
     description   = db.Column(db.Text, default='')
     classes_text  = db.Column(db.Text, default='')        # comma-separated class names
+    damage_dice   = db.Column(db.Text, default='')        # parsed from description, e.g. "8d6"
+    damage_type   = db.Column(db.Text, default='')        # e.g. "fire" (best-effort)
     source        = db.Column(db.Text, default='srd')
     created_at    = db.Column(db.Text, nullable=False)
 

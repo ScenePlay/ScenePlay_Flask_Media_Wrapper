@@ -434,7 +434,7 @@
           <!-- Local result display -->
           <div id="dice-result" class="mt-3" style="display:none;">
             <div id="dice-result-inner"
-                 style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);
+                 style="background:var(--ttrpg-surface);border:1px solid var(--ttrpg-accent);
                         border-radius:8px;padding:10px 14px;font-size:.95rem;"></div>
           </div>
         </div>
@@ -483,7 +483,13 @@
           <span class="qref-label">Spells</span>
           <div class="qref-chips">
             {% for cs in char.spells | sort(attribute='spell_level') %}
+            {% set dmg = cs.lib_spell.damage_dice if cs.lib_spell else '' %}
+            {% if dmg %}
+            <button class="qref-chip qref-click" onclick='diceQuickSetDamage({{ dmg | tojson }}, {{ (cs.spell_name ~ " damage") | tojson }})'
+                    title="Roll {{ cs.spell_name }} damage ({{ dmg }}{% if cs.lib_spell.damage_type %} {{ cs.lib_spell.damage_type }}{% endif %})">&#10039; {{ cs.spell_name }} <span class="qref-sub">{{ dmg }}</span></button>
+            {% else %}
             <span class="qref-chip" title="{% if cs.spell_level == 0 %}Cantrip{% else %}Level {{ cs.spell_level }}{% endif %}{% if cs.school %} &middot; {{ cs.school }}{% endif %}">&#10039; {{ cs.spell_name }} <span class="qref-sub">{% if cs.spell_level == 0 %}C{% else %}L{{ cs.spell_level }}{% endif %}{% if cs.prepared %} &#10003;{% endif %}</span></span>
+            {% endif %}
             {% endfor %}
           </div>
         </div>
@@ -1687,14 +1693,14 @@
           <div class="small fw-bold text-muted mb-2" style="text-transform:uppercase;letter-spacing:.06em;">Browse Libraries</div>
           <div id="ref-accordion">
             {% set lib_sections = [
-              ('spells',    'Spells',    '✦'),
-              ('weapons',   'Weapons',   '⚔'),
               ('armor',     'Armor',     '🛡'),
+              ('classes',   'Classes',   '🏰'),
               ('equipment', 'Equipment', '🎒'),
               ('feats',     'Feats',     '⭐'),
-              ('skills',    'Skills',    '🎯'),
               ('races',     'Races',     '🧬'),
-              ('classes',   'Classes',   '🏰'),
+              ('skills',    'Skills',    '🎯'),
+              ('spells',    'Spells',    '✦'),
+              ('weapons',   'Weapons',   '⚔'),
             ] %}
             {% for key, label, icon in lib_sections %}
             <div class="ref-section mb-1" style="border:1px solid var(--sp-border);border-radius:6px;overflow:hidden;">
@@ -1760,7 +1766,7 @@
 <div class="modal fade" id="llmPromptModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content"
-         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+         style="background:var(--ttrpg-surface);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
       <div class="modal-header" style="border-color:var(--ttrpg-accent);">
         <h5 class="modal-title" style="color:var(--ttrpg-accent);">&#127748; Image Prompt — {{ char.name }}</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -2727,6 +2733,16 @@ function diceQuickSet(modVal, label) {
   document.getElementById('dice-modifier').value = modVal;
   document.getElementById('dice-label').value    = label;
   selectDie(20);
+}
+
+// Load a spell's damage dice into the roller (count + die, e.g. 8d6).
+function diceQuickSetDamage(diceStr, label) {
+  const m = (diceStr || '').match(/(\d+)\s*d\s*(\d+)/i);
+  if (!m) return;
+  document.getElementById('dice-count').value    = parseInt(m[1], 10);
+  selectDie(parseInt(m[2], 10));
+  document.getElementById('dice-modifier').value = 0;
+  document.getElementById('dice-label').value    = label;
 }
 
 function doRoll() {

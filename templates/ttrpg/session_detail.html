@@ -86,11 +86,11 @@
 </div>
 
 {% if sess.status == 'active' %}
-<div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #28a745;color:#28a745;">
+<div class="alert mb-3" style="background:var(--ttrpg-surface);border:1px solid #28a745;color:#1d7a34;">
   &#9654; Session is live
 </div>
 {% elif sess.status == 'ended' %}
-<div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #555;color:#888;">
+<div class="alert mb-3" style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);color:var(--sp-muted);">
   &#9632; Session ended — reopen to resume or access maps
 </div>
 {% endif %}
@@ -120,7 +120,7 @@
       {% if sess.party %}
         {% for sp in sess.party %}
         {% set char = sp.character %}
-        <div class="d-flex align-items-center gap-2 mb-2 ttrpg-card p-2" style="border-color:#444;">
+        <div class="d-flex align-items-center gap-2 mb-2 ttrpg-card p-2" style="border-color:var(--sp-border);">
           {% if char.portrait_path %}
           <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
                style="width:36px;height:36px;object-fit:cover;border-radius:50%;" alt="">
@@ -133,7 +133,7 @@
             <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
                style="color:var(--ttrpg-accent);" class="text-truncate d-block fw-bold">{{ char.name }}</a>
             <div class="small text-muted">{{ char.user.display_name }} &bull; HP {{ char.hp_current }}/{{ char.hp_max }}</div>
-            <div class="progress mt-1" style="height:5px;background:#333;">
+            <div class="progress mt-1" style="height:5px;background:var(--sp-border);">
               <div class="progress-bar"
                    style="width:{{ char.hp_pct() }}%;
                           background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
@@ -185,8 +185,8 @@
                 data-scene-id="{{ scene.scene_ID }}"
                 data-scene-name="{{ scene.sceneName | e }}"
                 onclick="activateScene(this)"
-                style="background:var(--ttrpg-primary);color:var(--ttrpg-text);
-                       border:1px solid #444;">
+                style="background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                       border:1px solid var(--sp-border);">
           {{ scene.sceneName }}
         </button>
         {% endfor %}
@@ -217,7 +217,7 @@
         {% for sm in alive | sort(attribute='sort_order') %}
         {% set mstats = sm.template.stats_json | from_json %}
         <div class="ttrpg-card p-2 mb-2 monster-instance" id="mi-{{ sm.monster_id }}"
-             style="border-color:#444;">
+             style="border-color:var(--sp-border);">
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <!-- Portrait -->
             {% if mstats.image %}
@@ -255,7 +255,7 @@
             </div>
             <!-- HP bar -->
             <div class="flex-grow-1" style="min-width:60px;">
-              <div class="progress" style="height:6px;background:#333;">
+              <div class="progress" style="height:6px;background:var(--sp-border);">
                 <div id="mi-bar-{{ sm.monster_id }}" class="progress-bar"
                      style="width:{{ sm.hp_pct() }}%;
                             background:{% if sm.hp_pct() > 50 %}#28a745{% elif sm.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};
@@ -299,7 +299,7 @@
 
       <!-- Dead monsters (collapsed) -->
       {% if dead %}
-      <details class="ttrpg-card p-2" style="border-color:#444;">
+      <details class="ttrpg-card p-2" style="border-color:var(--sp-border);">
         <summary class="small text-muted" style="cursor:pointer;">
           &#9760; Defeated ({{ dead | length }})
         </summary>
@@ -416,7 +416,7 @@ function activateScene(btn) {
   fetch(`/activatescenes/?id=${sceneId}`)
     .then(() => {
       document.querySelectorAll('.scene-btn').forEach(b => {
-        b.style.borderColor = '#444';
+        b.style.borderColor = 'var(--sp-border)';
         b.style.color = 'var(--ttrpg-text)';
       });
       btn.style.borderColor = 'var(--ttrpg-accent)';

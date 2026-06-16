@@ -107,7 +107,7 @@
       <div class="row g-1 mb-3 text-center" id="det-abilities" style="display:none;">
         {% for ab in ['STR','DEX','CON','INT','WIS','CHA'] %}
         <div class="col">
-          <div class="ttrpg-card p-1" style="border-color:#444;">
+          <div class="ttrpg-card p-1" style="border-color:var(--sp-border);">
             <div class="small text-muted">{{ ab }}</div>
             <div id="det-{{ ab|lower }}" class="fw-bold" style="color:var(--ttrpg-accent);">—</div>
             <div id="det-{{ ab|lower }}-mod" class="small text-muted"></div>
@@ -121,12 +121,12 @@
 
       <!-- Actions -->
       <div id="det-actions-wrap" class="mb-3" style="display:none;">
-        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Actions</h6>
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid var(--sp-border);padding-bottom:4px;">Actions</h6>
         <div id="det-actions" class="small"></div>
       </div>
 
       <!-- Add to session -->
-      <div class="ttrpg-card p-3" style="border-color:#555;">
+      <div class="ttrpg-card p-3" style="border-color:var(--sp-border);">
         <h6 style="color:var(--ttrpg-accent);" class="mb-3">Add to Session</h6>
         <div class="row g-2 align-items-end">
           <div class="col-sm-5">

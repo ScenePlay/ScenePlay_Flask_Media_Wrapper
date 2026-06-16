@@ -42,7 +42,7 @@
 <div class="row g-3">
   {% for m in maps %}
   <div class="col-md-6">
-    <div class="ttrpg-card p-3" style="border-color:{% if m.is_active %}var(--ttrpg-accent){% else %}#444{% endif %};">
+    <div class="ttrpg-card p-3" style="border-color:{% if m.is_active %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
       <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
         <div>
           <h5 class="mb-0" style="color:var(--ttrpg-accent);">{{ m.name }}</h5>
@@ -113,11 +113,11 @@
           <div class="d-flex align-items-center gap-2 mb-2">
             {% if _bg_ext in ('mp4', 'webm', 'ogv') %}
             <video src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
-                   style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;"
+                   style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--sp-border);"
                    muted loop autoplay playsinline></video>
             {% else %}
             <img src="{{ url_for('static', filename='uploads/battlemaps/' ~ m.bg_image) }}"
-                 style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;" alt="">
+                 style="width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--sp-border);" alt="">
             {% endif %}
             <div>
               <div class="small text-muted">Background {{ 'video' if _bg_ext in ('mp4', 'webm', 'ogv') else 'image' }} set</div>
@@ -172,7 +172,7 @@
           </button>
           <button id="mpt-live-btn" onclick="setMapPromptType('live')"
                   class="btn btn-sm flex-grow-1"
-                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid #444;">
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
             &#127916; Live Video
           </button>
         </div>
@@ -182,7 +182,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted mb-1">Environment</label>
             <select id="mpt-env" class="form-select form-select-sm"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
               <option value="">-- any --</option>
               <option>Dungeon / Underground</option>
               <option>Forest / Wilderness</option>
@@ -201,7 +201,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted mb-1">Time of Day</label>
             <select id="mpt-time" class="form-select form-select-sm"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
               <option value="">-- any --</option>
               <option>Dawn / Sunrise</option>
               <option>Morning</option>
@@ -215,7 +215,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted mb-1">Weather / Atmosphere</label>
             <select id="mpt-weather" class="form-select form-select-sm"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
               <option value="">-- any --</option>
               <option>Clear</option>
               <option>Overcast / Cloudy</option>
@@ -229,7 +229,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted mb-1">Lighting</label>
             <select id="mpt-light" class="form-select form-select-sm"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
               <option value="">-- any --</option>
               <option>Natural Sunlight</option>
               <option>Torchlight / Firelight</option>
@@ -242,7 +242,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted mb-1">Art Style</label>
             <select id="mpt-style" class="form-select form-select-sm"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;">
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
               <option value="">-- any --</option>
               <option>Painterly Fantasy</option>
               <option>Dark and Gritty</option>
@@ -256,7 +256,7 @@
 
         <!-- Animated FX (Live video only) -->
         <div id="mpt-fx-section" style="display:none;" class="mb-3 p-2"
-             style="background:var(--ttrpg-surface);border-radius:6px;border:1px solid #444;">
+             style="background:var(--ttrpg-surface);border-radius:6px;border:1px solid var(--sp-border);">
           <div class="small text-muted mb-2">&#127916; Animated Elements</div>
           <div class="d-flex flex-wrap gap-3">
             <div class="form-check">
@@ -283,7 +283,7 @@
           <label class="form-label small text-muted mb-1">Additional Details <span class="text-muted">(optional)</span></label>
           <textarea id="mpt-freetext" class="form-control form-control-sm" rows="2"
                     placeholder="e.g. mossy stone walls, a large chasm in the center, blue magical runes on the floor"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#444;resize:vertical;"></textarea>
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);resize:vertical;"></textarea>
         </div>
 
         <!-- Generate button -->
@@ -292,7 +292,7 @@
 
         <!-- Output section -->
         <div id="mpt-output-section" style="display:none;">
-          <hr style="border-color:#444;">
+          <hr style="border-color:var(--sp-border);">
           <div class="d-flex align-items-center gap-2 mb-2">
             <span class="small text-muted">Copy and paste into your AI image/video tool.</span>
             <button class="btn btn-sm ms-auto"
@@ -360,11 +360,11 @@ function setMapPromptType(type) {
   const accent = 'var(--ttrpg-accent)', surface = 'var(--ttrpg-surface)', text = 'var(--ttrpg-text)';
   if (type === 'static') {
     staticBtn.style.background = accent; staticBtn.style.color = 'var(--sp-on-accent)'; staticBtn.style.border = 'none';
-    liveBtn.style.background   = surface; liveBtn.style.color = text; liveBtn.style.border = '1px solid #444';
+    liveBtn.style.background   = surface; liveBtn.style.color = text; liveBtn.style.border = '1px solid var(--sp-border)';
     fxSection.style.display = 'none';
   } else {
     liveBtn.style.background   = accent; liveBtn.style.color = 'var(--sp-on-accent)'; liveBtn.style.border = 'none';
-    staticBtn.style.background = surface; staticBtn.style.color = text; staticBtn.style.border = '1px solid #444';
+    staticBtn.style.background = surface; staticBtn.style.color = text; staticBtn.style.border = '1px solid var(--sp-border)';
     fxSection.style.display = '';
   }
 }
@@ -554,7 +554,7 @@ function _uploadMapBg(blob, ext) {
         const preview = document.getElementById('bg-preview-' + _activeMapId);
         const isVideo = data.is_video;
         const imgUrl  = data.url + '?t=' + Date.now();
-        const thumbStyle = 'width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid #555;';
+        const thumbStyle = 'width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--sp-border);';
         let media;
         if (isVideo) {
           media = document.createElement('video');

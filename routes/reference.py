@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import threading
 import requests
@@ -6,6 +7,7 @@ from datetime import datetime
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required
 from werkzeug.utils import secure_filename
+from sqlalchemy import text
 from extensions import db
 from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary, tblClassesLibrary
 from routes.auth import dm_required
@@ -65,6 +67,29 @@ API_OPTIONS = {
 
 def _now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+_SPELL_DAMAGE_TYPES = ('acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning',
+                       'necrotic', 'piercing', 'poison', 'psychic', 'radiant',
+                       'slashing', 'thunder')
+
+
+def parse_spell_damage(description):
+    """Best-effort extraction of a spell's base damage from its description.
+
+    Returns (damage_dice, damage_type), e.g. ("8d6", "fire"). Grabs the FIRST
+    'NdM' found and the nearest damage-type word after it. Approximate: misses
+    upcast scaling / save-for-half and may pick the wrong dice for complex
+    spells — a DM can correct individual entries later."""
+    if not description:
+        return '', ''
+    m = re.search(r'(\d+)\s*d\s*(\d+)', description)
+    if not m:
+        return '', ''
+    dice = f'{m.group(1)}d{m.group(2)}'
+    tail = description[m.end():m.end() + 40].lower()
+    dtype = next((t for t in _SPELL_DAMAGE_TYPES if t in tail), '')
+    return dice, dtype
 
 
 def get_api_base():
@@ -314,6 +339,114 @@ def api_test():
         return jsonify({'ok': True, 'endpoints': keys})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
+
+
+# ── Read-only library browser (all users, incl. players) ────────────────────────
+
+@reference_bp.route('/library')
+@login_required
+def library_browse():
+    """Read-only browse of every D&D library for any logged-in user.
+
+    Players have no access to the DM library pages (those stay @dm_required), so
+    this gives them the same reference data they already see on the relay. The
+    field set mirrors relay_broadcaster.push_library so both sides match. Read
+    only: no add/edit/delete/sync here."""
+    def _lvl(n):
+        return 'Cantrip' if (n or 0) == 0 else f'Level {n}'
+
+    def _join(parts):
+        return ' • '.join([p for p in parts if p])
+
+    spells = [{'name': s.name,
+               'sub': _join([_lvl(s.level), s.school or '', s.classes_text or '']),
+               'desc': s.description or ''}
+              for s in tblSpellsLibrary.query.order_by(tblSpellsLibrary.name).all()]
+    feats = [{'name': f.name,
+              'sub': ('Req: ' + f.prerequisites) if f.prerequisites else '',
+              'desc': f.description or ''}
+             for f in tblFeatsLibrary.query.order_by(tblFeatsLibrary.name).all()]
+    weapons = [{'name': w.name,
+                'sub': _join([w.weapon_category or '', w.weapon_range or '',
+                              _join([w.damage_dice or '', w.damage_type or '']), w.properties or '']),
+                'desc': ''}
+               for w in tblWeaponsLibrary.query.order_by(tblWeaponsLibrary.name).all()]
+    armor = [{'name': a.name,
+              'sub': _join([a.armor_category or '',
+                            (f'AC {a.armor_class_base}' if a.armor_class_base is not None else ''),
+                            ('Stealth disadv.' if a.stealth_disadvantage else '')]),
+              'desc': ''}
+             for a in tblArmorLibrary.query.order_by(tblArmorLibrary.name).all()]
+    equipment = [{'name': e.name,
+                  'sub': _join([' › '.join([p for p in [e.category, e.subcategory] if p]),
+                                e.cost or '', (f'{e.weight} lb' if e.weight else '')]),
+                  'desc': e.description or ''}
+                 for e in tblEquipmentLibrary.query.order_by(tblEquipmentLibrary.name).all()]
+    skills = [{'name': sk.name, 'sub': sk.ability_score or '', 'desc': sk.description or ''}
+              for sk in tblSkillsLibrary.query.order_by(tblSkillsLibrary.name).all()]
+    races = [{'name': r.name,
+              'sub': _join([(f'Speed {r.speed} ft' if r.speed else ''), r.size or '', r.ability_bonuses or '']),
+              'desc': r.traits_text or ''}
+             for r in tblRacesLibrary.query.order_by(tblRacesLibrary.name).all()]
+    classes = [{'name': c.name,
+                'sub': _join([(f'd{c.hit_die}' if c.hit_die else ''),
+                              c.spellcasting_ability or '', c.saving_throws or '']),
+                'desc': c.description or ''}
+               for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()]
+
+    # Sections listed alphabetically by label.
+    categories = [
+        ('armor', 'Armor', armor), ('classes', 'Classes', classes),
+        ('equipment', 'Equipment', equipment), ('feats', 'Feats', feats),
+        ('races', 'Races', races), ('skills', 'Skills', skills),
+        ('spells', 'Spells', spells), ('weapons', 'Weapons', weapons),
+    ]
+    return render_template('ttrpg/library_browse.html', categories=categories)
+
+
+# ── Clear all libraries (for a clean re-sync) ────────────────────────────────────
+
+@reference_bp.route('/libraries/clear', methods=['POST'])
+@login_required
+@dm_required
+def libraries_clear():
+    """Clear D&D reference libraries so they can be cleanly re-synced.
+
+    scope='srd' (default): delete only API-synced rows, KEEP homebrew — use this
+    before Sync All. scope='homebrew': delete only custom (homebrew) rows.
+    Characters, sessions, and the monster library are never touched."""
+    models = (tblSpellsLibrary, tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary,
+              tblEquipmentLibrary, tblSkillsLibrary, tblRacesLibrary, tblClassesLibrary)
+    scope = request.form.get('scope', 'srd')
+    total = 0
+    for model in models:
+        if scope == 'all':
+            q = model.query
+        elif scope == 'homebrew':
+            q = model.query.filter(model.source == 'homebrew')
+        else:  # synced/SRD — everything that isn't homebrew
+            q = model.query.filter((model.source != 'homebrew') | (model.source.is_(None)))
+        total += q.delete(synchronize_session=False)
+    db.session.commit()
+
+    if scope == 'all':
+        # Tables are now empty — reset the rowid counters so a fresh Sync All
+        # re-creates rows starting at id 1. (These tables aren't AUTOINCREMENT,
+        # so an empty table already restarts at 1; clearing sqlite_sequence is a
+        # harmless safeguard in case that ever changes.)
+        try:
+            names = ', '.join(f"'{m.__tablename__}'" for m in models)
+            db.session.execute(text(f"DELETE FROM sqlite_sequence WHERE name IN ({names})"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        flash(f'Cleared ALL {total} library rows and reset IDs to 1. Run "Sync All" now — '
+              f'if the re-sync matches, players keep their assigned items.')
+    elif scope == 'homebrew':
+        flash(f'Cleared {total} homebrew rows from the D&D libraries.')
+    else:
+        flash(f'Cleared {total} synced (SRD) rows; homebrew kept. Click "Sync All" to repopulate.')
+    return redirect(url_for('reference_bp.api_settings'))
 
 
 # ── Feats library ──────────────────────────────────────────────────────────────
@@ -822,6 +955,8 @@ def sync_spells_from_api(state=None):
             else:
                 components_str = ', '.join(components_list)
 
+            _spell_desc = '\n'.join(data.get('desc', []))
+            _dmg_dice, _dmg_type = parse_spell_damage(_spell_desc)
             spell = tblSpellsLibrary(
                 api_index    = index,
                 name         = data['name'],
@@ -833,8 +968,10 @@ def sync_spells_from_api(state=None):
                 duration     = data.get('duration', ''),
                 concentration = 1 if data.get('concentration', False) else 0,
                 ritual       = 1 if data.get('ritual', False) else 0,
-                description  = '\n'.join(data.get('desc', [])),
+                description  = _spell_desc,
                 classes_text = ', '.join(c['name'] for c in data.get('classes', [])),
+                damage_dice  = _dmg_dice,
+                damage_type  = _dmg_type,
                 source       = 'srd',
                 created_at   = _now(),
             )
@@ -909,6 +1046,8 @@ def spell_add():
     if not name:
         flash('Spell name is required.')
         return redirect(url_for('reference_bp.spells_library'))
+    _desc = request.form.get('description', '').strip()
+    _dmg_dice, _dmg_type = parse_spell_damage(_desc)
     spell = tblSpellsLibrary(
         api_index    = None,
         name         = name,
@@ -920,8 +1059,10 @@ def spell_add():
         duration     = request.form.get('duration', '').strip(),
         concentration = 1 if request.form.get('concentration') else 0,
         ritual       = 1 if request.form.get('ritual') else 0,
-        description  = request.form.get('description', '').strip(),
+        description  = _desc,
         classes_text = request.form.get('classes_text', '').strip(),
+        damage_dice  = _dmg_dice,
+        damage_type  = _dmg_type,
         source       = 'homebrew',
         created_at   = _now(),
     )

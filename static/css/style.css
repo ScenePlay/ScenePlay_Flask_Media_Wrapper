@@ -18,7 +18,8 @@ a:hover { color: var(--sp-accent); filter: brightness(1.2); }
 
 .title {
     padding: 0 20px;
-    background: var(--sp-primary);
+    background: var(--sp-surface);
+    border-bottom: 1px solid var(--sp-border);
     position: relative;
     height: 50px;
 }
@@ -127,14 +128,16 @@ form input[type=submit]:hover {
 /* ── Bootstrap dark overrides (main site) ──────────────────────────────── */
 
 .navbar.sp-nav {
-    background-color: var(--sp-primary) !important;
+    background-color: var(--sp-surface) !important;
     border-bottom: 1px solid var(--sp-border);
 }
-.navbar.sp-nav .navbar-brand,
-.navbar.sp-nav .nav-link {
+.navbar.sp-nav .navbar-brand {
     color: var(--sp-accent) !important;
 }
-.navbar.sp-nav .nav-link:hover { filter: brightness(1.25); }
+.navbar.sp-nav .nav-link {
+    color: var(--sp-text) !important;
+}
+.navbar.sp-nav .nav-link:hover { color: var(--sp-hover-bg) !important; }
 .navbar.sp-nav .navbar-toggler { border-color: var(--sp-accent); }
 .navbar.sp-nav .navbar-toggler-icon { filter: invert(1); }
 .navbar.sp-nav .dropdown-menu {
@@ -219,9 +222,10 @@ th, td { border-color: var(--sp-border) !important; color: var(--sp-text); }
 
 /* Header cells */
 th.gridjs-th {
-    background-color: var(--sp-primary) !important;
+    background-color: var(--sp-surface) !important;
     color: var(--sp-accent) !important;
     border-color: var(--sp-border) !important;
+    border-bottom: 2px solid var(--sp-accent) !important;
     font-weight: 600 !important;
     letter-spacing: .03em !important;
 }
@@ -255,7 +259,7 @@ td.gridjs-td {
 
 /* Footer / pagination */
 .gridjs-footer {
-    background-color: var(--sp-primary) !important;
+    background-color: var(--sp-surface) !important;
     border-color: var(--sp-border) !important;
     color: var(--sp-text) !important;
 }
@@ -309,11 +313,11 @@ td.gridjs-message {
     color: var(--sp-muted) !important;
 }
 
-/* Sort icons — invert them so they're visible on dark headers */
+/* Sort icons — headers are light now, so keep the icons dark (no invert) */
 button.gridjs-sort-neutral,
 button.gridjs-sort-asc,
 button.gridjs-sort-desc {
-    filter: invert(1) opacity(.7) !important;
+    filter: opacity(.55) !important;
 }
 
 /* ── Theme picker panel ────────────────────────────────────────────────── */
@@ -330,4 +334,22 @@ button.gridjs-sort-desc {
     color: var(--sp-accent);
     margin-bottom: 12px;
     text-transform: uppercase;
+}
+
+/* ── Root screen: all fonts black ─────────────────────────────────────────
+   --sp-text/-muted/-link are text-only, so blacken them outright. --sp-accent
+   is reused for button & border FILLS, so only the accent-as-TEXT elements are
+   forced to black explicitly (the variable itself is left alone). */
+:root {
+    --sp-text:  #000;
+    --sp-muted: #000;
+    --sp-link:  #000;
+}
+h1, h2, h3, h4, h5, h6,
+code,
+a:hover,
+.navbar.sp-nav .navbar-brand,
+th.gridjs-th,
+#sp-theme-panel .sp-panel-title {
+    color: #000 !important;
 }

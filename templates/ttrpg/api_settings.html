@@ -28,7 +28,30 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h3 style="color:var(--ttrpg-accent);" class="mb-0">&#9881; D&amp;D API Settings</h3>
-  <button id="sync-all-btn" class="btn btn-ttrpg btn-sm" onclick="syncAll()">&#8635; Sync All</button>
+  <div class="d-flex gap-2 flex-wrap">
+    <form method="POST" action="{{ url_for('reference_bp.libraries_clear') }}" class="m-0"
+          onsubmit="return confirm('⚠ WARNING — PLAYER IMPACT\n\nClearing the library unlinks items and spells your players currently have assigned. Their assigned spells lose their details (damage dice, casting time, etc.) and the spell-damage roller will stop working for them until they are re-added.\n\nThis clears all API-synced (SRD) data so it can be re-synced. Your HOMEBREW entries are kept. Characters, sessions, and the monster library are NOT deleted.\n\nClick OK only if you understand players will lose the details of their currently assigned items. Run Sync All afterward to repopulate.');">
+      <input type="hidden" name="scope" value="srd">
+      <button type="submit" class="btn btn-outline-danger btn-sm">&#128465; Clear SRD</button>
+    </form>
+    <form method="POST" action="{{ url_for('reference_bp.libraries_clear') }}" class="m-0"
+          onsubmit="return confirm('⚠ WARNING — PLAYER IMPACT\n\nPlayers will lose the details of any currently assigned items/spells that came from your homebrew library (they get unlinked until re-added).\n\nThis deletes ONLY your homebrew (custom) entries. Synced SRD data is kept. This cannot be undone.\n\nClick OK only if you understand and accept this.');">
+      <input type="hidden" name="scope" value="homebrew">
+      <button type="submit" class="btn btn-outline-danger btn-sm">&#128465; Clear Homebrew</button>
+    </form>
+    <form method="POST" action="{{ url_for('reference_bp.libraries_clear') }}" class="m-0"
+          onsubmit="return confirm('⚠ FULL WIPE + RESET IDs\n\nDeletes EVERYTHING in all libraries — including your HOMEBREW — and resets IDs to 1.\n\nThen run Sync All: because IDs restart at 1, players assigned items should re-link IF the re-sync produces the same entries in the same order. If it does not match, links can attach to the WRONG item.\n\nCharacters, sessions, and the monster library are not deleted. This cannot be undone. Proceed?');">
+      <input type="hidden" name="scope" value="all">
+      <button type="submit" class="btn btn-danger btn-sm">&#128465; Clear All &amp; Reset IDs</button>
+    </form>
+    <button id="sync-all-btn" class="btn btn-ttrpg btn-sm" onclick="syncAll()">&#8635; Sync All</button>
+  </div>
+</div>
+
+<div class="alert mb-3" style="background:rgba(220,53,69,.1);border:1px solid #dc3545;color:#dc3545;font-size:.82rem;">
+  &#9888; <strong>Clearing a library affects players.</strong> Items and spells your players have assigned get unlinked
+  &mdash; assigned spells lose their details (damage dice, casting time) and the spell-damage roller stops working for
+  them until re-added. You must confirm this in the dialog before clearing.
 </div>
 
 <!-- Current status -->

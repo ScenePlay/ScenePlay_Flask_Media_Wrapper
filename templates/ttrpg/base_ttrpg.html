@@ -15,15 +15,22 @@
             font-family: sans-serif;
         }
         .ttrpg-nav {
-            background-color: var(--ttrpg-primary);
+            background-color: var(--ttrpg-surface);
+            border-bottom: 1px solid var(--sp-border);
         }
-        .ttrpg-nav .navbar-brand,
-        .ttrpg-nav .nav-link {
+        .ttrpg-nav .navbar-brand {
             color: var(--ttrpg-accent) !important;
+        }
+        .ttrpg-nav .nav-link {
+            color: var(--ttrpg-text) !important;
+        }
+        .ttrpg-nav .nav-link:hover,
+        .ttrpg-nav .nav-link:focus {
+            color: var(--sp-hover-bg) !important;
         }
         .ttrpg-card {
             background-color: var(--ttrpg-surface);
-            border: 1px solid var(--ttrpg-accent);
+            border: 1px solid var(--sp-border);
             border-radius: 6px;
         }
         .btn-ttrpg {
@@ -96,7 +103,7 @@
             color: var(--sp-hover-text) !important;
         }
 
-        .nav-tabs { border-bottom-color: #333 !important; }
+        .nav-tabs { border-bottom-color: var(--sp-border) !important; }
         .nav-tabs .nav-link {
             color: var(--ttrpg-accent) !important;
             border-color: transparent !important;
@@ -141,12 +148,12 @@
 
         /* ── Attributes dropdown dark theme ────────────────────────── */
         .ttrpg-nav .dropdown-menu {
-            background-color: var(--ttrpg-primary);
-            border: 1px solid var(--ttrpg-accent);
+            background-color: var(--ttrpg-surface);
+            border: 1px solid var(--sp-border);
             border-radius: 6px;
         }
         .ttrpg-nav .dropdown-item {
-            color: var(--ttrpg-accent);
+            color: var(--ttrpg-text);
         }
         .ttrpg-nav .dropdown-item:hover,
         .ttrpg-nav .dropdown-item:focus {
@@ -226,10 +233,11 @@
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('monsters_bp.library') }}">Monsters</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('relay_admin_bp.status') }}">&#127760; Relay</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Manage Users</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881;</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.api_settings') }}" title="D&D API settings">&#9881; DND API</a></li>
                     {% else %}
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('ttrpg.my_character') }}">My Character</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('battlemap_bp.active_map') }}">&#9776; Battle Map</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('reference_bp.library_browse') }}">&#128218; Library</a></li>
                     {% endif %}
                 {% endif %}
             </ul>

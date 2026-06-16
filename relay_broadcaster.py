@@ -292,6 +292,8 @@ def _char_to_payload(char):
                 'ritual':       bool(cs.lib_spell.ritual   if cs.lib_spell else False),
                 'classes':      (cs.lib_spell.classes_text if cs.lib_spell else '') or '',
                 'description':  (cs.lib_spell.description  if cs.lib_spell else '') or '',
+                'damage_dice':  (cs.lib_spell.damage_dice  if cs.lib_spell else '') or '',
+                'damage_type':  (cs.lib_spell.damage_type  if cs.lib_spell else '') or '',
                 'prepared':     bool(cs.prepared),
                 'notes':        cs.notes         or '',
             }
@@ -427,7 +429,8 @@ def push_library():
              'casting_time': s.casting_time or '', 'range': s.range_text or '',
              'components': s.components or '', 'duration': s.duration or '',
              'concentration': bool(s.concentration), 'ritual': bool(s.ritual),
-             'description': s.description or '', 'classes': s.classes_text or ''}
+             'description': s.description or '', 'classes': s.classes_text or '',
+             'damage_dice': s.damage_dice or '', 'damage_type': s.damage_type or ''}
             for s in tblSpellsLibrary.query.order_by(
                 tblSpellsLibrary.level, tblSpellsLibrary.name).all()
         ],

@@ -59,7 +59,7 @@
         {% for label, key in ab_pairs %}
         {% set val = s.get(key) %}
         <div class="col">
-          <div class="ttrpg-card p-1" style="border-color:#444;">
+          <div class="ttrpg-card p-1" style="border-color:var(--sp-border);">
             <div class="small text-muted">{{ label }}</div>
             <div class="fw-bold" style="color:var(--ttrpg-accent);">{{ val if val is not none else '—' }}</div>
             {% if val is not none %}
@@ -113,7 +113,7 @@
       <!-- Actions -->
       {% if s.get('actions') %}
       <div class="mb-3">
-        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Actions</h6>
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid var(--sp-border);padding-bottom:4px;">Actions</h6>
         <div class="small">
           {% for a in s.actions %}
           <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
@@ -125,7 +125,7 @@
       <!-- Legendary actions -->
       {% if s.get('legendary_actions') %}
       <div class="mb-3">
-        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Legendary Actions</h6>
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid var(--sp-border);padding-bottom:4px;">Legendary Actions</h6>
         <div class="small">
           {% for a in s.legendary_actions %}
           <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
@@ -137,7 +137,7 @@
       <!-- Reactions -->
       {% if s.get('reactions') %}
       <div class="mb-3">
-        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid #444;padding-bottom:4px;">Reactions</h6>
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid var(--sp-border);padding-bottom:4px;">Reactions</h6>
         <div class="small">
           {% for a in s.reactions %}
           <p class="mb-1"><strong>{{ a.name }}.</strong> {{ a.desc }}</p>
