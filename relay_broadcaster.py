@@ -21,11 +21,11 @@ def _active():
     return cfg
 
 
-def _post(path, payload, cfg):
+def _post(path, payload, cfg, timeout=5):
     import requests
     url = cfg['url'].rstrip('/') + path
     headers = {'X-Relay-Secret': cfg['secret'], 'Content-Type': 'application/json'}
-    requests.post(url, json=payload, headers=headers, timeout=5)
+    requests.post(url, json=payload, headers=headers, timeout=timeout)
 
 
 def _fire(fn):
@@ -61,8 +61,37 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
     _fire(_go)
 
 
-def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None, movement_scale=1.0):
-    """POST /api/v1/session/push  body: { session_id, map: { url, ... } }"""
+def _battlemap_data(filename):
+    """Return (base64_data, ext) for a battlemap bg image, or (None, None).
+
+    Only still images are embedded so a remote relay can write the file itself;
+    video backgrounds (and missing files) fall back to the URL."""
+    if not filename:
+        return None, None
+    import base64, os
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+        return None, None
+    try:
+        from flask import current_app
+        path = os.path.join(current_app.root_path, 'static', 'uploads', 'battlemaps', filename)
+    except RuntimeError:
+        return None, None
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, 'rb') as f:
+            return base64.b64encode(f.read()).decode('ascii'), ext
+    except Exception:
+        return None, None
+
+
+def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
+                         movement_scale=1.0, bg_filename=None):
+    """POST /api/v1/session/push  body: { session_id, map: { url, ... } }
+
+    When bg_filename names a still image, its bytes are embedded as base64 so a
+    remote relay (which cannot reach this LAN server) can serve the map itself."""
     cfg = _active()
     if not cfg:
         return
@@ -77,10 +106,21 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None, mov
             'movement_scale': movement_scale,
         },
     }
+    bg_data, bg_ext = _battlemap_data(bg_filename)
+    if bg_data:
+        # Embed the image inline as a data: URL. The remote map <img> reads
+        # map.url, so the browser renders the bytes directly without reaching
+        # this LAN server. (image_data/_ext kept for any relay-side handler.)
+        mime = 'jpeg' if bg_ext == 'jpg' else bg_ext
+        payload['map']['url']        = f'data:image/{mime};base64,{bg_data}'
+        payload['map']['image_data'] = bg_data
+        payload['map']['image_ext']  = bg_ext
 
     def _go():
         try:
-            _post('/api/v1/session/push', payload, cfg)
+            # Map pushes can carry an embedded background image — allow a generous
+            # upload window so large maps aren't cut off on slow home uplinks.
+            _post('/api/v1/session/push', payload, cfg, timeout=60)
         except Exception as e:
             log.warning('relay broadcast_map_update failed: %s', e)
 

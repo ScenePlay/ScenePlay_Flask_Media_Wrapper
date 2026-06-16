@@ -96,6 +96,7 @@ def _push_map_state(bm):
         [_token_relay_payload(t, bm) for t in bm.tokens],
         effects=effects,
         movement_scale=bm.movement_scale or 1.0,
+        bg_filename=bm.bg_image,
     )
 
 
