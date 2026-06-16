@@ -196,6 +196,29 @@
             margin-bottom: 12px;
             text-transform: uppercase;
         }
+
+        /* ── Dark, high-contrast fonts ────────────────────────────────────────
+           Text vars are text-only, so blacken them. --ttrpg-accent is reused for
+           button/border fills, so only the accent-as-TEXT usages are forced black
+           (incl. the ~hundreds of inline color:var(--ttrpg-accent) titles, matched
+           by attribute selector). Semantic colours use explicit hex, so untouched. */
+        :root {
+            --sp-text:  #000;
+            --sp-muted: #000;
+            --sp-link:  #000;
+        }
+        h1, h2, h3, h4, h5, h6,
+        [style*="color:var(--ttrpg-accent)"],
+        [style*="color: var(--ttrpg-accent)"],
+        .ttrpg-nav .navbar-brand,
+        .ttrpg-nav .nav-link,
+        .ttrpg-nav .dropdown-item,
+        .nav-tabs .nav-link,
+        .nav-tabs .nav-link.active,
+        .condition-badge,
+        #sp-theme-panel .sp-panel-title {
+            color: #000 !important;
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
