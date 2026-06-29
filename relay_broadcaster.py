@@ -444,14 +444,16 @@ def push_library():
              'range': w.weapon_range or '', 'damage_dice': w.damage_dice or '',
              'damage_type': w.damage_type or '',
              'two_handed_damage_dice': w.two_handed_damage_dice or '',
-             'properties': w.properties or ''}
+             'properties': w.properties or '', 'mastery': w.mastery or '',
+             'notes': w.notes or ''}
             for w in tblWeaponsLibrary.query.order_by(tblWeaponsLibrary.name).all()
         ],
         'armor': [
             {'name': a.name, 'category': a.armor_category or '',
              'ac_base': a.armor_class_base, 'dex_bonus': bool(a.dex_bonus),
              'max_dex_bonus': a.max_dex_bonus, 'str_minimum': a.str_minimum,
-             'stealth_disadvantage': bool(a.stealth_disadvantage)}
+             'stealth_disadvantage': bool(a.stealth_disadvantage),
+             'notes': a.notes or ''}
             for a in tblArmorLibrary.query.order_by(tblArmorLibrary.name).all()
         ],
         'equipment': [

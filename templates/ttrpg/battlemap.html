@@ -1252,6 +1252,12 @@ function pollState() {
   fetch(`/ttrpg/battlemap/${MAP_ID}/state`)
     .then(r => r.json())
     .then(d => {
+      // Players auto-follow the DM to a newly activated map. DMs are left alone
+      // so they can keep editing prep maps that aren't the live one.
+      if (!IS_DM && d.active_map_id && d.active_map_id !== MAP_ID) {
+        window.location.href = `/ttrpg/battlemap/${d.active_map_id}/view`;
+        return;
+      }
       renderTokens(d.tokens);
       renderEffects(d.effects || []);
     });

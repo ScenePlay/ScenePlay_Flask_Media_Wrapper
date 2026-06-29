@@ -493,11 +493,22 @@ def map_state(map_id):
         'border_color': e.border_color,
     } for e in bm.effects]
 
+    # Report the currently-live map so a player's page can auto-switch when the
+    # DM activates a different one (avoids a manual refresh). None if nothing live.
+    active_session = tblSessions.query.filter_by(status='active').first()
+    active_map_id = None
+    if active_session:
+        active_bm = tblBattleMaps.query.filter_by(
+            session_id=active_session.session_id, is_active=1).first()
+        if active_bm:
+            active_map_id = active_bm.map_id
+
     return jsonify({
-        'tokens':    result,
-        'effects':   effects,
-        'grid_cols': bm.grid_cols,
-        'grid_rows': bm.grid_rows,
+        'tokens':        result,
+        'effects':       effects,
+        'grid_cols':     bm.grid_cols,
+        'grid_rows':     bm.grid_rows,
+        'active_map_id': active_map_id,
     })
 
 
