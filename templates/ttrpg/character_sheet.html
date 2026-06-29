@@ -472,8 +472,8 @@
           <span class="qref-label">Weapons</span>
           <div class="qref-chips">
             {% for w in char.weapons | sort(attribute='order_by') %}
-            <button class="qref-chip qref-click" onclick='diceQuickSet({{ w.attack_bonus or 0 }}, {{ (w.weapon_name ~ " attack") | tojson }})'
-                    title="Attack with {{ w.weapon_name }}{% if w.damage_dice %} &#8212; {{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% endif %}">&#9876; {{ w.weapon_name }} <span class="qref-sub">{{ '%+d' % (w.attack_bonus or 0) }}{% if w.damage_dice %} &bull; {{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% endif %}</span></button>
+            <button class="qref-chip qref-click" onclick='weaponQuickRoll({{ (w.damage_dice or "") | tojson }}, {{ w.damage_bonus or 0 }}, {{ w.attack_bonus or 0 }}, {{ w.weapon_name | tojson }})'
+                    title="Roll {{ w.weapon_name }}{% if w.damage_dice %} damage &#8212; {{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% else %} attack (d20 {{ '%+d' % (w.attack_bonus or 0) }}){% endif %}">&#9876; {{ w.weapon_name }} <span class="qref-sub">{% if w.damage_dice %}{{ w.damage_dice }}{% if w.damage_bonus %}+{{ w.damage_bonus }}{% endif %} {{ w.damage_type }}{% else %}{{ '%+d' % (w.attack_bonus or 0) }}{% endif %}</span></button>
             {% endfor %}
           </div>
         </div>
@@ -2743,6 +2743,17 @@ function diceQuickSetDamage(diceStr, label) {
   selectDie(parseInt(m[2], 10));
   document.getElementById('dice-modifier').value = 0;
   document.getElementById('dice-label').value    = label;
+}
+
+// Load a weapon's damage dice into the roller (count + die + damage bonus,
+// e.g. 2d6 +3). Falls back to a d20 attack roll when it has no damage dice.
+function weaponQuickRoll(diceStr, dmgBonus, atkBonus, name) {
+  const m = (diceStr || '').match(/(\d+)\s*d\s*(\d+)/i);
+  if (!m) { diceQuickSet(atkBonus || 0, (name || '') + ' attack'); return; }
+  document.getElementById('dice-count').value    = parseInt(m[1], 10);
+  selectDie(parseInt(m[2], 10));
+  document.getElementById('dice-modifier').value = dmgBonus || 0;
+  document.getElementById('dice-label').value    = (name || '') + ' damage';
 }
 
 function doRoll() {
