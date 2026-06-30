@@ -1816,12 +1816,33 @@
   </div>
 </div>
 
+<!-- SFX control — static so it's always visible even if JS/sfx.js fails to load -->
+<div id="sfx-ctrl" style="position:fixed;left:8px;bottom:8px;z-index:3000;display:flex;
+  align-items:center;gap:8px;background:rgba(20,18,12,.92);
+  border:1px solid var(--ttrpg-border,#3a3420);border-radius:20px;padding:5px 12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.5);font:600 12px system-ui,sans-serif;user-select:none;">
+  <button id="sfx-toggle" type="button" title="Click to enable / mute sound effects"
+    style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
+    white-space:nowrap;color:#c9a84c;">&#128264; Sound: tap to start</button>
+  <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
+    style="width:72px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
+  <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
+    onclick="if(window.SFX)SFX.openChooser()"
+    style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
+    cursor:pointer;font:inherit;line-height:1;padding:3px 9px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='scripts/Tone.js') }}"></script>
+<script src="{{ url_for('static', filename='scripts/sfx.js', v='5') }}"></script>
 <script>
 const CHAR_ID = {{ char.character_id }};
 const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
+
+// Safe SFX trigger — never let a missing/broken sound module touch sheet logic.
+function _sfx(name) { try { if (window.SFX) SFX.play(name); } catch (e) {} }
 
 // ── Tab persistence across reloads ────────────────────────────
 const TAB_KEY = `sheet_tab_${CHAR_ID}`;
@@ -1945,6 +1966,9 @@ function applyHpDelta(delta) {
     body: JSON.stringify({delta})
   }).then(r => r.json()).then(data => {
     if (!data.ok) return;
+    // Voice the change on the device that applied it.
+    if (delta < 0)      _sfx(data.hp_current <= 0 ? 'dead' : 'damage');
+    else if (delta > 0) _sfx('heal');
     document.getElementById('hp_current_disp').textContent = data.hp_current;
     updateHpBar(data.hp_pct);
   });
@@ -2756,6 +2780,30 @@ function weaponQuickRoll(diceStr, dmgBonus, atkBonus, name) {
   document.getElementById('dice-label').value    = (name || '') + ' damage';
 }
 
+// ── Crit / fumble SFX ─────────────────────────────────────────
+// Fire only on a d20. For advantage/disadvantage, judge the KEPT die.
+function _critFumble(d) {
+  const sides = parseInt((d.expression.match(/d(\d+)/) || ['', '0'])[1]);
+  if (sides !== 20) return null;
+  let val;
+  if (d.adv_mode === 'advantage')         val = Math.max(...d.dice);
+  else if (d.adv_mode === 'disadvantage') val = Math.min(...d.dice);
+  else                                    val = (d.dice.length === 1 ? d.dice[0] : null);
+  if (val === 20) return 'crit';
+  if (val === 1)  return 'fumble';
+  return null;
+}
+
+// Voice a roll's crit/fumble at most once per client. The roller hears it
+// instantly via doRoll; the dice-feed poll covers everyone else's rolls.
+let _lastSfxRollId = 0;
+function _maybeRollSfx(d) {
+  if (!d || typeof d.roll_id !== 'number' || d.roll_id <= _lastSfxRollId) return;
+  _lastSfxRollId = d.roll_id;
+  const cf = _critFumble(d);
+  if (cf) _sfx(cf);
+}
+
 function doRoll() {
   const count    = parseInt(document.getElementById('dice-count').value)    || 1;
   const modifier = parseInt(document.getElementById('dice-modifier').value) || 0;
@@ -2774,6 +2822,7 @@ function doRoll() {
     showLocalResult(d);
     renderFeedEntry(d, true);
     _diceLastId = Math.max(_diceLastId, d.roll_id);
+    _maybeRollSfx(d);   // crit/fumble — instant for the roller
   });
 }
 
@@ -2893,6 +2942,7 @@ function pollDiceFeed() {
       rolls.reverse().forEach(d => {
         if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
         renderFeedEntry(d, true);
+        _maybeRollSfx(d);   // everyone hears crit/fumble from anyone's roll
         _diceLastId = Math.max(_diceLastId, d.roll_id);
       });
     });
@@ -3441,5 +3491,52 @@ async function activatePastePortrait() {
   }, { once: true });
 }
 {% endif %}
+</script>
+
+<script>
+// ── SFX control: wire the static #sfx-ctrl element ────────────────────────────
+(function () {
+  const toggle = document.getElementById('sfx-toggle');
+  const slider = document.getElementById('sfx-vol');
+  if (!toggle || !slider) return;
+
+  if (!window.SFX) {   // sfx.js failed to load — tell the user instead of hiding
+    toggle.innerHTML = '&#9888; Sound unavailable';
+    toggle.style.color = '#e06666';
+    return;
+  }
+
+  slider.value = Math.round(SFX.getVolume() * 100);
+
+  function syncUI() {
+    if (!SFX.hasTone()) { toggle.innerHTML = '&#9888; Tone.js not loaded'; toggle.style.color = '#e06666'; return; }
+    let icon, text, color;
+    if (!SFX.isEnabled())   { icon = '&#128264;'; text = 'Sound: tap to start'; color = '#c9a84c'; }
+    else if (SFX.isMuted()) { icon = '&#128263;'; text = 'Sound: MUTED';        color = '#e06666'; }
+    else                    { icon = '&#128266;'; text = 'Sound: ON';           color = '#7bc77b'; }
+    toggle.innerHTML = icon + ' ' + text;
+    toggle.style.color = color;
+    slider.style.opacity = (SFX.isEnabled() && !SFX.isMuted()) ? '1' : '.5';
+  }
+
+  // Browsers require a user gesture before audio starts — enable on the first.
+  const _on = () => { SFX.enable().then(syncUI); };
+  document.addEventListener('pointerdown', _on, { once: true });
+  document.addEventListener('keydown',     _on, { once: true });
+
+  toggle.addEventListener('click', async () => {
+    const wasOn = SFX.isEnabled();
+    const ok = await SFX.enable();
+    if (!ok) {   // surface WHY, instead of doing nothing
+      toggle.innerHTML = '&#9888; ' + (SFX.lastError() || 'audio failed');
+      toggle.style.color = '#e06666';
+      return;
+    }
+    if (wasOn) SFX.mute(!SFX.isMuted());   // first click only enables; later clicks toggle mute
+    syncUI();
+  });
+  slider.addEventListener('input', () => SFX.setVolume(slider.value / 100));
+  syncUI();
+})();
 </script>
 {% endblock %}

@@ -214,6 +214,11 @@ def map_activate(map_id):
         t.updated_at = activation_ts
     db.session.commit()
 
+    # Called via fetch from the map view ("Set Active" button): reply JSON so the
+    # DM stays on the map. The maps-manage page posts a normal form → redirect.
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'ok': True, 'map_id': bm.map_id, 'name': bm.name})
+
     flash(f'"{bm.name}" is now the active map.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 

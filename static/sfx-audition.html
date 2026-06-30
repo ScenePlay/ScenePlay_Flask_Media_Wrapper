@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ScenePlay — SFX Audition</title>
+<style>
+:root{
+  --bg:#111009;--surface:#1c1a14;--surface2:#26231a;--border:#3a3420;
+  --gold:#c9a84c;--gold-dim:#6a5820;--gold-pale:#f0d890;
+  --ink:#e8dcc0;--ink-dim:#8a7a5a;--green:#4a8a4a;--red:#8a3030;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font-family:Georgia,serif;min-height:100vh;padding:24px 16px 60px;}
+.wrap{max-width:560px;margin:0 auto;}
+h1{font-size:22px;color:var(--gold);letter-spacing:.04em;margin-bottom:4px;}
+p.sub{font-size:14px;color:var(--ink-dim);font-style:italic;margin-bottom:20px;}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:18px;}
+.statusbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+#status{font-size:14px;color:var(--green);}
+#status.off{color:var(--ink-dim);}
+.ctrl-row{display:flex;align-items:center;gap:10px;flex:1;min-width:200px;}
+.ctrl-row label{font-size:13px;color:var(--ink-dim);}
+input[type=range]{flex:1;accent-color:var(--gold);cursor:pointer;}
+#vol-val{width:46px;text-align:right;font-family:monospace;font-size:13px;color:var(--gold);}
+.mute-row{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim);}
+.event{margin-bottom:18px;}
+.event h2{font-size:13px;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;
+  margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+.event h2 .pick{font-size:11px;letter-spacing:0;color:var(--ink-dim);text-transform:none;font-style:italic;}
+.variants{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+@media(max-width:480px){.variants{grid-template-columns:1fr;}}
+.vbtn{padding:10px;border-radius:6px;cursor:pointer;text-align:left;
+  background:var(--surface);border:1px solid var(--border);color:var(--ink);position:relative;}
+.vbtn:hover{border-color:var(--gold-dim);}
+.vbtn:active{background:#2a2510;}
+.vbtn.sel{border-color:var(--gold);background:#2a2510;}
+.vbtn .nm{display:block;font-size:14px;color:var(--gold-pale);margin-bottom:3px;}
+.vbtn .env{display:block;font-size:10.5px;color:var(--ink-dim);font-style:italic;line-height:1.35;}
+.vbtn .tick{position:absolute;top:7px;right:8px;color:var(--gold);font-size:12px;opacity:0;}
+.vbtn.sel .tick{opacity:1;}
+.hint{font-size:12px;color:var(--ink-dim);margin-top:8px;line-height:1.5;}
+code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--gold-pale);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SFX Audition &amp; Chooser</h1>
+  <p class="sub">Tap a variant to hear it and select it. Your pick is what the app will play, saved in this browser.</p>
+
+  <div class="panel">
+    <div class="statusbar">
+      <span id="status" class="off">🔇 Tap anything to start sound</span>
+      <div class="ctrl-row">
+        <label for="vol">Vol</label>
+        <input type="range" id="vol" min="0" max="100" value="80">
+        <span id="vol-val">80%</span>
+      </div>
+      <label class="mute-row"><input type="checkbox" id="mute"> Mute</label>
+    </div>
+  </div>
+
+  <div id="events"></div>
+
+  <p class="hint">
+    Tune the recipes in <code>static/scripts/sfx.js</code> — instrument character lives in
+    <code>_buildVoices</code>, notes/timing in the <code>VARIANTS</code> table — then reload to re-audition.
+  </p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="scripts/sfx.js"></script>
+<script>
+const EVENT_LABELS = {
+  crit:'Crit (nat 20)', fumble:'Fumble (nat 1)', move:'Move',
+  damage:'Damage', heal:'Heal', dead:'Down (0 HP)', mapswitch:'Map switch'
+};
+
+const statusEl = document.getElementById('status');
+function markEnabled(){
+  statusEl.textContent = '🔊 Sound on';
+  statusEl.classList.remove('off');
+}
+
+// "On by default": enable on the very first interaction anywhere (browsers
+// require a user gesture, so this is as automatic as it can be).
+async function ensureOn(){
+  if (SFX.isEnabled()) return true;
+  const ok = await SFX.enable();
+  if (ok) markEnabled();
+  else statusEl.textContent = '⚠ Tone.js failed to load';
+  return ok;
+}
+document.addEventListener('pointerdown', ensureOn, { once:true });
+document.addEventListener('keydown',     ensureOn, { once:true });
+
+// Build the chooser UI from the module's own registry.
+const eventsWrap = document.getElementById('events');
+SFX.events().forEach(event => {
+  const sec = document.createElement('div');
+  sec.className = 'event';
+  sec.innerHTML = `<h2>${EVENT_LABELS[event]||event} <span class="pick">tap to choose</span></h2>`;
+  const grid = document.createElement('div');
+  grid.className = 'variants';
+
+  SFX.variants(event).forEach(({id,label,env}) => {
+    const b = document.createElement('button');
+    b.className = 'vbtn' + (SFX.getSelected(event)===id ? ' sel' : '');
+    b.dataset.event = event; b.dataset.id = id;
+    b.innerHTML = `<span class="tick">✓ chosen</span><span class="nm">${label}</span><span class="env">${env}</span>`;
+    b.addEventListener('click', async () => {
+      await ensureOn();
+      SFX.select(event, id);
+      SFX.playVariant(event, id);
+      grid.querySelectorAll('.vbtn').forEach(x => x.classList.toggle('sel', x.dataset.id===id));
+    });
+    grid.appendChild(b);
+  });
+  sec.appendChild(grid);
+  eventsWrap.appendChild(sec);
+});
+
+// Volume + mute
+const vol = document.getElementById('vol');
+const volVal = document.getElementById('vol-val');
+vol.value = Math.round(SFX.getVolume()*100);
+volVal.textContent = vol.value + '%';
+vol.addEventListener('input', () => { volVal.textContent = vol.value+'%'; SFX.setVolume(vol.value/100); });
+
+const mute = document.getElementById('mute');
+mute.checked = SFX.isMuted();
+mute.addEventListener('change', () => SFX.mute(mute.checked));
+</script>
+</body>
+</html>

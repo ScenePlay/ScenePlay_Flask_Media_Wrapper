@@ -350,6 +350,13 @@
     </div>
     <div class="d-flex gap-2">
       {% if current_user.is_dm() %}
+      {% if bm.is_active %}
+      <span id="set-active-btn" class="btn btn-sm btn-success disabled"
+            title="This map is live for players">&#9679; Active</span>
+      {% else %}
+      <button id="set-active-btn" class="btn btn-sm btn-outline-warning"
+              onclick="setMapActive()" title="Make this the live map players see">Set Active</button>
+      {% endif %}
       <button id="fx-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleFxPanel()" title="Map effects">&#10022; FX</button>
       <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
@@ -769,9 +776,27 @@
   </div>
 </div>
 
+<!-- SFX control — static so it's always visible even if JS/sfx.js fails to load -->
+<div id="sfx-ctrl" style="position:fixed;left:8px;bottom:8px;z-index:3000;display:flex;
+  align-items:center;gap:8px;background:rgba(20,18,12,.92);
+  border:1px solid var(--ttrpg-border,#3a3420);border-radius:20px;padding:5px 12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.5);font:600 12px system-ui,sans-serif;user-select:none;">
+  <button id="sfx-toggle" type="button" title="Click to enable / mute sound effects"
+    style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
+    white-space:nowrap;color:#c9a84c;">&#128264; Sound: tap to start</button>
+  <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
+    style="width:72px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
+  <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
+    onclick="if(window.SFX)SFX.openChooser()"
+    style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
+    cursor:pointer;font:inherit;line-height:1;padding:3px 9px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='scripts/Tone.js') }}"></script>
+<script src="{{ url_for('static', filename='scripts/sfx.js', v='5') }}"></script>
 <script>
 const MAP_ID    = {{ bm.map_id }};
 let   CELL_PX   = {{ cell_px }};
@@ -1048,6 +1073,9 @@ function attachDrag(el, tokenId) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ token_id: tokenId, col, row }),
     });
+    // Mover-only footstep — only when the token actually changed cells, so a
+    // click / double-click that lands on the same square stays silent.
+    if (col !== _startCol || row !== _startRow) _sfx('move');
   }
 
   el.addEventListener('pointerup',     endDrag);
@@ -1201,6 +1229,8 @@ function adjustSidebarHp(entityType, entityId, delta) {
     body: JSON.stringify({ delta }),
   }).then(r => r.json()).then(data => {
     if (!data.ok) return;
+    if (delta < 0)      _sfx(data.hp_current <= 0 ? 'dead' : 'damage');
+    else if (delta > 0) _sfx('heal');
     // Update sidebar HP display
     const hpRow = document.querySelector(
       `.sidebar-entity[data-entity-type="${entityType}"][data-entity-id="${entityId}"] .sb-hp-row`
@@ -1243,6 +1273,31 @@ function removeTokenByEntity(entityType, entityId) {
   }).then(r => r.json()).then(d => { if (d.ok) pollState(); });
 }
 
+// ── Set this map live (DM) ──────────────────────────────────────────────────────
+// Activate the current map without leaving the page; players auto-follow on their
+// next state poll. The button swaps to a static "Active" badge on success.
+function setMapActive() {
+  const btn = document.getElementById('set-active-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Activating…'; }
+  fetch(`/ttrpg/battlemap/${MAP_ID}/activate`, {
+    method:  'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  }).then(r => r.json()).then(d => {
+    const el = document.getElementById('set-active-btn');
+    if (d && d.ok) {
+      if (el) el.outerHTML =
+        '<span id="set-active-btn" class="btn btn-sm btn-success disabled"' +
+        ' title="This map is live for players">● Active</span>';
+    } else if (el) {
+      el.disabled = false; el.textContent = 'Set Active';
+      alert((d && d.error) || 'Could not set this map active.');
+    }
+  }).catch(() => {
+    const el = document.getElementById('set-active-btn');
+    if (el) { el.disabled = false; el.textContent = 'Set Active'; }
+  });
+}
+
 // ── State poll ────────────────────────────────────────────────────────────────
 
 let pollTimer = null;
@@ -1255,9 +1310,14 @@ function pollState() {
       // Players auto-follow the DM to a newly activated map. DMs are left alone
       // so they can keep editing prep maps that aren't the live one.
       if (!IS_DM && d.active_map_id && d.active_map_id !== MAP_ID) {
-        window.location.href = `/ttrpg/battlemap/${d.active_map_id}/view`;
+        const _go = () => { window.location.href = `/ttrpg/battlemap/${d.active_map_id}/view`; };
+        // Play the transition sting on this (already-enabled) page, then
+        // navigate — the new page can't auto-play without its own gesture.
+        if (window.SFX && SFX.isEnabled()) { _sfx('mapswitch'); setTimeout(_go, 450); }
+        else _go();
         return;
       }
+      _hpSfxDiff(d.tokens);   // everyone hears HP changes (incl. DM-applied)
       renderTokens(d.tokens);
       renderEffects(d.effects || []);
     });
@@ -2047,6 +2107,9 @@ function clearAllEffects() {
 
 // ── Draggable panel ───────────────────────────────────────────────────────────
 function makeDraggable(panel, handle) {
+  // Null-safe: some panels (e.g. the DM-only fx-panel) don't exist for players,
+  // and a thrown error here would halt the rest of the script (incl. SFX setup).
+  if (!panel || !handle) return;
   let startX, startY, startLeft, startTop;
 
   function onDown(clientX, clientY) {
@@ -2192,6 +2255,47 @@ function _mapDieHtml(val, sides, mode, idx, ki) {
   return `<span class="${cls}">${tick}${val}</span>`;
 }
 
+// ── SFX helpers ───────────────────────────────────────────────────────────────
+// _sfx: never let a missing/broken sound module touch core map behaviour.
+function _sfx(name) { try { console.log('[SFX]', name, 'enabled=' + (window.SFX && SFX.isEnabled())); if (window.SFX) SFX.play(name); } catch (e) { console.warn('[SFX]', name, e); } }
+// Crit/fumble fire only on a d20; this runs on the roller's own device only.
+function _critFumble(d) {
+  const sides = parseInt((d.expression.match(/d(\d+)/) || ['', '0'])[1]);
+  if (sides !== 20) return null;
+  let val;
+  if (d.adv_mode === 'advantage')         val = Math.max(...d.dice);
+  else if (d.adv_mode === 'disadvantage') val = Math.min(...d.dice);
+  else                                    val = (d.dice.length === 1 ? d.dice[0] : null);
+  if (val === 20) return 'crit';
+  if (val === 1)  return 'fumble';
+  return null;
+}
+
+// Voice a roll's crit/fumble at most once per client. The roller hears it
+// instantly via mapDoRoll; everyone else picks it up from the dice-feed poll.
+let _lastSfxRollId = 0;
+function _maybeRollSfx(d) {
+  if (!d || typeof d.roll_id !== 'number' || d.roll_id <= _lastSfxRollId) return;
+  _lastSfxRollId = d.roll_id;
+  const cf = _critFumble(d);
+  if (cf) _sfx(cf);
+}
+
+// HP-change SFX: diff incoming token HP against what we last knew, so every
+// client hears damage/heal/death — including changes the DM applies to a
+// player. The DM's own optimistic HP update makes their next poll a no-op,
+// so the sidebar button isn't double-voiced.
+function _hpSfxDiff(tokens) {
+  for (const tok of tokens || []) {
+    const prev = currentTokens[tok.token_id];
+    if (!prev) continue;
+    const a = prev.hp_current, b = tok.hp_current;
+    if (typeof a !== 'number' || typeof b !== 'number' || a === b) continue;
+    if (b < a) _sfx(b <= 0 ? 'dead' : 'damage');
+    else       _sfx('heal');
+  }
+}
+
 function mapDoRoll() {
   const count    = parseInt(document.getElementById('map-dice-count').value) || 1;
   const modifier = parseInt(document.getElementById('map-dice-mod').value)   || 0;
@@ -2207,6 +2311,7 @@ function mapDoRoll() {
     _mapShowResult(d);
     _mapRenderEntry(d, true);
     _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
+    _maybeRollSfx(d);   // crit/fumble — instant for the roller
   });
 }
 
@@ -2303,6 +2408,7 @@ function mapPollFeed() {
     rolls.reverse().forEach(d => {
       if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
       _mapRenderEntry(d, true);
+      _maybeRollSfx(d);   // everyone hears crit/fumble from anyone's roll
       _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
     });
   });
@@ -2403,6 +2509,51 @@ function adjustCellPx(delta) { setCellPx(CELL_PX + delta); }
     const saved = localStorage.getItem('bm_cell_px_' + MAP_ID);
     if (saved) setCellPx(parseInt(saved));
   } catch(e) {}
+})();
+
+// ── SFX control: wire the static #sfx-ctrl element ────────────────────────────
+(function () {
+  const toggle = document.getElementById('sfx-toggle');
+  const slider = document.getElementById('sfx-vol');
+  if (!toggle || !slider) return;
+
+  if (!window.SFX) {   // sfx.js failed to load — tell the user instead of hiding
+    toggle.innerHTML = '&#9888; Sound unavailable';
+    toggle.style.color = '#e06666';
+    return;
+  }
+
+  slider.value = Math.round(SFX.getVolume() * 100);
+
+  function syncUI() {
+    if (!SFX.hasTone()) { toggle.innerHTML = '&#9888; Tone.js not loaded'; toggle.style.color = '#e06666'; return; }
+    let icon, text, color;
+    if (!SFX.isEnabled())   { icon = '&#128264;'; text = 'Sound: tap to start'; color = '#c9a84c'; }
+    else if (SFX.isMuted()) { icon = '&#128263;'; text = 'Sound: MUTED';        color = '#e06666'; }
+    else                    { icon = '&#128266;'; text = 'Sound: ON';           color = '#7bc77b'; }
+    toggle.innerHTML = icon + ' ' + text;
+    toggle.style.color = color;
+    slider.style.opacity = (SFX.isEnabled() && !SFX.isMuted()) ? '1' : '.5';
+  }
+
+  // Browsers require a user gesture before audio starts — enable on the first.
+  const _on = () => { SFX.enable().then(syncUI); };
+  document.addEventListener('pointerdown', _on, { once: true });
+  document.addEventListener('keydown',     _on, { once: true });
+
+  toggle.addEventListener('click', async () => {
+    const wasOn = SFX.isEnabled();
+    const ok = await SFX.enable();
+    if (!ok) {   // surface WHY, instead of doing nothing
+      toggle.innerHTML = '&#9888; ' + (SFX.lastError() || 'audio failed');
+      toggle.style.color = '#e06666';
+      return;
+    }
+    if (wasOn) SFX.mute(!SFX.isMuted());   // first click only enables; later clicks toggle mute
+    syncUI();
+  });
+  slider.addEventListener('input', () => SFX.setVolume(slider.value / 100));
+  syncUI();
 })();
 
 </script>
