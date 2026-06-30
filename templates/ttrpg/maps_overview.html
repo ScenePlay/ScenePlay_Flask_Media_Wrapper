@@ -63,7 +63,7 @@
                                               color:var(--sp-on-accent);">Live</span>
               {% endif %}
             </div>
-            <div class="small text-muted">{{ m.grid_cols }}&times;{{ m.grid_rows }}
+            <div class="small text-muted">#{{ loop.index }} &bull; {{ m.grid_cols }}&times;{{ m.grid_rows }}
               &bull; {{ m.tokens|length }} token{{ 's' if m.tokens|length != 1 }}</div>
           </div>
           <a href="{{ url_for('battlemap_bp.map_view', map_id=m.map_id) }}"

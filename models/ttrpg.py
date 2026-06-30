@@ -316,6 +316,7 @@ class tblBattleMaps(db.Model):
     bg_image   = db.Column(db.Text, default='')   # filename under static/uploads/battlemaps/
     is_active  = db.Column(db.Integer, default=0)  # 1 = currently shown map for this session
     movement_scale = db.Column(db.Float, default=1.0)  # feet = squares × 5 × movement_scale (per-map proportion fix)
+    sort_order = db.Column(db.Integer, default=0)  # DM-defined display order in the maps list
     created_at = db.Column(db.Text, nullable=False)
 
     tokens  = db.relationship('tblBattleMapTokens',  backref='battle_map',

@@ -155,8 +155,14 @@
         <div id="add-result" class="mt-2 small"></div>
       </div>
 
-      <!-- Homebrew delete -->
+      <!-- Homebrew tools (picture + delete) -->
       <div id="homebrew-delete-wrap" class="mt-2" style="display:none;">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+          <input type="file" id="hb-img-file" accept="image/png,image/jpeg,image/gif,image/webp"
+                 class="form-control form-control-sm bg-dark text-light border-secondary" style="max-width:240px;">
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadMonsterImage()">Set Picture</button>
+          <span id="hb-img-msg" class="small text-muted"></span>
+        </div>
         <form id="homebrew-delete-form" method="POST">
           <button class="btn btn-outline-danger btn-sm"
                   onclick="return confirm('Delete this homebrew monster?')">Delete Homebrew</button>
@@ -195,6 +201,7 @@ const searchInput    = document.getElementById('search-input');
 const resultsEl      = document.getElementById('search-results');
 const detPanel       = document.getElementById('detail-panel');
 const detPlaceholder = document.getElementById('detail-placeholder');
+let   _curTemplateId = null;   // monster currently shown in the detail panel
 
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
@@ -299,9 +306,13 @@ function renderDetail(templateId, data) {
   document.getElementById('det-meta').textContent =
     [s.size, s.type, s.alignment].filter(Boolean).join(' ');
 
+  _curTemplateId = templateId;
+  const _hbMsg = document.getElementById('hb-img-msg'); if (_hbMsg) _hbMsg.textContent = '';
+  const _hbFile = document.getElementById('hb-img-file'); if (_hbFile) _hbFile.value = '';
   const imgEl = document.getElementById('det-img');
   if (s.image) {
-    imgEl.src = 'https://www.dnd5eapi.co' + s.image;
+    imgEl.src = (s.image.startsWith('http') || s.image.startsWith('/static/') || s.image.startsWith('data:'))
+      ? s.image : 'https://www.dnd5eapi.co' + s.image;
     imgEl.style.display = '';
   } else {
     imgEl.src = '';
@@ -365,6 +376,31 @@ function renderDetail(templateId, data) {
 
   detPanel.style.display = '';
   detPlaceholder.style.display = 'none';
+}
+
+// Upload / replace the picture on the currently-shown homebrew monster.
+function uploadMonsterImage() {
+  const fileEl = document.getElementById('hb-img-file');
+  const msg    = document.getElementById('hb-img-msg');
+  const file   = fileEl && fileEl.files && fileEl.files[0];
+  if (!_curTemplateId) return;
+  if (!file) { if (msg) { msg.textContent = 'Choose an image first.'; msg.style.color = '#e0a45c'; } return; }
+  const fd = new FormData();
+  fd.append('image', file);
+  if (msg) { msg.textContent = 'Uploading…'; msg.style.color = ''; }
+  fetch(`/ttrpg/monsters/homebrew/${_curTemplateId}/image`, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.ok) {
+        const imgEl = document.getElementById('det-img');
+        if (imgEl) { imgEl.src = d.image_url + '?t=' + Date.now(); imgEl.style.display = ''; }
+        if (msg) { msg.textContent = 'Picture updated.'; msg.style.color = '#7bc77b'; }
+        if (fileEl) fileEl.value = '';
+      } else if (msg) {
+        msg.textContent = (d && d.error) || 'Upload failed.'; msg.style.color = '#e06666';
+      }
+    })
+    .catch(() => { if (msg) { msg.textContent = 'Upload failed.'; msg.style.color = '#e06666'; } });
 }
 
 function addToSession() {

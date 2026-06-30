@@ -27,7 +27,8 @@
       <!-- Header -->
       <div class="d-flex align-items-start gap-3 mb-3 flex-wrap">
         {% if s.get('image') %}
-        <img src="https://www.dnd5eapi.co{{ s.image }}" alt=""
+        {% set _mi = s.image %}
+        <img src="{{ _mi if _mi.startswith('http') or _mi.startswith('/static/') or _mi.startswith('data:') else 'https://www.dnd5eapi.co' + _mi }}" alt=""
              style="width:100px;height:100px;object-fit:contain;border-radius:6px;
                     background:var(--ttrpg-primary);flex-shrink:0;">
         {% endif %}

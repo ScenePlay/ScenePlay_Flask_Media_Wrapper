@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+import base64
 from datetime import datetime, timezone
 
 from flask import (Blueprint, render_template, redirect, url_for,
@@ -27,6 +28,48 @@ def _now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+# D&D creature size → number of grid squares the token spans (square footprint).
+# Players and unknown sizes default to 1×1.
+_SIZE_SQUARES = {'tiny': 1, 'small': 1, 'medium': 1, 'large': 2, 'huge': 3, 'gargantuan': 4}
+
+
+def _size_squares(size_str):
+    return _SIZE_SQUARES.get((size_str or '').strip().lower(), 1)
+
+
+def _monster_img_url(image):
+    """Resolve a monster image for a LOCAL page. SRD images are stored as dnd5eapi
+    paths ('/api/...'); homebrew uploads as local '/static/...' paths. Both resolve
+    to a URL this server's pages can load. Returns '' for no image."""
+    if not image:
+        return ''
+    if image.startswith('http') or image.startswith('/static/') or image.startswith('data:'):
+        return image
+    return 'https://www.dnd5eapi.co' + image
+
+
+def _monster_relay_img(image):
+    """Resolve a monster image for the REMOTE relay portal, which can't reach this
+    LAN server. SRD -> public dnd5eapi URL; homebrew local upload -> embedded as a
+    data: URL so the portal renders it directly (mirrors map-background embedding)."""
+    if not image:
+        return ''
+    if image.startswith('http') or image.startswith('data:'):
+        return image
+    if image.startswith('/static/'):
+        fname = os.path.basename(image)
+        path = os.path.join(current_app.root_path, 'static', 'uploads', 'monsters', fname)
+        try:
+            with open(path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('ascii')
+            ext = fname.rsplit('.', 1)[-1].lower()
+            mime = 'jpeg' if ext == 'jpg' else ext
+            return f'data:image/{mime};base64,{b64}'
+        except Exception:
+            return ''
+    return 'https://www.dnd5eapi.co' + image
+
+
 def _token_relay_payload(t, bm):
     data = {
         'token_id':    t.token_id,
@@ -40,6 +83,7 @@ def _token_relay_payload(t, bm):
         'token_type':  t.entity_type,
         'character_id': None,
         'image_url':   '',
+        'size_squares': 1,
     }
     if t.entity_type == 'player':
         char = db.session.get(tblCharacters, t.entity_id)
@@ -54,11 +98,12 @@ def _token_relay_payload(t, bm):
             data['label']      = sm.display_name
             data['hp_current'] = sm.hp_current
             data['hp_max']     = sm.hp_max
+            data['size_squares'] = _size_squares(sm.template.size if sm.template else '')
             data['conditions'] = json.loads(sm.conditions or '[]')
             try:
                 raw = json.loads(sm.template.stats_json or '{}')
                 if raw.get('image'):
-                    data['image_url'] = 'https://www.dnd5eapi.co' + raw['image']
+                    data['image_url'] = _monster_relay_img(raw['image'])
                 # speed
                 raw_spd = raw.get('speed', {})
                 walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
@@ -144,7 +189,7 @@ def all_maps():
     for s in sessions:
         s._maps = (tblBattleMaps.query
                    .filter_by(session_id=s.session_id)
-                   .order_by(tblBattleMaps.map_id)
+                   .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
                    .all())
     return render_template('ttrpg/maps_overview.html', sessions=sessions)
 
@@ -171,7 +216,7 @@ def session_maps(session_id):
     sess = tblSessions.query.get_or_404(session_id)
     maps = (tblBattleMaps.query
             .filter_by(session_id=session_id)
-            .order_by(tblBattleMaps.map_id)
+            .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
             .all())
     return render_template('ttrpg/battlemap_manage.html', sess=sess, maps=maps)
 
@@ -184,15 +229,41 @@ def map_new(session_id):
     name = request.form.get('name', '').strip() or 'Untitled Map'
     cols = max(5, min(60, int(request.form.get('cols', 20) or 20)))
     rows = max(5, min(60, int(request.form.get('rows', 20) or 20)))
+    next_order = (db.session.query(db.func.max(tblBattleMaps.sort_order))
+                  .filter_by(session_id=session_id).scalar() or 0) + 1
     bm = tblBattleMaps(
         session_id=session_id, name=name,
         grid_cols=cols, grid_rows=rows,
-        bg_image='', is_active=0, created_at=_now(),
+        bg_image='', is_active=0, sort_order=next_order, created_at=_now(),
     )
     db.session.add(bm)
     db.session.commit()
     flash(f'Map "{name}" created.')
     return redirect(url_for('battlemap_bp.session_maps', session_id=session_id))
+
+
+@battlemap_bp.route('/<int:map_id>/reorder', methods=['POST'])
+@login_required
+@dm_required
+def map_reorder(map_id):
+    """Move a map one step earlier/later in the DM's display order."""
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    direction = request.form.get('direction', '')
+    maps = (tblBattleMaps.query
+            .filter_by(session_id=bm.session_id)
+            .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
+            .all())
+    # Normalize to a clean 0..n-1 sequence so a neighbour swap is always
+    # well-defined, even if older rows happen to share sort_order values.
+    for i, m in enumerate(maps):
+        m.sort_order = i
+    idx = next((i for i, m in enumerate(maps) if m.map_id == map_id), None)
+    if idx is not None:
+        swap = idx - 1 if direction == 'up' else idx + 1 if direction == 'down' else None
+        if swap is not None and 0 <= swap < len(maps):
+            maps[idx].sort_order, maps[swap].sort_order = maps[swap].sort_order, maps[idx].sort_order
+    db.session.commit()
+    return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
 
 @battlemap_bp.route('/<int:map_id>/activate', methods=['POST'])
@@ -433,7 +504,7 @@ def map_state(map_id):
             if not sm:
                 continue
             raw  = json.loads(sm.template.stats_json or '{}')
-            img  = ('https://www.dnd5eapi.co' + raw['image']) if raw.get('image') else ''
+            img  = _monster_img_url(raw.get('image'))
             raw_spd = raw.get('speed', {})
             walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
             if isinstance(walk, str):
@@ -453,6 +524,7 @@ def map_state(map_id):
                 'hp_max':      sm.hp_max,
                 'hp_pct':      sm.hp_pct(),
                 'is_alive':    sm.is_alive,
+                'size_squares': _size_squares(sm.template.size if sm.template else ''),
                 'image_url':   img,
                 'color':       '#cc3333',
                 'conditions':  json.loads(sm.conditions or '[]'),
@@ -476,6 +548,7 @@ def map_state(map_id):
                 'hp_max':      char.hp_max,
                 'hp_pct':      char.hp_pct(),
                 'is_alive':    1,
+                'size_squares': 1,
                 'image_url':   img,
                 'color':       '#4a9eff',
                 'conditions':  [c.condition_name for c in char.conditions],

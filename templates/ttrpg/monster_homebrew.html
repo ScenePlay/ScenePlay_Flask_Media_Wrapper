@@ -10,7 +10,7 @@
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
   <div class="row g-3">
     <!-- Identity -->
     <div class="col-12">
@@ -20,6 +20,11 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted">Name *</label>
             <input type="text" name="name" class="form-control bg-dark text-light border-secondary" required>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted">Picture <span class="text-muted">(token art — png/jpg/gif/webp)</span></label>
+            <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
+                   class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-sm-3">
             <label class="form-label small text-muted">Size</label>

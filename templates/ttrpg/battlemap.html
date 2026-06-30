@@ -1085,7 +1085,8 @@ function attachDrag(el, tokenId) {
 // ── Token DOM ─────────────────────────────────────────────────────────────────
 
 function createTokenEl(tok) {
-  const sz    = CELL_PX - 6;
+  const span  = Math.max(1, tok.size_squares || 1);   // grid squares this token spans
+  const sz    = span * CELL_PX - 6;
   const isMe  = !IS_DM && tok.entity_type === 'player' && tok.user_id === CURRENT_USER_ID;
   const border = isMe ? '#2ecc71' : tok.entity_type === 'player' ? '#4a9eff' : '#cc3333';
   const bg     = isMe ? '#0d2820' : tok.entity_type === 'player' ? '#0d2845' : '#2d0a0a';
@@ -1094,7 +1095,9 @@ function createTokenEl(tok) {
   el.className       = 'map-token tok-' + tok.entity_type + (tok.is_alive ? '' : ' token-dead') + (isMe ? ' token-mine' : '');
   el.id              = `tok-${tok.token_id}`;
   el.dataset.tokenId = tok.token_id;
-  el.style.cssText   = `transform:translate(${tok.col * CELL_PX}px,${tok.row * CELL_PX}px);width:${CELL_PX}px;`;
+  // Big tokens sit BEHIND smaller ones so adjacent creatures stay clickable.
+  const zBase = span > 1 ? Math.max(1, 6 - span) : '';
+  el.style.cssText   = `transform:translate(${tok.col * CELL_PX}px,${tok.row * CELL_PX}px);width:${span * CELL_PX}px;${zBase !== '' ? 'z-index:' + zBase + ';' : ''}`;
 
   const portraitInner = tok.image_url
     ? `<img src="${tok.image_url}" alt=""
@@ -2480,11 +2483,12 @@ function setCellPx(val) {
   for (const [tid, tok] of Object.entries(currentTokens)) {
     const el = document.getElementById('tok-' + tid);
     if (!el) continue;
+    const span = Math.max(1, tok.size_squares || 1);
     el.style.transform = `translate(${tok.col * CELL_PX}px,${tok.row * CELL_PX}px)`;
-    el.style.width     = CELL_PX + 'px';
+    el.style.width     = (span * CELL_PX) + 'px';
     const portrait = el.querySelector('.token-portrait');
     if (portrait) {
-      const sz = CELL_PX - 6;
+      const sz = span * CELL_PX - 6;
       portrait.style.width  = sz + 'px';
       portrait.style.height = sz + 'px';
     }

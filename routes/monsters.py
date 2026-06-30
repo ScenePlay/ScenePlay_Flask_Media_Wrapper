@@ -1,4 +1,6 @@
 import json
+import os
+import uuid
 import threading
 import requests
 from datetime import datetime
@@ -10,6 +12,25 @@ from models.ttrpg import tblMonsterTemplates, tblSessionMonsters, tblSessions
 from routes.auth import dm_required
 
 monsters_bp = Blueprint('monsters_bp', __name__, url_prefix='/ttrpg/monsters')
+
+# Homebrew monster art lives here; SRD monsters use the dnd5eapi image instead.
+MONSTER_IMG_DIR = os.path.join('static', 'uploads', 'monsters')
+MONSTER_IMG_EXTS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+
+def _save_monster_image(file_storage):
+    """Save an uploaded monster image and return its root-relative /static URL,
+    or None if there's no valid file. Caller decides what to do with it."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = file_storage.filename.rsplit('.', 1)[-1].lower() if '.' in file_storage.filename else ''
+    if ext not in MONSTER_IMG_EXTS:
+        return None
+    fname = f"{uuid.uuid4().hex}.{ext}"
+    dest = os.path.join(current_app.root_path, MONSTER_IMG_DIR, fname)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    file_storage.save(dest)
+    return '/static/uploads/monsters/' + fname
 import relay_broadcaster
 _sync_states = {}
 
@@ -318,6 +339,9 @@ def homebrew_new():
                 'actions': [],
                 'notes': request.form.get('notes', ''),
             }
+            img_url = _save_monster_image(request.files.get('image'))
+            if img_url:
+                stats['image'] = img_url
             t = tblMonsterTemplates(
                 api_index    = None,
                 name         = name,
@@ -336,6 +360,31 @@ def homebrew_new():
             return redirect(url_for('monsters_bp.library'))
 
     return render_template('ttrpg/monster_homebrew.html', error=error)
+
+
+@monsters_bp.route('/homebrew/<int:template_id>/image', methods=['POST'])
+@login_required
+@dm_required
+def homebrew_image(template_id):
+    """Set / replace the picture on an existing homebrew monster."""
+    m = tblMonsterTemplates.query.get_or_404(template_id)
+    if m.source != 'homebrew':
+        return jsonify({'ok': False, 'error': 'Only homebrew monsters can have a custom image.'}), 400
+    img_url = _save_monster_image(request.files.get('image'))
+    if not img_url:
+        return jsonify({'ok': False, 'error': 'No valid image (png/jpg/gif/webp).'}), 400
+    stats = json.loads(m.stats_json or '{}')
+    old = stats.get('image', '')
+    if isinstance(old, str) and old.startswith('/static/uploads/monsters/'):
+        try:
+            os.remove(os.path.join(current_app.root_path, 'static', 'uploads',
+                                   'monsters', os.path.basename(old)))
+        except OSError:
+            pass
+    stats['image'] = img_url
+    m.stats_json = json.dumps(stats)
+    db.session.commit()
+    return jsonify({'ok': True, 'image_url': img_url})
 
 
 @monsters_bp.route('/homebrew/<int:template_id>/delete', methods=['POST'])

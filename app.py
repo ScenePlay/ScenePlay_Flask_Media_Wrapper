@@ -119,8 +119,24 @@ with app.app_context():
     import models.tblRollLog         # noqa: F401
     db.create_all()
 
+    # Lightweight migration: add tblBattleMaps.sort_order to older DBs (create_all
+    # never alters existing tables), then seed it from map_id so current maps keep
+    # their order. Idempotent — skipped once the column exists.
+    from sqlalchemy import text as _sa_text
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblBattleMaps)"))]
+        if 'sort_order' not in _cols:
+            db.session.execute(_sa_text(
+                "ALTER TABLE tblBattleMaps ADD COLUMN sort_order INTEGER DEFAULT 0"))
+            db.session.execute(_sa_text(
+                "UPDATE tblBattleMaps SET sort_order = map_id"))
+            db.session.commit()
+    except Exception as _e:  # never block startup on a migration hiccup
+        db.session.rollback()
+        print('tblBattleMaps.sort_order migration skipped:', _e)
+
 # Ensure all upload directories exist
-for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor'):
+for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):
     os.makedirs(os.path.join(app.root_path, 'static', 'uploads', _upload_dir), exist_ok=True)
 
 num = Value('i', 1)
