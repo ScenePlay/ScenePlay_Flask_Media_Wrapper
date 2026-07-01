@@ -7,6 +7,27 @@ _thread = None
 _stop   = threading.Event()
 
 
+def _relay_ts_to_local(rolled_at):
+    """Relay roll timestamps are ISO UTC; convert to LOCAL wall-clock
+    'YYYY-MM-DD HH:MM:SS' so relay rolls sort chronologically against local
+    rolls (which use local time). Falls back to a plain strip on any parse error."""
+    from datetime import datetime, timezone
+    s = (rolled_at or '').strip()
+    if not s:
+        return ''
+    try:
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        if 'T' in s:
+            return s[:10] + ' ' + s[11:19]
+        return s[:19]
+
+
 def start(app):
     global _thread, _stop
     _stop.clear()
@@ -126,6 +147,11 @@ def _poll():
 
     # --- roll log (relay roll_log array) ---
     # Relay roll shape: { id, session_id, player_name, roll_expr, result, breakdown, rolled_at }
+    # De-dupe on the relay's UNIQUE roll id so fast or identical rolls are never
+    # dropped (the old value/second-timestamp match collapsed same-second and
+    # same-result rolls into one). Fall back to the fuzzy match only for a relay
+    # that sends no id.
+    import re as _re
     roll_cleared_at = appsettingGet('relay_roll_cleared_at', '')
     for roll in payload.get('roll_log', []):
         rolled_at = roll.get('rolled_at', '')
@@ -133,21 +159,32 @@ def _poll():
             continue
         if roll_cleared_at and rolled_at <= roll_cleared_at:
             continue
-        existing = tblRollLog.query.filter_by(
-            session_id  = local_sid,
-            player_name = roll.get('player_name', ''),
-            rolled_at   = rolled_at,
-        ).first()
-        if not existing:
+
+        try:
+            rid = int(roll['id']) if roll.get('id') is not None else None
+        except (TypeError, ValueError, KeyError):
+            rid = None
+
+        player_name = roll.get('player_name', '')
+        relay_expr  = roll.get('roll_expr', '')
+        relay_total = roll.get('result', 0)
+
+        # tblRollLog — full history. Dedup by relay id when present, else timestamp.
+        if rid is not None:
+            log_exists = tblRollLog.query.filter_by(session_id=local_sid, relay_roll_id=rid).first()
+        else:
+            log_exists = tblRollLog.query.filter_by(
+                session_id=local_sid, player_name=player_name, rolled_at=rolled_at).first()
+        if not log_exists:
             db.session.add(tblRollLog(
-                session_id  = local_sid,
-                player_name = roll.get('player_name', ''),
-                roll_expr   = roll.get('roll_expr', ''),
-                result      = roll.get('result', 0),
-                breakdown   = roll.get('breakdown', ''),
-                rolled_at   = rolled_at,
+                session_id    = local_sid,
+                player_name   = player_name,
+                roll_expr     = relay_expr,
+                result        = relay_total,
+                breakdown     = roll.get('breakdown', ''),
+                rolled_at     = rolled_at,
+                relay_roll_id = rid,
             ))
-            # prune oldest beyond 500
             if tblRollLog.query.filter_by(session_id=local_sid).count() > 500:
                 oldest = (tblRollLog.query
                           .filter_by(session_id=local_sid)
@@ -156,66 +193,75 @@ def _poll():
                 if oldest:
                     db.session.delete(oldest)
 
-        # Also write to tblDiceRolls so relay rolls appear in the 50-roll history.
-        # Local rolls use "YYYY-MM-DD HH:MM:SS"; relay timestamps are ISO with T and TZ.
-        # Normalize to local format so the dedup check matches local-broadcast-echo rolls.
-        player_name = roll.get('player_name', '')
-        relay_expr  = roll.get('roll_expr', '')
-        relay_total = roll.get('result', 0)
-        ts_norm = (rolled_at[:10] + ' ' + rolled_at[11:19]
-                   if rolled_at and 'T' in rolled_at else (rolled_at or '')[:19])
+        # tblDiceRolls — the 50-roll display feed. Store the roll time in LOCAL
+        # wall-clock (relay sends UTC) so it interleaves correctly with local rolls.
+        ts_norm = _relay_ts_to_local(rolled_at)
 
-        # Parse expr_base and label out of relay_expr.
-        # Portal format: "{count}d{sides}{mod} [{mode}] {label}"
-        # e.g. "2d6+3 [advantage] Attack" → expr_base="2d6+3", label="Attack"
-        import re as _re
+        # Parse expr_base + label. Portal format: "{count}d{sides}{mod} [{mode}] {label}"
         _m = _re.match(
-            r'^(\d*d\d+(?:[+-]\d+)?)'          # dice expression
-            r'(?:\s*\[(?:advantage|disadvantage)\])?'  # optional mode tag
-            r'(?:\s+(.+))?$',                   # optional label
+            r'^(\d*d\d+(?:[+-]\d+)?)'
+            r'(?:\s*\[(?:advantage|disadvantage)\])?'
+            r'(?:\s+(.+))?$',
             relay_expr, _re.IGNORECASE
         )
         if _m:
-            expr_base = _m.group(1) or ''
+            expr_base  = _m.group(1) or ''
             roll_label = (_m.group(2) or '').strip()
         else:
             expr_base  = relay_expr.split()[0] if relay_expr else ''
             roll_label = ''
 
-        # Primary dedup: normalized timestamp + char_name
-        existing_dr = tblDiceRolls.query.filter_by(
-            char_name = player_name,
-            rolled_at = ts_norm,
-        ).first()
-        # Fallback dedup: same char, same result, same base expression (catches ±1s clock skew)
-        if not existing_dr:
-            existing_dr = (tblDiceRolls.query
-                .filter_by(char_name=player_name, total=relay_total)
-                .filter(tblDiceRolls.expression == expr_base)
-                .first())
-        if not existing_dr:
-            breakdown_str = roll.get('breakdown', '')
-            try:
-                dice_list = [int(x.strip()) for x in breakdown_str.split(',') if x.strip()]
-            except (ValueError, AttributeError):
-                dice_list = []
-            db.session.add(tblDiceRolls(
-                char_name  = player_name,
-                expression = expr_base or relay_expr,
-                label      = roll_label,
-                dice_json  = _json.dumps(dice_list),
-                modifier   = 0,
-                total      = relay_total,
-                adv_mode   = 'normal',
-                rolled_at  = ts_norm,
-            ))
-            db.session.flush()
-            old = db.session.query(tblDiceRolls.roll_id).order_by(
-                tblDiceRolls.roll_id.desc()).offset(50).all()
-            if old:
-                tblDiceRolls.query.filter(
-                    tblDiceRolls.roll_id.in_([r[0] for r in old])
-                ).delete(synchronize_session=False)
+        if rid is not None:
+            # Already recorded (as a relay roll, or as a claimed local echo)?
+            if tblDiceRolls.query.filter_by(relay_roll_id=rid).first():
+                continue
+            # Echo of a LOCAL roll we already show? Claim the most recent unclaimed
+            # local row with the same signature instead of adding a duplicate. This
+            # suppresses local-broadcast echoes WITHOUT dropping genuinely distinct
+            # relay rolls (which each carry their own unique id).
+            echo = (tblDiceRolls.query
+                    .filter_by(char_name=player_name, total=relay_total, relay_roll_id=None)
+                    .filter(tblDiceRolls.expression == expr_base)
+                    .order_by(tblDiceRolls.roll_id.desc())
+                    .first())
+            if echo:
+                echo.relay_roll_id = rid
+                continue
+        else:
+            # Legacy relay with no id: original fuzzy dedup (timestamp, then value).
+            existing_dr = tblDiceRolls.query.filter_by(char_name=player_name, rolled_at=ts_norm).first()
+            if not existing_dr:
+                existing_dr = (tblDiceRolls.query
+                    .filter_by(char_name=player_name, total=relay_total)
+                    .filter(tblDiceRolls.expression == expr_base)
+                    .first())
+            if existing_dr:
+                continue
+
+        # New relay roll → add it to the feed.
+        breakdown_str = roll.get('breakdown', '')
+        try:
+            dice_list = [int(x.strip()) for x in breakdown_str.split(',') if x.strip()]
+        except (ValueError, AttributeError):
+            dice_list = []
+        db.session.add(tblDiceRolls(
+            char_name     = player_name,
+            expression    = expr_base or relay_expr,
+            label         = roll_label,
+            dice_json     = _json.dumps(dice_list),
+            modifier      = 0,
+            total         = relay_total,
+            adv_mode      = 'normal',
+            rolled_at     = ts_norm,
+            relay_roll_id = rid,
+        ))
+        db.session.flush()
+        old = db.session.query(tblDiceRolls.roll_id).order_by(
+            tblDiceRolls.roll_id.desc()).offset(50).all()
+        if old:
+            tblDiceRolls.query.filter(
+                tblDiceRolls.roll_id.in_([r[0] for r in old])
+            ).delete(synchronize_session=False)
 
     # --- character HP ---
     # Intentionally NOT copied from the relay. Local Flask is the single authority

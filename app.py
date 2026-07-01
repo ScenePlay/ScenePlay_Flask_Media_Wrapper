@@ -135,6 +135,20 @@ with app.app_context():
         db.session.rollback()
         print('tblBattleMaps.sort_order migration skipped:', _e)
 
+    # Lightweight migration: add relay_roll_id to the roll tables so relay rolls can
+    # be de-duplicated by the relay's unique id (fixes fast/identical rolls being
+    # dropped). Idempotent — skipped once the columns exist.
+    for _tbl in ('tblRollLog', 'tblDiceRolls'):
+        try:
+            _cols = [r[1] for r in db.session.execute(_sa_text(f"PRAGMA table_info({_tbl})"))]
+            if _cols and 'relay_roll_id' not in _cols:
+                db.session.execute(_sa_text(
+                    f"ALTER TABLE {_tbl} ADD COLUMN relay_roll_id INTEGER"))
+                db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            print(f'{_tbl}.relay_roll_id migration skipped:', _e)
+
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):
     os.makedirs(os.path.join(app.root_path, 'static', 'uploads', _upload_dir), exist_ok=True)

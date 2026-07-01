@@ -879,7 +879,17 @@ def dice_feed():
     q = tblDiceRolls.query
     if since:
         q = q.filter(tblDiceRolls.roll_id > since)
-    rolls = q.order_by(tblDiceRolls.roll_id.desc()).limit(50).all()
+    # Order by actual roll TIME, then break within-second ties by the relay's own
+    # roll id (its true order) for relay rolls, falling back to local roll_id for
+    # local rolls. Insertion order (roll_id) alone is wrong: a relay burst arrives
+    # newest-first, so local inserts it reversed and roll_id anti-correlates with
+    # the real order.
+    rolls = (q.order_by(
+                tblDiceRolls.rolled_at.desc(),
+                tblDiceRolls.relay_roll_id.is_(None),   # relay rolls (non-null) first within a tie
+                tblDiceRolls.relay_roll_id.desc(),      # newest relay roll first
+                tblDiceRolls.roll_id.desc(),            # local rolls: insertion order
+             ).limit(50).all())
     return jsonify([{
         'roll_id':    r.roll_id,
         'char_name':  r.char_name,

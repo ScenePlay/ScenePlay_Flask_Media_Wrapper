@@ -6,6 +6,7 @@ Flask-Bcrypt
 waitress
 requests
 SQLAlchemy
+Pillow
 python-crontab
 gTTS
 psutil

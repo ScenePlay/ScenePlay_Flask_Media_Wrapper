@@ -61,11 +61,47 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
     _fire(_go)
 
 
+def _downscale_image(raw, orig_ext, max_dim, quality=82):
+    """Shrink image bytes before they're base64-embedded into a relay payload:
+    downscale to `max_dim` on the long side and recompress (opaque -> JPEG,
+    transparent -> PNG). Uses Pillow if installed; if Pillow is missing, the image
+    is animated, or anything errors, the ORIGINAL bytes are returned unchanged so
+    the relay keeps working. Returns (bytes, ext)."""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        if getattr(im, 'is_animated', False):
+            return raw, orig_ext          # don't flatten animated GIF/WebP
+        if max_dim and max(im.size) > max_dim:
+            im.thumbnail((max_dim, max_dim), Image.LANCZOS)
+        # Decide JPEG vs PNG by ACTUAL transparency, not just an alpha channel:
+        # many opaque PNGs (e.g. AI-generated maps) carry an unused alpha channel
+        # and compress terribly as PNG. Only keep PNG if a pixel is really see-through.
+        has_alpha = False
+        if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
+            alpha = im.convert('RGBA').getchannel('A')
+            has_alpha = alpha.getextrema()[0] < 255
+        buf = io.BytesIO()
+        if has_alpha:
+            im.convert('RGBA').save(buf, format='PNG', optimize=True)
+            out, ext = buf.getvalue(), 'png'
+        else:
+            im.convert('RGB').save(buf, format='JPEG', quality=quality, optimize=True)
+            out, ext = buf.getvalue(), 'jpg'
+        if len(out) < len(raw):           # only adopt it if it actually shrank
+            return out, ext
+    except Exception:
+        pass
+    return raw, orig_ext
+
+
 def _battlemap_data(filename):
     """Return (base64_data, ext) for a battlemap bg image, or (None, None).
 
     Only still images are embedded so a remote relay can write the file itself;
-    video backgrounds (and missing files) fall back to the URL."""
+    video backgrounds (and missing files) fall back to the URL. Still images are
+    downscaled/recompressed first to keep the relay payload small."""
     if not filename:
         return None, None
     import base64, os
@@ -81,7 +117,9 @@ def _battlemap_data(filename):
         return None, None
     try:
         with open(path, 'rb') as f:
-            return base64.b64encode(f.read()).decode('ascii'), ext
+            raw = f.read()
+        data, new_ext = _downscale_image(raw, ext, max_dim=1920, quality=82)
+        return base64.b64encode(data).decode('ascii'), new_ext
     except Exception:
         return None, None
 
@@ -191,7 +229,8 @@ def broadcast_condition_update(conditions, token_id=None, player_name=None):
 
 
 def _portrait_data(char):
-    """Return (filename, base64_data) for the character portrait, or (None, None)."""
+    """Return (ext, base64_data) for the character portrait, or (None, None).
+    The portrait is downscaled/recompressed first to shrink the relay payload."""
     if not char.portrait_path:
         return None, None
     import base64, os
@@ -203,8 +242,11 @@ def _portrait_data(char):
     if not os.path.exists(path):
         return None, None
     try:
+        ext = char.portrait_path.rsplit('.', 1)[-1].lower() if '.' in char.portrait_path else 'png'
         with open(path, 'rb') as f:
-            return char.portrait_path, base64.b64encode(f.read()).decode('ascii')
+            raw = f.read()
+        data, new_ext = _downscale_image(raw, ext, max_dim=384, quality=82)
+        return new_ext, base64.b64encode(data).decode('ascii')
     except Exception:
         return None, None
 
@@ -305,7 +347,7 @@ def _char_to_payload(char):
         ],
     }
     user = char.user
-    portrait_filename, portrait_b64 = _portrait_data(char)
+    portrait_ext, portrait_b64 = _portrait_data(char)
     return {
         'player_name':     char.name,
         'username':        user.username      if user else '',
@@ -313,7 +355,7 @@ def _char_to_payload(char):
         'password_hash':   user.password_hash if user else '',
         'portrait_url':    '',
         'portrait_data':   portrait_b64 or '',
-        'portrait_ext':    portrait_filename.rsplit('.', 1)[-1] if portrait_filename else '',
+        'portrait_ext':    portrait_ext or '',
         'sheet_json':      _json.dumps(sheet),
         'hp_current':      char.hp_current,
         'hp_max':          char.hp_max,

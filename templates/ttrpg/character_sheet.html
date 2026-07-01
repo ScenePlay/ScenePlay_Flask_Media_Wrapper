@@ -1836,7 +1836,7 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='scripts/Tone.js') }}"></script>
-<script src="{{ url_for('static', filename='scripts/sfx.js', v='5') }}"></script>
+<script src="{{ url_for('static', filename='scripts/sfx.js', v='6') }}"></script>
 <script>
 const CHAR_ID = {{ char.character_id }};
 const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
@@ -2926,25 +2926,37 @@ function renderRelayFeedEntry(r, prepend) {
   else         list.insertAdjacentHTML('beforeend', html);
 }
 
+// Server returns the feed ordered by roll TIME (newest first). Render in that
+// order rather than prepending by insertion id, so late-synced relay rolls land
+// in their correct chronological place instead of jumping to the top.
+let _diceFeedSig = '';
+function _renderDiceFeed(rolls) {
+  const list = document.getElementById('dice-feed-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!rolls.length) { list.innerHTML = '<p class="small text-muted">No rolls yet.</p>'; return; }
+  rolls.forEach(d => renderFeedEntry(d, false));
+}
+
 function fetchDiceFeed() {
   fetch('/ttrpg/dice/feed')
     .then(r => r.json()).then(rolls => {
-      const list = document.getElementById('dice-feed-list');
-      list.innerHTML = '';
-      if (!rolls.length) { list.innerHTML = '<p class="small text-muted">No rolls yet.</p>'; return; }
-      rolls.forEach(d => { renderFeedEntry(d, false); _diceLastId = Math.max(_diceLastId, d.roll_id); });
+      _renderDiceFeed(rolls);
+      rolls.forEach(d => {
+        _diceLastId    = Math.max(_diceLastId,    d.roll_id);
+        _lastSfxRollId = Math.max(_lastSfxRollId, d.roll_id);  // don't voice backlog
+      });
+      _diceFeedSig = rolls.length + ':' + _diceLastId;
     });
 }
 
 function pollDiceFeed() {
-  fetch(`/ttrpg/dice/feed?since=${_diceLastId}`)
+  fetch('/ttrpg/dice/feed')
     .then(r => r.json()).then(rolls => {
-      rolls.reverse().forEach(d => {
-        if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
-        renderFeedEntry(d, true);
-        _maybeRollSfx(d);   // everyone hears crit/fumble from anyone's roll
-        _diceLastId = Math.max(_diceLastId, d.roll_id);
-      });
+      rolls.slice().sort((a, b) => a.roll_id - b.roll_id).forEach(d => _maybeRollSfx(d));
+      rolls.forEach(d => { _diceLastId = Math.max(_diceLastId, d.roll_id); });
+      const sig = rolls.length + ':' + _diceLastId;
+      if (sig !== _diceFeedSig) { _diceFeedSig = sig; _renderDiceFeed(rolls); }
     });
 }
 

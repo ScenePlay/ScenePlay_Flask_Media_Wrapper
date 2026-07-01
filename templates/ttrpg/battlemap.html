@@ -796,7 +796,7 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='scripts/Tone.js') }}"></script>
-<script src="{{ url_for('static', filename='scripts/sfx.js', v='5') }}"></script>
+<script src="{{ url_for('static', filename='scripts/sfx.js', v='6') }}"></script>
 <script>
 const MAP_ID    = {{ bm.map_id }};
 let   CELL_PX   = {{ cell_px }};
@@ -2397,23 +2397,36 @@ function _mapRenderRelayEntry(r, prepend) {
   prepend ? feed.insertAdjacentHTML('afterbegin', html) : feed.insertAdjacentHTML('beforeend', html);
 }
 
+// The server returns the feed already ordered by roll TIME (newest first). Render
+// it in that order rather than prepending by insertion id, so relay rolls that
+// sync late land in their correct chronological place instead of jumping to top.
+let _mapFeedSig = '';
+function _mapRenderFeed(rolls) {
+  const feed = document.getElementById('map-dice-feed');
+  if (!feed) return;
+  feed.innerHTML = '';
+  if (!rolls.length) { feed.innerHTML = '<p class="fx-label">No rolls yet.</p>'; return; }
+  rolls.forEach(d => _mapRenderEntry(d, false));
+}
+
 function mapFetchFeed() {
   fetch('/ttrpg/dice/feed').then(r => r.json()).then(rolls => {
-    const feed = document.getElementById('map-dice-feed');
-    feed.innerHTML = '';
-    if (!rolls.length) { feed.innerHTML = '<p class="fx-label">No rolls yet.</p>'; return; }
-    rolls.forEach(d => { _mapRenderEntry(d, false); _mapLastRollId = Math.max(_mapLastRollId, d.roll_id); });
+    _mapRenderFeed(rolls);
+    rolls.forEach(d => {
+      _mapLastRollId  = Math.max(_mapLastRollId,  d.roll_id);
+      _lastSfxRollId  = Math.max(_lastSfxRollId,  d.roll_id);  // don't voice backlog
+    });
+    _mapFeedSig = rolls.length + ':' + _mapLastRollId;
   });
 }
 
 function mapPollFeed() {
-  fetch(`/ttrpg/dice/feed?since=${_mapLastRollId}`).then(r => r.json()).then(rolls => {
-    rolls.reverse().forEach(d => {
-      if (document.querySelector(`[data-rid="${d.roll_id}"]`)) return;
-      _mapRenderEntry(d, true);
-      _maybeRollSfx(d);   // everyone hears crit/fumble from anyone's roll
-      _mapLastRollId = Math.max(_mapLastRollId, d.roll_id);
-    });
+  fetch('/ttrpg/dice/feed').then(r => r.json()).then(rolls => {
+    // Voice crit/fumble for genuinely new rolls (ascending; _maybeRollSfx dedups).
+    rolls.slice().sort((a, b) => a.roll_id - b.roll_id).forEach(d => _maybeRollSfx(d));
+    rolls.forEach(d => { _mapLastRollId = Math.max(_mapLastRollId, d.roll_id); });
+    const sig = rolls.length + ':' + _mapLastRollId;
+    if (sig !== _mapFeedSig) { _mapFeedSig = sig; _mapRenderFeed(rolls); }
   });
 }
 

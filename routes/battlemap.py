@@ -61,10 +61,12 @@ def _monster_relay_img(image):
         path = os.path.join(current_app.root_path, 'static', 'uploads', 'monsters', fname)
         try:
             with open(path, 'rb') as f:
-                b64 = base64.b64encode(f.read()).decode('ascii')
+                raw = f.read()
             ext = fname.rsplit('.', 1)[-1].lower()
-            mime = 'jpeg' if ext == 'jpg' else ext
-            return f'data:image/{mime};base64,{b64}'
+            # Downscale/recompress for the relay (token art renders small anyway).
+            data, new_ext = relay_broadcaster._downscale_image(raw, ext, max_dim=512, quality=82)
+            mime = 'jpeg' if new_ext == 'jpg' else new_ext
+            return f'data:image/{mime};base64,{base64.b64encode(data).decode("ascii")}'
         except Exception:
             return ''
     return 'https://www.dnd5eapi.co' + image

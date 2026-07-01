@@ -11,5 +11,6 @@ class tblRollLog(db.Model):
     result      = db.Column(db.Integer, default=0)
     breakdown   = db.Column(db.Text, default='')
     rolled_at   = db.Column(db.Text, nullable=False)
+    relay_roll_id = db.Column(db.Integer, nullable=True)  # relay's unique roll id, for exact dedup
 
     session = db.relationship('tblSessions', backref='roll_log', lazy=True)

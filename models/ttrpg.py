@@ -429,6 +429,7 @@ class tblDiceRolls(db.Model):
     total        = db.Column(db.Integer, default=0)
     adv_mode     = db.Column(db.Text, default='normal')  # normal | advantage | disadvantage
     rolled_at    = db.Column(db.Text, nullable=False)
+    relay_roll_id = db.Column(db.Integer, nullable=True)  # relay's unique roll id, for exact dedup
 
 
 class tblEquipmentLibrary(db.Model):
