@@ -189,12 +189,26 @@
             {% endif %}
             <h3 class="mb-0" style="color:var(--ttrpg-accent);">{{ char.name }}</h3>
           </div>
-          <div class="d-flex gap-1">
+          <div class="d-flex gap-1 flex-wrap align-items-center">
             <button class="btn btn-sm btn-outline-secondary" onclick="toggleDicePanel()" title="Dice Roller">&#127922;</button>
             {% if can_edit %}
             <a href="{{ url_for('ttrpg.character_edit', character_id=char.character_id) }}"
                class="btn btn-sm btn-outline-secondary">&#9998; Edit Sheet</a>
             {% endif %}
+            <!-- SFX control — docked in the header toolbar to match the battlemap -->
+            <div id="sfx-ctrl" style="display:inline-flex;align-items:center;gap:6px;
+              background:rgba(20,18,12,.5);border:1px solid var(--ttrpg-border,#3a3420);
+              border-radius:16px;padding:2px 8px;font:600 12px system-ui,sans-serif;user-select:none;">
+              <button id="sfx-toggle" type="button" title="Click to enable / mute sound effects"
+                style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
+                white-space:nowrap;color:#c9a84c;">&#128264; Sound: tap to start</button>
+              <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
+                style="width:64px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
+              <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
+                onclick="if(window.SFX)SFX.openChooser()"
+                style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
+                cursor:pointer;font:inherit;line-height:1;padding:2px 8px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
+            </div>
           </div>
         </div>
         <div class="text-muted small mt-1">
@@ -1816,22 +1830,6 @@
   </div>
 </div>
 
-<!-- SFX control — static so it's always visible even if JS/sfx.js fails to load -->
-<div id="sfx-ctrl" style="position:fixed;left:8px;bottom:8px;z-index:3000;display:flex;
-  align-items:center;gap:8px;background:rgba(20,18,12,.92);
-  border:1px solid var(--ttrpg-border,#3a3420);border-radius:20px;padding:5px 12px;
-  box-shadow:0 2px 8px rgba(0,0,0,.5);font:600 12px system-ui,sans-serif;user-select:none;">
-  <button id="sfx-toggle" type="button" title="Click to enable / mute sound effects"
-    style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
-    white-space:nowrap;color:#c9a84c;">&#128264; Sound: tap to start</button>
-  <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
-    style="width:72px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
-  <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
-    onclick="if(window.SFX)SFX.openChooser()"
-    style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
-    cursor:pointer;font:inherit;line-height:1;padding:3px 9px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
-</div>
-
 {% endblock %}
 
 {% block scripts %}
@@ -2953,7 +2951,7 @@ function fetchDiceFeed() {
 function pollDiceFeed() {
   fetch('/ttrpg/dice/feed')
     .then(r => r.json()).then(rolls => {
-      rolls.slice().sort((a, b) => a.roll_id - b.roll_id).forEach(d => _maybeRollSfx(d));
+      // crit/fumble is voiced by the dice roller itself (doRoll); no feed echo.
       rolls.forEach(d => { _diceLastId = Math.max(_diceLastId, d.roll_id); });
       const sig = rolls.length + ':' + _diceLastId;
       if (sig !== _diceFeedSig) { _diceFeedSig = sig; _renderDiceFeed(rolls); }
