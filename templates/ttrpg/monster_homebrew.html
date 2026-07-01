@@ -1,8 +1,18 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
 {% block content %}
+{% set is_edit = m is defined and m %}
+{% set st = stats if stats is defined and stats else {} %}
+{% set cur_size  = (m.size if is_edit else '') or 'Medium' %}
+{% set cur_speed = (st.get('speed') or {}).get('walk', '30 ft.') %}
+{% set A = {
+  'str_val': st.get('strength', 10),    'dex_val': st.get('dexterity', 10),
+  'con_val': st.get('constitution', 10),'int_val': st.get('intelligence', 10),
+  'wis_val': st.get('wisdom', 10),      'cha_val': st.get('charisma', 10)
+} %}
+
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 style="color:var(--ttrpg-accent);">New Homebrew Monster</h3>
+  <h3 style="color:var(--ttrpg-accent);">{{ 'Edit Homebrew Monster' if is_edit else 'New Homebrew Monster' }}</h3>
   <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">&larr; Library</a>
 </div>
 
@@ -10,7 +20,8 @@
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
-<form method="POST" enctype="multipart/form-data">
+<form method="POST" enctype="multipart/form-data"
+      {% if is_edit %}action="{{ url_for('monsters_bp.homebrew_edit', template_id=m.template_id) }}"{% endif %}>
   <div class="row g-3">
     <!-- Identity -->
     <div class="col-12">
@@ -19,44 +30,57 @@
         <div class="row g-3">
           <div class="col-sm-6">
             <label class="form-label small text-muted">Name *</label>
-            <input type="text" name="name" class="form-control bg-dark text-light border-secondary" required>
+            <input type="text" name="name" value="{{ m.name if is_edit else '' }}"
+                   class="form-control bg-dark text-light border-secondary" required>
           </div>
           <div class="col-sm-6">
             <label class="form-label small text-muted">Picture <span class="text-muted">(token art — png/jpg/gif/webp)</span></label>
-            <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
-                   class="form-control bg-dark text-light border-secondary">
+            <div class="d-flex align-items-center gap-2">
+              {% if st.get('image') %}
+              <img src="{{ st.image }}" alt=""
+                   style="width:38px;height:38px;object-fit:cover;border-radius:4px;
+                          border:1px solid var(--sp-border);flex-shrink:0;">
+              {% endif %}
+              <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
+                     class="form-control bg-dark text-light border-secondary">
+            </div>
+            {% if is_edit and st.get('image') %}
+            <div class="form-text text-muted">Leave empty to keep the current picture.</div>
+            {% endif %}
           </div>
           <div class="col-sm-3">
             <label class="form-label small text-muted">Size</label>
             <select name="size" class="form-select bg-dark text-light border-secondary">
               {% for sz in ['Tiny','Small','Medium','Large','Huge','Gargantuan'] %}
-              <option value="{{ sz }}"{% if sz == 'Medium' %} selected{% endif %}>{{ sz }}</option>
+              <option value="{{ sz }}"{% if sz == cur_size %} selected{% endif %}>{{ sz }}</option>
               {% endfor %}
             </select>
           </div>
           <div class="col-sm-3">
             <label class="form-label small text-muted">Type</label>
             <input type="text" name="monster_type" placeholder="beast, undead…"
+                   value="{{ m.monster_type if is_edit else '' }}"
                    class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-sm-4">
             <label class="form-label small text-muted">Alignment</label>
             <input type="text" name="alignment" placeholder="chaotic evil…"
+                   value="{{ st.get('alignment', '') }}"
                    class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-sm-4">
             <label class="form-label small text-muted">Speed</label>
-            <input type="text" name="speed" value="30 ft."
+            <input type="text" name="speed" value="{{ cur_speed }}"
                    class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-sm-2">
             <label class="form-label small text-muted">CR</label>
-            <input type="text" name="cr" value="1"
+            <input type="text" name="cr" value="{{ m.cr if is_edit else '1' }}"
                    class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-sm-2">
             <label class="form-label small text-muted">XP</label>
-            <input type="number" name="xp" value="0" min="0"
+            <input type="number" name="xp" value="{{ st.get('xp', 0) }}" min="0"
                    class="form-control bg-dark text-light border-secondary">
           </div>
         </div>
@@ -70,12 +94,12 @@
         <div class="row g-3">
           <div class="col-6">
             <label class="form-label small text-muted">Max HP</label>
-            <input type="number" name="hp_max" value="10" min="1"
+            <input type="number" name="hp_max" value="{{ m.hp_max if is_edit else 10 }}" min="1"
                    class="form-control bg-dark text-light border-secondary">
           </div>
           <div class="col-6">
             <label class="form-label small text-muted">AC</label>
-            <input type="number" name="ac" value="10" min="1"
+            <input type="number" name="ac" value="{{ m.ac if is_edit else 10 }}" min="1"
                    class="form-control bg-dark text-light border-secondary">
           </div>
         </div>
@@ -91,7 +115,7 @@
                                   ('int_val','INT'),('wis_val','WIS'),('cha_val','CHA')] %}
           <div class="col-4 col-sm-2">
             <label class="form-label small text-muted mb-1">{{ label }}</label>
-            <input type="number" name="{{ stat }}" value="10" min="1" max="30"
+            <input type="number" name="{{ stat }}" value="{{ A[stat] }}" min="1" max="30"
                    class="form-control form-control-sm bg-dark text-light border-secondary text-center">
           </div>
           {% endfor %}
@@ -106,19 +130,20 @@
         <div class="mb-3">
           <label class="form-label small text-muted">Languages</label>
           <input type="text" name="languages" placeholder="Common, Draconic…"
+                 value="{{ st.get('languages', '') }}"
                  class="form-control bg-dark text-light border-secondary">
         </div>
         <div>
           <label class="form-label small text-muted">Notes / Special Abilities</label>
           <textarea name="notes" rows="4"
                     class="form-control bg-dark text-light border-secondary"
-                    placeholder="Describe traits, actions, reactions…"></textarea>
+                    placeholder="Describe traits, actions, reactions…">{{ st.get('notes', '') }}</textarea>
         </div>
       </div>
     </div>
 
     <div class="col-12 d-flex gap-2">
-      <button type="submit" class="btn btn-ttrpg">Create Monster</button>
+      <button type="submit" class="btn btn-ttrpg">{{ 'Save Changes' if is_edit else 'Create Monster' }}</button>
       <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-outline-secondary">Cancel</a>
     </div>
   </div>

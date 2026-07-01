@@ -73,6 +73,13 @@ def _monster_relay_img(image):
 
 
 def _token_relay_payload(t, bm):
+    # Skip tokens whose backing entity was deleted — otherwise the relay renders
+    # them as blank "orphan" tokens. (The local /state endpoint already skips
+    # these the same way; this keeps the relay payload consistent with it.)
+    if t.entity_type == 'player' and not db.session.get(tblCharacters, t.entity_id):
+        return None
+    if t.entity_type == 'monster' and not db.session.get(tblSessionMonsters, t.entity_id):
+        return None
     data = {
         'token_id':    t.token_id,
         'entity_type': t.entity_type,
@@ -157,7 +164,7 @@ def _push_map_state(bm):
     } for e in bm.effects]
     relay_broadcaster.broadcast_map_update(
         bg_url, bm.grid_cols, bm.grid_rows,
-        [_token_relay_payload(t, bm) for t in bm.tokens],
+        [p for p in (_token_relay_payload(t, bm) for t in bm.tokens) if p],
         effects=effects,
         movement_scale=bm.movement_scale or 1.0,
         bg_filename=bm.bg_image,

@@ -161,6 +161,7 @@
           <input type="file" id="hb-img-file" accept="image/png,image/jpeg,image/gif,image/webp"
                  class="form-control form-control-sm bg-dark text-light border-secondary" style="max-width:240px;">
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadMonsterImage()">Set Picture</button>
+          <a id="homebrew-edit-link" href="#" class="btn btn-outline-secondary btn-sm">&#9998; Edit Monster</a>
           <span id="hb-img-msg" class="small text-muted"></span>
         </div>
         <form id="homebrew-delete-form" method="POST">
@@ -364,11 +365,13 @@ function renderDetail(templateId, data) {
     actWrap.style.display = 'none';
   }
 
-  // Homebrew delete button
+  // Homebrew tools (edit / picture / delete)
   const delWrap = document.getElementById('homebrew-delete-wrap');
   if (data.source === 'homebrew') {
     document.getElementById('homebrew-delete-form').action =
       `/ttrpg/monsters/homebrew/${templateId}/delete`;
+    document.getElementById('homebrew-edit-link').href =
+      `/ttrpg/monsters/homebrew/${templateId}/edit`;
     delWrap.style.display = '';
   } else {
     delWrap.style.display = 'none';

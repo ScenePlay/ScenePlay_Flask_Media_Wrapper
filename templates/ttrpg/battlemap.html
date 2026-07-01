@@ -446,7 +446,12 @@
 
       <!-- Campaign Scenes -->
       {% if campaign_scenes %}
-      <div class="sidebar-section-title mt-3">Scenes</div>
+      <div class="sidebar-section-title mt-3 d-flex justify-content-between align-items-center">
+        <span>Scenes</span>
+        <button type="button" class="btn btn-danger btn-sm py-0 px-2"
+                style="font-size:.68rem;text-transform:none;letter-spacing:0;"
+                onclick="mapAllStop()" title="Stop all media &amp; clear the active scene">All Stop</button>
+      </div>
       {% if sess.campaign %}
       <p class="small text-muted mb-1" style="font-size:.68rem;">{{ sess.campaign.campaign_name }}</p>
       {% endif %}
@@ -466,19 +471,24 @@
       </button>
       {% endfor %}
       {% elif sess and sess.campaign_id %}
-      <div class="sidebar-section-title mt-3">Scenes</div>
+      <div class="sidebar-section-title mt-3 d-flex justify-content-between align-items-center">
+        <span>Scenes</span>
+        <button type="button" class="btn btn-danger btn-sm py-0 px-2"
+                style="font-size:.68rem;text-transform:none;letter-spacing:0;"
+                onclick="mapAllStop()" title="Stop all media &amp; clear the active scene">All Stop</button>
+      </div>
       <p class="small text-muted">No active scenes for this campaign.</p>
       {% endif %}
 
       <!-- Volume -->
       <div class="sidebar-section-title mt-3">Volume</div>
-      <div class="d-flex align-items-center gap-1 mb-1">
-        <span style="font-size:.7rem;color:var(--ttrpg-accent);">&#128266;</span>
+      <div class="d-flex align-items-center gap-1 mb-1" style="min-width:0;">
+        <span style="font-size:.7rem;color:var(--ttrpg-accent);flex-shrink:0;">&#128266;</span>
         <input type="range" id="map-vol-slider" min="0" max="100"
                value="{{ current_vol }}"
                oninput="mapVolChange(this.value)"
-               style="flex:1;accent-color:var(--ttrpg-accent);cursor:pointer;">
-        <span id="map-vol-label" style="font-size:.7rem;color:var(--sp-muted);min-width:26px;text-align:right;">{{ current_vol }}</span>
+               style="flex:1 1 0;min-width:0;width:0;accent-color:var(--ttrpg-accent);cursor:pointer;">
+        <span id="map-vol-label" style="font-size:.7rem;color:var(--sp-muted);min-width:26px;flex-shrink:0;text-align:right;">{{ current_vol }}</span>
       </div>
 
       <div class="sidebar-section-title mt-3">Hint</div>
@@ -2479,6 +2489,21 @@ function mapActivateScene(btn) {
       if (nameEl) nameEl.textContent = sceneName;
       if (banner) banner.style.display = '';
     });
+}
+
+// All Stop — mirror the ScenePlay home screen: stop the media queue, then clear
+// the active scene. Chained so the queue is killed before the scene is cleared.
+function mapAllStop() {
+  fetch('/killqueue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '' })
+    .catch(() => {})
+    .finally(() => { fetch('/activatescenes/?id=-1').catch(() => {}); });
+  // Reset the scene UI: nothing highlighted, banner hidden.
+  document.querySelectorAll('.map-scene-btn').forEach(b => {
+    b.style.borderColor = '#444';
+    b.style.color = 'var(--ttrpg-text)';
+  });
+  const banner = document.getElementById('map-active-scene-banner');
+  if (banner) banner.style.display = 'none';
 }
 
 // ── Grid cell size ─────────────────────────────────────────────────────────────

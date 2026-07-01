@@ -981,13 +981,19 @@ def session_detail(session_id):
                            .filter_by(campaign_id=sess.campaign_id, active=1)
                            .order_by(tblscenes.orderBy)
                            .all())
+    try:
+        from extensions import currentvolume
+        current_vol = currentvolume()
+    except Exception:
+        current_vol = 50
     return render_template('ttrpg/session_detail.html',
                            sess=sess,
                            campaigns=campaigns,
                            all_chars=all_chars,
                            party_ids=party_ids,
                            conditions=CONDITIONS,
-                           campaign_scenes=campaign_scenes)
+                           campaign_scenes=campaign_scenes,
+                           current_vol=current_vol)
 
 
 @ttrpg.route('/sessions/<int:session_id>/status', methods=['POST'])

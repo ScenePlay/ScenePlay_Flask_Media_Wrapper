@@ -8,7 +8,8 @@ from flask import (Blueprint, render_template, redirect, url_for,
                    request, flash, jsonify, current_app)
 from flask_login import login_required
 from extensions import db
-from models.ttrpg import tblMonsterTemplates, tblSessionMonsters, tblSessions
+from models.ttrpg import (tblMonsterTemplates, tblSessionMonsters, tblSessions,
+                          tblBattleMaps, tblBattleMapTokens)
 from routes.auth import dm_required
 
 monsters_bp = Blueprint('monsters_bp', __name__, url_prefix='/ttrpg/monsters')
@@ -362,6 +363,69 @@ def homebrew_new():
     return render_template('ttrpg/monster_homebrew.html', error=error)
 
 
+@monsters_bp.route('/homebrew/<int:template_id>/edit', methods=['GET', 'POST'])
+@login_required
+@dm_required
+def homebrew_edit(template_id):
+    m = tblMonsterTemplates.query.get_or_404(template_id)
+    if m.source != 'homebrew':
+        flash('Only homebrew monsters can be edited.')
+        return redirect(url_for('monsters_bp.library'))
+
+    error = None
+    stats = json.loads(m.stats_json or '{}')
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            error = 'Monster name is required.'
+        else:
+            # Update editable fields, PRESERVING anything the form doesn't cover
+            # (image, special_abilities, actions, senses stay intact).
+            stats.update({
+                'name': name,
+                'size': request.form.get('size', ''),
+                'type': request.form.get('monster_type', ''),
+                'alignment': request.form.get('alignment', ''),
+                'hit_points': int(request.form.get('hp_max', 0) or 0),
+                'armor_class': [{'value': int(request.form.get('ac', 10) or 10), 'type': 'natural'}],
+                'speed': {'walk': request.form.get('speed', '30 ft.')},
+                'strength': int(request.form.get('str_val', 10) or 10),
+                'dexterity': int(request.form.get('dex_val', 10) or 10),
+                'constitution': int(request.form.get('con_val', 10) or 10),
+                'intelligence': int(request.form.get('int_val', 10) or 10),
+                'wisdom': int(request.form.get('wis_val', 10) or 10),
+                'charisma': int(request.form.get('cha_val', 10) or 10),
+                'challenge_rating': request.form.get('cr', '0'),
+                'xp': int(request.form.get('xp', 0) or 0),
+                'languages': request.form.get('languages', ''),
+                'notes': request.form.get('notes', ''),
+            })
+            # Optional new picture (replaces the previous local upload, if any).
+            new_img = _save_monster_image(request.files.get('image'))
+            if new_img:
+                old = stats.get('image', '')
+                if isinstance(old, str) and old.startswith('/static/uploads/monsters/'):
+                    try:
+                        os.remove(os.path.join(current_app.root_path, 'static', 'uploads',
+                                               'monsters', os.path.basename(old)))
+                    except OSError:
+                        pass
+                stats['image'] = new_img
+
+            m.name         = name
+            m.cr           = request.form.get('cr', '0')
+            m.monster_type = request.form.get('monster_type', '')
+            m.size         = request.form.get('size', '')
+            m.hp_max       = int(request.form.get('hp_max', 0) or 0)
+            m.ac           = int(request.form.get('ac', 10) or 10)
+            m.stats_json   = json.dumps(stats)
+            db.session.commit()
+            flash(f'Homebrew monster "{name}" updated.')
+            return redirect(url_for('monsters_bp.library'))
+
+    return render_template('ttrpg/monster_homebrew.html', error=error, m=m, stats=stats)
+
+
 @monsters_bp.route('/homebrew/<int:template_id>/image', methods=['POST'])
 @login_required
 @dm_required
@@ -488,6 +552,23 @@ def instance_revive(monster_id):
 @dm_required
 def instance_delete(monster_id):
     sm = tblSessionMonsters.query.get_or_404(monster_id)
+    # Remove any battlemap tokens for this monster too, so it doesn't linger as an
+    # orphan (blank) token on the relay after the monster itself is gone.
+    tok_rows = tblBattleMapTokens.query.filter_by(
+        entity_type='monster', entity_id=monster_id).all()
+    affected_map_ids = {tr.map_id for tr in tok_rows}
+    for tr in tok_rows:
+        db.session.delete(tr)
     db.session.delete(sm)
     db.session.commit()
+    # Refresh the relay for any affected live map so the token disappears at once
+    # (rather than on the next unrelated map push).
+    try:
+        from routes.battlemap import _push_map_state
+        for mid in affected_map_ids:
+            bm = db.session.get(tblBattleMaps, mid)
+            if bm:
+                _push_map_state(bm)
+    except Exception:
+        pass
     return jsonify({'ok': True})

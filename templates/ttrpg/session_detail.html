@@ -196,6 +196,18 @@
       {% else %}
       <p class="text-muted small mb-0">Link this session to a campaign to see its scenes here.</p>
       {% endif %}
+
+      <!-- PC / system playback volume + All Stop -->
+      <hr style="border-color:var(--sp-border);margin:12px 0 10px;">
+      <div class="d-flex align-items-center gap-2 flex-wrap" style="min-width:0;">
+        <span class="small text-muted" style="flex-shrink:0;">&#128266; PC Volume</span>
+        <input type="range" id="pc-vol-slider" min="0" max="100" value="{{ current_vol }}"
+               oninput="sessionVolChange(this.value)"
+               style="flex:0 1 150px;min-width:60px;max-width:150px;accent-color:var(--ttrpg-accent);cursor:pointer;">
+        <span id="pc-vol-label" style="font-size:.75rem;color:var(--sp-muted);min-width:26px;flex-shrink:0;text-align:right;">{{ current_vol }}</span>
+        <button type="button" class="btn btn-danger btn-sm py-0 px-2"
+                onclick="sessionAllStop()" title="Stop all media &amp; clear the active scene">All Stop</button>
+      </div>
     </div>
   </div>
 
@@ -221,7 +233,8 @@
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <!-- Portrait -->
             {% if mstats.image %}
-            <img src="https://www.dnd5eapi.co{{ mstats.image }}"
+            {% set _mi = mstats.image %}
+            <img src="{{ _mi if _mi.startswith('http') or _mi.startswith('/static/') or _mi.startswith('data:') else 'https://www.dnd5eapi.co' + _mi }}"
                  style="width:44px;height:44px;object-fit:contain;border-radius:4px;
                         background:var(--ttrpg-primary);flex-shrink:0;" alt="">
             {% else %}
@@ -424,6 +437,35 @@ function activateScene(btn) {
       document.getElementById('active-scene-name').textContent = sceneName;
       document.getElementById('active-scene-banner').style.display = '';
     });
+}
+
+// All Stop — mirror the ScenePlay home screen: stop the media queue, then clear
+// the active scene. Chained so the queue is killed before the scene is cleared.
+function sessionAllStop() {
+  fetch('/killqueue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '' })
+    .catch(() => {})
+    .finally(() => { fetch('/activatescenes/?id=-1').catch(() => {}); });
+  document.querySelectorAll('.scene-btn').forEach(b => {
+    b.style.borderColor = 'var(--sp-border)';
+    b.style.color = 'var(--ttrpg-text)';
+  });
+  const banner = document.getElementById('active-scene-banner');
+  if (banner) banner.style.display = 'none';
+}
+
+// PC / system playback volume (debounced POST to /set_volume).
+let _pcVolTimer = null;
+function sessionVolChange(val) {
+  const lbl = document.getElementById('pc-vol-label');
+  if (lbl) lbl.textContent = val;
+  clearTimeout(_pcVolTimer);
+  _pcVolTimer = setTimeout(() => {
+    fetch('/set_volume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ volume: parseInt(val) })
+    }).catch(() => {});
+  }, 120);
 }
 
 // ── Monster instance controls ───────────────────────────────────────────────
