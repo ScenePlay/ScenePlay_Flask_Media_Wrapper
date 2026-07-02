@@ -451,22 +451,16 @@ def map_view(map_id):
     bm   = tblBattleMaps.query.get_or_404(map_id)
     sess = db.session.get(tblSessions, bm.session_id)
 
-    # Players may only open the LIVE map of the ACTIVE session, and only if they
-    # belong to its party. Anything else bounces to the active-map redirect
-    # (which shows a friendly message when nothing is live). DMs see all maps.
+    # Players may only open the LIVE map of the ACTIVE session — but ANY
+    # logged-in user may view it, even with no character assigned yet
+    # (spectator). Moving tokens still requires ownership, and the moment the
+    # DM assigns them a character the page picks it up (roller_sig reload).
     if not current_user.is_dm():
         active_session = tblSessions.query.filter_by(status='active').first()
-        in_party = bool(active_session and (
-            tblSessionParty.query
-            .join(tblCharacters, tblCharacters.character_id == tblSessionParty.character_id)
-            .filter(tblSessionParty.session_id == active_session.session_id,
-                    tblCharacters.user_id == current_user.user_id)
-            .first()))
         if (not active_session
                 or sess is None
                 or sess.session_id != active_session.session_id
-                or not bm.is_active
-                or not in_party):
+                or not bm.is_active):
             return redirect(url_for('battlemap_bp.active_map'))
 
     monsters = []
@@ -506,6 +500,34 @@ def map_view(map_id):
                 roller_name = sp.character.name
                 break
 
+    # Characters this user may roll AS from the map dice panel (a user can play
+    # several characters; the DM can roll for anyone in the party). Includes the
+    # same skills/weapons/spells the sheet's Quick Reference offers.
+    def _roller_char(char):
+        return {
+            'id':   char.character_id,
+            'name': char.name,
+            'skills': [{'name': s.skill_name, 'bonus': s.bonus or 0,
+                        'proficient': bool(s.proficient)}
+                       for s in sorted(char.skills, key=lambda x: x.order_by)],
+            'weapons': [{'name': w.weapon_name, 'dice': w.damage_dice or '',
+                         'dmg_bonus': w.damage_bonus or 0,
+                         'atk_bonus': w.attack_bonus or 0,
+                         'dmg_type': w.damage_type or ''}
+                        for w in sorted(char.weapons, key=lambda x: x.order_by)],
+            'spells': [{'name': cs.spell_name,
+                        'dice': (cs.lib_spell.damage_dice if cs.lib_spell else '') or '',
+                        'level': cs.spell_level,
+                        'prepared': bool(cs.prepared)}
+                       for cs in sorted(char.spells, key=lambda x: (x.spell_level, x.order_by))],
+        }
+
+    roller_chars = [
+        _roller_char(sp.character) for sp in sess.party
+        if sp.character and (current_user.is_dm()
+                             or sp.character.user_id == current_user.user_id)
+    ] if sess else []
+
     if current_user.is_dm() and bm.is_active:
         _push_map_state(bm)
 
@@ -516,6 +538,7 @@ def map_view(map_id):
                            on_map_player_ids=on_map_player_ids,
                            cell_px=CELL_PX,
                            roller_name=roller_name,
+                           roller_chars=roller_chars,
                            campaign_scenes=campaign_scenes,
                            current_vol=current_vol)
 
@@ -618,6 +641,19 @@ def map_state(map_id):
     # Report the currently-live map so a player's page can auto-switch when the
     # DM activates a different one (avoids a manual refresh). None if nothing live.
     active_session = tblSessions.query.filter_by(status='active').first()
+
+    # Signature of the characters this user may roll as — an open player page
+    # compares it against its page-load roster and reloads on change, so a
+    # mid-session (re)assignment grants/revokes control without a re-login.
+    roller_sig = None
+    if not current_user.is_dm() and active_session:
+        ids = sorted(
+            sp.character_id for sp in tblSessionParty.query
+            .join(tblCharacters, tblCharacters.character_id == tblSessionParty.character_id)
+            .filter(tblSessionParty.session_id == active_session.session_id,
+                    tblCharacters.user_id == current_user.user_id,
+                    tblCharacters.active == 1).all())
+        roller_sig = ','.join(str(i) for i in ids)
     active_map_id = None
     if active_session:
         active_bm = tblBattleMaps.query.filter_by(
@@ -631,6 +667,7 @@ def map_state(map_id):
         'grid_cols':     bm.grid_cols,
         'grid_rows':     bm.grid_rows,
         'active_map_id': active_map_id,
+        'roller_sig':    roller_sig,
     })
 
 

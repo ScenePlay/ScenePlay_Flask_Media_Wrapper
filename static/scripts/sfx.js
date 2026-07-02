@@ -65,18 +65,34 @@ window.SFX = (function () {
   }
 
   function _buildVoices() {
-    // Brass — saw FM (crit fanfare/stab)
+    // Brass — saw FM through a gentle vibrato: a section of players is never
+    // perfectly steady, and that slow shimmer is most of what reads as "brass"
+    // rather than "buzzer". (crit fanfare/stab)
     const brass = new Tone.PolySynth(Tone.FMSynth, {
       maxPolyphony: 8, harmonicity: 1, modulationIndex: 5,
       oscillator: { type: 'sawtooth' },
-      envelope: { attack: 0.02, decay: 0.1, sustain: 0.7, release: 0.25 },
+      envelope: { attack: 0.025, decay: 0.1, sustain: 0.7, release: 0.3 },
       modulation: { type: 'square' },
       modulationEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.5, release: 0.2 }
     });
+    const brassVib  = new Tone.Vibrato({ frequency: 5.2, depth: 0.06 });
     const brassFilt = new Tone.Filter(3000, 'lowpass');
-    brass.connect(brassFilt); _route(brassFilt, 0.5, 0.25);
+    brass.connect(brassVib); brassVib.connect(brassFilt); _route(brassFilt, 0.5, 0.25);
 
-    // Reed/crumhorn — square FM (fumble, dirge)
+    // Slide — MONO brassy FM used for anything with continuous pitch motion
+    // (sad-trombone droop, comic up-slip, whoosh body). Mono matters: glides
+    // are scheduled directly on its frequency signal.
+    const slide = new Tone.FMSynth({
+      harmonicity: 1, modulationIndex: 3.5,
+      oscillator: { type: 'sawtooth' },
+      envelope: { attack: 0.05, decay: 0.05, sustain: 0.85, release: 0.25 },
+      modulation: { type: 'square' },
+      modulationEnvelope: { attack: 0.05, decay: 0.1, sustain: 0.6, release: 0.2 }
+    });
+    const slideFilt = new Tone.Filter(1800, 'lowpass');
+    slide.connect(slideFilt); _route(slideFilt, 0.42, 0.22);
+
+    // Reed/crumhorn — square FM (fumble blat, dirge)
     const reed = new Tone.PolySynth(Tone.FMSynth, {
       maxPolyphony: 4, harmonicity: 1, modulationIndex: 2.4,
       oscillator: { type: 'square' },
@@ -87,27 +103,45 @@ window.SFX = (function () {
     const reedFilt = new Tone.Filter(2000, 'lowpass');
     reed.connect(reedFilt); _route(reedFilt, 0.4, 0.2);
 
-    // Bell — inharmonic FM (crit peal, heal chime, dead knell/gong)
+    // Bell — inharmonic FM. Longer modulation decay = the strike "blooms"
+    // before it rings, like a real bell. (crit peal, heal chime, knell)
     const bell = new Tone.PolySynth(Tone.FMSynth, {
-      maxPolyphony: 6, harmonicity: 3.01, modulationIndex: 6,
+      maxPolyphony: 8, harmonicity: 3.01, modulationIndex: 7,
       oscillator: { type: 'sine' },
-      envelope: { attack: 0.004, decay: 1.4, sustain: 0, release: 1.2 },
+      envelope: { attack: 0.004, decay: 1.6, sustain: 0, release: 1.4 },
       modulation: { type: 'sine' },
-      modulationEnvelope: { attack: 0.004, decay: 0.5, sustain: 0, release: 0.6 }
+      modulationEnvelope: { attack: 0.004, decay: 0.9, sustain: 0, release: 0.7 }
     });
     _route(bell, 0.35, 0.4);
 
-    // Harp/pluck — triangle FM (heal shimmer, map gliss, move tick)
-    const harp = new Tone.PolySynth(Tone.FMSynth, {
-      maxPolyphony: 8, harmonicity: 2, modulationIndex: 3,
-      oscillator: { type: 'triangle' },
-      envelope: { attack: 0.003, decay: 0.6, sustain: 0, release: 0.5 },
-      modulation: { type: 'sine' },
-      modulationEnvelope: { attack: 0.003, decay: 0.1, sustain: 0, release: 0.1 }
+    // Big drum — a great skin drum (deep membrane, long ring) for the tribal
+    // death-drum. Slower pitch decay + more octaves than the damage thud =
+    // ceremonial war drum rather than a punch.
+    const drum = new Tone.MembraneSynth({
+      pitchDecay: 0.09, octaves: 2.5,
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.002, decay: 0.65, sustain: 0, release: 0.35 }
     });
-    _route(harp, 0.3, 0.3);
+    _route(drum, 0.5, 0.2);
 
-    // Pad — AM swell (heal swell). SLOW attack: the clearest envelope demo.
+    // Shing — bright short metal: the "blade" accent layered into crit hits.
+    const shing = new Tone.MetalSynth({
+      harmonicity: 5.1, modulationIndex: 22, resonance: 4500, octaves: 1.5,
+      envelope: { attack: 0.001, decay: 0.45, release: 0.12 }
+    });
+    _route(shing, 0.22, 0.3);
+
+    // Harp — POOL of Karplus-Strong plucked strings (PluckSynth is mono and
+    // physically modeled; a run of real plucks beats FM approximations).
+    const pluck = [];
+    for (let i = 0; i < 3; i++) {
+      const p = new Tone.PluckSynth({ attackNoise: 0.9, dampening: 3800, resonance: 0.92 });
+      _route(p, 0.55, 0.35);
+      pluck.push(p);
+    }
+
+    // Pad — AM swell; padFilt is exposed so the heal-swell can open it slowly
+    // (a filter bloom under a chord is what makes a swell feel like sunrise).
     const pad = new Tone.PolySynth(Tone.AMSynth, {
       maxPolyphony: 5, harmonicity: 1.5,
       oscillator: { type: 'sine' },
@@ -118,22 +152,21 @@ window.SFX = (function () {
     const padFilt = new Tone.Filter(1400, 'lowpass');
     pad.connect(padFilt); _route(padFilt, 0.3, 0.4);
 
-    // Footstep — a POOL of brown-noise voices. A single monophonic NoiseSynth
-    // can't take the 4-in-a-row sequence (or rapid repeated moves): the later
-    // scheduled hits choke and the voice gets stuck ("plays once then stops").
-    // Round-robining a small pool gives each hit its own clean voice.
+    // Footsteps — pool of brown-noise voices (mono NoiseSynth chokes on rapid
+    // retriggers), with DIFFERENT filter cutoffs per voice: alternating heavy/
+    // light footfalls instead of four identical thumps.
     const step = [];
-    for (let i = 0; i < 4; i++) {
+    [700, 1000, 780, 1100].forEach(cut => {
       const n = new Tone.NoiseSynth({
         noise: { type: 'brown' },
         envelope: { attack: 0.004, decay: 0.08, sustain: 0, release: 0.05 }
       });
-      const f = new Tone.Filter(900, 'lowpass');
+      const f = new Tone.Filter(cut, 'lowpass');
       n.connect(f); _route(f, 0.45, 0.08);
       step.push(n);
-    }
+    });
 
-    // General white noise w/ automatable filter (whoosh, riser, crunch)
+    // General white noise w/ automatable filter (whoosh, riser, deflate)
     const noise = new Tone.NoiseSynth({
       noise: { type: 'white' },
       envelope: { attack: 0.008, decay: 0.06, sustain: 0.5, release: 0.1 }
@@ -141,7 +174,20 @@ window.SFX = (function () {
     const noiseFilt = new Tone.Filter(2000, 'lowpass');
     noise.connect(noiseFilt); _route(noiseFilt, 0.3, 0.25);
 
-    // Membrane drum (damage thud/impact, fumble dud)
+    // Snap — pool of ultra-short highpassed white noise: the TRANSIENT layer.
+    // Impacts read as "a hit" because of the first 30ms of snap, not the boom.
+    const snap = [];
+    for (let i = 0; i < 2; i++) {
+      const s = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }
+      });
+      const f = new Tone.Filter(3800, 'highpass');
+      s.connect(f); _route(f, 0.4, 0.05);
+      snap.push(s);
+    }
+
+    // Membrane drum — the BODY layer of impacts (and timpani under fanfares)
     const thud = new Tone.MembraneSynth({
       pitchDecay: 0.06, octaves: 4,
       oscillator: { type: 'sine' },
@@ -149,7 +195,40 @@ window.SFX = (function () {
     });
     _route(thud, 0.5, 0.12);
 
-    return { brass, reed, bell, harp, pad, step, noise, noiseFilt, thud };
+    // Sub — mono sine for drones under death sounds and cinematic pitch-drops
+    const sub = new Tone.Synth({
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.01, decay: 0.05, sustain: 0.9, release: 0.5 }
+    });
+    _route(sub, 0.5, 0.1);
+
+    return { brass, slide, reed, bell, drum, shing, pluck, pad, padFilt,
+             step, noise, noiseFilt, snap, thud, sub };
+  }
+
+  // Schedule a pitch glide on a mono voice: attack at the first point, ramp
+  // through the rest, release at the end. pts = [[note, holdSeconds], ...].
+  // The held-note micro-droop and the final slide are what discrete notes
+  // can't do — this is the engine behind the sad trombone.
+  function _glide(voice, pts, vel, dropRatio) {
+    const t = Tone.now();
+    const F = n => Tone.Frequency(n).toFrequency();
+    voice.frequency.cancelScheduledValues(t);
+    // A release scheduled by a PREVIOUS glide would choke this retrigger
+    // (mono voice) — wipe pending envelope events before attacking again.
+    try { voice.envelope.cancel(t); } catch (e) {}
+    voice.triggerAttack(pts[0][0], t, vel);
+    let at = t;
+    pts.forEach(([n, hold], i) => {
+      const hz = F(n);
+      voice.frequency.setValueAtTime(hz, at);
+      // droop each held note slightly flat — the "wah" in wah-wah-wah
+      const sag = (i === pts.length - 1 && dropRatio) ? dropRatio : 0.972;
+      voice.frequency.exponentialRampToValueAtTime(hz * sag, at + hold * 0.92);
+      at += hold;
+    });
+    voice.triggerRelease(at);
+    return at - t;   // total length, for layering follow-ups
   }
 
   // Sweep helper for the white-noise filter (used by whoosh / riser).
@@ -166,114 +245,195 @@ window.SFX = (function () {
   // audition UI to help build intuition for attack/decay/release.
   const VARIANTS = {
     crit: {
-      fanfare: { label: 'Fanfare', env: 'sharp attack · 0.18s notes · rising arpeggio', play() {
+      fanfare: { label: 'Fanfare', env: 'crescendo arpeggio · chord landing · timpani + sub root', play() {
         const t = Tone.now();
-        ['G4','C5','E5','G5'].forEach((n,i)=>v.brass.triggerAttackRelease(n,0.18,t+i*0.09,0.8));
-        v.brass.triggerAttackRelease('C6',0.5,t+0.36,0.9);
+        // Rising three-note pickup that CRESCENDOS into the landing…
+        ['G4','C5','E5'].forEach((n,i)=>v.brass.triggerAttackRelease(n,0.16,t+i*0.09,0.5+i*0.09));
+        // …then lands on a full chord (notes staggered 8ms — a section, not a
+        // keyboard), grounded by a timpani hit and a sub root.
+        const land = t + 0.28;
+        ['C5','E5','G5'].forEach((n,i)=>v.brass.triggerAttackRelease(n,0.55,land+i*0.008,0.75));
+        v.brass.triggerAttackRelease('C6',0.6,land+0.016,0.9);
+        v.thud.triggerAttackRelease('C2',0.3,land,0.6);
+        v.sub.triggerAttackRelease('C2',0.5,land,0.5);
       }},
-      stab: { label: 'Power stab', env: 'instant attack · stacked chord · short', play() {
+      stab: { label: 'Power stab', env: 'chord punch + blade shing + drum — a landed blow', play() {
         const t = Tone.now();
-        ['C4','G4','C5','E5'].forEach(n=>v.brass.triggerAttackRelease(n,0.22,t,0.7));
-        v.brass.triggerAttackRelease('G5',0.45,t+0.14,0.85);
+        // Three layers on the same instant: chord (body), metal shing
+        // (transient edge), drum (weight). Reads as steel meeting its mark.
+        ['C4','G4','C5'].forEach(n=>v.brass.triggerAttackRelease(n,0.28,t,0.7));
+        v.shing.triggerAttackRelease('E5',0.3,t,0.55);
+        v.thud.triggerAttackRelease('G1',0.22,t,0.65);
+        v.brass.triggerAttackRelease('G5',0.5,t+0.12,0.85);
       }},
-      peal: { label: 'Bell peal', env: 'sharp attack · long ring · rising bells', play() {
+      peal: { label: 'Bell peal', env: 'overlapping bells · double-struck top · high sparkle', play() {
         const t = Tone.now();
-        ['C5','E5','G5','C6'].forEach((n,i)=>v.bell.triggerAttackRelease(n,0.9,t+i*0.07,0.55));
+        ['C5','E5','G5'].forEach((n,i)=>v.bell.triggerAttackRelease(n,1.0,t+i*0.09,0.5));
+        // real bells get struck twice — once firm, once softer as they ring
+        v.bell.triggerAttackRelease('C6',1.2,t+0.27,0.6);
+        v.bell.triggerAttackRelease('C6',1.0,t+0.55,0.3);
+        v.bell.triggerAttackRelease('E6',0.8,t+0.62,0.22);   // faint sparkle
       }},
     },
     fumble: {
-      trombone: { label: 'Sad trombone', env: 'medium attack · falling pitch · low', play() {
-        const t = Tone.now();
-        ['E2','Eb2','D2','Db2'].forEach((n,i)=>v.reed.triggerAttackRelease(n,0.22,t+i*0.12,0.7));
-        v.reed.triggerAttackRelease('A1',0.6,t+0.5,0.7);
+      trombone: { label: 'Sad trombone', env: 'true slide — three drooping wahs, long final fall', play() {
+        // A real trombone SLIDES — each "wah" sags flat as it holds, and the
+        // last one falls continuously past a fifth. Glides, not steps.
+        _glide(v.slide, [['Eb3',0.3],['D3',0.3],['Db3',0.3],['C3',0.9]], 0.7, 0.62);
       }},
-      squeak: { label: 'Comic squeak', env: 'fast attack · short · two-note down-slip', play() {
+      squeak: { label: 'Comic squeak', env: 'up-slip glide… then the splat — a pratfall', play() {
         const t = Tone.now();
-        ['A4','F4'].forEach((n,i)=>v.reed.triggerAttackRelease(n,0.12,t+i*0.1,0.6));
+        // The slip: a fast rising glide (losing your footing)…
+        _glide(v.slide, [['A4',0.09],['E5',0.07]], 0.5);
+        // …the beat of airtime… the splat (drum body + snap transient).
+        v.thud.triggerAttackRelease('G1',0.22,t+0.3,0.7);
+        v.snap[0].triggerAttackRelease(0.05,t+0.3,0.5);
       }},
-      dud: { label: 'Dud', env: 'instant · no tail · muffled drum + reed', play() {
+      dud: { label: 'Dud', env: 'muffled thump + deflating air leak', play() {
         const t = Tone.now();
         v.thud.triggerAttackRelease('G1',0.18,t,0.6);
-        v.reed.triggerAttackRelease('D2',0.16,t+0.04,0.45);
+        v.reed.triggerAttackRelease('D2',0.14,t+0.03,0.4);
+        // the deflate: bandpassed air leaking out downward
+        v.noiseFilt.frequency.cancelScheduledValues(t);
+        v.noiseFilt.frequency.setValueAtTime(1400,t+0.12);
+        v.noiseFilt.frequency.exponentialRampToValueAtTime(280,t+0.5);
+        v.noise.triggerAttackRelease(0.34,t+0.12,0.22);
       }},
     },
     move: {
-      step: { label: 'Footstep', env: 'four steps in a row · dry (brown noise)', play() {
+      step: { label: 'Footstep', env: 'four steps · uneven gait · heavy/light alternation', play() {
         const t = Tone.now();
-        // Four footfalls in a walking cadence, alternating velocity for a
-        // natural left/right feel. Each hit uses a separate pooled voice so
-        // no single monophonic synth is retriggered mid-sound.
-        [0.6, 0.5, 0.6, 0.5].forEach((vel, i) =>
-          v.step[i % v.step.length].triggerAttackRelease(0.08, t + i * 0.24, vel));
+        // Each pooled voice has its own filter cutoff (heavy L / light R),
+        // and the timing is slightly uneven — a walk, not a metronome.
+        const gait = [[0,0.6],[0.26,0.42],[0.50,0.55],[0.78,0.4]];
+        gait.forEach(([dt,vel],i)=>v.step[i].triggerAttackRelease(0.08,t+dt,vel));
       }},
-      whoosh: { label: 'Cloth whoosh', env: 'soft burst · filter closes (sweep down)', play() {
-        const t = _sweep(2200, 500, 0.18);
-        v.noise.triggerAttackRelease(0.16, t, 0.25);
+      whoosh: { label: 'Cloth whoosh', env: 'air sweep down + faint pitch body underneath', play() {
+        const t = _sweep(2600, 420, 0.2);
+        v.noise.triggerAttackRelease(0.18, t, 0.25);
+        // barely-audible falling tone under the air gives the whoosh direction
+        _glide(v.slide, [['G3',0.1],['C3',0.08]], 0.12);
       }},
-      tick: { label: 'Soft tick', env: 'instant · ultra-short · pitched click', play() {
-        v.harp.triggerAttackRelease('C6', 0.05, Tone.now(), 0.4);
+      tick: { label: 'Soft tick', env: 'single real string pluck · minimal', play() {
+        v.pluck[0].triggerAttack('C6', Tone.now());
       }},
     },
     damage: {
-      thud: { label: 'Thud', env: 'instant attack · 0.2s decay · low drum', play() {
-        v.thud.triggerAttackRelease('C2', 0.2, Tone.now(), 0.5);
+      thud: { label: 'Thud', env: 'snap transient + drum body — layered like real foley', play() {
+        const t = Tone.now();
+        v.snap[0].triggerAttackRelease(0.04, t, 0.5);   // the "hit" edge
+        v.thud.triggerAttackRelease('C2', 0.2, t, 0.55); // the weight behind it
       }},
-      crunch: { label: 'Crunch', env: 'instant · drum + noise burst', play() {
-        const t = _sweep(1800, 1800, 0.01);
-        v.thud.triggerAttackRelease('C2', 0.18, t, 0.5);
-        v.noise.triggerAttackRelease(0.08, t, 0.3);
+      crunch: { label: 'Crunch', env: 'three cracking bursts down a closing filter + body', play() {
+        const t = Tone.now();
+        v.thud.triggerAttackRelease('C2',0.18,t,0.5);
+        // bone-crunch: rapid noise cracks, each duller than the last
+        v.noiseFilt.frequency.cancelScheduledValues(t);
+        v.noiseFilt.frequency.setValueAtTime(3200,t);
+        v.noiseFilt.frequency.exponentialRampToValueAtTime(700,t+0.16);
+        [0,0.05,0.11].forEach((dt,i)=>v.noise.triggerAttackRelease(0.03,t+dt,0.4-i*0.08));
+        v.snap[1].triggerAttackRelease(0.04,t,0.45);
       }},
-      impact: { label: 'Sub impact', env: 'instant · pitch-drop · deep', play() {
-        v.thud.triggerAttackRelease('G1', 0.3, Tone.now(), 0.7);
+      impact: { label: 'Sub impact', env: 'cinematic pitch-DROP into the chest + drum', play() {
+        const t = Tone.now();
+        // the drop: a sub tone falling G2 -> C1 in a quarter second
+        v.sub.frequency.cancelScheduledValues(t);
+        try { v.sub.envelope.cancel(t); } catch (e) {}   // mono retrigger safety
+        v.sub.triggerAttack('G2', t, 0.8);
+        v.sub.frequency.setValueAtTime(Tone.Frequency('G2').toFrequency(), t);
+        v.sub.frequency.exponentialRampToValueAtTime(Tone.Frequency('C1').toFrequency(), t+0.24);
+        v.sub.triggerRelease(t+0.32);
+        v.thud.triggerAttackRelease('G1',0.26,t,0.7);
       }},
     },
     heal: {
-      chime: { label: 'Chime', env: 'sharp attack · long ring · two rising bells', play() {
+      chime: { label: 'Chime', env: 'two rising bells over a warm pad cushion', play() {
         const t = Tone.now();
-        v.bell.triggerAttackRelease('C5', 0.6, t, 0.5);
-        v.bell.triggerAttackRelease('G5', 0.8, t + 0.12, 0.45);
+        v.pad.triggerAttackRelease('E4', 0.9, t, 0.25);   // warmth underneath
+        v.bell.triggerAttackRelease('C5', 0.7, t, 0.5);
+        v.bell.triggerAttackRelease('G5', 0.9, t + 0.13, 0.45);
       }},
-      shimmer: { label: 'Shimmer', env: 'sharp attack · quick sparkly harp run', play() {
+      shimmer: { label: 'Shimmer', env: 'real plucked-string run + bell sparkle on top', play() {
         const t = Tone.now();
-        ['C5','E5','G5','B5','D6'].forEach((n,i)=>v.harp.triggerAttackRelease(n,0.4,t+i*0.05,0.4));
+        ['C5','E5','G5','B5','D6'].forEach((n,i)=>
+          v.pluck[i % v.pluck.length].triggerAttack(n, t + i*0.055));
+        v.bell.triggerAttackRelease('E6', 0.7, t + 0.3, 0.3);  // fairy-dust top
       }},
-      swell: { label: 'Warm swell', env: 'SLOW attack · soft pad rising', play() {
+      swell: { label: 'Warm swell', env: 'chord blooms as the filter slowly OPENS — sunrise', play() {
         const t = Tone.now();
+        // the filter opening is the sunrise; the chord alone is just organ
+        v.padFilt.frequency.cancelScheduledValues(t);
+        v.padFilt.frequency.setValueAtTime(500, t);
+        v.padFilt.frequency.exponentialRampToValueAtTime(2600, t + 1.1);
         v.pad.triggerAttackRelease('C4', 1.2, t, 0.4);
         v.pad.triggerAttackRelease('G4', 1.2, t + 0.05, 0.4);
-        v.pad.triggerAttackRelease('C5', 1.3, t + 0.1, 0.35);
+        v.pad.triggerAttackRelease('E5', 1.3, t + 0.1, 0.3);
       }},
     },
     dead: {
-      knell: { label: 'Knell', env: 'sharp attack · VERY long release (5s) · low bell', play() {
-        v.bell.triggerAttackRelease('C3', 5.0, Tone.now(), 1.0);
-      }},
-      gong: { label: 'Deep gong', env: 'sharp attack · long · very low', play() {
-        v.bell.triggerAttackRelease('C2', 4.0, Tone.now(), 0.9);
-      }},
-      dirge: { label: 'Dirge', env: 'medium attack · three falling notes · somber', play() {
+      knell: { label: 'Knell', env: 'church bell struck twice over a fading sub drone', play() {
         const t = Tone.now();
-        ['G3','Eb3','C3'].forEach((n,i)=>v.reed.triggerAttackRelease(n,0.7,t+i*0.32,0.6));
+        v.sub.triggerAttackRelease('C2', 3.5, t, 0.45);        // the dread under it
+        v.bell.triggerAttackRelease('C3', 4.0, t, 0.95);
+        v.bell.triggerAttackRelease('C3', 3.0, t + 1.15, 0.5); // second, softer toll
+      }},
+      gong: { label: 'Tribal drum', env: 'deep war drum · a slowing, fading heartbeat', play() {
+        const t = Tone.now();
+        // A dying heartbeat on a great skin drum: each strike later and
+        // softer than the last. Skin-slap layer (pooled noise) on each hit.
+        [[0, 0.9], [0.5, 0.68], [1.08, 0.48], [1.8, 0.3]].forEach(([dt, vel], i) => {
+          v.drum.triggerAttackRelease('G1', 0.4, t + dt, vel);
+          v.step[i % v.step.length].triggerAttackRelease(0.05, t + dt, vel * 0.45);
+        });
+      }},
+      dirge: { label: 'Dirge', env: 'three falling reeds over a held low drone', play() {
+        const t = Tone.now();
+        v.sub.triggerAttackRelease('C2', 1.9, t, 0.3);
+        ['G3','Eb3','C3'].forEach((n,i)=>v.reed.triggerAttackRelease(n,0.7,t+i*0.34,0.6));
       }},
     },
     mapswitch: {
-      riser: { label: 'Riser', env: 'held noise · filter opens upward · airy', play() {
-        const t = _sweep(400, 4000, 0.22);
-        v.noise.triggerAttackRelease(0.24, t, 0.4);
+      riser: { label: 'Riser', env: 'air sweep + rushing pluck climb + arrival bell', play() {
+        const t = _sweep(400, 4200, 0.3);
+        v.noise.triggerAttackRelease(0.28, t, 0.32);
+        // pluck run rushes upward THROUGH the sweep, arrival ding on top
+        ['C4','E4','G4','C5','E5','G5'].forEach((n,i)=>
+          v.pluck[i % v.pluck.length].triggerAttack(n, t + i*0.045));
+        v.bell.triggerAttackRelease('C6', 0.7, t + 0.32, 0.45);
       }},
-      gliss: { label: 'Harp gliss', env: 'fast attack · rising harp run', play() {
+      gliss: { label: 'Harp gliss', env: 'real plucked-string climb · gentle bell top', play() {
         const t = Tone.now();
-        ['C4','E4','G4','C5','E5','G5'].forEach((n,i)=>v.harp.triggerAttackRelease(n,0.5,t+i*0.045,0.4));
+        ['C4','E4','G4','C5','E5','G5','C6'].forEach((n,i)=>
+          v.pluck[i % v.pluck.length].triggerAttack(n, t + i*0.05));
+        v.bell.triggerAttackRelease('E6', 0.6, t + 0.4, 0.25);
       }},
-      chimeup: { label: 'Whoosh + ding', env: 'noise sweep up + bell accent', play() {
-        const t = _sweep(500, 3500, 0.2);
+      chimeup: { label: 'Whoosh + ding', env: 'air sweep up · two-note arrival chime', play() {
+        const t = _sweep(500, 3600, 0.2);
         v.noise.triggerAttackRelease(0.2, t, 0.3);
-        v.bell.triggerAttackRelease('C6', 0.6, t + 0.2, 0.5);
+        v.bell.triggerAttackRelease('C6', 0.7, t + 0.21, 0.5);
+        v.bell.triggerAttackRelease('G6', 0.6, t + 0.29, 0.28);
       }},
     },
   };
 
-  const _firstId = (event) => Object.keys(VARIANTS[event] || {})[0];
+  // Default variant per event — what plays when the user hasn't picked one
+  // in the ⚙ Sounds chooser. Complete on purpose: every event's table default
+  // is explicit here, immune to registry reordering.
+  const _DEFAULTS = {
+    crit:      'fanfare',
+    fumble:    'dud',
+    move:      'step',
+    damage:    'crunch',
+    heal:      'swell',
+    dead:      'knell',
+    mapswitch: 'chimeup',
+  };
+
+  const _firstId = (event) => {
+    const set = VARIANTS[event] || {};
+    const d = _DEFAULTS[event];
+    return (d && set[d]) ? d : Object.keys(set)[0];
+  };
 
   // ── public API ───────────────────────────────────────────────────────
   async function enable() {

@@ -388,6 +388,10 @@ def character_assign(character_id):
         if user:
             char.user_id = new_user_id
             db.session.commit()
+            # Reaches connected portals live (character_upserted with the new
+            # username) — the old owner loses the sheet, the new owner gains
+            # it, nobody re-logs. No-op unless char is in the active session.
+            relay_broadcaster.push_character(char)
             flash(f'{char.name} reassigned to {user.display_name}.')
     return redirect(url_for('ttrpg.character_sheet', character_id=character_id))
 
@@ -1071,9 +1075,14 @@ def session_party_add(session_id):
 def session_party_remove(session_id, char_id):
     sp = tblSessionParty.query.filter_by(
         session_id=session_id, character_id=char_id).first_or_404()
+    char_name = sp.character.name if sp.character else None
     db.session.delete(sp)
     db.session.commit()
     relay_broadcaster.push_all_characters()
+    # Drop it from the relay too — push_all only upserts, so without this the
+    # departed character lingered until the session was recreated.
+    if char_name:
+        relay_broadcaster.remove_character(char_name)
     return jsonify({'ok': True})
 
 

@@ -631,6 +631,52 @@ def get_presence():
     return {}
 
 
+def push_session_users():
+    """POST /session/{id}/users — push all active user accounts so anyone at
+    the table can log into the portal BEFORE a character is assigned to them
+    (spectator until the GM hands them a sheet)."""
+    cfg = _active()
+    if not cfg:
+        return
+    from models.user import tblUsers
+    users = [{'username': u.username,
+              'display_name': u.display_name,
+              'password_hash': u.password_hash or ''}
+             for u in tblUsers.query.filter_by(active=1).all()]
+    if not users:
+        return
+    payload = {'users': users}
+
+    def _go():
+        _post(f'/api/v1/session/{cfg["session_id"]}/users', payload, cfg)
+        log.info('push_session_users: pushed %d users', len(users))
+
+    _enqueue('session-users', _go)   # coalesce: latest user list wins
+
+
+def remove_character(player_name):
+    """DELETE /session/{id}/characters/{name} — drop a character that left the
+    party. The relay broadcasts character_removed to connected portals, so the
+    player's view updates without a re-login."""
+    cfg = _active()
+    if not cfg:
+        return
+    from urllib.parse import quote
+
+    def _go():
+        import requests
+        url = (cfg['url'].rstrip('/')
+               + f'/api/v1/session/{cfg["session_id"]}/characters/'
+               + quote(player_name, safe=''))
+        resp = requests.delete(url, headers={'X-Relay-Secret': cfg['secret']}, timeout=5)
+        # 404 = already gone on the relay; success as far as we're concerned
+        # (retrying a delete of nothing would wedge the queue pointlessly).
+        if resp.status_code not in (200, 404):
+            resp.raise_for_status()
+
+    _enqueue(f'char-del-{player_name}', _go)
+
+
 def find_token_id(entity_type, entity_id):
     """Return the battlemap token_id for an entity on the active map, or None."""
     from models.ttrpg import tblSessions, tblBattleMaps, tblBattleMapTokens

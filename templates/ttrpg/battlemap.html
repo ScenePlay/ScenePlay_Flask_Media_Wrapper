@@ -241,6 +241,20 @@
     cursor: grabbing;
   }
   #dice-map-panel.minimized > *:not(#dice-drag-handle) { display: none !important; }
+
+  /* Quick Reference chips (same look as the character sheet's) */
+  .dice-quickref { border-top: 1px solid var(--sp-border); padding-top: 8px; margin-bottom: 8px; }
+  .qref-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--sp-muted); font-weight: 600; margin-bottom: 6px; }
+  .qref-hint  { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .68rem; }
+  .qref-row   { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 5px; }
+  .qref-label { flex-shrink: 0; width: 56px; font-size: .62rem; text-transform: uppercase; color: var(--sp-muted); padding-top: 3px; letter-spacing: .04em; }
+  .qref-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+  .qref-chip  { display: inline-flex; align-items: center; gap: 3px; font-size: .72rem; padding: 2px 7px;
+                background: var(--ttrpg-surface); border: 1px solid var(--sp-border); border-radius: 10px; color: var(--ttrpg-text); }
+  .qref-sub   { color: var(--sp-muted); font-size: .66rem; }
+  .qref-click { cursor: pointer; }
+  .qref-click:hover { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
+  .qref-click:hover .qref-sub { color: var(--ttrpg-accent); }
   #dice-map-panel.minimized { overflow-y: hidden; }
   .map-dice-btn        { min-width: 36px; padding: 6px 4px; font-size: .78rem; }
   .sidebar-btn         { min-height: 36px; min-width: 36px; }
@@ -759,6 +773,18 @@
             onclick="document.getElementById('map-dice-label').value='Saving Throw'">Saving Throw</button>
   </div>
 
+  <!-- Rolling-as character selector (users can play several characters; the
+       DM can roll for anyone in the party). Hidden when there is no choice. -->
+  <div class="d-flex align-items-center gap-2 mb-2" id="map-roller-row" style="display:none!important;">
+    <label class="fx-label mb-0" style="flex-shrink:0;">Rolling as</label>
+    <select id="map-roller-sel" onchange="mapRollerChanged()"
+            class="form-select form-select-sm bg-dark text-light border-secondary"
+            style="flex:1;font-size:.78rem;"></select>
+  </div>
+
+  <!-- Quick Reference for the selected character (skills / weapons / spells) -->
+  <div id="map-dice-quickref" class="dice-quickref" style="display:none;"></div>
+
   <!-- Roll button -->
   <div class="d-flex gap-1 mb-2">
     <button class="btn btn-sm btn-ttrpg flex-grow-1" onclick="mapDoRoll()">&#127922; Roll</button>
@@ -816,6 +842,7 @@ const IS_DM          = {{ 'true' if current_user.is_dm() else 'false' }};
 const CURRENT_USER_ID = {{ current_user.user_id }};
 let   MOVE_SCALE     = {{ bm.movement_scale or 1.0 }};  // feet = squares × 5 × MOVE_SCALE
 const MAP_ROLLER_NAME = '{{ roller_name | e }}';
+const ROLLER_CHARS = {{ roller_chars | tojson }};  // characters this user may roll as
 </script>
 <script src="{{ static_v('scripts/battlemap.js') }}"></script>
 <script src="{{ static_v('scripts/sfx-control.js') }}"></script>

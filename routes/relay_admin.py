@@ -95,6 +95,7 @@ def toggle():
         _start_receiver()
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
+        relay_broadcaster.push_session_users()
         flash('Relay enabled — receiver started and party synced.')
     else:
         _stop_receiver()
@@ -147,6 +148,7 @@ def generate_code():
         # Push all current party characters and D&D library into the fresh session immediately
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
+        relay_broadcaster.push_session_users()
         relay_broadcaster.push_library()
 
         flash(f'New session created — join code: {code}. Party pushed to relay.')
@@ -163,8 +165,9 @@ def generate_code():
 def sync_characters():
     import relay_broadcaster
     relay_broadcaster.push_all_characters()
+    relay_broadcaster.push_session_users()
     relay_broadcaster.push_library()
-    flash('Party characters and library pushed to relay.')
+    flash('Party characters, user accounts and library pushed to relay.')
     return redirect(url_for('relay_admin_bp.status'))
 
 

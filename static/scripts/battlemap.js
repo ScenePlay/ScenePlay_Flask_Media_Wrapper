@@ -526,6 +526,15 @@ function pollState() {
         else _go();
         return;
       }
+      // Character (re)assignment: if the set of characters this player may
+      // roll as changed since page load, reload — that refreshes the
+      // "Rolling as" roster, token drag permissions, and highlights, so the
+      // DM can hand out characters mid-session with no re-login.
+      if (!IS_DM && d.roller_sig !== null && d.roller_sig !== undefined
+          && d.roller_sig !== _pageRollerSig) {
+        location.reload();
+        return;
+      }
       _hpSfxDiff(d.tokens);   // everyone hears HP changes (incl. DM-applied)
       renderTokens(d.tokens);
       renderEffects(d.effects || []);
@@ -1460,6 +1469,127 @@ function _mEsc(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Rolling-as character + Quick Reference ────────────────────────────────────
+// A user can play several characters (and the DM can roll for anyone in the
+// party), so the dice panel carries a "Rolling as" selector; the Quick
+// Reference chips (skills / weapons / spells) always reflect that character.
+const _pageRollerSig = ROLLER_CHARS.map(c => c.id).sort((a, b) => a - b).join(',');
+let _mapRollerId = '';   // selected character_id as string; '' = plain DM roll
+
+function _mapRollerChar() {
+  return ROLLER_CHARS.find(c => String(c.id) === _mapRollerId) || null;
+}
+
+function mapInitRoller() {
+  const row = document.getElementById('map-roller-row');
+  const sel = document.getElementById('map-roller-sel');
+  if (!row || !sel) return;
+  sel.innerHTML = '';
+  if (IS_DM) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = MAP_ROLLER_NAME + ' (DM)';
+    sel.appendChild(o);
+  }
+  ROLLER_CHARS.forEach(c => {
+    const o = document.createElement('option');
+    o.value = String(c.id); o.textContent = c.name;
+    sel.appendChild(o);
+  });
+  let saved = null;
+  try { saved = sessionStorage.getItem('bm_roller'); } catch (e) {}
+  if (saved !== null && [...sel.options].some(o => o.value === saved)) sel.value = saved;
+  else if (!IS_DM && ROLLER_CHARS.length) sel.value = String(ROLLER_CHARS[0].id);
+  _mapRollerId = sel.value;
+  // Only show the row when there is an actual choice to make. (The template
+  // hides it with !important to beat Bootstrap's d-flex, so match that here.)
+  if (sel.options.length > 1) row.style.removeProperty('display');
+  else row.style.setProperty('display', 'none', 'important');
+  mapRenderQuickRef();
+}
+
+function mapRollerChanged() {
+  const sel = document.getElementById('map-roller-sel');
+  _mapRollerId = sel.value;
+  try { sessionStorage.setItem('bm_roller', sel.value); } catch (e) {}
+  mapResetDice();       // fresh character, fresh roller: 1d20 +0, no label
+  mapRenderQuickRef();
+}
+
+function mapRenderQuickRef() {
+  const host = document.getElementById('map-dice-quickref');
+  if (!host) return;
+  const c = _mapRollerChar();
+  const chip = (attrs, title, body) =>
+    `<button type="button" class="qref-chip qref-click" title="${_mEsc(title)}" ${attrs}>${body}</button>`;
+  const sign = n => (n >= 0 ? '+' : '') + n;
+  const rows = [];
+  if (c && c.skills.length) rows.push(['Skills', c.skills.map((s, i) =>
+    chip(`data-qr="skill" data-i="${i}"`,
+         `Roll ${s.name} check (d20 ${sign(s.bonus)})`,
+         `${s.proficient ? '&#9733; ' : ''}${_mEsc(s.name)} <span class="qref-sub">${sign(s.bonus)}</span>`)).join('')]);
+  if (c && c.weapons.length) rows.push(['Weapons', c.weapons.map((w, i) =>
+    chip(`data-qr="weapon" data-i="${i}"`,
+         w.dice ? `Roll ${w.name} damage — ${w.dice}${w.dmg_bonus ? '+' + w.dmg_bonus : ''} ${w.dmg_type}`
+                : `Roll ${w.name} attack (d20 ${sign(w.atk_bonus)})`,
+         `&#9876; ${_mEsc(w.name)} <span class="qref-sub">${w.dice
+             ? _mEsc(w.dice + (w.dmg_bonus ? '+' + w.dmg_bonus : '') + ' ' + w.dmg_type)
+             : sign(w.atk_bonus)}</span>`)).join('')]);
+  if (c && c.spells.some(sp => sp.dice)) rows.push(['Spells', c.spells.map((sp, i) => sp.dice
+    ? chip(`data-qr="spell" data-i="${i}"`,
+           `Roll ${sp.name} damage (${sp.dice})`,
+           `&#10039; ${_mEsc(sp.name)} <span class="qref-sub">${_mEsc(sp.dice)}</span>`)
+    : '').join('')]);
+  if (!rows.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+  host.innerHTML =
+    '<div class="qref-title">Quick Reference <span class="qref-hint">&mdash; click to load the roll</span></div>'
+    + rows.map(([label, chips]) =>
+        `<div class="qref-row"><span class="qref-label">${label}</span><div class="qref-chips">${chips}</div></div>`).join('');
+  host.style.display = '';
+}
+
+// One delegated handler instead of per-chip inline JS (names stay escaped).
+document.getElementById('map-dice-quickref').addEventListener('click', e => {
+  const btn = e.target.closest('[data-qr]');
+  const c = _mapRollerChar();
+  if (!btn || !c) return;
+  const i = parseInt(btn.dataset.i, 10);
+  if (btn.dataset.qr === 'skill') {
+    const s = c.skills[i]; mapQuickSet(s.bonus, s.name);
+  } else if (btn.dataset.qr === 'weapon') {
+    const w = c.weapons[i]; mapWeaponQuickRoll(w.dice, w.dmg_bonus, w.atk_bonus, w.name);
+  } else if (btn.dataset.qr === 'spell') {
+    const sp = c.spells[i]; mapQuickSetDamage(sp.dice, sp.name + ' damage');
+  }
+});
+
+// Same semantics as the character sheet's quick-set helpers.
+function mapQuickSet(modVal, label) {
+  document.getElementById('map-dice-count').value = 1;
+  document.getElementById('map-dice-mod').value   = modVal;
+  document.getElementById('map-dice-label').value = label;
+  mapSelectDie(20);
+}
+
+function mapQuickSetDamage(diceStr, label) {
+  const m = (diceStr || '').match(/(\d+)\s*d\s*(\d+)/i);
+  if (!m) return;
+  document.getElementById('map-dice-count').value = parseInt(m[1], 10);
+  mapSelectDie(parseInt(m[2], 10));
+  document.getElementById('map-dice-mod').value   = 0;
+  document.getElementById('map-dice-label').value = label;
+}
+
+function mapWeaponQuickRoll(diceStr, dmgBonus, atkBonus, name) {
+  const m = (diceStr || '').match(/(\d+)\s*d\s*(\d+)/i);
+  if (!m) { mapQuickSet(atkBonus || 0, (name || '') + ' attack'); return; }
+  document.getElementById('map-dice-count').value = parseInt(m[1], 10);
+  mapSelectDie(parseInt(m[2], 10));
+  document.getElementById('map-dice-mod').value   = dmgBonus || 0;
+  document.getElementById('map-dice-label').value = (name || '') + ' damage';
+}
+
+mapInitRoller();
+
 function _mapDieHtml(val, sides, mode, idx, ki) {
   let cls = 'map-die-val';
   if (sides === 20 && val === 20) cls += ' nat20';
@@ -1471,7 +1601,7 @@ function _mapDieHtml(val, sides, mode, idx, ki) {
 
 // ── SFX helpers ───────────────────────────────────────────────────────────────
 // _sfx: never let a missing/broken sound module touch core map behaviour.
-function _sfx(name) { try { console.log('[SFX]', name, 'enabled=' + (window.SFX && SFX.isEnabled())); if (window.SFX) SFX.play(name); } catch (e) { console.warn('[SFX]', name, e); } }
+function _sfx(name) { try { if (window.SFX) SFX.play(name); } catch (e) {} }
 // Crit/fumble fire only on a d20; this runs on the roller's own device only.
 function _critFumble(d) {
   // Roll algebra lives in the shared DiceCore module (static/scripts/dice.js).
@@ -1507,10 +1637,12 @@ function mapDoRoll() {
   const count    = parseInt(document.getElementById('map-dice-count').value) || 1;
   const modifier = parseInt(document.getElementById('map-dice-mod').value)   || 0;
   const label    = document.getElementById('map-dice-label').value.trim();
+  const rc       = _mapRollerChar();   // attribute to the "Rolling as" character
   fetch('/ttrpg/dice/roll', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      character_id: null, char_name: MAP_ROLLER_NAME,
+      character_id: rc ? rc.id : null,
+      char_name:    rc ? rc.name : MAP_ROLLER_NAME,
       count, sides: _mapDiceSel, modifier, label, adv_mode: _mapAdvMode,
     })
   }).then(r => r.json()).then(d => {

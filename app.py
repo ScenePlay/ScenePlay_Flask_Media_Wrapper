@@ -287,6 +287,7 @@ def startTheadPlayer():
         with app.app_context():
             import relay_broadcaster
             relay_broadcaster.push_all_characters()
+            relay_broadcaster.push_session_users()
             relay_broadcaster.push_library()
     
     
