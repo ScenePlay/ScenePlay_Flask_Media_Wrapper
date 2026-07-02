@@ -62,7 +62,49 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
+def _load_or_create_secret_key():
+    """SECRET_KEY env var wins; otherwise generate a random key once and persist
+    it to the instance dir. Replaces the old 'change-me-in-production' fallback —
+    zero-config and no shared default, and sessions survive restarts."""
+    env_key = os.environ.get('SECRET_KEY')
+    if env_key:
+        return env_key
+    key_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                            'instance', 'secret_key')
+    try:
+        with open(key_path) as f:
+            key = f.read().strip()
+            if key:
+                return key
+    except OSError:
+        pass
+    import secrets as _secrets
+    key = _secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.dirname(key_path), exist_ok=True)
+        with open(key_path, 'w') as f:
+            f.write(key)
+        os.chmod(key_path, 0o600)
+    except OSError as e:
+        print('Could not persist secret key (sessions reset each restart):', e)
+    return key
+
+
+app.secret_key = _load_or_create_secret_key()
+
+
+@app.template_global()
+def static_v(filename):
+    """url_for('static', ...) with the file's mtime as a cache-busting query
+    param — replaces the manual ?v=NN bump ritual, so LAN players never run a
+    stale sfx.js/dice.js after an edit."""
+    from flask import url_for
+    path = os.path.join(app.root_path, 'static', filename)
+    try:
+        v = int(os.stat(path).st_mtime)
+    except OSError:
+        v = 0
+    return url_for('static', filename=filename, v=v)
 db.init_app(app)
 migrate.init_app(app, db)
 bcrypt.init_app(app)
@@ -148,6 +190,19 @@ with app.app_context():
         except Exception as _e:
             db.session.rollback()
             print(f'{_tbl}.relay_roll_id migration skipped:', _e)
+
+    # Lightweight migration: add tblTokenPositions.relay_seq — the last relay
+    # write-sequence processed per token, used for clock-skew-free reconciliation
+    # of relay token moves. Idempotent — skipped once the column exists.
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblTokenPositions)"))]
+        if _cols and 'relay_seq' not in _cols:
+            db.session.execute(_sa_text(
+                "ALTER TABLE tblTokenPositions ADD COLUMN relay_seq INTEGER DEFAULT 0"))
+            db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('tblTokenPositions.relay_seq migration skipped:', _e)
 
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):

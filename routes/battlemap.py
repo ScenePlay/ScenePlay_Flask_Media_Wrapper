@@ -24,8 +24,7 @@ VIDEO_EXT     = {'mp4', 'webm', 'ogv'}
 CELL_PX       = 64
 
 
-def _now():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+from routes._util import _now  # shared timestamp format (relay sync compares these strings)
 
 
 # D&D creature size → number of grid squares the token spans (square footprint).
@@ -72,13 +71,66 @@ def _monster_relay_img(image):
     return 'https://www.dnd5eapi.co' + image
 
 
-def _token_relay_payload(t, bm):
+def _monster_stats(sm):
+    """Parse a session-monster's template stats_json ONCE.
+
+    Single home for the speed/type/ac/image extraction that used to be
+    duplicated (with drift) between map_state and the relay payload.
+    Returns {'speed': int, 'type': str, 'ac': int, 'image': raw-path-or-''}."""
+    try:
+        raw = json.loads(sm.template.stats_json or '{}') if sm.template else {}
+    except (ValueError, TypeError):
+        raw = {}
+    raw_spd = raw.get('speed', {})
+    walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
+    if isinstance(walk, str):
+        walk = walk.replace(' ft.', '').strip()
+    try:
+        walk = int(walk)
+    except (ValueError, TypeError):
+        walk = 0
+    return {
+        'speed': walk,
+        'type':  raw.get('type', ''),
+        'ac':    raw.get('armor_class', 0),
+        'image': raw.get('image') or '',
+    }
+
+
+def _fetch_token_entities(tokens):
+    """Batch-load the entities behind a token list in two IN queries.
+
+    map_state runs on a 2-second poll per connected client and used to issue
+    one query PER TOKEN plus lazy loads for template/conditions/skills — this
+    replaces that N+1 with two round-trips. Returns (monsters_by_id, chars_by_id);
+    deleted entities are simply absent, so callers treat a miss as an orphan."""
+    from sqlalchemy.orm import joinedload, selectinload
+    monster_ids = [t.entity_id for t in tokens if t.entity_type == 'monster']
+    char_ids    = [t.entity_id for t in tokens if t.entity_type == 'player']
+    monsters, chars = {}, {}
+    if monster_ids:
+        rows = (tblSessionMonsters.query
+                .options(joinedload(tblSessionMonsters.template))
+                .filter(tblSessionMonsters.monster_id.in_(monster_ids)).all())
+        monsters = {m.monster_id: m for m in rows}
+    if char_ids:
+        rows = (tblCharacters.query
+                .options(selectinload(tblCharacters.conditions),
+                         selectinload(tblCharacters.skills))
+                .filter(tblCharacters.character_id.in_(char_ids)).all())
+        chars = {c.character_id: c for c in rows}
+    return monsters, chars
+
+
+def _token_relay_payload(t, bm, monsters, chars):
     # Skip tokens whose backing entity was deleted — otherwise the relay renders
     # them as blank "orphan" tokens. (The local /state endpoint already skips
     # these the same way; this keeps the relay payload consistent with it.)
-    if t.entity_type == 'player' and not db.session.get(tblCharacters, t.entity_id):
+    char = chars.get(t.entity_id)    if t.entity_type == 'player'  else None
+    sm   = monsters.get(t.entity_id) if t.entity_type == 'monster' else None
+    if t.entity_type == 'player' and not char:
         return None
-    if t.entity_type == 'monster' and not db.session.get(tblSessionMonsters, t.entity_id):
+    if t.entity_type == 'monster' and not sm:
         return None
     data = {
         'token_id':    t.token_id,
@@ -94,39 +146,23 @@ def _token_relay_payload(t, bm):
         'image_url':   '',
         'size_squares': 1,
     }
-    if t.entity_type == 'player':
-        char = db.session.get(tblCharacters, t.entity_id)
-        if char:
-            data['label']      = char.name
-            data['character_id'] = t.entity_id
-            data['hp_current'] = char.hp_current
-            data['hp_max']     = char.hp_max
-    elif t.entity_type == 'monster':
-        sm = db.session.get(tblSessionMonsters, t.entity_id)
-        if sm:
-            data['label']      = sm.display_name
-            data['hp_current'] = sm.hp_current
-            data['hp_max']     = sm.hp_max
-            data['size_squares'] = _size_squares(sm.template.size if sm.template else '')
-            data['conditions'] = json.loads(sm.conditions or '[]')
-            try:
-                raw = json.loads(sm.template.stats_json or '{}')
-                if raw.get('image'):
-                    data['image_url'] = _monster_relay_img(raw['image'])
-                # speed
-                raw_spd = raw.get('speed', {})
-                walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
-                if isinstance(walk, str):
-                    walk = walk.replace(' ft.', '').strip()
-                try:
-                    walk = int(walk)
-                except (ValueError, TypeError):
-                    walk = 0
-                data['speed'] = walk
-                data['type']  = raw.get('type', '')
-                data['ac']    = raw.get('armor_class', 0)
-            except Exception:
-                pass
+    if char:
+        data['label']      = char.name
+        data['character_id'] = t.entity_id
+        data['hp_current'] = char.hp_current
+        data['hp_max']     = char.hp_max
+    elif sm:
+        stats = _monster_stats(sm)
+        data['label']      = sm.display_name
+        data['hp_current'] = sm.hp_current
+        data['hp_max']     = sm.hp_max
+        data['size_squares'] = _size_squares(sm.template.size if sm.template else '')
+        data['conditions'] = json.loads(sm.conditions or '[]')
+        if stats['image']:
+            data['image_url'] = _monster_relay_img(stats['image'])
+        data['speed'] = stats['speed']
+        data['type']  = stats['type']
+        data['ac']    = stats['ac']
     return data
 
 
@@ -162,9 +198,10 @@ def _push_map_state(bm):
         'fill_opacity': e.fill_opacity,
         'border_color': e.border_color,
     } for e in bm.effects]
+    monsters, chars = _fetch_token_entities(bm.tokens)
     relay_broadcaster.broadcast_map_update(
         bg_url, bm.grid_cols, bm.grid_rows,
-        [p for p in (_token_relay_payload(t, bm) for t in bm.tokens) if p],
+        [p for p in (_token_relay_payload(t, bm, monsters, chars) for t in bm.tokens) if p],
         effects=effects,
         movement_scale=bm.movement_scale or 1.0,
         bg_filename=bm.bg_image,
@@ -287,12 +324,18 @@ def map_activate(map_id):
     _push_map_state(bm)
 
     # Stamp all tokens on the newly active map with the current time (ISO UTC).
-    # relay_receiver uses this to detect which relay positions predate this activation
-    # and must not overwrite the map's explicit token placements.
+    # Kept for mid-upgrade compatibility: a relay without per-token seqs falls
+    # back to this timestamp compare in relay_receiver.
     activation_ts = datetime.now(timezone.utc).isoformat()
     for t in bm.tokens:
         t.updated_at = activation_ts
     db.session.commit()
+
+    # Seq-based reconciliation: tell the receiver to fast-forward past all
+    # current relay token seqs on its next poll (record without applying), so
+    # stale relay positions can't overwrite this map's explicit placements.
+    from sql import appsettingSet
+    appsettingSet('relay_token_baseline_pending', '1')
 
     # Called via fetch from the map view ("Set Active" button): reply JSON so the
     # DM stays on the map. The maps-manage page posts a normal form → redirect.
@@ -506,22 +549,14 @@ def relay_rolls():
 def map_state(map_id):
     bm     = tblBattleMaps.query.get_or_404(map_id)
     result = []
+    monsters, chars = _fetch_token_entities(bm.tokens)
 
     for t in bm.tokens:
         if t.entity_type == 'monster':
-            sm = db.session.get(tblSessionMonsters, t.entity_id)
+            sm = monsters.get(t.entity_id)
             if not sm:
                 continue
-            raw  = json.loads(sm.template.stats_json or '{}')
-            img  = _monster_img_url(raw.get('image'))
-            raw_spd = raw.get('speed', {})
-            walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
-            if isinstance(walk, str):
-                walk = walk.replace(' ft.', '').strip()
-            try:
-                walk = int(walk)
-            except (ValueError, TypeError):
-                walk = 0
+            stats = _monster_stats(sm)
             result.append({
                 'token_id':    t.token_id,
                 'entity_type': 'monster',
@@ -534,14 +569,14 @@ def map_state(map_id):
                 'hp_pct':      sm.hp_pct(),
                 'is_alive':    sm.is_alive,
                 'size_squares': _size_squares(sm.template.size if sm.template else ''),
-                'image_url':   img,
+                'image_url':   _monster_img_url(stats['image']),
                 'color':       '#cc3333',
                 'conditions':  json.loads(sm.conditions or '[]'),
                 'skills':      [],
-                'speed':       walk,
+                'speed':       stats['speed'],
             })
         elif t.entity_type == 'player':
-            char = db.session.get(tblCharacters, t.entity_id)
+            char = chars.get(t.entity_id)
             if not char:
                 continue
             img = (url_for('static', filename=f'uploads/portraits/{char.portrait_path}')

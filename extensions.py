@@ -19,13 +19,6 @@ def getmixer():
     with pulsectl.Pulse('volume-control') as pulse:
     # Get a list of all output devices (sinks)
         mixers = pulse.sink_list()
-    # try:
-    #    mixer = alsaaudio.Mixer("Master")
-    # except alsaaudio.ALSAAudioError:
-    #    try:
-    #       mixer = alsaaudio.Mixer("PCM", cardindex=1)
-    #    except alsaaudio.ALSAAudioError:
-    #         mixer = None
     return mixers
 
 def currentvolume():
@@ -44,14 +37,6 @@ def currentvolume():
     
     #print(f"Device: {sink.description}")
     #print(f"Current Volume: {volume}%")
-    # try:
-    #    mixer = getmixer()
-    #    if mixer == None:
-    #        volume = 0
-    #    else:
-    #     volume = mixer.getvolume()[0]
-    # except alsaaudio.ALSAAudioError:
-    #     volume = 0
     return volume 
 
 def setvolume(volume):
@@ -60,9 +45,4 @@ def setvolume(volume):
         mixers = getmixer()
         for sink in mixers:
             pulse.volume_set_all_chans(sink,volume/100)
-    # try:
-    #    mixer = getmixer()
-    #    mixer.setvolume(volume)
-    # except alsaaudio.ALSAAudioError:
-    #     pass
     return

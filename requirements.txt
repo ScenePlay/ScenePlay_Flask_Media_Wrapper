@@ -1,18 +1,26 @@
-Flask
-Flask-SQLAlchemy
-Flask-Migrate
-Flask-Login
-Flask-Bcrypt
-waitress
-requests
-SQLAlchemy
-Pillow
-python-crontab
-gTTS
-psutil
-pulsectl
-pyalsaaudio
-pathlib
+# Pinned with ~= (compatible-release) so a fresh install matches the known-good
+# environment instead of silently pulling breaking majors. Refresh deliberately
+# with: pip install -U -r requirements.txt && pip freeze
+Flask~=3.1.3
+Flask-SQLAlchemy~=3.1.1
+Flask-Migrate~=4.1.0
+Flask-Login~=0.6.3
+Flask-Bcrypt~=1.0.1
+waitress~=3.0.2
+requests~=2.34.2
+SQLAlchemy~=2.0.50
+Pillow~=12.2.0
+python-crontab~=3.3.0
+gTTS~=2.5.4
+psutil~=7.2.2
+pulsectl~=24.12.0
+pyalsaaudio~=0.11.0
+# NOTE: the 'pathlib' pip package was removed — it's an obsolete Python 2
+# backport that shadows the stdlib module and breaks modern Pythons.
+
+# Dev tooling (used by `make check`)
+pytest~=9.1
+ruff~=0.15
 
 # Raspberry Pi / LED (install only on Pi hardware)
 # rpi_ws281x

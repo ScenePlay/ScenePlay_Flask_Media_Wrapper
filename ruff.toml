@@ -1,0 +1,19 @@
+# Permissive config: catch real bugs (undefined names, syntax errors, duplicate
+# definitions) without churning a long-lived hobby codebase's style.
+line-length = 120
+target-version = "py312"
+
+[lint]
+# E9: syntax/indentation errors, F: pyflakes (undefined names, redefinitions, ...)
+select = ["E9", "F"]
+# Legacy patterns used pervasively; not worth churning:
+#   F401 unused imports (star-import re-export chains in sql.py/extensions.py)
+#   F841 unused locals, F541 f-string without placeholders
+ignore = ["F401", "F841", "F541", "F403", "F405"]  # star imports are the legacy style here
+
+[lint.per-file-ignores]
+# Pre-existing duplicate imports / legacy duplicated function — F811 stays ON
+# for all other files so new duplicate definitions are still caught.
+"led_Run.py"     = ["F811"]
+"routes/main.py" = ["F811"]
+"sql.py"         = ["F811"]

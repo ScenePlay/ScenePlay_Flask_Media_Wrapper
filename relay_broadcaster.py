@@ -28,8 +28,71 @@ def _post(path, payload, cfg, timeout=5):
     requests.post(url, json=payload, headers=headers, timeout=timeout)
 
 
-def _fire(fn):
-    threading.Thread(target=fn, daemon=True).start()
+# ── Push queue ────────────────────────────────────────────────────────────────
+# One background worker drains an ordered queue of push closures. Replaces the
+# old fire-and-forget per-push threads, whose failures were logged and DROPPED —
+# a sleeping/flaky relay silently lost map/token/roll/character updates.
+#
+# Coalescing: enqueueing with an existing key REPLACES that entry, so while the
+# relay is unreachable only the LATEST map state / character payload per key is
+# kept (dice rolls use unique keys and all queue). Failures retry with backoff
+# (1s → 30s cap) and are dropped with a warning after _MAX_ATTEMPTS.
+import itertools
+from collections import OrderedDict
+
+_queue      = OrderedDict()      # key -> [fn, attempts]
+_queue_lock = threading.Lock()
+_queue_evt  = threading.Event()
+_worker     = None
+_seq        = itertools.count()  # unique suffix for non-coalescing keys
+_MAX_ATTEMPTS = 8                # ~2 minutes of retries before dropping
+
+
+def _enqueue(key, fn):
+    """Queue `fn` (which must RAISE on failure) under a coalescing key."""
+    global _worker
+    with _queue_lock:
+        _queue[key] = [fn, 0]
+        if _worker is None or not _worker.is_alive():
+            _worker = threading.Thread(target=_worker_run, daemon=True,
+                                       name='relay-push')
+            _worker.start()
+    _queue_evt.set()
+
+
+def _worker_run():
+    import time
+    backoff = 1.0
+    while True:
+        _queue_evt.wait()
+        with _queue_lock:
+            if not _queue:
+                _queue_evt.clear()
+                continue
+            key   = next(iter(_queue))
+            entry = _queue[key]
+        fn, attempts = entry
+        try:
+            fn()
+            backoff = 1.0
+            with _queue_lock:
+                if _queue.get(key) is entry:   # not replaced by a newer payload
+                    del _queue[key]
+        except Exception as e:
+            attempts += 1
+            if attempts >= _MAX_ATTEMPTS:
+                log.warning('relay push %r dropped after %d attempts: %s',
+                            key, attempts, e)
+                backoff = 1.0
+                with _queue_lock:
+                    if _queue.get(key) is entry:
+                        del _queue[key]
+            else:
+                entry[1] = attempts
+                log.info('relay push %r failed (attempt %d, retry in %.0fs): %s',
+                         key, attempts, backoff, e)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -53,12 +116,9 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
     }
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/push-roll', payload, cfg)
-        except Exception as e:
-            log.warning('relay broadcast_roll failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/push-roll', payload, cfg)
 
-    _fire(_go)
+    _enqueue(f'roll-{next(_seq)}', _go)   # unique key: every roll is delivered
 
 
 def _downscale_image(raw, orig_ext, max_dim, quality=82):
@@ -124,6 +184,27 @@ def _battlemap_data(filename):
         return None, None
 
 
+# _push_map_state fires from ~13 route call sites (every token nudge, effect
+# tweak, bg change). Two cheap guards keep that from flooding the relay:
+#   hash-skip — identical payloads (vs the last SUCCESSFUL push) are dropped;
+#   debounce  — pushes wait 250ms and reset on each new call, so a drag burst
+#               collapses into one push (coalescing in the queue handles the rest).
+_MAP_DEBOUNCE_S    = 0.25
+_last_map_hash     = {'v': None}
+_map_debounce      = {'timer': None}
+_map_debounce_lock = threading.Lock()
+
+
+def _debounced_map_enqueue(fn):
+    with _map_debounce_lock:
+        if _map_debounce['timer'] is not None:
+            _map_debounce['timer'].cancel()
+        t = threading.Timer(_MAP_DEBOUNCE_S, lambda: _enqueue('map-state', fn))
+        t.daemon = True
+        _map_debounce['timer'] = t
+        t.start()
+
+
 def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
                          movement_scale=1.0, bg_filename=None):
     """POST /api/v1/session/push  body: { session_id, map: { url, ... } }
@@ -154,15 +235,20 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
         payload['map']['image_data'] = bg_data
         payload['map']['image_ext']  = bg_ext
 
-    def _go():
-        try:
-            # Map pushes can carry an embedded background image — allow a generous
-            # upload window so large maps aren't cut off on slow home uplinks.
-            _post('/api/v1/session/push', payload, cfg, timeout=60)
-        except Exception as e:
-            log.warning('relay broadcast_map_update failed: %s', e)
+    import hashlib
+    import json as _json
+    digest = hashlib.sha1(
+        _json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    if digest == _last_map_hash['v']:
+        return   # nothing changed since the last successful push
 
-    _fire(_go)
+    def _go():
+        # Map pushes can carry an embedded background image — allow a generous
+        # upload window so large maps aren't cut off on slow home uplinks.
+        _post('/api/v1/session/push', payload, cfg, timeout=60)
+        _last_map_hash['v'] = digest   # only remember payloads that landed
+
+    _debounced_map_enqueue(_go)   # queue coalesces on 'map-state'; latest wins
 
 
 def broadcast_token_move(token_id, x_pct, y_pct,
@@ -183,12 +269,9 @@ def broadcast_token_move(token_id, x_pct, y_pct,
         body['character_id'] = str(character_id)
 
     def _go():
-        try:
-            _post('/api/v1/token/move', body, cfg)
-        except Exception as e:
-            log.warning('relay broadcast_token_move failed: %s', e)
+        _post('/api/v1/token/move', body, cfg)
 
-    _fire(_go)
+    _enqueue(f'token-move-{token_id}', _go)   # coalesce per token
 
 
 def broadcast_token_health(token_id, hp_current, hp_max):
@@ -200,12 +283,9 @@ def broadcast_token_health(token_id, hp_current, hp_max):
             'session_id': cfg['session_id']}
 
     def _go():
-        try:
-            _post('/api/v1/token/health', body, cfg)
-        except Exception as e:
-            log.warning('relay broadcast_token_health failed: %s', e)
+        _post('/api/v1/token/health', body, cfg)
 
-    _fire(_go)
+    _enqueue(f'token-health-{token_id}', _go)   # coalesce per token
 
 
 def broadcast_condition_update(conditions, token_id=None, player_name=None):
@@ -220,12 +300,9 @@ def broadcast_condition_update(conditions, token_id=None, player_name=None):
         body['player_name'] = player_name
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/condition-update', body, cfg)
-        except Exception as e:
-            log.warning('relay broadcast_condition_update failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/condition-update', body, cfg)
 
-    _fire(_go)
+    _enqueue(f'condition-{token_id or player_name}', _go)   # coalesce per target
 
 
 def _portrait_data(char):
@@ -391,13 +468,10 @@ def push_all_characters():
     payload = {'characters': characters}
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
-            log.info('push_all_characters: pushed %d characters', len(characters))
-        except Exception as e:
-            log.warning('push_all_characters failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
+        log.info('push_all_characters: pushed %d characters', len(characters))
 
-    _fire(_go)
+    _enqueue('all-characters', _go)   # coalesce: latest full party wins
 
 
 def _in_active_session(char):
@@ -426,12 +500,9 @@ def push_character(char):
     payload = {'characters': [_char_to_payload(char)]}
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
-        except Exception as e:
-            log.warning('push_character failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
 
-    _fire(_go)
+    _enqueue(f'character-{char.character_id}', _go)   # coalesce per character
 
 
 def push_character_and_broadcast(char):
@@ -445,14 +516,11 @@ def push_character_and_broadcast(char):
     player_name = char.name
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
-            _post(f'/api/v1/session/{cfg["session_id"]}/character-sheet-broadcast',
-                  {'player_name': player_name}, cfg)
-        except Exception as e:
-            log.warning('push_character_and_broadcast failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
+        _post(f'/api/v1/session/{cfg["session_id"]}/character-sheet-broadcast',
+              {'player_name': player_name}, cfg)
 
-    _fire(_go)
+    _enqueue(f'character-bcast-{char.character_id}', _go)   # coalesce per character
 
 
 def push_library():
@@ -524,13 +592,10 @@ def push_library():
     }
 
     def _go():
-        try:
-            _post(f'/api/v1/session/{cfg["session_id"]}/library', payload, cfg)
-            log.info('push_library: pushed library data to relay')
-        except Exception as e:
-            log.warning('push_library failed: %s', e)
+        _post(f'/api/v1/session/{cfg["session_id"]}/library', payload, cfg)
+        log.info('push_library: pushed library data to relay')
 
-    _fire(_go)
+    _enqueue('library', _go)   # coalesce: latest library snapshot wins
 
 
 def get_relay_rolls(since_id=0):

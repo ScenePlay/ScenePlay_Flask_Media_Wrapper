@@ -20,7 +20,17 @@
           {% else %}
             <span class="badge bg-secondary ms-1">Disabled</span>
           {% endif %}
-          <span class="small text-muted ms-3">Last sync: {{ cfg.last_sync }}</span>
+          <span class="small text-muted ms-3">Last sync: {{ cfg.last_sync }}
+            {% if sync_age is not none %}
+              {% if sync_age < 15 %}
+                <span class="badge bg-success ms-1">{{ sync_age }}s ago</span>
+              {% elif sync_age < 90 %}
+                <span class="badge bg-warning text-dark ms-1">{{ sync_age }}s ago</span>
+              {% else %}
+                <span class="badge bg-danger ms-1">stalled &mdash; {{ (sync_age // 60) }}m ago</span>
+              {% endif %}
+            {% endif %}
+          </span>
         </div>
         <form method="post" action="{{ url_for('relay_admin_bp.toggle') }}">
           <button class="btn btn-sm {% if cfg.enabled == '1' %}btn-outline-danger{% else %}btn-ttrpg{% endif %}">

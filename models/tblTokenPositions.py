@@ -12,5 +12,6 @@ class tblTokenPositions(db.Model):
     y_pct        = db.Column(db.Float, default=0.0)
     token_type   = db.Column(db.Text, default='player')  # 'player' | 'npc' | 'monster'
     updated_at   = db.Column(db.Text, nullable=False)
+    relay_seq    = db.Column(db.Integer, default=0)       # last relay write-seq processed for this token
 
     session = db.relationship('tblSessions', backref='token_positions', lazy=True)

@@ -65,8 +65,7 @@ API_OPTIONS = {
 }
 
 
-def _now():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+from routes._util import _now  # shared timestamp format (relay sync compares these strings)
 
 
 _SPELL_DAMAGE_TYPES = ('acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning',

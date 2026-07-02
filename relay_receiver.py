@@ -45,11 +45,14 @@ def stop():
 
 def _run(app):
     with app.app_context():
+        failures = 0
         while not _stop.is_set():
             try:
                 _poll()
+                failures = 0
             except Exception as e:
-                log.warning('Relay receiver poll error: %s', e)
+                failures += 1
+                log.warning('Relay receiver poll error (streak %d): %s', failures, e)
                 # Recover the session so a transient flush error doesn't wedge
                 # every subsequent poll ("transaction has been rolled back").
                 try:
@@ -57,7 +60,52 @@ def _run(app):
                     db.session.rollback()
                 except Exception:
                     pass
-            _stop.wait(2)
+            # 2s normally; back off toward 30s while the relay is unreachable so
+            # a sleeping/offline relay isn't hammered at full speed.
+            delay = 2 if failures == 0 else min(30, 2 ** (failures + 1))
+            _stop.wait(delay)
+
+
+def _should_apply_relay_pos(tok_seq, last_seq, tok_ts, bm_ts):
+    """Decide whether a relay token position should overwrite the local one.
+
+    Preferred path: relay-assigned per-token write sequences (`seq`), which are
+    immune to clock skew between this machine and the relay host. Falls back to
+    the legacy cross-machine ISO-timestamp compare only when the relay predates
+    the seq column (mid-upgrade compatibility)."""
+    if tok_seq is not None:
+        return tok_seq > (last_seq or 0)
+    return not (bm_ts and tok_ts and tok_ts <= bm_ts)
+
+
+# Ring of the most recent relay mutation IDs this instance has applied.
+# Persisted in tblAppSettings so it survives restarts. 500 comfortably exceeds
+# what a table of players could stage between two 2-second polls.
+_LEDGER_KEY  = 'relay_applied_mutation_ids'
+_LEDGER_SIZE = 500
+
+
+def _applied_ledger_load():
+    """Return the set of recently applied relay mutation IDs."""
+    import json as _json
+    from sql import appsettingGet
+    try:
+        ids = _json.loads(appsettingGet(_LEDGER_KEY, '[]') or '[]')
+        return set(int(i) for i in ids)
+    except (ValueError, TypeError):
+        return set()
+
+
+def _applied_ledger_save(ledger, newly_applied):
+    """Add newly applied IDs to the ledger and persist the newest _LEDGER_SIZE."""
+    import json as _json
+    from sql import appsettingSet
+    ledger.update(newly_applied)
+    ring = sorted(ledger)[-_LEDGER_SIZE:]
+    try:
+        appsettingSet(_LEDGER_KEY, _json.dumps(ring))
+    except Exception as exc:
+        log.warning('Applied-mutation ledger save failed: %s', exc)
 
 
 def _poll():
@@ -96,7 +144,16 @@ def _poll():
                    .first()) if local_sid else None
 
     # --- token positions (relay tokens array) ---
-    # Relay token shape: { id, session_id, character_id, label, x_pct, y_pct, token_type, updated_at }
+    # Relay token shape: { id, session_id, character_id, label, x_pct, y_pct,
+    #                      token_type, updated_at, seq }
+    # `seq` is the relay's per-token write counter; we track the last seq we
+    # processed in tblTokenPositions.relay_seq and only apply strictly newer
+    # writes — no cross-machine clock comparison involved.
+    #
+    # Baseline mode: right after map activation the DM's explicit placements
+    # must win, so that poll only RECORDS current relay seqs without applying
+    # them (fast-forward), then resumes normal application next poll.
+    baseline_only = appsettingGet('relay_token_baseline_pending', '0') == '1'
     for tok in payload.get('tokens', []):
         label      = tok.get('label', '')
         x_pct      = tok.get('x_pct')
@@ -104,13 +161,21 @@ def _poll():
         token_type = tok.get('token_type', 'player')
         if not label or local_sid is None or x_pct is None or y_pct is None:
             continue
+        try:
+            tok_seq = int(tok['seq']) if tok.get('seq') is not None else None
+        except (TypeError, ValueError):
+            tok_seq = None
 
-        # Update tblTokenPositions (relay mirror)
+        # Update tblTokenPositions (relay mirror) and read the previously
+        # processed seq BEFORE overwriting it.
         tp = tblTokenPositions.query.filter_by(session_id=local_sid, label=label).first()
+        prev_seq = tp.relay_seq if tp else 0
         if tp:
             tp.x_pct      = x_pct
             tp.y_pct      = y_pct
             tp.updated_at = now
+            if tok_seq is not None:
+                tp.relay_seq = tok_seq
         else:
             db.session.add(tblTokenPositions(
                 session_id  = local_sid,
@@ -119,14 +184,13 @@ def _poll():
                 y_pct       = y_pct,
                 token_type  = token_type,
                 updated_at  = now,
+                relay_seq   = tok_seq or 0,
             ))
 
+        if baseline_only:
+            continue   # seqs recorded above; do not move local tokens this poll
+
         # Update tblBattleMapTokens so the local battlemap poll sees relay moves.
-        # Both the relay's updated_at and bm_tok.updated_at use ISO UTC after the
-        # map_activate / token_add / token_move changes, so we can compare them
-        # directly: only apply the relay position if it is strictly newer than the
-        # local battlemap record (meaning the player genuinely moved after the map
-        # was last set up / activated).
         if active_bm and token_type == 'player':
             char = tblCharacters.query.filter_by(name=label, active=1).first()
             if char:
@@ -134,16 +198,18 @@ def _poll():
                     map_id=active_bm.map_id, entity_type='player', entity_id=char.character_id
                 ).first()
                 if bm_tok:
-                    tok_ts = tok.get('updated_at', '')
-                    bm_ts  = bm_tok.updated_at or ''
-                    # Skip if local record is present and relay position is not newer
-                    if bm_ts and tok_ts and tok_ts <= bm_ts:
+                    if not _should_apply_relay_pos(tok_seq, prev_seq,
+                                                   tok.get('updated_at', ''),
+                                                   bm_tok.updated_at or ''):
                         continue
                     bm_tok.col        = max(0, min(active_bm.grid_cols - 1,
                                                    round(x_pct * (active_bm.grid_cols - 1))))
                     bm_tok.row        = max(0, min(active_bm.grid_rows - 1,
                                                    round(y_pct * (active_bm.grid_rows - 1))))
                     bm_tok.updated_at = bm_tok_ts
+
+    if baseline_only:
+        appsettingSet('relay_token_baseline_pending', '0')
 
     # --- roll log (relay roll_log array) ---
     # Relay roll shape: { id, session_id, player_name, roll_expr, result, breakdown, rolled_at }
@@ -270,9 +336,15 @@ def _poll():
     # into local here would let the relay win a conflict, violating local-authority.
 
     # --- character mutations (relay player sheet changes) ---
+    # Idempotency ledger: if the ack POST below ever fails, the relay re-serves
+    # the same mutations on the next poll. Without a ledger they would apply
+    # again (an hp_delta would hit twice). Already-seen IDs are skipped but
+    # still re-acked so the relay eventually marks them applied.
     pending_mutations = payload.get('pending_mutations', [])
     applied_ids    = []
     changed_chars  = set()  # character_id values that need push_character_and_broadcast
+    ledger         = _applied_ledger_load()
+    newly_applied  = []
 
     for mut in pending_mutations:
         if mut.get('applied'):
@@ -280,6 +352,11 @@ def _poll():
         mut_id         = mut.get('id')
         player_name    = mut.get('player_name', '')
         mutation_type  = mut.get('mutation_type', '')
+
+        if mut_id is not None and mut_id in ledger:
+            applied_ids.append(mut_id)   # re-ack only; do NOT re-apply
+            continue
+
         try:
             data = _json.loads(mut.get('mutation_data', '{}'))
         except (ValueError, TypeError):
@@ -288,6 +365,8 @@ def _poll():
         char = tblCharacters.query.filter_by(name=player_name, active=1).first()
         if not char:
             applied_ids.append(mut_id)
+            if mut_id is not None:
+                newly_applied.append(mut_id)
             continue
 
         try:
@@ -296,8 +375,16 @@ def _poll():
         except Exception as exc:
             log.warning('Mutation apply error (id=%s type=%s): %s', mut_id, mutation_type, exc)
         applied_ids.append(mut_id)
+        if mut_id is not None:
+            newly_applied.append(mut_id)
 
     db.session.commit()
+
+    # Persist the ledger AFTER the mutation commit but BEFORE the ack attempt,
+    # so an ack failure (the common case this protects against) can never lead
+    # to a double-apply on the next poll.
+    if newly_applied:
+        _applied_ledger_save(ledger, newly_applied)
 
     # Ack applied mutations on the relay server
     if applied_ids:

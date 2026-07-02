@@ -36,6 +36,17 @@ def status():
     cfg = _relay_cfg()
     logged_in = []
 
+    # Age of the last successful receiver poll, so a stalled sync is visible
+    # at the table instead of being discovered mid-combat. last_sync is stored
+    # by relay_receiver as UTC '%Y-%m-%d %H:%M:%S'.
+    sync_age = None
+    try:
+        from datetime import datetime, timezone
+        ts = datetime.strptime(cfg['last_sync'], '%Y-%m-%d %H:%M:%S')
+        sync_age = int((datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds())
+    except (ValueError, TypeError):
+        pass
+
     if cfg['session_id'] and cfg['url'] and cfg['enabled'] == '1':
         try:
             resp = requests.get(
@@ -68,7 +79,8 @@ def status():
         except Exception as e:
             log.debug('status logged-in fetch error: %s', e)
 
-    return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in)
+    return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in,
+                           sync_age=sync_age)
 
 
 @relay_admin_bp.route('/toggle', methods=['POST'])
