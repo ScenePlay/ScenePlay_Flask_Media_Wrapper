@@ -12,16 +12,18 @@ from extensions import *
 class tblserversip(db.Model):
     ServerIP_ID = db.Column(db.Integer, primary_key=True)
     serverName = db.Column(db.Text)
+    version = db.Column(db.Text)         # app/firmware version reported at discovery
     ipAddress = db.Column(db.Text)
     ports = db.Column(db.Text)
     active = db.Column(db.Integer)
     PingTime = db.Column(db.Text)
     serverroleid = db.Column(db.Integer)
-    
+
     def to_dict(self):
         return {
             'ServerIP_ID': self.ServerIP_ID,
             'serverName': self.serverName,
+            'version': self.version,
             'ipAddress': self.ipAddress,
             'ports': self.ports,
             'active': self.active,

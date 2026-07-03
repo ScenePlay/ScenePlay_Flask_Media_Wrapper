@@ -86,6 +86,44 @@ def is_raspberry_pi() -> bool:
             return False
     return platform.machine() in('armv7l', 'armv6l', 'aarch64')
 
+@main.route('/api/server-info', methods=['GET'])
+def server_info():
+    """Fingerprint endpoint used for LAN discovery — an answering box IS a
+    ScenePlay server. The network scanner (discovery.py) hits this on every
+    host with the ScenePlay port open and records the ones that respond with
+    app == 'ScenePlay'. Intentionally unauthenticated and read-only: it exposes
+    only hostname/version/OS/core-count/capabilities so strangers on the LAN can
+    identify it. Nothing here is sensitive and nothing here mutates state."""
+    import socket as _socket
+    from version import __version__
+
+    # A friendly name if the operator set one, else the machine hostname.
+    name = appsettingGet('server_name', None) or _socket.gethostname()
+
+    # capabilities let a discovering box auto-classify this one:
+    #   led   -> drives a physical LED strip (active tblLEDConfig row)
+    #   relay -> local->relay sync is enabled here
+    try:
+        from models.ledConfig import tblledconfig
+        has_led = db.session.query(tblledconfig.ledConfig_ID).filter(
+            tblledconfig.active == 1).first() is not None
+    except Exception:
+        has_led = False
+
+    return jsonify({
+        'app':          'ScenePlay',
+        'server_name':  name,
+        'version':      __version__,
+        'os':           platform.platform(),
+        'machine':      platform.machine(),
+        'cores':        os.cpu_count() or 1,
+        'capabilities': {
+            'led':   has_led,
+            'relay': appsettingGet('relay_enabled', '0') == '1',
+        },
+    })
+
+
 @main.route('/api/ChromeExtensionAddVideo', methods=['POST'])
 def ChromeExtensionAddVideo():
     data = request.get_json()

@@ -17,7 +17,7 @@ import alsaaudio
 
 ip = Blueprint('ip', __name__)
 
-tblColumns = ['ServerIP_ID', 'serverName', 'ipAddress', 'ports','active','PingTime','serverroleid']
+tblColumns = ['ServerIP_ID', 'serverName', 'version', 'ipAddress', 'ports','active','PingTime','serverroleid']
 primeKey = tblColumns[0]
 @ip.route('/serverIP')
 def edittbl():

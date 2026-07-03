@@ -1,19 +1,30 @@
-from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for
+from flask import (Blueprint, render_template, request, abort, jsonify, json,
+                   redirect, url_for, current_app)
 from extensions import *
 
 from sql import *
 from sql import appsettingGetKeepMusicPlaying, appsettingSetKeepMusicPlaying
-from ipsearch import *
 from ledPlayer import *
 from sys import platform
 import alsaaudio
+import os
+import subprocess
 
+import discovery
 from ytProcess import yt_process
 from pathlib import Path
 from models.scenes import tblscenes as sc
 from routes.main import addMediaToYT_que, sanitize_filename
 
 ut = Blueprint('ut', __name__)
+
+
+def restart_computer():
+    """Fire the repo-root restartComputer.sh (relocated here from the old
+    ipsearch.py so that whole ping chain could be deleted)."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    subprocess.Popen(['bash', os.path.join(repo_root, 'restartComputer.sh')],
+                     shell=False)
 
 def remove_list_param(input_str):
     if '&list' in input_str:
@@ -35,10 +46,13 @@ def main():
             
             return  redirect(url_for('main.home'))
         elif request.form['submit'] == 'Ping Network':
-            startPinging()
+            # Concurrent TCP-connect scan for ScenePlay/WLED devices (discovery.py),
+            # replacing the old ICMP-ping process fan-out. Runs in the background so
+            # the request returns immediately; results land in tblServersIP.
+            discovery.start_scan(current_app._get_current_object())
             return  redirect(url_for('main.home'))
         elif request.form['submit'] == 'Restart Computer':
-            restartComputer()
+            restart_computer()
             return  redirect(url_for('main.home'))
         else:
             pass

@@ -204,6 +204,19 @@ with app.app_context():
         db.session.rollback()
         print('tblTokenPositions.relay_seq migration skipped:', _e)
 
+    # Lightweight migration: add tblServersIP.version — the app/firmware version a
+    # discovered device reports via /api/server-info (ScenePlay) or /json/info
+    # (WLED), shown next to its name in the server table. Idempotent.
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblServersIP)"))]
+        if _cols and 'version' not in _cols:
+            db.session.execute(_sa_text(
+                "ALTER TABLE tblServersIP ADD COLUMN version TEXT"))
+            db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('tblServersIP.version migration skipped:', _e)
+
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):
     os.makedirs(os.path.join(app.root_path, 'static', 'uploads', _upload_dir), exist_ok=True)

@@ -1,5 +1,6 @@
 
 
+import logging
 import requests
 import json
 from extensions import *
@@ -7,26 +8,40 @@ from extensions import *
 from sql import *
 from models.serverIP import tblserversip as IP
 from models.serverRole import tblserverrole as Role
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-engine = create_engine('sqlite:///' + databaseDir)
-Session = sessionmaker(bind=engine)
-session = Session()
+from sqlalchemy import select
+
+log = logging.getLogger(__name__)
+
+# A Remote-role device is another ScenePlay box, so its receive endpoint is on
+# the same LAN port this app serves.
+REMOTE_PORT = 8086
+# Every push carries this timeout — without it, a single powered-off Remote hung
+# scene activation indefinitely (requests.post blocks with no deadline).
+REMOTE_TIMEOUT = 4
+
 
 def remoteSend(LEDPattern):
+    # Parse once up front; a malformed pattern should fail here, not per device.
     try:
-        query = select(IP, Role).where(Role.ID == IP.serverroleid).where(Role.name == 'Remote').where(IP.active == 1)
-        remoteIPs = session.execute(query).fetchall()
-        for eachIP in remoteIPs:
-            ip_address = str(eachIP[0].ipAddress) #eachIP.
-            #print(f"Sending Data to Remotes: {ip_address}")
-            port = str(8086)
-            api_url = f"http://{ip_address}:{port}/receive_led_patterns"
-            print(LEDPattern)
-            response = requests.post(api_url, json=json.loads(LEDPattern))
-        session.close()
-    except Exception as err: 
-        print(err)
+        payload = json.loads(LEDPattern)
+    except (ValueError, TypeError) as err:
+        log.warning("remoteSend: bad LED pattern JSON: %s", err)
+        return
+
+    # Use the app's db session (this runs inside a request) instead of a second
+    # long-lived engine/session created at import time.
+    query = (select(IP, Role)
+             .where(Role.ID == IP.serverroleid)
+             .where(Role.name == 'Remote')
+             .where(IP.active == 1))
+    for row in db.session.execute(query).fetchall():
+        ip_address = str(row[0].ipAddress)
+        api_url = f"http://{ip_address}:{REMOTE_PORT}/receive_led_patterns"
+        try:
+            requests.post(api_url, json=payload, timeout=REMOTE_TIMEOUT)
+        except requests.RequestException as err:
+            # One unreachable Remote must not stop the others.
+            log.warning("remoteSend to %s failed: %s", ip_address, err)
         
 def prepJsonRemote(ledMdl, scnPat, isLocal=False) -> str:
     i=0

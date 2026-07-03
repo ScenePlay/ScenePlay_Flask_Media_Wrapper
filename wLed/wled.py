@@ -1,6 +1,11 @@
 from requests import get, post
 import json
 
+# Every request carries this timeout. Without it, a single powered-off or
+# unplugged WLED board would hang scene activation indefinitely — wledCommand
+# constructs a Wled() for each device in a loop, so one dead board froze them all.
+WLED_TIMEOUT = 4
+
 def clip(value, lower, upper):
     return lower if value < lower else upper if value > upper else value
 
@@ -17,7 +22,10 @@ class Wled():
     def __init__(self, host):
         self.host = host
 
-        self._effects = self.get_effects()
+        # Effects are fetched lazily (get_effects / update), NOT here: making a
+        # network call in the constructor meant an offline board hung the whole
+        # scene-activation loop before any light command was even sent.
+        self._effects = None
 
         self._name = None
         self._state = None
@@ -28,17 +36,17 @@ class Wled():
 
     def get_all(self):
         """Get all JSON objects for WLED controller"""
-        request = get(f"http://{self.host}/json")
+        request = get(f"http://{self.host}/json", timeout=WLED_TIMEOUT)
         return json.loads(request.text)
 
     def get_info(self):
         """Get info about the WLED controller"""
-        request = get(f"http://{self.host}/json/info")
+        request = get(f"http://{self.host}/json/info", timeout=WLED_TIMEOUT)
         return json.loads(request.text)
 
     def get_state(self):
         """Get the current state of the WLED controller"""
-        request = get(f"http://{self.host}/json/state")
+        request = get(f"http://{self.host}/json/state", timeout=WLED_TIMEOUT)
         return json.loads(request.text)
 
     def get_effects(self):
@@ -49,9 +57,9 @@ class Wled():
             list of effects available to the WLED controller
         """
 
-        request = get(f"http://{self.host}/json/eff")
+        request = get(f"http://{self.host}/json/eff", timeout=WLED_TIMEOUT)
         return json.loads(request.text)
-    
+
     def get_palettes(self):
         """
         Get the list of available palettes.
@@ -60,7 +68,7 @@ class Wled():
             list of palettes available to the WLED controller
         """
 
-        request = get(f"http://{self.host}/json/pal")
+        request = get(f"http://{self.host}/json/pal", timeout=WLED_TIMEOUT)
         return json.loads(request.text)
 
     def set_state(self, state):
@@ -73,7 +81,8 @@ class Wled():
         Returns:
             Request response object from Requests module
         """
-        request = post(f"http://{self.host}/json/state", data=json.dumps(state))
+        request = post(f"http://{self.host}/json/state", data=json.dumps(state),
+                       timeout=WLED_TIMEOUT)
         return request
     def set_speed(self, _speed):
 

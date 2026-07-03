@@ -140,15 +140,18 @@
       // # 4    active        INT      0                    0 
       // # 5    PingTime      TEXT     0                    0 
       // # 6    serverroleid  INT      0                    0 
-      const tblColumns = ['ServerIP_ID','serverName', 'ipAddress', 'ports','active','PingTime','serverroleid']
+      // Order MUST match the visual columns array below — the sort handler maps a
+      // clicked column's index into this list. 'version' sits right after the name.
+      const tblColumns = ['ServerIP_ID','serverName', 'version', 'ipAddress', 'ports','active','PingTime','serverroleid']
       const primeKey = tblColumns[0]
       new gridjs.Grid({
         columns: [
-          { id: tblColumns[0], name: 'ServerIP_ID', 'hidden': true },
-          { id: tblColumns[1], name: 'Server Name', sort: true, 'attributes': editableCellAttributes },
-          { id: tblColumns[2], name: 'IP Address' , sort: true, 'attributes': editableCellAttributes  },
-          { id: tblColumns[3], name: 'Ports', sort: false },
-          { id: tblColumns[4], name: 'active', sort: false,
+          { id: 'ServerIP_ID', name: 'ServerIP_ID', 'hidden': true },
+          { id: 'serverName', name: 'Server Name', sort: true, 'attributes': editableCellAttributes },
+          { id: 'version', name: 'Version', sort: true },
+          { id: 'ipAddress', name: 'IP Address' , sort: true, 'attributes': editableCellAttributes  },
+          { id: 'ports', name: 'Ports', sort: false },
+          { id: 'active', name: 'active', sort: false,
           formatter: function (cellData, row) { 
               const selectedValue = cellData
               const active = document.createElement("select");
@@ -159,33 +162,36 @@
                 active.appendChild(el)
               })
               active.name = "active"
-              active.id = "activeOpt_" + row.cells[4].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              active.id = "activeOpt_" + row.cells[5].data.toString() + "_ID_" + row.cells[0].data.toString()
               active.setAttribute("onchange","activeChange()")
-              active.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[4].data)){
+              active.childNodes.forEach((node) => {
+                if(parseInt(node.value)===parseInt(row.cells[5].data)){
                   node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
                 }
               });
               return gridjs.html(active.outerHTML);
               } 
           },
-          { id: tblColumns[5], name: 'PingTime', sort: true },
-          { id: tblColumns[6], name: 'serverroleid', sort: false
+          { id: 'PingTime', name: 'PingTime', sort: true },
+          { id: 'serverroleid', name: 'serverroleid', sort: false
             ,
             formatter: function (cellData, row) {
               const selectedValue = cellData
+              // Fall back to role 1 ("None") when serverroleid is null/undefined —
+              // otherwise .toString() below throws and the whole grid fails to render.
+              const roleId = (row.cells[7].data == null) ? 1 : row.cells[7].data
               const serverrole = document.createElement("select");
               serverRoleDD.populateDropdown(serverrole)
               serverrole.name = "serverrole"
-              serverrole.id = "serverroleOpt_" + row.cells[6].data.toString() + "_ID_" + row.cells[0].data.toString()           
+              serverrole.id = "serverroleOpt_" + roleId.toString() + "_ID_" + row.cells[0].data.toString()
               serverrole.setAttribute("onchange","serverRoleChange()")
-              serverrole.childNodes.forEach((node) => { 
-                if(parseInt(node.value)===parseInt(row.cells[6].data)){
+              serverrole.childNodes.forEach((node) => {
+                if(parseInt(node.value)===parseInt(roleId)){
                   node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
                 }
               });
               return gridjs.html(serverrole.outerHTML);
-              } 
+              }
           },
           {id: 'dlete', name: 'Delete' , sort: false,
           formatter: function (cellData, row) { 
@@ -266,7 +272,7 @@
         var ev = event.target;
         id = ev.id.split("_ID_")
         if(ev.id.toString().includes("serverroleOpt_")){
-          jsn = {[primeKey]:id[1],[tblColumns[6]]:ev.value}
+          jsn = {[primeKey]:id[1],['serverroleid']:ev.value}
           console.log(JSON.stringify(jsn))
           saveChange(JSON.stringify(jsn))
           if (ev.value == "4") { //4 = WLED Server

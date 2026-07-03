@@ -44,7 +44,7 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  version TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblVideoMedia (  video_ID INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  title TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblVideoScene (  videoScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  video_ID INT,  DisplayScreen_ID INT,  orderBy INT,  volume INT, loops INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblwledPattern (  wledPattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT, server_ID INT,  effect INT,  pallette INT,  color1 TEXT,  color2 TEXT,  color3 TEXT,  speed INT,  brightness INT,  orderBy INT)")
