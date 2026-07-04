@@ -1,5 +1,5 @@
 from flask import (Blueprint, render_template, request, abort, jsonify, json,
-                   redirect, url_for, current_app, flash)
+                   redirect, url_for, flash)
 from extensions import *
 
 from sql import *
@@ -10,7 +10,6 @@ import alsaaudio
 import os
 import subprocess
 
-import discovery
 from ytProcess import yt_process
 from pathlib import Path
 from models.scenes import tblscenes as sc
@@ -55,12 +54,6 @@ def main():
             summary = backfill_video_ids()
             flash(f"Backfill: tagged {summary['tagged']}, duplicates skipped "
                   f"{summary['duplicates_skipped']}, unparseable {summary['unparseable']}.")
-            return  redirect(url_for('main.home'))
-        elif request.form['submit'] == 'Ping Network':
-            # Concurrent TCP-connect scan for ScenePlay/WLED devices (discovery.py),
-            # replacing the old ICMP-ping process fan-out. Runs in the background so
-            # the request returns immediately; results land in tblServersIP.
-            discovery.start_scan(current_app._get_current_object())
             return  redirect(url_for('main.home'))
         elif request.form['submit'] == 'Restart Computer':
             restart_computer()

@@ -56,6 +56,15 @@ SWEEP_ROUNDS    = 1
 # without this a second press would stack another full sweep on top of the first.
 _scan_lock = threading.Lock()
 
+# Progress for the UI status bar (Servers page). The sweep/identify loops bump
+# `done` as their futures complete; GET /api/pingnetwork/status polls this.
+# Plain dict mutation — single writer thread, readers only copy.
+_progress = {'state': 'idle', 'done': 0, 'total': 0, 'summary': None}
+
+
+def get_progress():
+    return dict(_progress)
+
 
 def check_port(ip, port, timeout=CONNECT_TIMEOUT):
     """True if a TCP connect to (ip, port) succeeds within the timeout."""
@@ -104,10 +113,12 @@ def sweep(ports=(SCENEPLAY_PORT, WLED_PORT), rounds=SWEEP_ROUNDS):
                    if p not in open_ports.get(h, ())]
         if not pending:
             break
+        _progress.update(state='sweeping', done=0, total=len(pending))
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
             futures = {ex.submit(check_port, h, p): (h, p) for (h, p) in pending}
             for fut in concurrent.futures.as_completed(futures):
                 host_s, port = futures[fut]
+                _progress['done'] += 1
                 try:
                     if fut.result():
                         open_ports.setdefault(host_s, set()).add(port)
@@ -165,7 +176,9 @@ def identify(open_ports):
                 futures[ex.submit(_identify_sceneplay, ip)] = ip
             if WLED_PORT in ports:
                 futures[ex.submit(_identify_wled, ip)] = ip
+        _progress.update(state='identifying', done=0, total=len(futures))
         for fut in concurrent.futures.as_completed(futures):
+            _progress['done'] += 1
             try:
                 dev = fut.result()
             except Exception:
@@ -239,6 +252,7 @@ def scan_and_record(app):
             'created':     created,
             'updated':     updated,
         }
+        _progress.update(state='done', summary=summary)
         print('[discovery]', summary)
         return summary
 
@@ -253,7 +267,9 @@ def start_scan(app):
         try:
             scan_and_record(app)
         except Exception as e:
+            _progress.update(state='error', summary=None)
             print('[discovery] scan failed:', e)
 
+    _progress.update(state='sweeping', done=0, total=0, summary=None)
     threading.Thread(target=_run, daemon=True).start()
     return True

@@ -3,11 +3,90 @@
   <body onload="addButton()">
     <div>
       <h1>Server IP Table</h1>
+      <!-- LAN scan (discovery.py): finds ScenePlay + WLED boxes and upserts
+           them below. Runs server-side in the background; the bar polls
+           /api/pingnetwork/status. -->
+      <div style="display:flex;align-items:center;gap:10px;margin:6px 0;">
+        <input type="button" id="pingNetworkBtn" class="btn btn-primary" value="Ping Network">
+        <div id="pingBarWrap" style="display:none;flex:1;max-width:420px;height:10px;
+             background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:5px;overflow:hidden;">
+          <div id="pingBar" style="height:100%;width:0%;background:var(--sp-accent);transition:width .3s;"></div>
+        </div>
+        <span id="pingStatus" style="font-size:.85em;color:var(--sp-muted);"></span>
+      </div>
       <hr>
       <div id="table"></div>
     </div>
     <script>
       const tableDiv = document.getElementById('table');
+
+      // ── Ping Network: background LAN scan with a live progress bar ────
+      const pingBtn = document.getElementById('pingNetworkBtn');
+      let pingTimer = null;
+
+      function renderPingStatus(p) {
+        const wrap  = document.getElementById('pingBarWrap');
+        const bar   = document.getElementById('pingBar');
+        const label = document.getElementById('pingStatus');
+        if (p.state === 'sweeping' || p.state === 'identifying') {
+          wrap.style.display = '';
+          const pct = p.total ? Math.round(100 * p.done / p.total) : 0;
+          bar.style.width = pct + '%';
+          label.textContent = p.state === 'sweeping'
+            ? `scanning ${p.done}/${p.total} host:port probes…`
+            : `identifying ${p.done}/${p.total} responders…`;
+          return false;                       // still running
+        }
+        if (p.state === 'done' && p.summary) {
+          wrap.style.display = '';
+          bar.style.width = '100%';
+          const s = p.summary;
+          label.textContent = `done — ${s.sceneplay} ScenePlay, ${s.wled} WLED (${s.created} new, ${s.updated} updated)`;
+        } else if (p.state === 'error') {
+          label.textContent = 'scan failed — check the server log';
+        }
+        return true;                          // finished (or idle)
+      }
+
+      function pollPing() {
+        fetch('/api/pingnetwork/status')
+          .then(r => r.json())
+          .then(p => {
+            if (renderPingStatus(p)) {
+              clearInterval(pingTimer);
+              pingTimer = null;
+              pingBtn.disabled = false;
+              // reload so freshly discovered rows appear in the grid
+              if (p.state === 'done') setTimeout(() => window.location.reload(), 1500);
+            }
+          })
+          .catch(() => {});
+      }
+
+      pingBtn.addEventListener('click', () => {
+        pingBtn.disabled = true;
+        document.getElementById('pingStatus').textContent = 'starting…';
+        fetch('/api/pingnetwork', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => { if (!pingTimer) pingTimer = setInterval(pollPing, 500); })
+          .catch(() => {
+            pingBtn.disabled = false;
+            document.getElementById('pingStatus').textContent = 'could not start scan';
+          });
+      });
+
+      // A scan may already be running (started elsewhere / page reloaded
+      // mid-scan) — pick its progress bar back up.
+      fetch('/api/pingnetwork/status')
+        .then(r => r.json())
+        .then(p => {
+          if (p.state === 'sweeping' || p.state === 'identifying') {
+            pingBtn.disabled = true;
+            renderPingStatus(p);
+            pingTimer = setInterval(pollPing, 500);
+          }
+        })
+        .catch(() => {});
       function addButton() {
       // Select the element next to which the button should be added
           var element = document.querySelector("div.gridjs-search");

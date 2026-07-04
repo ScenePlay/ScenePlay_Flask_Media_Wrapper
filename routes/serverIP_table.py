@@ -1,9 +1,10 @@
-from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for
+from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for, current_app
 from extensions import *
 
 from models.serverIP import tblserversip as tbl
 from sql import *
 import alsaaudio
+import discovery
 
 # cid  name          type     notnull  dflt_value  pk
 # ---  ------------  -------  -------  ----------  --
@@ -24,6 +25,21 @@ def edittbl():
     data = select_data_stats()#arr)
     volume = currentvolume()
     return render_template('serverIP_table.html',items=data,volume=volume)
+
+
+@ip.route('/api/pingnetwork', methods=['POST'])
+def pingnetwork_start():
+    """Kick off the background LAN scan (discovery.py). started=False means a
+    scan is already running — the status endpoint will show its progress."""
+    started = discovery.start_scan(current_app._get_current_object())
+    return jsonify({'started': started})
+
+
+@ip.route('/api/pingnetwork/status', methods=['GET'])
+def pingnetwork_status():
+    """Scan progress for the status bar: state (idle/sweeping/identifying/
+    done/error), done/total counters, and the result summary when finished."""
+    return jsonify(discovery.get_progress())
 
 @ip.route('/api/serverIP')
 def data():

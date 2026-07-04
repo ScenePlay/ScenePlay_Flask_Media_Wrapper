@@ -42,10 +42,10 @@
                      <input type="submit" name="submit" value="loadtestdata"/> -->
                      <br />
                      <div style="border: 3px solid black;">
-                     <label for="form"><h3 >Find Servers</h3></label>
-                     <input type="submit" name="submit" value="Ping Network"/>
-                     <br />
-                     <br />
+                     <h3>Find Servers</h3>
+                     <!-- Ping Network moved to the Servers page, where the scan
+                          shows a live progress bar and the results land. -->
+                     <p style="margin:6px 0;">Moved to <a href="{{ url_for('ip.edittbl') }}">Servers</a> &mdash; run the network scan there with a progress bar.</p>
                      </div>
                      <br />
                      <div style="border: 3px solid black;">
