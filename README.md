@@ -1,94 +1,205 @@
-ScenePlay Installation and User Guide
-=====================================
+# ScenePlay
 
-ScenePlay is a customizable media controller designed for enhancing tabletop gaming sessions with immersive atmospheres. It integrates sound, video, and LED lighting control, making your gaming environment more engaging. Follow this guide to set up ScenePlay on your system.
+ScenePlay is a self-hosted atmosphere controller for tabletop gaming. One box
+(a Raspberry Pi or any Linux machine) plays music, shows video on a screen,
+drives LED lighting, and runs a full TTRPG toolkit — characters, battle maps,
+monsters — all controlled from any browser on your network (phone, tablet,
+laptop). A Dungeon Master presses one Scene button and the room changes:
+tavern music starts, a fireplace video plays, the LEDs go warm orange.
 
-1. Prerequisites
------------------
-Ensure you have the following before starting:
-- A Raspberry Pi with a fresh Raspberry Pi OS installation, or an old computer running Mint OS.
-- Make sure SSH is enabled
-- Optional VNC Server (Makes it much easier to manage)
-- Optional Disable IP V6 
-- Optional Set your IP4 to a static IP address. 
-- A stable internet connection.
-- Basic familiarity with the Linux command line.
-- Setup your PI https://youtu.be/aG3hmzW03cs?si=4im_tgTbxHoVPVMD
+Flask + SQLite, no cloud dependencies. Media comes from YouTube via yt-dlp and
+is stored locally, so game night doesn't depend on anyone's streaming account.
 
+---
 
-2. Installation Steps
----------------------
+## Feature Tour
 
-Step 1: System Preparation
-1. Open a terminal on your Computer ssh user@ipaddress.
-2. Enter 
-      - sudo visudo
-      - After root user entry paste ex. sammy   ALL=(ALL) NOPASSWD:ALL
-      - username  ALL=(ALL) NOPASSWD:ALL
-      - Save and exit 
-3. Update and upgrade your system:
-   sudo apt-get update && sudo apt-get -y upgrade
+### Scenes — the core idea
+A **Scene** bundles media and lighting into one button: any number of songs,
+videos (with per-scene volume, screen, ordering and loops), an RPiLED pattern,
+and WLED presets. Activating a scene stops what's playing, queues that scene's
+media, and applies its lighting. Scenes group into **Campaigns** so the scene
+list only shows what belongs to tonight's game.
 
-Step 2: Download ScenePlay Files
-Clone or copy the ScenePlay project files to your Raspberry Pi. Make sure when cloning to be in your /home/user directory. The application may break if not in this location. (Sorry)
-    
-    git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
+### The player bar (top of every page)
+- **Master volume** slider (system-wide, live).
+- **Now Playing** — active scene, current song and video with thumbnails.
+  Hover a thumbnail for full metadata (uploader, length, views, description);
+  click it for the detail card.
+- **Transport controls for both players** — seek back / pause / seek forward /
+  next, independently for music and video.
+- **Queue counts with total remaining time** (e.g. `Songs: 12 (1h 47m)`),
+  computed from extracted metadata.
+- **All Stop** — kills both players and clears the scene. The **Music Ignore
+  Stop** toggle lets music survive an All Stop (useful when switching maps but
+  keeping the tavern playlist going).
 
-Later use this to get upgrades:
-(If you have made changes to the files) git -C ScenePlay stash 
-git -C ScenePlay pull
+### Media library & YouTube import
+- **Import** a video or a whole playlist by URL — from the Utilities page or
+  the browser extensions (below). Playlists expand in the background,
+  entry-by-entry, skipping private/deleted videos.
+- **Video-id dedup** — the same video imported twice (any URL form: `watch?v=`,
+  `youtu.be/`, shorts, share-links with `&list=`) resolves to ONE row and one
+  file on disk, shared across scenes. Re-adding a known video just links it to
+  the new scene.
+- **Download queue** — yt-dlp fetches audio as MP3 or video as 720p MP4 into
+  `~/Music/SP/` / `~/Videos/SP/`, one at a time, with status per row.
+- **Metadata queue** — a second worker extracts title, duration, uploader,
+  thumbnail, view count and description for every imported item (no extra
+  download). Display names fill in automatically; a typed name always wins.
+  Failures retry with exponential backoff; permanently unavailable videos are
+  marked and never retried. Re-queuing a download also retries its metadata.
+- **Media tables** — sortable/searchable tables for music and video showing
+  name, play stats, queue state, download status, length, uploader and a
+  thumbnail that opens the full metadata card.
 
-Step 3: Install Dependencies
-1. Navigate to the directory (cd ~/ScenePlay)containing `requirements.sh` and make the script executable:
-   chmod +x requirements.sh
-2. Run the script to install required packages and set up the Python virtual environment:
-   ./requirements.sh
-   This will install essential tools like:
-   - mpg123, mpv, and sqlite3 for media playback and database management.
-   - Python libraries including Flask, SQLAlchemy, and GTTS for web server and audio features.
-   - Raspberry Pi-specific libraries such as rpi_ws281x and adafruit-circuitpython-neopixel for LED control.
+### Players
+Two independent `mpv` instances — one audio-only for music, one fullscreen for
+video — each with its own IPC socket, so music and video mix freely and
+transport commands (and kills) target exactly one player. Volume is passed
+per-item from the scene link settings.
 
-Step 4: (This will run Automatically but you may need to execute it manually) Enable Auto-Start
-1. Navigate to the `ScenePlay/supportFiles` directory.
-2. Make the `setupAutoStart.sh` script executable:
-   chmod +x setupAutoStart.sh
-3. Run the script to set up auto-start and system services:
-   ./setupAutoStart.sh
+### LED lighting
+- **RPiLED** — WS281x strips driven directly from the Pi (patterns defined in
+  the LED Type Model table, assigned per scene via Scene RPiLED).
+- **WLED** — network WLED controllers: per-scene effect, palette, colors,
+  speed and brightness (Scene WLED table). Multiple controllers supported via
+  the Servers table.
 
-3. Usage
---------
+### TTRPG toolkit (`/ttrpg`)
+Login-based, with DM and player roles.
+- **Characters** — full sheets: HP/AC/stats, skills, inventory, notes, feats,
+  armor, weapons, spells, custom resources, conditions, portraits (upload or
+  paste). Players manage their own; the DM sees all.
+- **Battle maps** — grid maps with a background image (upload or paste),
+  drag-and-drop tokens for party and monsters, HP tracking from the sidebar,
+  map effects, movement scale, and multiple maps per session with ordering.
+  The DM sidebar includes the campaign's **Scenes** (with live now-playing
+  pills and volume) so atmosphere control never leaves the map screen.
+- **Monsters** — library plus homebrew, with per-session instances.
+- **Reference libraries** — spells, armor, equipment, feats, classes.
+- **Remote play relay** (optional) — a companion portal (`ScenePlayRemote`)
+  lets remote players see maps, rolls and characters. The local server is the
+  authority; the relay only stages changes for the local box to pick up.
 
-Starting ScenePlay
-Once the installation is complete, ScenePlay should start automatically on boot. If it doesn't, you can manually start it using the terminal:
+### Multi-server & discovery
+`GET /api/server-info` fingerprints a ScenePlay box (name, version,
+capabilities). *Utilities → Ping Network* scans the LAN for other ScenePlay
+servers and WLED devices and fills the Servers table.
+
+### Utilities page
+YouTube import form, **Backfill Metadata** (tags legacy rows with video ids
+and queues them for metadata), network scan, browser-extension downloads, and
+computer restart.
+
+### Table management
+Every data table (Scenes, Scene Music/Video/RPiLED/WLED, Music/Video Media,
+Campaigns, LED Type Model, LED Config, Servers, Cron Schedules) is browser
+-editable, with multi-select checkbox delete — select across pages, one
+confirm, done. Scene tables pick media through a searchable picker with
+thumbnails and durations.
+
+### Cron schedules
+Schedule scene activations by time (e.g. lights on at dusk) via the Cron
+Schedules table.
+
+---
+
+## Installation
+
+Target: Raspberry Pi OS or a Debian/Mint-family Linux box, cloned into your
+home directory.
+
+```bash
+# 1. prep (once): allow passwordless sudo for your user
+sudo visudo        # add:  <username>  ALL=(ALL) NOPASSWD:ALL
+sudo apt-get update && sudo apt-get -y upgrade
+
+# 2. clone INTO ~/ScenePlay (paths assume this location)
+cd ~
+git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
+
+# 3. install everything (apt packages, Python venv, LED libraries)
 cd ~/ScenePlay
-source ~/ScenePlay/bin/activate
-python3 app.py -flask
+chmod +x requirements.sh
+./requirements.sh          # installs mpv, mpg123, sqlite3, socat, Flask, yt-dlp deps…
 
-Accessing the Interface
-- Open a web browser and navigate to the Raspberry Pi’s IP address (e.g., http://ipaddress).
-- This interface allows you to control media playback and LED settings.
+# 4. auto-start on boot (usually done by requirements.sh)
+cd supportFiles && chmod +x setupAutoStart.sh && ./setupAutoStart.sh
+```
 
-4. Features
------------
-- Audio and Video Playback: Use MPV and MPG123 for seamless media playback.
-- LED Lighting: Control WLED or directly connected LED strips.
-- Web Interface: Manage settings and media via an easy-to-use browser interface.
-- Auto-Start and Watchdog: Ensures ScenePlay runs reliably at startup.
+Then open `http://<server-ip>:8086` from any device on the network. The
+SQLite database (`ScenePlay.db`), tables and default data are created on
+first boot.
 
-5. Troubleshooting
--------------------
-- Dependencies not installed? Rerun `requirements.sh` to ensure all required tools and libraries are installed.
-- Service not starting? Check the status of the `sceneplay_watchdog` service:
-  systemctl --user status sceneplay_watchdog.service
-- Interface not accessible? Ensure the correct IP and port are used. Verify that nginx is running:
-  sudo systemctl status nginx
+**Manual start** (production — waitress on port 8086, plus all workers):
 
-6. Chrome Extension
--------------------
-Having access to youtube.com is a must for this application. Access your content using the chrome extension located in the /ChromeExt folder.
-Goto chrome://extensions/ and set your browerser in Developer Mode. Then click on "Load Unpacked" and select the /ChromeExt folder.
-The extension only will work on YouTube pages.
+```bash
+~/ScenePlay/startApp.sh          # runs ws.py from the project root
+```
 
-You can also do it one at a time in Utilites section of ScenePlay, but it makes it much easier using the Chrome Extension.
+**Dev start** from a working copy: `./startLocal.sh` (same thing, local venv),
+or `python3 app.py -flask` for Flask's dev server.
+
+Updating: `git -C ~/ScenePlay stash && git -C ~/ScenePlay pull`, then restart.
+
+---
+
+## Browser extensions (the fast way to import)
+
+While watching any YouTube video, click the ScenePlay extension: it shows the
+saved server, a media-type pick (MP3/MP4), the scene to attach to, and Send.
+If the video is part of a playlist it asks whether you meant the single video
+or the whole playlist. The server address needs no `http://` — `192.168.1.50:8086`
+works — and Save runs a connection test.
+
+- **Chrome**: `chrome://extensions` → Developer mode → *Load unpacked* →
+  select `ChromeExt/`. (Or download `ScenePlay-chrome.zip` from Utilities.)
+- **Firefox**: unsigned extensions persist only on ESR / Developer Edition /
+  Nightly — set `xpinstall.signatures.required=false` in `about:config`, then
+  open `ScenePlay-firefox.xpi` (downloadable from Utilities). Release Firefox
+  requires the free Mozilla signing flow: `web-ext sign --channel=unlisted`
+  with an addons.mozilla.org API key, then distribute the signed `.xpi`.
+
+Rebuild the downloadable packages after changing extension code: `make ext`.
+
+---
+
+## Development
+
+```bash
+make check     # ruff lint + pytest
+make test      # pytest only
+make ext       # package browser extensions into static/ext/
+```
+
+Layout, briefly:
+
+| Path | What |
+|---|---|
+| `app.py` / `ws.py` | Flask app + migrations; waitress entrypoint that also starts workers |
+| `routes/` | Blueprints: player/API (`main.py`), table editors, TTRPG, battle maps, monsters, auth, relay admin |
+| `player.py` / `mpvPlayer.py` | Music / video player worker loops (mpv via `mpvAudio.sh` / `mpv.sh`) |
+| `yt_que.py`, `meta_que.py`, `playlist_que.py` | Download, metadata and playlist-expansion workers |
+| `ytid.py` | YouTube URL/id parsing (dedup identity) |
+| `sql.py` | Queries, queue helpers, scene activation plumbing |
+| `discovery.py`, `relay_*.py` | LAN scan; optional remote-play relay sync |
+| `templates/`, `static/` | UI (server-rendered + grid.js tables), shared JS/CSS |
+| `ChromeExt/`, `FireFoxExt/` | Browser extensions |
+| `tests/` | pytest suite (URL parsing, queue backoff, dedup rules) |
+
+---
+
+## Troubleshooting
+
+- **Dependencies** — rerun `./requirements.sh`.
+- **Service not starting** — `systemctl --user status sceneplay_watchdog.service`.
+- **No metadata/downloads** — both queues need internet; check the media
+  table's Download Status column and `tblPlaylistQueue.last_error` for stuck
+  playlist jobs. *Utilities → Backfill Metadata* re-queues legacy rows.
+- **Transport buttons do nothing** — the players expose IPC sockets at
+  `/tmp/mpvsocket-music` / `/tmp/mpvsocket-video`; `socat` must be installed.
+- **Wrong/old UI after update** — hard-refresh (Ctrl+Shift+R); static JS/CSS
+  is cached by the browser.
 
 Have fun. Don't Panic!!

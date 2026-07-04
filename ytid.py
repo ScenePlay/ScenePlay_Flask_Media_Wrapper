@@ -65,9 +65,10 @@ def canonical_watch_url(vid):
 
 
 def is_playlist_url(url):
-    """True for a playlist the user wants EXPANDED — a `list=` with no single
-    `v=`. A watch?v=X&list=Y URL is treated as a single video (current behavior):
-    the user pasted a specific video that merely happens to sit in a playlist."""
+    """True for a playlist the user wants EXPANDED — a `list=` with NO
+    identifiable single video. Any URL carrying a video id (watch?v=X&list=Y,
+    youtu.be/X?list=Y, shorts/X?list=Y) is treated as that single video: the
+    user shared a specific video that merely happens to sit in a playlist."""
     if not url:
         return False
     try:
@@ -75,4 +76,4 @@ def is_playlist_url(url):
     except ValueError:
         return False
     qs = parse_qs(parts.query)
-    return 'list' in qs and 'v' not in qs
+    return 'list' in qs and youtube_video_id(url) is None

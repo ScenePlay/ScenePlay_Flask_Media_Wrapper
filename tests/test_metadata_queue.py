@@ -49,6 +49,11 @@ class TestPlaylistDetection:
         # watch?v=X&list=Y = the user pasted a specific video; treat as single
         assert is_playlist_url('https://www.youtube.com/watch?v=IzOx0X5FWrc&list=PLabc') is False
 
+    def test_youtu_be_with_list_is_single_video(self):
+        # YouTube's Share button emits these while watching inside a playlist —
+        # the video id lives in the path, so it must NOT be auto-expanded.
+        assert is_playlist_url('https://youtu.be/IzOx0X5FWrc?list=PLabc') is False
+
     def test_plain_video(self):
         assert is_playlist_url('https://youtu.be/IzOx0X5FWrc') is False
 

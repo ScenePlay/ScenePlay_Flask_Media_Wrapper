@@ -484,6 +484,17 @@
       {% if sess.campaign %}
       <p class="small text-muted mb-1" style="font-size:.68rem;">{{ sess.campaign.campaign_name }}</p>
       {% endif %}
+      <!-- Now Playing: polled from /api/nowplaying (battlemap.js) — music and
+           video pills stacked above the active-scene pill, so the whole
+           "what's running" picture persists across page loads. -->
+      <div id="map-np" style="display:none;margin-bottom:3px;">
+        <div id="map-np-song" style="display:none;font-size:.7rem;padding:1px 6px;border-radius:8px;
+             margin-bottom:3px;background:var(--ttrpg-surface);border:1px solid var(--ttrpg-accent);
+             color:var(--ttrpg-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div id="map-np-video" style="display:none;font-size:.7rem;padding:1px 6px;border-radius:8px;
+             margin-bottom:3px;background:var(--ttrpg-surface);border:1px solid var(--ttrpg-accent);
+             color:var(--ttrpg-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      </div>
       <div id="map-active-scene-banner" style="display:none;margin-bottom:4px;">
         <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
                      background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);

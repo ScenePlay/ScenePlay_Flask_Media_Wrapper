@@ -1,30 +1,100 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <img src="icon.png" alt="ScenePlay">
+<meta charset="utf-8">
+<style>
+  body {
+    width: 320px; margin: 0;
+    font-family: system-ui, -apple-system, sans-serif; font-size: 13px;
+    background: #17171c; color: #e8e8ee;
+  }
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+  header img { height: 24px; width: 24px; border-radius: 4px; }
+  header h1 { font-size: 15px; margin: 0; color: #c9a84c; font-weight: 600; }
+  #conn-status { margin-left: auto; font-size: 11px; }
+  main { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 9px; }
+  label { font-size: 11px; color: #9a9aa4; display: block; margin-bottom: 2px; }
+  input[type=text], select {
+    width: 100%; box-sizing: border-box;
+    background: #22222a; color: #e8e8ee;
+    border: 1px solid #3a3a46; border-radius: 4px;
+    padding: 5px 7px; font-size: 13px;
+  }
+  .row { display: flex; gap: 6px; align-items: flex-end; }
+  .row > div { flex: 1; min-width: 0; }
+  button {
+    background: #2c2c36; color: #e8e8ee;
+    border: 1px solid #3a3a46; border-radius: 4px;
+    padding: 5px 9px; cursor: pointer; font-size: 12px; white-space: nowrap;
+  }
+  button:hover { border-color: #c9a84c; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #shareButton { background: #c9a84c; color: #151515; font-weight: 600; font-size: 13px; padding: 8px; }
+  #shareButton:hover { background: #d8b75e; }
+  #status-message { min-height: 16px; font-size: 12px; }
+  .ok { color: #6fdc6f; } .err { color: #ff7a7a; } .busy { color: #9a9aa4; }
+  #yt-warning {
+    display: none; background: #3a2a2a; border: 1px solid #aa5555;
+    border-radius: 4px; padding: 6px 8px; font-size: 12px;
+  }
+  .notice {
+    display: none; background: #34301f; border: 1px solid #c9a84c;
+    border-radius: 4px; padding: 6px 8px; font-size: 12px;
+  }
+  .notice label { display: block; font-size: 12px; color: #e8e8ee; margin: 4px 0 0; cursor: pointer; }
+  .notice input[type=radio] { accent-color: #c9a84c; margin-right: 5px; }
+</style>
 </head>
 <body>
-  <input type="text" id="websiteUrl" placeholder="Enter your website URL">
-  <button id="saveUrlButton">Save URL</button> <!-- New Button to Save URL -->
-  <input type="text" id="name" placeholder="Name of video">
-  <button id="fetchTitleButton">Fetch Video Title</button> <!-- Button to Fetch Title -->
+  <header>
+    <img src="icon.png" alt="">
+    <h1>ScenePlay</h1>
+    <span id="conn-status"></span>
+  </header>
+  <main>
+    <div id="yt-warning">This works on YouTube tabs &mdash; open a video or playlist there.</div>
 
-  <div id="mediaTypeContainer">
-    <label for="mediaType-dropdown">Select a Media Type:</label>
-    <div id="mediaType-dropdown"></div>
-  </div>
+    <div id="pl-choice" class="notice">
+      This video is part of a playlist &mdash; what should be sent?
+      <label><input type="radio" name="plmode" value="video" checked> Just this video</label>
+      <label><input type="radio" name="plmode" value="playlist"> The entire playlist (queues every entry)</label>
+    </div>
+    <div id="pl-note" class="notice">This is a playlist &mdash; sending will queue <b>every entry</b>.</div>
 
-  <div id="dropdownContainer">
-    <label for="scene-dropdown">Select a Scene:</label>
-    <div id="scene-dropdown"></div>
-  </div>
+    <div class="row">
+      <div>
+        <label for="websiteUrl">ScenePlay server (host or host:port)</label>
+        <input type="text" id="websiteUrl" placeholder="192.168.1.50:8086">
+      </div>
+      <button id="saveUrlButton" title="Save and test the connection">Save</button>
+    </div>
 
-  <button id="refreshScenesButton">Refresh Scenes</button> <!-- Button to Refresh Scenes -->
-  <br>
+    <div>
+      <label for="name">Name override (optional &mdash; blank lets metadata name it)</label>
+      <div class="row">
+        <div><input type="text" id="name" placeholder="leave blank to use YouTube metadata"></div>
+        <button id="fetchTitleButton" title="Copy the tab title as the override">Tab title</button>
+      </div>
+    </div>
 
-  <button id="shareButton">Send</button>
-  <div id="status-message"></div>
+    <div class="row">
+      <div>
+        <label for="mediaTypeDropdown">Media type</label>
+        <select id="mediaTypeDropdown">
+          <option value="mp4">MP4 (video)</option>
+          <option value="mp3">MP3 (music)</option>
+        </select>
+      </div>
+      <div>
+        <label for="sceneDropdown">Scene</label>
+        <select id="sceneDropdown"></select>
+      </div>
+      <button id="refreshScenesButton" title="Reload scenes from the server">&#10227;</button>
+    </div>
 
+    <button id="shareButton">Send to ScenePlay</button>
+    <div id="status-message"></div>
+  </main>
   <script src="popup.js"></script>
 </body>
 </html>

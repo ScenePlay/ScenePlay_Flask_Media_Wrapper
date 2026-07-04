@@ -14,7 +14,7 @@ import discovery
 from ytProcess import yt_process
 from pathlib import Path
 from models.scenes import tblscenes as sc
-from routes.main import addMediaToYT_que, sanitize_filename
+from routes.main import addMediaToYT_que
 
 ut = Blueprint('ut', __name__)
 
@@ -40,8 +40,9 @@ def main():
             # playlist from &list= and enqueue_single canonicalizes single videos to
             # watch?v=<id>, so the &list= no longer needs stripping here.
             url = request.form['URLLink']
-            flname = request.form.get('FileName', '')     # optional display-name override
-            flname = sanitize_filename(flname) if flname else ''
+            # Optional display-name override — raw text; only the legacy
+            # no-video-id path turns it into a filename (and scrubs it there).
+            flname = request.form.get('FileName', '').strip()
             scene_ID = request.form.get("Scene")
             mediaType = request.form.get("Media")
             addMediaToYT_que(url, flname, mediaType, scene_ID)

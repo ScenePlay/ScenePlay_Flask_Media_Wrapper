@@ -140,15 +140,14 @@ def server_info():
 def ChromeExtensionAddVideo():
     data = request.get_json()
     url = data['url']
-    flname = data['flname']
-    flname = sanitize_filename(flname)
+    # flname is an OPTIONAL display-name override — kept human-readable; the
+    # legacy no-video-id path scrubs it into a safe filename itself
+    # (sql._enqueue_legacy).
+    flname = (data.get('flname') or '').strip()
     mediaType = data['mediaType']
     scene_ID = data['scene_ID']
     addMediaToYT_que(url,flname, mediaType, scene_ID)
     return jsonify('Success')#jsonf'Success'
-
-def sanitize_filename(filename):
-    return re.sub('[^A-Za-z0-9._-]', '_', filename)
 def addMediaToYT_que(url, flname, mediaType, scene_ID):
     """Intake entry point (form + Chrome extension). A playlist URL is queued for
     background expansion; a single video is deduped by its YouTube id and shares

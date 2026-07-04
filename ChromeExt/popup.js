@@ -1,242 +1,189 @@
-// Function to get the stored URL from Chrome storage
+// ScenePlay popup — sends the active YouTube tab to a ScenePlay server.
+//
+// Architecture notes:
+// - The RAW tab URL goes to the server: it extracts the video id itself, a
+//   watch?v=X&list=Y URL is treated as the single video, and a pure playlist
+//   link (list= with no v=) is expanded track-by-track server-side.
+// - The name field is an OPTIONAL display-name override. Left blank, the
+//   server names media from YouTube metadata — usually what you want.
+// - Server URL / media type / scene picks persist in chrome.storage.sync
+//   under the same keys as v1.0 (websiteUrl / sceneId / mediaType).
 
-function getStoredUrl() {
-  return new Promise((resolve, reject) => {
-    chrome.storage.sync.get('websiteUrl', (data) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(data.websiteUrl || '');
-      }
-    });
-  });
+const $ = id => document.getElementById(id);
+
+// People type "192.168.1.50:8086" or "myhost/" — default the scheme to
+// http:// (LAN servers) and drop trailing slashes so path joins stay clean.
+function normalizeServerUrl(raw) {
+  let u = (raw || '').trim().replace(/\/+$/, '');
+  if (u && !/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u;
 }
 
-// Helper function to shorten and clean the video title
-function shortenTitle(title, maxLength = 50) {
-  // Remove "- YouTube" suffix if it exists
-  const cleanedTitle = title
-  .replace(/\s-\sYouTube$/, '')
-  .replace(/\(\d+\)\s*/, '')
-  .replace(/\./g, '')
-  .replace(/\s+/g, ' ')
-  .replace(/\([^)]+\)/g, '')
-  .replace(/\[[^\]]+\]/g, '')
-  .replace(/\,/g, '')
-  .replace(/\:/g, '')
-  .replace(/\#/g, '')
-  .replace(/\|/g, '')
-  .replace(/\'/g, '')
-  .replace(/\"/g, '')
-  .replace(/\?/g, '')
-  .trim();
-  return cleanedTitle.length > maxLength ? cleanedTitle.slice(0, maxLength) + '' : cleanedTitle;
+const storageGet = keys => new Promise(res => chrome.storage.sync.get(keys, res));
+const storageSet = obj => new Promise(res => chrome.storage.sync.set(obj, res));
+
+async function getServerUrl() {
+  const { websiteUrl } = await storageGet('websiteUrl');
+  return normalizeServerUrl(websiteUrl);   // normalizes legacy stored values too
 }
 
-// Load saved website URL, video title, media type, and scene selection on startup
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+function setStatus(msg, kind) {          // kind: 'ok' | 'err' | 'busy'
+  const el = $('status-message');
+  el.textContent = msg;
+  el.className = kind || '';
+}
+
+function setConnStatus(msg, kind) {
+  const el = $('conn-status');
+  el.textContent = msg;
+  el.className = kind || '';
+}
+
+// /api/server-info is ScenePlay's unauthenticated fingerprint endpoint —
+// answering with app == 'ScenePlay' proves the URL points at the right box.
+async function testConnection() {
+  const server = await getServerUrl();
+  if (!server) { setConnStatus('no server set', 'err'); return false; }
+  setConnStatus('connecting…', 'busy');
+  try {
+    const r = await fetch(`${server}/api/server-info`);
+    const info = await r.json();
+    if (info.app === 'ScenePlay') {
+      setConnStatus(`✓ ${info.server_name} v${info.version}`, 'ok');
+      return true;
+    }
+    setConnStatus('host is not ScenePlay', 'err');
+  } catch (e) {
+    setConnStatus('cannot reach server', 'err');
+  }
+  return false;
+}
+
+// Light cleanup only — this becomes a human display name, not a filename.
+function cleanTitle(title) {
+  return (title || '').replace(/\s-\sYouTube$/, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+function isYouTube(url) {
+  return /(^|\/\/|\.)youtube\.com\//.test(url || '') || /youtu\.be\//.test(url || '');
+}
+
+// Anything the server can parse: watch?v=, playlist ?list=, youtu.be/,
+// /shorts/, /live/, /embed/.
+function isSendable(url) {
+  return /[?&](v|list)=|youtu\.be\/|\/shorts\/|\/live\/|\/embed\//.test(url || '');
+}
+
+// Does the URL carry a single video id, a playlist id, or both? Both means
+// the user is watching a video INSIDE a playlist — they get asked which one
+// they mean (the pl-choice radios).
+function parseYouTubeUrl(url) {
+  const list = (url || '').match(/[?&]list=([A-Za-z0-9_-]+)/);
+  const hasVideo = /[?&]v=[A-Za-z0-9_-]{11}|youtu\.be\/[A-Za-z0-9_-]{11}|\/(shorts|live|embed)\/[A-Za-z0-9_-]{11}/.test(url || '');
+  return { listId: list ? list[1] : null, hasVideo };
+}
+
+async function loadScenes() {
+  const server = await getServerUrl();
+  const dropdown = $('sceneDropdown');
+  dropdown.innerHTML = '';
+  if (!server) return;
+  try {
+    const r = await fetch(`${server}/api/scenes`);
+    const data = await r.json();
+    for (const scene of data.data) {
+      const opt = document.createElement('option');
+      opt.value = scene.scene_ID;
+      opt.textContent = scene.sceneName;
+      dropdown.appendChild(opt);
+    }
+    const { sceneId } = await storageGet('sceneId');
+    if (sceneId) dropdown.value = sceneId;
+  } catch (e) {
+    setStatus('could not load scenes from server', 'err');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  const savedUrl = await getStoredUrl();
-  if (savedUrl) {
-    document.getElementById('websiteUrl').value = savedUrl;
-  }
+  const { websiteUrl, mediaType } = await storageGet(['websiteUrl', 'mediaType']);
+  $('websiteUrl').value = normalizeServerUrl(websiteUrl);
+  $('mediaTypeDropdown').value = mediaType || 'mp4';
 
-  // Automatically fetch, clean, and shorten video title on startup
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && tab.url.includes("youtube.com")) {
-    const shortenedTitle = shortenTitle(tab.title || "Video Title");
-    document.getElementById('name').value = shortenedTitle;
-  }
-
-  // Initialize the media type and scene dropdowns
-  await createMediaTypeDropdown();
-  await createSceneDropdown();
-});
-
-// Only allow the extension on YouTube pages
-chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-  if (!tab.url.includes("youtube.com")) {
-    const alertDiv = document.createElement('div');
-    alertDiv.id = 'alert';
-    alertDiv.style.position = 'fixed';
-    alertDiv.style.top = '0';
-    alertDiv.style.left = '0';
-    alertDiv.style.width = '100%';
-    alertDiv.style.backgroundColor = 'white';
-    alertDiv.style.padding = '10px';
-    alertDiv.style.border = '1px solid black';
-    alertDiv.style.zIndex = '9999';
-    alertDiv.textContent = 'This extension only works on YouTube.';
-    document.body.appendChild(alertDiv);
-    setTimeout(() => {
-      alertDiv.remove();
-      // Open a new tab to YouTube
-      chrome.tabs.create({ url: 'https://www.youtube.com' });
-      // Close the popup immediately
-      window.close();
-    }, 2000);
-  }
-});
-
-// Function to save the website URL
-document.getElementById('saveUrlButton').addEventListener('click', () => {
-  const websiteUrl = document.getElementById('websiteUrl').value;
-  chrome.storage.sync.set({ websiteUrl }, () => {
-    console.log('Website URL saved:', websiteUrl);
-    alert('Website URL saved successfully!');
-  });
-});
-
-// Function to create or refresh the scene dropdown and load saved selection
-async function createSceneDropdown() {
-  const websiteUrl = await getStoredUrl();
-  if (!websiteUrl) {
-    console.error('No website URL found in storage.');
-    return;
-  }
-
-  const url = `${websiteUrl}/api/scenes`;
-  fetch(url)
-    .then(response => response.json())
-    .then(async (data) => {
-      const scenes = data.data;
-      const parentElement = document.getElementById('dropdownContainer');
-      if (!parentElement) {
-        console.error('Dropdown container not found!');
-        return;
-      }
-
-      let dropdown = document.getElementById('sceneDropdown');
-      if (!dropdown) {
-        dropdown = document.createElement('select');
-        dropdown.id = 'sceneDropdown';
-        parentElement.appendChild(dropdown);
-      } else {
-        dropdown.innerHTML = '';
-      }
-
-      for (const scene of scenes) {
-        const option = document.createElement('option');
-        option.value = scene.scene_ID;
-        option.textContent = scene.sceneName;
-        dropdown.appendChild(option);
-      }
-
-      // Load saved scene selection
-      const savedSceneId = await new Promise((resolve) => {
-        chrome.storage.sync.get('sceneId', (data) => resolve(data.sceneId || ''));
-      });
-      if (savedSceneId) {
-        dropdown.value = savedSceneId;
-      }
-
-      // Save scene selection on change
-      dropdown.addEventListener('change', () => {
-        chrome.storage.sync.set({ sceneId: dropdown.value }, () => {
-          console.log('Scene selection saved:', dropdown.value);
-        });
-      });
-    })
-    .catch(error => console.error('Error fetching scenes:', error));
-}
-
-// Function to create media type dropdown with mp3 and mp4 options and load saved selection
-async function createMediaTypeDropdown() {
-  const mediaTypes = ['mp3', 'mp4'];
-  const dropdown = document.createElement('select');
-  dropdown.id = 'mediaTypeDropdown';
-
-  const parentElement = document.getElementById('mediaTypeContainer');
-  if (!parentElement) {
-    console.error('Media type container not found!');
-    return;
-  }
-
-  for (const type of mediaTypes) {
-    const option = document.createElement('option');
-    option.value = type;
-    option.textContent = type.toUpperCase();
-    dropdown.appendChild(option);
-  }
-
-  parentElement.appendChild(dropdown);
-
-  // Load saved media type selection from storage
-  const savedMediaType = await new Promise((resolve) => {
-    chrome.storage.sync.get('mediaType', (data) => resolve(data.mediaType || 'mp4'));
-  });
-  dropdown.value = savedMediaType;
-
-  // Save media type selection on change
-  dropdown.addEventListener('change', () => {
-    chrome.storage.sync.set({ mediaType: dropdown.value }, () => {
-      console.log('Media type saved:', dropdown.value);
-    });
-  });
-}
-
-// Add refresh scenes button functionality
-document.getElementById('refreshScenesButton').addEventListener('click', createSceneDropdown);
-
-// Fetch and clean video title on demand
-document.getElementById('fetchTitleButton').addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const title = shortenTitle(tab.title || "Video Title");
-  document.getElementById('name').value = title;
-});
-
-// Share data to /api/ChromeExtensionAddVideo
-document.getElementById('shareButton').addEventListener('click', async () => {
-  const websiteUrl = await getStoredUrl();
-  if (!websiteUrl) {
-    alert('Please enter a valid website URL.');
-    return;
-  }
-const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-let videoId; // Declare a variable to store the extracted video ID
-
-try {
-  const match = tab.url.match(/v=([^&]+)/);
-  if (match) {
-    videoId = match[1];
+  const tab = await activeTab();
+  if (!isYouTube(tab && tab.url)) {
+    $('yt-warning').style.display = 'block';
+    $('shareButton').disabled = true;
   } else {
-    throw new Error("No video ID found in the URL");
+    const info = parseYouTubeUrl(tab.url);
+    if (info.hasVideo && info.listId) {
+      $('pl-choice').style.display = 'block';   // ask: this video or the playlist?
+    } else if (info.listId) {
+      $('pl-note').style.display = 'block';     // pure playlist — warn it fans out
+    }
   }
-} catch (error) {
-  alert("Error: " + error.message); // Display an alert with the error message
-}
 
-if (videoId) {
-  // Use the extracted video ID here (e.g., console.log(videoId))
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = 'https://www.youtube.com/watch?v=' + tab.url.match(/v=([^&]+)/)[1];
-  const sceneDropdown = document.getElementById('sceneDropdown');
-  const scene_ID = sceneDropdown ? sceneDropdown.value : '';
-  const mediaTypeDropdown = document.getElementById('mediaTypeDropdown');
-  const mediaType = mediaTypeDropdown ? mediaTypeDropdown.value : '';
-  const flname = document.getElementById('name').value;
-  const statusMessage = document.getElementById('status-message');
+  testConnection();
+  loadScenes();
+});
 
-  const data = {
+$('saveUrlButton').addEventListener('click', async () => {
+  const normalized = normalizeServerUrl($('websiteUrl').value);
+  $('websiteUrl').value = normalized;      // show what will actually be used
+  await storageSet({ websiteUrl: normalized });
+  if (await testConnection()) loadScenes();
+});
+
+$('sceneDropdown').addEventListener('change', e => storageSet({ sceneId: e.target.value }));
+$('mediaTypeDropdown').addEventListener('change', e => storageSet({ mediaType: e.target.value }));
+$('refreshScenesButton').addEventListener('click', loadScenes);
+
+$('fetchTitleButton').addEventListener('click', async () => {
+  const tab = await activeTab();
+  $('name').value = cleanTitle(tab && tab.title);
+});
+
+$('shareButton').addEventListener('click', async () => {
+  const server = await getServerUrl();
+  if (!server) { setStatus('set the server URL first', 'err'); return; }
+  const tab = await activeTab();
+  if (!isSendable(tab && tab.url)) {
+    setStatus('not a YouTube video or playlist URL', 'err');
+    return;
+  }
+
+  // A video inside a playlist sends whichever the user picked; the server
+  // treats a URL with a video id as that single video, so "entire playlist"
+  // is sent as a bare playlist?list= URL to trigger expansion.
+  const info = parseYouTubeUrl(tab.url);
+  let url = tab.url;
+  let asPlaylist = !!info.listId && !info.hasVideo;
+  if (info.hasVideo && info.listId) {
+    asPlaylist = document.querySelector('input[name="plmode"]:checked').value === 'playlist';
+    if (asPlaylist) url = 'https://www.youtube.com/playlist?list=' + info.listId;
+  }
+
+  const payload = {
     url,
-    flname,
-    mediaType,
-    scene_ID
+    flname: $('name').value.trim(),
+    mediaType: $('mediaTypeDropdown').value,
+    scene_ID: $('sceneDropdown').value || '',
   };
-
-  fetch(`${websiteUrl}/api/ChromeExtensionAddVideo`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  })
-  .then(response => response.json())
-  .then(result => {
-    console.log('Data sent successfully:', result);
-    statusMessage.style.backgroundColor = 'limegreen';
-    statusMessage.textContent = 'Request successful!';
-  
-  })
-  .catch(error => console.error('Error sending data:', error));
-  statusMessage.style.backgroundColor = 'pink';
-  statusMessage.textContent = 'Request failed!';
-}
+  setStatus('sending…', 'busy');
+  try {
+    const r = await fetch(`${server}/api/ChromeExtensionAddVideo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await r.json();
+    setStatus(asPlaylist ? 'sent — playlist queued for expansion' : 'sent — download queued', 'ok');
+  } catch (e) {
+    setStatus('send failed: ' + e.message, 'err');
+  }
 });

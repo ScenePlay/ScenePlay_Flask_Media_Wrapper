@@ -267,7 +267,12 @@ def enqueue_single(url, mediaType, scene_ID, flname=''):
 
 def _enqueue_legacy(url, mediaType, scene_ID, flname):
     """Old behavior for non-parseable URLs: name-based file, no dedup."""
+    import re as _re
     from pathlib import Path as _Path
+    # Only HERE does flname become a filename (no video id to name the file
+    # after) — scrub it. The id-based path keeps the raw text as a human
+    # displayName override, so callers no longer pre-sanitize.
+    flname = _re.sub('[^A-Za-z0-9._-]', '_', flname)
     title = flname + '.' + mediaType
     if mediaType == 'mp3':
         path = str(_Path.home()) + "/Music/SP/"

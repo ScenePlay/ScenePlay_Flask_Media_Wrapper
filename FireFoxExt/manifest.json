@@ -1,16 +1,20 @@
 {
   "manifest_version": 3,
   "name": "ScenePlay",
-  "version": "1.0",
-  "description": "An extension for sharing YouTube scenes.",
-  "permissions": ["activeTab", "storage"],
+  "version": "1.1",
+  "description": "Send the current YouTube video or playlist to a ScenePlay server.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_icon": "icon.png" 
+    "default_icon": "icon.png"
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "sceneplay@gmail.com" 
+      "id": "sceneplay2024@gmail.com",
+      "strict_min_version": "109.0"
     }
   }
 }

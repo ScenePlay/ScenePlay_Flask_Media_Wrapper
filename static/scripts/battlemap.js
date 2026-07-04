@@ -1837,6 +1837,50 @@ function mapAllStop() {
   if (banner) banner.style.display = 'none';
 }
 
+// ── Now playing (Scenes sidebar) ──────────────────────────────────────────────
+// Polled from the server so the active scene + current song/video PERSIST
+// across page loads and track changes made from any screen (home bar, another
+// DM tab). The click handlers above still update instantly; the poll corrects.
+function mapRefreshNowPlaying() {
+  const banner = document.getElementById('map-active-scene-banner');
+  const npBox  = document.getElementById('map-np');
+  if (!banner && !npBox) return;   // no scenes sidebar on this view
+  fetch('/api/nowplaying')
+    .then(r => r.json())
+    .then(np => {
+      if (banner) {
+        const nameEl = document.getElementById('map-active-scene-name');
+        if (np.scene) {
+          if (nameEl) nameEl.textContent = np.scene.name;
+          banner.style.display = '';
+        } else {
+          banner.style.display = 'none';
+        }
+        // Re-highlight the active scene's button (matched by id, so it also
+        // lights up on a fresh page load).
+        document.querySelectorAll('.map-scene-btn').forEach(b => {
+          const on = np.scene && parseInt(b.dataset.sceneId) === np.scene.id;
+          b.style.borderColor = on ? 'var(--ttrpg-accent)' : '#444';
+          b.style.color       = on ? 'var(--ttrpg-accent)' : 'var(--ttrpg-text)';
+        });
+      }
+      if (npBox) {
+        // textContent — titles come from YouTube metadata. Each pill hides
+        // individually (an empty bordered pill would render as a stray blob).
+        const s = document.getElementById('map-np-song');
+        const v = document.getElementById('map-np-video');
+        s.textContent = np.song  ? '♫ ' + np.song.name  : '';
+        v.textContent = np.video ? '▶ ' + np.video.name : '';
+        s.style.display = np.song  ? '' : 'none';
+        v.style.display = np.video ? '' : 'none';
+        npBox.style.display = (np.song || np.video) ? '' : 'none';
+      }
+    })
+    .catch(() => {});   // server restarting — keep last shown values
+}
+mapRefreshNowPlaying();
+setInterval(mapRefreshNowPlaying, 4000);
+
 // ── Grid cell size ─────────────────────────────────────────────────────────────
 
 function setCellPx(val) {
