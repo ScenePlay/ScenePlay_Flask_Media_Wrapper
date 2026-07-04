@@ -4,6 +4,14 @@
             <div>
                 <h1>Utilities</h1>
             </div>
+            {% with messages = get_flashed_messages() %}
+              {% if messages %}
+                {% for m in messages %}
+                <div style="margin:6px 12px;padding:8px 12px;border:1px solid var(--sp-accent);
+                            border-radius:6px;background:var(--sp-surface);color:var(--sp-text);">{{ m }}</div>
+                {% endfor %}
+              {% endif %}
+            {% endwith %}
             <div id="content" align="left">
                 <form method="post" action="{{ url_for('ut.main') }}" class="form">
                     <div  style="border: 3px solid black;"> 
@@ -42,13 +50,6 @@
                      <input type="submit" name="submit" value="loadtestdata"/> -->
                      <br />
                      <div style="border: 3px solid black;">
-                     <h3>Find Servers</h3>
-                     <!-- Ping Network moved to the Servers page, where the scan
-                          shows a live progress bar and the results land. -->
-                     <p style="margin:6px 0;">Moved to <a href="{{ url_for('ip.edittbl') }}">Servers</a> &mdash; run the network scan there with a progress bar.</p>
-                     </div>
-                     <br />
-                     <div style="border: 3px solid black;">
                      <h3>Browser Extensions</h3>
                      <!-- Artifacts built by `make ext` (scripts/build_extensions.sh). -->
                      <a href="{{ url_for('static', filename='ext/ScenePlay-firefox.xpi') }}">ScenePlay-firefox.xpi</a>
@@ -65,12 +66,79 @@
                      </div>
                      <br />
                      <div style="border: 3px solid black;">
-                     <label for="form"><h3 >This Server</h3></label>
-                     <input type="submit" name="submit" value="Restart Computer" onclick="return confirm('Are you sure you want to restart the computer?');"/>
-                     <br />
-                     <br />
+                     <h3>Backup &amp; Restore</h3>
+                     <!-- Light archives: DB snapshot + uploaded images. Media
+                          re-downloads through the yt-dlp pipeline on restore. -->
+                     <input type="submit" name="submit" value="Create Backup"/>
+                     <input type="submit" name="submit"
+                            value="{{ 'Disable Nightly Backup' if backup_auto else 'Enable Nightly Backup' }}"/>
+                     <span style="font-size:.85em;color:var(--sp-muted);">
+                       Nightly backup is {{ 'ON — keeps the last 7 automatic snapshots' if backup_auto else 'off' }}.
+                     </span>
+                     {% if backups %}
+                     <table style="margin:8px 0;font-size:.9em;">
+                       {% for b in backups %}
+                       <tr>
+                         <td style="border:none;padding-right:12px;"><a href="{{ url_for('ut.backup_download', name=b.name) }}">{{ b.name }}</a></td>
+                         <td style="border:none;padding-right:12px;color:var(--sp-muted);">{{ b.created }}</td>
+                         <td style="border:none;padding-right:12px;color:var(--sp-muted);">{{ '%.1f'|format(b.size / 1048576) }} MB</td>
+                         <td style="border:none;"><input type="button" class="btn btn-primary btn-sm" value="Delete"
+                                onclick="deleteBackup('{{ b.name }}')"></td>
+                       </tr>
+                       {% endfor %}
+                     </table>
+                     {% else %}
+                     <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">No backups yet.</p>
+                     {% endif %}
                      </div>
                 </form>
+
+                <!-- Import: its own form (multipart upload can't nest in the
+                     main form). Merge folds shared scenes/media in with dedup;
+                     Replace swaps the whole database (safety snapshot first). -->
+                <form method="post" action="{{ url_for('ut.backup_import') }}"
+                      enctype="multipart/form-data" id="backupImportForm">
+                    <div style="border: 3px solid black;">
+                    <h3>Import Backup</h3>
+                    <input type="file" name="backupFile" accept=".zip" required>
+                    <br />
+                    <label style="display:inline-block;margin:6px 12px 6px 0;">
+                      <input type="radio" name="mode" value="merge" checked>
+                      Merge — add its campaigns/scenes/media to this server (dedup by video id / name)
+                    </label>
+                    <br />
+                    <label style="display:inline-block;margin:0 12px 6px 0;">
+                      <input type="radio" name="mode" value="replace">
+                      Replace — restore the ENTIRE database from this backup (current data snapshotted first)
+                    </label>
+                    <br />
+                    <input type="submit" value="Import"
+                           onclick="return (document.querySelector('input[name=mode]:checked').value !== 'replace')
+                                    || confirm('Replace ALL data on this server with the backup? A safety snapshot of the current state is taken first, and the app must be restarted afterwards.');">
+                    </div>
+                </form>
+                <br />
+
+                <!-- Own form: the restart button sits below the import section,
+                     outside the main utilities form. -->
+                <form method="post" action="{{ url_for('ut.main') }}">
+                    <div style="border: 3px solid black;">
+                    <h3>This Server</h3>
+                    <input type="submit" name="submit" value="Restart Computer" onclick="return confirm('Are you sure you want to restart the computer?');"/>
+                    <br />
+                    <br />
+                    </div>
+                </form>
+                <script>
+                  function deleteBackup(name) {
+                    if (!confirm('Delete backup ' + name + '?')) return;
+                    fetch('/api/backupdelete', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({name: name}),
+                    }).then(r => { if (r.ok) window.location.reload(); else alert('Delete failed'); });
+                  }
+                </script>
             </div>
         </div>
 {% endblock %}

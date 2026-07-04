@@ -351,6 +351,11 @@ def startTheadPlayer():
     mq.start()
     pq = Process(target=PlaylistQue_threader)
     pq.start()
+    # Nightly backup scheduler — no-op unless backup_auto is switched on
+    # (Utilities page). Same detached-worker pattern as the queues above.
+    from backup_restore import Backup_threader
+    bk = Process(target=Backup_threader)
+    bk.start()
     appsettingAudioPlayFlagUpdate(1)
     appsettingVideoPlayFlagUpdate(1)
     appsettingYT_QuePlayFlagUpdate(1)

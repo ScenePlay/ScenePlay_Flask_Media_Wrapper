@@ -14,6 +14,8 @@ from ytProcess import yt_process
 from pathlib import Path
 from models.scenes import tblscenes as sc
 from routes.main import addMediaToYT_que
+from flask import send_from_directory
+import backup_restore
 
 ut = Blueprint('ut', __name__)
 
@@ -55,6 +57,15 @@ def main():
             flash(f"Backfill: tagged {summary['tagged']}, duplicates skipped "
                   f"{summary['duplicates_skipped']}, unparseable {summary['unparseable']}.")
             return  redirect(url_for('main.home'))
+        elif request.form['submit'] == 'Create Backup':
+            path = backup_restore.create_backup(label='manual')
+            flash(f"Backup created: {os.path.basename(path)}")
+            return redirect(url_for('ut.main'))
+        elif request.form['submit'] in ('Enable Nightly Backup', 'Disable Nightly Backup'):
+            enable = request.form['submit'].startswith('Enable')
+            appsettingSet('backup_auto', 1 if enable else 0, 'int')
+            flash(f"Nightly backup {'enabled' if enable else 'disabled'}.")
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
             restart_computer()
             return  redirect(url_for('main.home'))
@@ -66,9 +77,73 @@ def main():
     data = select_data_stats()#arr)
     volume = currentvolume()
     keep_music = appsettingGetKeepMusicPlaying()
-    return render_template('utils.html', items=data, volume=volume, Scenes=scenes, keep_music=keep_music)
+    backups = backup_restore.list_backups()
+    backup_auto = str(appsettingGet('backup_auto', '0') or '0') == '1'
+    return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
+                           keep_music=keep_music, backups=backups, backup_auto=backup_auto)
 
     
+def _safe_backup_name(name):
+    """Backup filenames only — no separators, must match what we generate."""
+    return ('/' not in name and '\\' not in name
+            and name.startswith('sceneplay-') and name.endswith('.zip'))
+
+
+@ut.route('/backups/<name>')
+def backup_download(name):
+    if not _safe_backup_name(name):
+        abort(404)
+    return send_from_directory(backup_restore.BACKUP_DIR, name, as_attachment=True)
+
+
+@ut.route('/api/backupdelete', methods=['POST'])
+def backup_delete():
+    name = (request.get_json() or {}).get('name', '')
+    if not _safe_backup_name(name):
+        abort(400)
+    try:
+        os.remove(os.path.join(backup_restore.BACKUP_DIR, name))
+    except OSError:
+        abort(404)
+    return jsonify({'deleted': name})
+
+
+@ut.route('/backup/import', methods=['POST'])
+def backup_import():
+    """Restore an uploaded archive. mode=replace swaps the whole database
+    (safety snapshot taken first); mode=merge folds campaigns/scenes/media in
+    with dedup. Either way missing media re-queues for download."""
+    f = request.files.get('backupFile')
+    mode = request.form.get('mode', 'merge')
+    if not f or not f.filename:
+        flash('Import: no file selected.')
+        return redirect(url_for('ut.main'))
+    os.makedirs(backup_restore.BACKUP_DIR, exist_ok=True)
+    staged = os.path.join(backup_restore.BACKUP_DIR, '.upload.zip')
+    f.save(staged)
+    try:
+        if mode == 'replace':
+            summary = backup_restore.restore_replace(staged)
+            db.engine.dispose()   # drop pooled connections to the swapped-out file
+            flash(f"Restored from {summary['from']} (backup of {summary['created_at']}): "
+                  f"{summary['uploads_restored']} images, {summary['requeued_downloads']} downloads "
+                  f"re-queued. Safety copy: {summary['safety_backup']}. RESTART the app now.")
+        else:
+            summary = backup_restore.restore_merge(staged)
+            flash(f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
+                  f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
+                  f"{summary['links']} scene links, {summary['uploads_added']} images "
+                  f"({summary['skipped_legacy']} legacy rows skipped). New media is downloading.")
+    except ValueError as e:
+        flash(f'Import failed: {e}')
+    finally:
+        try:
+            os.remove(staged)
+        except OSError:
+            pass
+    return redirect(url_for('ut.main'))
+
+
 @ut.route('/api/keepmusicplaying', methods=['POST'])
 def toggle_keep_music():
     current = appsettingGetKeepMusicPlaying()

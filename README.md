@@ -87,10 +87,25 @@ Login-based, with DM and player roles.
 capabilities). *Utilities → Ping Network* scans the LAN for other ScenePlay
 servers and WLED devices and fills the Servers table.
 
+### Backup, export & import
+Backups are light archives — database snapshot plus uploaded images (portraits,
+map backgrounds), **not** the media files: every media row keeps its YouTube
+URL, so a restore re-queues missing downloads through the normal pipeline.
+- **Create Backup** on the Utilities page (download/delete from the list
+  there), or enable the **nightly automatic snapshot** (keeps the last 7).
+- **Import → Replace** — full restore for disaster recovery or moving to a new
+  box. A safety snapshot of the current state is taken first, media paths are
+  rewritten for the new machine, and missing files re-download automatically.
+- **Import → Merge** — share content between servers: the archive's campaigns,
+  scenes, media and scene-links fold into the live library, deduped by video
+  id and by name (scenes/campaigns/genres). Metadata rides along; new media
+  queues for download. LED patterns and TTRPG data are box-specific and only
+  move with Replace.
+
 ### Utilities page
 YouTube import form, **Backfill Metadata** (tags legacy rows with video ids
-and queues them for metadata), network scan, browser-extension downloads, and
-computer restart.
+and queues them for metadata), **Backup &amp; Restore**, browser-extension
+downloads, and computer restart. (The network scan lives on the Servers page.)
 
 ### Table management
 Every data table (Scenes, Scene Music/Video/RPiLED/WLED, Music/Video Media,
