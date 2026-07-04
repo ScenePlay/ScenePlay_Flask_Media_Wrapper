@@ -321,11 +321,35 @@ button.gridjs-sort-desc {
 }
 
 /* ── Theme picker panel ────────────────────────────────────────────────── */
+.sp-theme-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+#sp-theme-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.15rem;
+    color: var(--sp-accent);
+    padding: .35rem .5rem;
+}
 #sp-theme-panel {
+    display: none;               /* toggled inline by theme.js spTogglePicker() */
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 9999;
+    padding: 14px;
+    width: 290px;
     background: var(--sp-surface);
     border: 1px solid var(--sp-accent);
     border-radius: 8px;
     box-shadow: 0 4px 24px rgba(0,0,0,.8);
+}
+#sp-swatches {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
 }
 #sp-theme-panel .sp-panel-title {
     font-size: .72rem;
@@ -334,6 +358,153 @@ button.gridjs-sort-desc {
     color: var(--sp-accent);
     margin-bottom: 12px;
     text-transform: uppercase;
+}
+
+/* ── Player bar (base.html header) ────────────────────────────────────────
+   One flex row of sections split by faint dividers:
+   volume | now playing | transport | queue counts | stop.
+   Bootstrap utilities lay out the button rows inside each section. */
+.sp-player-bar {
+    display: flex;
+    align-items: center;
+}
+.sp-player-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 18px;
+}
+.sp-player-section:first-child { padding-left: 0; }
+.sp-player-section + .sp-player-section {
+    border-left: 1px solid var(--sp-border);
+}
+
+#volume {
+    font-size: 1rem;
+    line-height: 1.5;
+}
+.sp-volume-slider {
+    width: 500px;
+    max-width: 100%;
+    accent-color: var(--sp-accent);
+}
+
+.sp-np-scene {
+    color: var(--sp-muted);
+    font-size: .8em;
+}
+.sp-np-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 340px;
+}
+.sp-np-thumb {
+    height: 40px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: none;               /* shown by npRow() once metadata supplies art */
+}
+.sp-np-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sp-np-muted { color: var(--sp-muted); }
+
+.sp-keep-label {
+    font-size: .8em;
+    color: var(--sp-muted);
+}
+
+/* ── Media picker (scene tables) ──────────────────────────────────────────
+   .sp-picker-btn is the per-row face (thumb + short name); #spMediaPicker is
+   the ONE shared floating panel site.js builds on open and removes on close. */
+.sp-picker-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--sp-input-bg);
+    color: var(--sp-text);
+    border: 1px solid var(--sp-border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    max-width: 300px;
+}
+.sp-picker-btn img {
+    height: 20px;
+    border-radius: 2px;
+    flex: none;
+}
+.sp-picker-btn span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#spMediaPicker {
+    position: fixed;
+    z-index: 1070;
+    width: 400px;
+    max-width: 95vw;
+    max-height: 55vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-accent);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.6);
+}
+#spMediaPicker input {
+    margin: 8px;
+    padding: 4px 8px;
+    background: var(--sp-input-bg);
+    color: var(--sp-text);
+    border: 1px solid var(--sp-border);
+    border-radius: 4px;
+}
+.sp-picker-list {
+    overflow-y: auto;
+    padding: 0 4px 6px;
+}
+.sp-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.sp-picker-row:hover {
+    background: var(--sp-hover-bg);
+    color: var(--sp-hover-text);
+}
+.sp-picker-row.current { outline: 1px solid var(--sp-accent); }
+.sp-picker-row img {
+    height: 24px;
+    border-radius: 3px;
+    flex: none;
+}
+.sp-picker-row .nm {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sp-picker-row .dur {
+    color: var(--sp-muted);
+    font-size: .85em;
+    flex: none;
+}
+
+/* ── Multi-select delete checkboxes (all gridjs tables) ─────────────────── */
+.sp-row-check {
+    width: 17px;
+    height: 17px;
+    cursor: pointer;
+    accent-color: var(--sp-accent);
 }
 
 /* ── Root screen: all fonts black ─────────────────────────────────────────

@@ -123,18 +123,12 @@
               return gridjs.html(active.outerHTML);
             }
           },
-          {
-            id: 'delete', name: 'Delete', sort: false,
-            formatter: function (cellData, row) {
-              const btn = document.createElement("input");
-              btn.name = "Dlete";
-              btn.id = "Dlete_ID_" + row.cells[0].data.toString();
-              btn.setAttribute("type", "submit");
-              btn.setAttribute("onclick", "dlete(event)");
-              btn.setAttribute("value", "Delete");
-              btn.className = "btn btn-danger";
-              return gridjs.html(btn.outerHTML);
-            }
+          {id: 'dlete', name: 'Del', sort: false,
+          formatter: function (cellData, row) {
+              // Multi-select delete: checkbox feeds the shared Set in site.js;
+              // "Delete Selected" posts each id to the single-delete endpoint.
+              return gridjs.html(spCheckHtml(row.cells[0].data));
+              }
           },
         ],
         server: {
@@ -165,6 +159,7 @@
           },
         },
       }).render(tableDiv);
+      spInitBulkDelete('/api/cronscheduledelrow', primeKey);
 
       let savedValue;
 
@@ -215,30 +210,6 @@
         }
       }
 
-      async function dlete(event) {
-        if (confirm('Are you sure you want to DELETE this schedule?')) {
-          const ev = event.target;
-          const idParts = ev.id.split("_ID_");
-          if (ev.id.includes("Dlete_") && idParts.length > 1) {
-            const rowId = idParts[1];
-            try {
-              const response = await fetch('/api/cronscheduledelrow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [primeKey]: rowId }),
-              });
-              if (response.ok) {
-                window.location.reload();
-              } else {
-                alert('Failed to delete: ' + response.statusText);
-              }
-            } catch (error) {
-              console.error('Error during delete:', error);
-              alert('An error occurred while trying to delete the row.');
-            }
-          }
-        }
-      }
     </script>
   </body>
 {% endblock %}

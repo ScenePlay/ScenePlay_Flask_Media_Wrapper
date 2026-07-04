@@ -322,15 +322,32 @@ def isAlive():
     return jsonify({'isAlive': 'true', 'pid': arr[0], 'WatchManage': watchManage})
 
 
+# Transport controls: each mpv instance is addressed by its own IPC socket
+# (video: mpvsocket-video / music: mpvsocket-music, see mpv.sh / mpvAudio.sh).
+# socat against a dead socket fails silently — same as before when idle.
+
 @main.route('/video_seek', methods=['POST'])
 def video_seek():
     value = request.json['value']
-    command = f"echo seek {value} | socat - /tmp/mpvsocket"
+    command = f"echo seek {value} | socat - /tmp/mpvsocket-video"
     os.system(command)
     return jsonify({'success': True})
 
 @main.route('/video_stopstart', methods=['POST'])
 def video_stopstart():
-    command = f"echo cycle pause | socat - /tmp/mpvsocket"
+    command = f"echo cycle pause | socat - /tmp/mpvsocket-video"
+    os.system(command)
+    return jsonify({'success': True})
+
+@main.route('/music_seek', methods=['POST'])
+def music_seek():
+    value = request.json['value']
+    command = f"echo seek {value} | socat - /tmp/mpvsocket-music"
+    os.system(command)
+    return jsonify({'success': True})
+
+@main.route('/music_stopstart', methods=['POST'])
+def music_stopstart():
+    command = f"echo cycle pause | socat - /tmp/mpvsocket-music"
     os.system(command)
     return jsonify({'success': True})

@@ -124,6 +124,13 @@
               return gridjs.html(active.outerHTML);
               } 
           },
+          {id: 'dlete', name: 'Del', sort: false,
+          formatter: function (cellData, row) {
+              // Multi-select delete: checkbox feeds the shared Set in site.js;
+              // "Delete Selected" posts each id to the single-delete endpoint.
+              return gridjs.html(spCheckHtml(row.cells[0].data));
+              }
+          },
         ],
         server: {
           url: '/api/ledconfig',
@@ -158,6 +165,7 @@
           },
         },
       }).render(tableDiv);
+      spInitBulkDelete('/api/ledconfigdelrow', primeKey);
 
       let savedValue;
 

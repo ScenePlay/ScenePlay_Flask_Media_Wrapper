@@ -235,6 +235,17 @@ with app.app_context():
             db.session.rollback()
             print(f'{_mtbl} metadata-column migration skipped:', _e)
 
+    # Lightweight migration: retry backoff gate on the playlist queue (fresh DBs
+    # get it in create_table()). Idempotent — added only if absent.
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblPlaylistQueue)"))]
+        if _cols and 'next_retry' not in _cols:
+            db.session.execute(_sa_text("ALTER TABLE tblPlaylistQueue ADD COLUMN next_retry TEXT"))
+        db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('tblPlaylistQueue.next_retry migration skipped:', _e)
+
     # The partial UNIQUE index on videoId must exist AFTER the ALTERs above (a
     # fresh DB gets it in create_table(); an upgraded DB needs it here).
     for _mtbl, _idx in (('tblMusic', 'idx_tblMusic_videoId'),

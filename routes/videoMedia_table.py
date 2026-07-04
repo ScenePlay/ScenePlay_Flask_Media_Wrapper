@@ -116,6 +116,9 @@ def update():
             setattr(TSP, field, data[field])
             if str(field) == 'dnLoadStatus' and int(data['dnLoadStatus']) == 1:
                 appsettingYT_QuePlayFlagUpdate(1)
+                # Re-queuing a download also retries metadata that never landed
+                # or failed out — the manual "try again" path (self-guarded).
+                requeue_metadata_if_missing('video', data[primeKey])
             if str(field) == 'que' and int(data['que']) == 1:
                 appsettingVideoPlayFlagUpdate(1)
     db.session.commit()

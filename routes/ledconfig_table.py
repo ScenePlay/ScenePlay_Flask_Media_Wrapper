@@ -92,6 +92,21 @@ def update():
     return '', 204
 
 
+@lcf.route('/api/ledconfigdelrow', methods=['POST'])
+def ledconfigdelrow():
+    # First real delete for this table — the old commented stub below pointed
+    # at the wrong endpoint entirely. Serves the shared multi-select delete.
+    data = request.get_json()
+    if primeKey not in data:
+        abort(400)
+    row = db.session.get(tbl, data[primeKey])
+    if row is None:
+        abort(404)
+    db.session.delete(row)
+    db.session.commit()
+    return 'tblledconfig row ' + str(data[primeKey]) + ' has been deleted'
+
+
 # @lcf.route('/api/ledtypemodeladdrow')
 # def ledtypemodeladdrow():
 #     row = [' ','{"type": "solid","color": [0,0,0]}']

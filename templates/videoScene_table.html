@@ -139,50 +139,45 @@ let sceneCache = null;
         return videoCachePromise;
       }
 
-      function videoNameFromCache(videoId) {
+      // /api/videomedia rows carry displayName + thumbnail + duration
+      // (metadata), so the picker face and list need no extra endpoint.
+      function videoFromCache(videoId) {
         if (!videoCache) return null;
-        const found = videoCache.find(item => parseInt(item.video_ID) === parseInt(videoId));
-        return found ? found.title : null;
+        return videoCache.find(item => parseInt(item.video_ID) === parseInt(videoId)) || null;
+      }
+
+      function videoLabel(item) {
+        return shortMediaName(item.displayName || item.title);
       }
 
       function updateVideoPlaceholders() {
-        document.querySelectorAll('select[data-current-video-id]:not([data-loaded="true"])').forEach(el => {
-          const name = videoNameFromCache(parseInt(el.dataset.currentVideoId));
-          if (name && el.options.length === 1) el.options[0].textContent = name;
+        document.querySelectorAll('button[data-current-video-id]').forEach(el => {
+          const it = videoFromCache(parseInt(el.dataset.currentVideoId));
+          if (it) spSetPickerBtn(el, videoLabel(it), spSmallThumb(it.thumbnail));
         });
       }
 
       // Fetch videos in background so placeholders show real titles without blocking render
       fetchVideos().then(updateVideoPlaceholders).catch(err => console.error('Error fetching videos:', err));
 
-      async function loadVideoOptions(selectEl) {
-        if (selectEl.dataset.loaded === 'true') return;
-
-        try {
-          await fetchVideos();
-        } catch (error) {
-          console.error('Error fetching videos:', error);
-          return;
-        }
-
-        const currentVideoId = parseInt(selectEl.dataset.currentVideoId);
-        selectEl.innerHTML = '';
-
-        const emptyOpt = document.createElement('option');
-        emptyOpt.value = '0';
-        emptyOpt.textContent = '';
-        selectEl.appendChild(emptyOpt);
-
-        videoCache.forEach(item => {
-          const opt = document.createElement('option');
-          opt.value = item.video_ID;
-          opt.textContent = item.title;
-          if (parseInt(item.video_ID) === currentVideoId) opt.selected = true;
-          selectEl.appendChild(opt);
-        });
-
-        selectEl.dataset.loaded = 'true';
-        updateVideoPlaceholders();
+      // Opens the ONE shared picker panel (site.js) — replaces the per-row
+      // option lists that crashed the page at library size.
+      function openVideoPicker(btn) {
+        fetchVideos().then(items => {
+          spOpenMediaPicker(btn, {
+            items: items,
+            current: parseInt(btn.dataset.currentVideoId),
+            getId: it => it.video_ID,
+            getName: videoLabel,
+            getThumb: it => spSmallThumb(it.thumbnail),
+            getDur: it => fmtDur(it.duration),
+            onPick: (id, it) => {
+              saveChange(JSON.stringify({[primeKey]: btn.dataset.rowId, video_ID: id}));
+              btn.dataset.currentVideoId = id;
+              spSetPickerBtn(btn, it ? videoLabel(it) : '— select —', it ? spSmallThumb(it.thumbnail) : null);
+            }
+          });
+        }).catch(err => console.error('Error fetching videos:', err));
       }
 
       const updateUrl = (prev, query) => {
@@ -233,38 +228,39 @@ let sceneCache = null;
            },
           { id: tblColumns[2], name: 'Video', sort: false,
             formatter: function (cellData, row) {
+              // Face button (thumb + short metadata name); clicking opens the
+              // shared picker. Cache usually loaded by later page renders, so
+              // the face fills inline; first paint is patched by
+              // updateVideoPlaceholders once the fetch lands.
               const videoId = row.cells[2].data;
               const videoSceneId = row.cells[0].data;
-              const selectVideo = document.createElement("select");
-              selectVideo.name = "videoMedia";
-              selectVideo.id = "selectVideoOpt_" + videoId.toString() + "_ID_" + videoSceneId.toString();
-              selectVideo.dataset.currentVideoId = videoId;
-              selectVideo.setAttribute("onchange", "videomediaChange()");
-              selectVideo.setAttribute("onfocus", "loadVideoOptions(this)");
-              const placeholder = document.createElement('option');
-              placeholder.value = videoId;
-              placeholder.textContent = (videoId > 0) ? (videoNameFromCache(videoId) ?? '') : '';
-              placeholder.selected = true;
-              selectVideo.appendChild(placeholder);
-              return gridjs.html(selectVideo.outerHTML);
+              const it = (videoId > 0) ? videoFromCache(videoId) : null;
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'sp-picker-btn';
+              btn.dataset.currentVideoId = videoId;
+              btn.dataset.rowId = videoSceneId;
+              btn.setAttribute('onclick', 'openVideoPicker(this)');
+              const img = document.createElement('img');
+              const thumb = it ? spSmallThumb(it.thumbnail) : null;
+              if (thumb) { img.src = thumb; } else { img.style.display = 'none'; }
+              btn.appendChild(img);
+              const span = document.createElement('span');
+              span.textContent = it ? videoLabel(it) : ((videoId > 0) ? '…' : '— select —');
+              btn.appendChild(span);
+              return gridjs.html(btn.outerHTML);
             }
           },
           { id: tblColumns[3], name: 'Display Screen','attributes': editableCellAttributes},
           { id: tblColumns[4], name: 'orderBy','attributes': editableCellAttributes},
           { id: tblColumns[5], name: 'Volume 0-100', sort: false,'attributes': editableCellAttributes},
           { id: tblColumns[6], name: 'Loops 0-9999', sort: false,'attributes': editableCellAttributes},
-          {id: 'dlete', name: 'Delete' , sort: false,
-          formatter: function (cellData, row) { 
-              const selectedValue = cellData
-              const dlete = document.createElement("input");
-              dlete.name = "Dlete"
-              dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
-              dlete.setAttribute("type","submit")           
-              dlete.setAttribute("onclick","dlete(event)")
-              dlete.setAttribute("value","Delete")
-              dlete.className = "btn btn-primary";
-              return gridjs.html(dlete.outerHTML);
-              } 
+          {id: 'dlete', name: 'Del', sort: false,
+          formatter: function (cellData, row) {
+              // Multi-select delete: checkbox feeds the shared Set in site.js;
+              // "Delete Selected" posts each id to the single-delete endpoint.
+              return gridjs.html(spCheckHtml(row.cells[0].data));
+              }
           },
         ],
         server: {
@@ -300,6 +296,7 @@ let sceneCache = null;
           },
         },
       }).render(tableDiv);
+      spInitBulkDelete('/api/videoScenedelrow', primeKey);
 
       grid.on('ready', () => {
         updateScenePlaceholders();
@@ -344,18 +341,6 @@ let sceneCache = null;
         }
       }
 
-      function videomediaChange(){
-        var ev = event.target;
-        id = ev.id.split("_ID_")
-        console.log("hi" + id)
-        if(ev.id.toString().includes("selectVideoOpt_")){
-          jsn = {[primeKey]:id[1],video_ID:ev.value}
-          console.log(JSON.stringify(jsn))
-          saveChange(JSON.stringify(jsn))
-          //console.log("Selected " + ev.value);
-        }
-      }
-
 
       tableDiv.addEventListener('keydown', ev => {
         if (ev.target.tagName === 'TD') {
@@ -372,34 +357,6 @@ let sceneCache = null;
 
 
 
-        async function dlete(event) {
-        if (confirm('Are you sure you want to DELETE?')) {
-          const ev = event.target;
-          const idParts = ev.id.split("_ID_");
-
-          if (ev.id.includes("Dlete_") && idParts.length > 1) {
-            const rowId = idParts[1];
-            const payload = { [primeKey]: rowId };
-
-            try {
-              const response = await fetch('/api/videoScenedelrow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              if (response.ok) {
-                window.location.reload();
-              } else {
-                alert(`Failed to delete row: ${response.statusText}`);
-              }
-            } catch (error) {
-              console.error('Error during delete operation:', error);
-              alert('An error occurred while trying to delete the row.');
-            }
-          }
-        }
-      }
       // function dlete(){
       //   if (confirm('Are you sure you want to DELETE?')) {
       //   var ev = event.target;

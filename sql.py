@@ -58,7 +58,7 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblMediaMetadata (  metadata_id INTEGER PRIMARY KEY AUTOINCREMENT,  media_type TEXT,  media_id INT,  title TEXT,  duration INT,  uploader TEXT,  upload_date TEXT,  thumbnail TEXT,  view_count INT,  description TEXT,  categories TEXT,  raw_json TEXT,  retry_count INT DEFAULT 0,  last_error TEXT,  extracted_at TEXT,  active INT DEFAULT 1)")
     # Playlist-expansion jobs: a playlist URL is queued here and a background worker
     # expands it into single-video intakes. status uses the lutStatus lexicon (1-4).
-    c.execute("CREATE TABLE IF NOT EXISTS tblPlaylistQueue (  playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,  url TEXT,  media_type TEXT,  scene_ID INT,  status INT DEFAULT 1,  retry_count INT DEFAULT 0,  last_error TEXT,  created_at TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblPlaylistQueue (  playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,  url TEXT,  media_type TEXT,  scene_ID INT,  status INT DEFAULT 1,  retry_count INT DEFAULT 0,  last_error TEXT,  created_at TEXT,  next_retry TEXT)")
     # Dedup identity: one media row per YouTube video per table. Partial indexes so
     # legacy rows (videoId NULL) stay legal; SQLite treats NULLs as distinct anyway,
     # but the WHERE clause makes the intent explicit. try/except: on a legacy DB that
@@ -249,6 +249,9 @@ def enqueue_single(url, mediaType, scene_ID, flname=''):
         if dn_status == 4 and meta_status != 5:
             _set_dnload_status(media_type, pk, 1)
             appsettingYT_QuePlayFlagUpdate(1)
+        # Re-adding a known video is also the natural "try again" for metadata
+        # that never landed (0) or failed out of retries (4) — self-guarded.
+        requeue_metadata_if_missing(media_type, pk)
     else:
         pk, created = insert_media_dedup(media_type, path, filename, canonical, vid, flname or '')
         appsettingYT_QuePlayFlagUpdate(1)              # wake the download worker
@@ -296,6 +299,32 @@ def set_meta_status(media_type, pk, status, next_retry=None):
     conn.commit()
     c.close()
     conn.close()
+
+
+def requeue_metadata_if_missing(media_type, pk):
+    """Re-queue metadata extraction for a row that has none — never extracted
+    (0) or failed out of retries (4). Rides along wherever a download is
+    re-queued (table Download Status flip, re-adding a known video) so the two
+    recover together. No-op for finished (3), queued/processing (1/2),
+    permanently unavailable (5), and rows with no urlSource to extract from.
+    Resets the stored retry_count so the row gets a full set of fresh attempts,
+    not the single one left over from the failed run."""
+    tbl, pkcol, _ = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"UPDATE {tbl} SET metaStatus = 1, metaNextRetry = NULL "
+              f"WHERE {pkcol} = ? AND metaStatus IN (0, 4) "
+              f"AND urlSource IS NOT NULL AND urlSource <> ''", (pk,))
+    changed = c.rowcount
+    if changed:
+        c.execute("UPDATE tblMediaMetadata SET retry_count = 0 WHERE media_type = ? AND media_id = ?",
+                  (media_type, pk))
+    conn.commit()
+    c.close()
+    conn.close()
+    if changed:
+        appsettingFlagUpdate('meta_que_switch', 1)
+    return bool(changed)
 
 
 def fill_display_name_if_empty(media_type, pk, name):
@@ -447,16 +476,24 @@ def get_now_playing():
     out = {'song': None, 'video': None, 'scene': None}
     sid = _as_int(vals.get('currentsong'))
     if sid > 0:
-        c.execute("SELECT COALESCE(NULLIF(displayName,''), song) FROM tblMusic WHERE song_ID = ?", (sid,))
+        # thumbnail rides along from tblMediaMetadata (NULL until extracted) so
+        # the now-playing bar can show art + metadata hover.
+        c.execute("SELECT COALESCE(NULLIF(m.displayName,''), m.song), md.thumbnail "
+                  "FROM tblMusic m LEFT JOIN tblMediaMetadata md "
+                  "ON md.media_type='music' AND md.media_id=m.song_ID "
+                  "WHERE m.song_ID = ?", (sid,))
         row = c.fetchone()
         if row:
-            out['song'] = {'id': sid, 'name': row[0]}
+            out['song'] = {'id': sid, 'name': row[0], 'thumbnail': row[1]}
     vid = _as_int(vals.get('currentvideo'))
     if vid > 0:
-        c.execute("SELECT COALESCE(NULLIF(displayName,''), title) FROM tblVideoMedia WHERE video_ID = ?", (vid,))
+        c.execute("SELECT COALESCE(NULLIF(v.displayName,''), v.title), md.thumbnail "
+                  "FROM tblVideoMedia v LEFT JOIN tblMediaMetadata md "
+                  "ON md.media_type='video' AND md.media_id=v.video_ID "
+                  "WHERE v.video_ID = ?", (vid,))
         row = c.fetchone()
         if row:
-            out['video'] = {'id': vid, 'name': row[0]}
+            out['video'] = {'id': vid, 'name': row[0], 'thumbnail': row[1]}
     scn = _as_int(vals.get('CurrentScene'))
     if scn > 0:
         c.execute("SELECT sceneName FROM tblScenes WHERE scene_ID = ?", (scn,))
@@ -548,26 +585,58 @@ def backfill_video_ids():
 
 
 def select_Playlist_Que_Next():
+    """One queued playlist job whose retry backoff (if any) has expired —
+    mirrors select_Meta_Que_Next so a transient expansion failure waits out
+    its backoff instead of burning all retries seconds apart."""
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    c.execute("SELECT playlist_id, url, media_type, scene_ID, retry_count FROM tblPlaylistQueue WHERE status = 1 ORDER BY playlist_id ASC LIMIT 1")
+    c.execute("SELECT playlist_id, url, media_type, scene_ID, retry_count FROM tblPlaylistQueue "
+              "WHERE status = 1 AND (next_retry IS NULL OR next_retry <= datetime('now')) "
+              "ORDER BY playlist_id ASC LIMIT 1")
     data = c.fetchall()
     c.close()
     conn.close()
     return data
 
 
-def update_playlist_status(playlist_id, status, retry_count=None, last_error=None):
+def update_playlist_status(playlist_id, status, retry_count=None, last_error=None, next_retry=None):
+    """next_retry is written unconditionally: set on a transient re-queue,
+    cleared (NULL) on every other transition so a job never carries a stale
+    backoff into Processing/Finished/Failed."""
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    if retry_count is None and last_error is None:
-        c.execute("UPDATE tblPlaylistQueue SET status = ? WHERE playlist_id = ?", (status, playlist_id))
-    else:
-        c.execute("UPDATE tblPlaylistQueue SET status = ?, retry_count = COALESCE(?, retry_count), last_error = COALESCE(?, last_error) WHERE playlist_id = ?",
-                  (status, retry_count, last_error, playlist_id))
+    c.execute("UPDATE tblPlaylistQueue SET status = ?, retry_count = COALESCE(?, retry_count), "
+              "last_error = COALESCE(?, last_error), next_retry = ? WHERE playlist_id = ?",
+              (status, retry_count, last_error, next_retry, playlist_id))
     conn.commit()
     c.close()
     conn.close()
+
+
+def meta_pending_any():
+    """True if ANY media row is queued for metadata (metaStatus 1), INCLUDING
+    rows whose retry backoff hasn't expired. The worker must not switch itself
+    off while one of these waits — select_Meta_Que_Next excludes backoff rows,
+    so 'nothing selectable' does not mean 'nothing pending'."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT EXISTS(SELECT 1 FROM tblMusic WHERE urlSource IS NOT NULL AND urlSource <> '' AND metaStatus = 1) "
+              "OR EXISTS(SELECT 1 FROM tblVideoMedia WHERE urlSource IS NOT NULL AND urlSource <> '' AND metaStatus = 1)")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return bool(row and row[0])
+
+
+def playlist_pending_any():
+    """Playlist-queue twin of meta_pending_any (status 1, backoff included)."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT EXISTS(SELECT 1 FROM tblPlaylistQueue WHERE status = 1)")
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return bool(row and row[0])
 
 
 
@@ -1724,25 +1793,30 @@ def queue_kill():
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")
     else:
+       # Music and video are now SEPARATE mpv instances — kills target the
+       # instance by its IPC socket name on the command line, never the bare
+       # process name (a plain `pkill mpv` would take both players down).
        if not keep_music:
-           os.system("pkill mpg123")
-       os.system("pkill mpv")
+           os.system("pkill mpg123")   # legacy player, in case one is still up
+           os.system("pkill -f mpvsocket-music")
+       os.system("pkill -f mpvsocket-video")
     c.close()
     conn.close()
-    
-    
-def queue_next(): 
+
+
+def queue_next():
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")
     else:
-       os.system("pkill mpg123")
-def queueVideo_next(): 
+       os.system("pkill mpg123")   # legacy player, in case one is still up
+       os.system("pkill -f mpvsocket-music")
+def queueVideo_next():
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")
     else:
-       os.system("pkill mpv")
+       os.system("pkill -f mpvsocket-video")
 
 def select_data_all():
     conn = sqlite3.connect(database)

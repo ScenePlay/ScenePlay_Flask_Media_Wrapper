@@ -139,50 +139,45 @@ let sceneCache = null;
         return songCachePromise;
       }
 
-      function songNameFromCache(songId) {
+      // /api/music rows carry displayName + thumbnail + duration (metadata),
+      // so the picker face and list need no extra endpoint.
+      function songFromCache(songId) {
         if (!songCache) return null;
-        const found = songCache.find(item => parseInt(item.song_ID) === parseInt(songId));
-        return found ? found.song : null;
+        return songCache.find(item => parseInt(item.song_ID) === parseInt(songId)) || null;
+      }
+
+      function songLabel(item) {
+        return shortMediaName(item.displayName || item.song);
       }
 
       function updateSongPlaceholders() {
-        document.querySelectorAll('select[data-current-song-id]:not([data-loaded="true"])').forEach(el => {
-          const name = songNameFromCache(parseInt(el.dataset.currentSongId));
-          if (name && el.options.length === 1) el.options[0].textContent = name;
+        document.querySelectorAll('button[data-current-song-id]').forEach(el => {
+          const it = songFromCache(parseInt(el.dataset.currentSongId));
+          if (it) spSetPickerBtn(el, songLabel(it), spSmallThumb(it.thumbnail));
         });
       }
 
       // Fetch songs in background so placeholders show real names without blocking render
       fetchSongs().then(updateSongPlaceholders).catch(err => console.error('Error fetching songs:', err));
 
-      async function loadSongOptions(selectEl) {
-        if (selectEl.dataset.loaded === 'true') return;
-
-        try {
-          await fetchSongs();
-        } catch (error) {
-          console.error('Error fetching songs:', error);
-          return;
-        }
-
-        const currentSongId = parseInt(selectEl.dataset.currentSongId);
-        selectEl.innerHTML = '';
-
-        const emptyOpt = document.createElement('option');
-        emptyOpt.value = '0';
-        emptyOpt.textContent = '';
-        selectEl.appendChild(emptyOpt);
-
-        songCache.forEach(item => {
-          const opt = document.createElement('option');
-          opt.value = item.song_ID;
-          opt.textContent = item.song;
-          if (parseInt(item.song_ID) === currentSongId) opt.selected = true;
-          selectEl.appendChild(opt);
-        });
-
-        selectEl.dataset.loaded = 'true';
-        updateSongPlaceholders();
+      // Opens the ONE shared picker panel (site.js) — replaces the per-row
+      // option lists that crashed the page at library size.
+      function openSongPicker(btn) {
+        fetchSongs().then(items => {
+          spOpenMediaPicker(btn, {
+            items: items,
+            current: parseInt(btn.dataset.currentSongId),
+            getId: it => it.song_ID,
+            getName: songLabel,
+            getThumb: it => spSmallThumb(it.thumbnail),
+            getDur: it => fmtDur(it.duration),
+            onPick: (id, it) => {
+              saveChange(JSON.stringify({[primeKey]: btn.dataset.rowId, song_ID: id}));
+              btn.dataset.currentSongId = id;
+              spSetPickerBtn(btn, it ? songLabel(it) : '— select —', it ? spSmallThumb(it.thumbnail) : null);
+            }
+          });
+        }).catch(err => console.error('Error fetching songs:', err));
       }
 
       const updateUrl = (prev, query) => {
@@ -229,36 +224,37 @@ let sceneCache = null;
            },
           { id: tblColumns[2], name: 'Song' , sort: false,
             formatter: function (cellData, row) {
+              // Face button (thumb + short metadata name); clicking opens the
+              // shared picker. Cache usually loaded by later page renders, so
+              // the face fills inline; first paint is patched by
+              // updateSongPlaceholders once the fetch lands.
               const songId = row.cells[2].data;
               const musicSceneId = row.cells[0].data;
-              const selectSong = document.createElement("select");
-              selectSong.name = "typeModel";
-              selectSong.id = "selectSongOpt_" + songId.toString() + "_ID_" + musicSceneId.toString();
-              selectSong.dataset.currentSongId = songId;
-              selectSong.setAttribute("onchange", "songChange()");
-              selectSong.setAttribute("onfocus", "loadSongOptions(this)");
-              const placeholder = document.createElement('option');
-              placeholder.value = songId;
-              placeholder.textContent = (songId > 0) ? (songNameFromCache(songId) ?? '') : '';
-              placeholder.selected = true;
-              selectSong.appendChild(placeholder);
-              return gridjs.html(selectSong.outerHTML);
+              const it = (songId > 0) ? songFromCache(songId) : null;
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'sp-picker-btn';
+              btn.dataset.currentSongId = songId;
+              btn.dataset.rowId = musicSceneId;
+              btn.setAttribute('onclick', 'openSongPicker(this)');
+              const img = document.createElement('img');
+              const thumb = it ? spSmallThumb(it.thumbnail) : null;
+              if (thumb) { img.src = thumb; } else { img.style.display = 'none'; }
+              btn.appendChild(img);
+              const span = document.createElement('span');
+              span.textContent = it ? songLabel(it) : ((songId > 0) ? '…' : '— select —');
+              btn.appendChild(span);
+              return gridjs.html(btn.outerHTML);
             }
           },
           { id: tblColumns[3], name: 'orderBy','attributes': editableCellAttributes},
           { id: tblColumns[4], name: 'Volume 0-100', sort: false,'attributes': editableCellAttributes},
-          {id: 'dlete', name: 'Delete' , sort: false,
-          formatter: function (cellData, row) { 
-              const selectedValue = cellData
-              const dlete = document.createElement("input");
-              dlete.name = "Dlete"
-              dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
-              dlete.setAttribute("type","submit")           
-              dlete.setAttribute("onclick","dlete(event)")
-              dlete.setAttribute("value","Delete")
-              dlete.className = "btn btn-primary";
-              return gridjs.html(dlete.outerHTML);
-              } 
+          {id: 'dlete', name: 'Del', sort: false,
+          formatter: function (cellData, row) {
+              // Multi-select delete: checkbox feeds the shared Set in site.js;
+              // "Delete Selected" posts each id to the single-delete endpoint.
+              return gridjs.html(spCheckHtml(row.cells[0].data));
+              }
           },
         ],
         server: {
@@ -294,6 +290,7 @@ let sceneCache = null;
           },
         },
       }).render(tableDiv);
+      spInitBulkDelete('/api/musicScenedelrow', primeKey);
 
       grid.on('ready', () => {
         updateScenePlaceholders();
@@ -338,19 +335,6 @@ let sceneCache = null;
         }
       }
 
-      function songChange(){
-        var ev = event.target;
-        id = ev.id.split("_ID_")
-        console.log("hi" + id)
-        if(ev.id.toString().includes("selectSongOpt_")){
-          jsn = {[primeKey]:id[1],song_ID:ev.value}
-          console.log(JSON.stringify(jsn))
-          saveChange(JSON.stringify(jsn))
-          //console.log("Selected " + ev.value);
-        }
-      }
-
-
       tableDiv.addEventListener('keydown', ev => {
         if (ev.target.tagName === 'TD') {
           if (ev.key === 'Escape') {
@@ -363,34 +347,6 @@ let sceneCache = null;
           }
         }
       });
-            async function dlete(event) {
-        if (confirm('Are you sure you want to DELETE?')) {
-          const ev = event.target;
-          const idParts = ev.id.split("_ID_");
-
-          if (ev.id.includes("Dlete_") && idParts.length > 1) {
-            const rowId = idParts[1];
-            const payload = { [primeKey]: rowId };
-
-            try {
-              const response = await fetch('/api/musicScenedelrow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              if (response.ok) {
-                window.location.reload();
-              } else {
-                alert(`Failed to delete row: ${response.statusText}`);
-              }
-            } catch (error) {
-              console.error('Error during delete operation:', error);
-              alert('An error occurred while trying to delete the row.');
-            }
-          }
-        }
-      }
       // function dlete(){
       //   if (confirm('Are you sure you want to DELETE?')) {
       //   var ev = event.target;

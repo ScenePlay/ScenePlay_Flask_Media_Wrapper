@@ -306,18 +306,12 @@
               return gridjs.html(sTest.outerHTML);
               } 
           },
-          {id: 'dlete', name: 'Delete' , sort: false,
-          formatter: function (cellData, row) { 
-              const selectedValue = cellData
-              const dlete = document.createElement("input");
-              dlete.name = "Dlete"
-              dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
-              dlete.setAttribute("type","submit")           
-              dlete.setAttribute("onclick","dlete(event)")
-              dlete.setAttribute("value","Delete")
-              dlete.className = "btn btn-primary";
-              return gridjs.html(dlete.outerHTML);
-              } 
+          {id: 'dlete', name: 'Del', sort: false,
+          formatter: function (cellData, row) {
+              // Multi-select delete: checkbox feeds the shared Set in site.js;
+              // "Delete Selected" posts each id to the single-delete endpoint.
+              return gridjs.html(spCheckHtml(row.cells[0].data));
+              }
           },
         ],
         server: {
@@ -353,6 +347,7 @@
           },
         },
       }).render(tableDiv);
+      spInitBulkDelete('/api/wledpatterndelrow', primeKey);
 
       let savedValue;
 
@@ -464,34 +459,6 @@
         }
       }
       
-      async function dlete(event) {
-        if (confirm('Are you sure you want to DELETE?')) {
-          const ev = event.target;
-          const idParts = ev.id.split("_ID_");
-
-          if (ev.id.includes("Dlete_") && idParts.length > 1) {
-            const rowId = idParts[1];
-            const payload = { [primeKey]: rowId };
-
-            try {
-              const response = await fetch('/api/wledpatterndelrow', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              if (response.ok) {
-                window.location.reload();
-              } else {
-                alert(`Failed to delete row: ${response.statusText}`);
-              }
-            } catch (error) {
-              console.error('Error during delete operation:', error);
-              alert('An error occurred while trying to delete the row.');
-            }
-          }
-        }
-      }
       // function dlete(){        
       //   if (confirm('Are you sure you want to DELETE?')) {
       //   var ev = event.target;

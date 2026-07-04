@@ -56,96 +56,119 @@
               </div>
 
               <!-- Theme picker — after collapse so it sits at far right and is never clipped -->
-              <div style="position:relative;flex-shrink:0;">
-                <button id="sp-theme-btn" onclick="spTogglePicker()"
-                        class="btn nav-link" title="Color theme"
-                        style="background:none;border:none;cursor:pointer;
-                               font-size:1.15rem;color:var(--sp-accent);padding:.35rem .5rem;">
-                  &#9670;
-                </button>
-                <div id="sp-theme-panel"
-                     style="display:none;position:absolute;right:0;top:calc(100% + 4px);
-                            z-index:9999;padding:14px;width:290px;">
+              <div class="sp-theme-wrap">
+                <button id="sp-theme-btn" class="btn nav-link" title="Color theme">&#9670;</button>
+                <div id="sp-theme-panel">
                   <div class="sp-panel-title">Color Theme</div>
-                  <div id="sp-swatches"
-                       style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;"></div>
+                  <div id="sp-swatches"></div>
                 </div>
               </div>
             </div>
         </nav>
 
+        <!-- Player bar: volume | now playing | transport | queue counts | stop.
+             Layout classes live in style.css (.sp-player-*); all control wiring
+             is in the script block at the bottom of this file. -->
         <div id="container">
-          <div id="content">
-            <table style="width:100%;border:none;">
-              <tr>
-                <td style="border:none;">
-                    <h2 id="volume" style="font-size:1rem;line-height:1.5;color:var(--sp-accent);">
-                      Master Volume: {{ volume }}
-                    </h2>
-                    <input style="width:500px;margin:0 auto;accent-color:var(--sp-accent);"
-                           type="range" min="0" max="100" id="volume_slider"
-                           value="{{ volume }}" oninput="volumeChange()">
-                </td>
-                <td style="border:none;vertical-align:middle;">
-                  <!-- Now Playing: fed by /api/nowplaying (ids the player
-                       processes persist at play start, resolved to display names) -->
-                  <div id="npScene" style="color:var(--sp-muted);font-size:.8em;"></div>
-                  <div id="npSong"  style="color:var(--sp-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;">&#9835; &mdash;</div>
-                  <div id="npVideo" style="color:var(--sp-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;">&#9654; &mdash;</div>
-                </td>
-                <td style="vertical-align:middle;border:none;">
-                  <input type="button" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
-                  <br><br>
-                  <input type="button" onclick="videoSeek(-30)"  class="btn btn-secondary" value="&lt;" style="display:inline;">
-                  <input type="button" id="playPauseButton" onclick="videoStartStop()" class="btn btn-secondary" value="||" style="display:inline;">
-                  <input type="button" onclick="videoSeek(30)"   class="btn btn-secondary" value="&gt;" style="display:inline;">
-                  <input type="button" onclick="nextVideo()"     class="btn btn-primary"   value="Next">
-                </td>
-                <td style="border:none;">
-                  <table style="border:none;">
-                    <!-- (Nh NNm) suffix = summed metadata durations of queued rows;
-                         format must match site.js fmtQueueDur (poll overwrites this). -->
-                    {% set sQD = (items[0][2] or 0) | int %}
-                    {% set vQD = (items[1][2] or 0) | int %}
-                    <tr><td style="border:none;color:var(--sp-text);" id="songQueueCount">Songs: {{ songQueueCount or items[0][1] }}{% if sQD >= 3600 %} ({{ sQD // 3600 }}h {{ '%02d' % (sQD % 3600 // 60) }}m){% elif sQD >= 60 %} ({{ sQD // 60 }}m){% endif %}</td></tr>
-                    <tr><td style="border:none;">&nbsp;</td></tr>
-                    <tr><td style="border:none;color:var(--sp-text);" id="videoQueueCount">Video: {{ videoQueueCount or items[1][1] }}{% if vQD >= 3600 %} ({{ vQD // 3600 }}h {{ '%02d' % (vQD % 3600 // 60) }}m){% elif vQD >= 60 %} ({{ vQD // 60 }}m){% endif %}</td></tr>
-                    <script>setInterval(songAndVideoCount, 5000);</script>
-                  </table>
-                </td>
-                <td style="border:none;">
-                  <input type="submit" onclick="killQueue()" class="btn btn-danger mt-2" value="All Stop">
-                  <br><br>
-                  <label style="font-size:.8em;color:var(--sp-muted);">Music Ignore Stop</label><br>
-                  <button id="keepMusicBtn" type="button"
-                      class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }} mt-1"
-                      onclick="toggleKeepMusic()">
-                      {{ 'ON' if keep_music else 'OFF' }}
-                  </button>
-                </td>
-              </tr>
-            </table>
+          <div id="content" class="sp-player-bar">
+
+            <div class="sp-player-section">
+              <h2 id="volume">Master Volume: {{ volume }}</h2>
+              <input type="range" min="0" max="100" id="volume_slider"
+                     value="{{ volume }}" class="sp-volume-slider">
+            </div>
+
+            <!-- Now Playing: fed by /api/nowplaying (ids the player processes
+                 persist at play start, resolved to display names). Thumb hidden
+                 until metadata supplies one; hover = metadata popover, click =
+                 full Info modal (same card as the tables). -->
+            <div class="sp-player-section">
+              <div id="npScene" class="sp-np-scene"></div>
+              <div id="npSong" class="sp-np-row">
+                <img id="npSongThumb" class="sp-np-thumb" data-mtype="music" alt="">
+                <span id="npSongText" class="sp-np-text sp-np-muted">&#9835; nothing playing</span>
+              </div>
+              <div id="npVideo" class="sp-np-row">
+                <img id="npVideoThumb" class="sp-np-thumb" data-mtype="video" alt="">
+                <span id="npVideoText" class="sp-np-text sp-np-muted">&#9654; nothing playing</span>
+              </div>
+            </div>
+
+            <div class="sp-player-section">
+              <div class="d-flex gap-2">
+                <div class="btn-group" role="group" aria-label="Music seek and pause">
+                  <button type="button" id="musicBackBtn"    class="btn btn-secondary">&lt;</button>
+                  <button type="button" id="musicPauseButton" class="btn btn-secondary">||</button>
+                  <button type="button" id="musicFwdBtn"     class="btn btn-secondary">&gt;</button>
+                </div>
+                <button type="button" id="nextSongBtn" class="btn btn-primary">Next Song</button>
+              </div>
+              <div class="d-flex gap-2">
+                <div class="btn-group" role="group" aria-label="Video seek and pause">
+                  <button type="button" id="videoBackBtn"    class="btn btn-secondary">&lt;</button>
+                  <button type="button" id="playPauseButton" class="btn btn-secondary">||</button>
+                  <button type="button" id="videoFwdBtn"     class="btn btn-secondary">&gt;</button>
+                </div>
+                <button type="button" id="nextVideoBtn" class="btn btn-primary">Next Video</button>
+              </div>
+            </div>
+
+            <!-- (Nh NNm) suffix = summed metadata durations of queued rows;
+                 format must match site.js fmtQueueDur (poll overwrites this). -->
+            {% set sQD = (items[0][2] or 0) | int %}
+            {% set vQD = (items[1][2] or 0) | int %}
+            <div class="sp-player-section">
+              <div id="songQueueCount">Songs: {{ songQueueCount or items[0][1] }}{% if sQD >= 3600 %} ({{ sQD // 3600 }}h {{ '%02d' % (sQD % 3600 // 60) }}m){% elif sQD >= 60 %} ({{ sQD // 60 }}m){% endif %}</div>
+              <div id="videoQueueCount">Video: {{ videoQueueCount or items[1][1] }}{% if vQD >= 3600 %} ({{ vQD // 3600 }}h {{ '%02d' % (vQD % 3600 // 60) }}m){% elif vQD >= 60 %} ({{ vQD // 60 }}m){% endif %}</div>
+            </div>
+
+            <div class="sp-player-section">
+              <div><button type="button" id="killQueueBtn" class="btn btn-danger">All Stop</button></div>
+              <div>
+                <label class="sp-keep-label" for="keepMusicBtn">Music Ignore Stop</label><br>
+                <button id="keepMusicBtn" type="button"
+                    class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }}">
+                    {{ 'ON' if keep_music else 'OFF' }}
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
 
         {% block content %}{% endblock %}
 
         <script>
+        // ── Now playing ─────────────────────────────────────────────────
+        // One row: name into the text span, thumbnail into the img (hidden
+        // when there's none, or when this URL already failed to load —
+        // dataset.err, set by the error listener below, stops a broken-icon
+        // flicker on every poll while offline).
+        function npRow(prefix, icon, item) {
+            const txt = document.getElementById(prefix + 'Text');
+            const img = document.getElementById(prefix + 'Thumb');
+            // textContent everywhere — titles come from YouTube metadata.
+            txt.textContent = icon + ' ' + (item ? item.name : 'nothing playing');
+            txt.classList.toggle('sp-np-muted', !item);
+            if (item && item.thumbnail && img.dataset.err !== item.thumbnail) {
+                if (img.getAttribute('src') !== item.thumbnail) img.src = item.thumbnail;
+                img.dataset.mid = item.id;
+                img.style.display = 'block';   // .sp-np-thumb hides it by default
+            } else {
+                img.style.display = 'none';
+            }
+        }
+
         async function refreshNowPlaying() {
             try {
                 const r = await fetch('/api/nowplaying');
                 const np = await r.json();
-                // textContent everywhere — titles come from YouTube metadata.
-                document.getElementById('npSong').textContent =
-                    '♫ ' + (np.song ? np.song.name : '—');
-                document.getElementById('npVideo').textContent =
-                    '▶ ' + (np.video ? np.video.name : '—');
+                npRow('npSong', '♫', np.song);
+                npRow('npVideo', '▶', np.video);
                 document.getElementById('npScene').textContent =
                     np.scene ? 'Scene: ' + np.scene.name : '';
             } catch (e) { /* server restarting — keep last shown values */ }
         }
-        refreshNowPlaying();
-        setInterval(refreshNowPlaying, 4000);
 
         async function toggleKeepMusic() {
             const response = await fetch('/api/keepmusicplaying', { method: 'POST' });
@@ -153,12 +176,41 @@
             const btn = document.getElementById('keepMusicBtn');
             if (data.keep_music) {
                 btn.textContent = 'ON';
-                btn.className = 'btn btn-success mt-1';
+                btn.className = 'btn btn-success';
             } else {
                 btn.textContent = 'OFF';
-                btn.className = 'btn btn-secondary mt-1';
+                btn.className = 'btn btn-secondary';
             }
         }
+
+        // ── Control wiring (handlers live in site.js / theme.js) ────────
+        const wire = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
+        wire('volume_slider',   'input', volumeChange);
+        wire('musicBackBtn',    'click', () => musicSeek(-30));
+        wire('musicPauseButton','click', musicStartStop);
+        wire('musicFwdBtn',     'click', () => musicSeek(30));
+        wire('nextSongBtn',     'click', nextSong);
+        wire('videoBackBtn',    'click', () => videoSeek(-30));
+        wire('playPauseButton', 'click', videoStartStop);
+        wire('videoFwdBtn',     'click', () => videoSeek(30));
+        wire('nextVideoBtn',    'click', nextVideo);
+        wire('killQueueBtn',    'click', killQueue);
+        wire('keepMusicBtn',    'click', toggleKeepMusic);
+        wire('sp-theme-btn',    'click', spTogglePicker);
+
+        for (const id of ['npSongThumb', 'npVideoThumb']) {
+            const img = document.getElementById(id);
+            const type = img.dataset.mtype;
+            img.addEventListener('mouseenter', () => showMetaHover(img, type, img.dataset.mid));
+            img.addEventListener('mouseleave', hideMetaHover);
+            img.addEventListener('click', () => showMediaMeta(type, img.dataset.mid));
+            img.addEventListener('error', () => { img.dataset.err = img.src; img.style.display = 'none'; });
+        }
+
+        // ── Polling ─────────────────────────────────────────────────────
+        refreshNowPlaying();
+        setInterval(refreshNowPlaying, 4000);
+        setInterval(songAndVideoCount, 5000);
         </script>
     </body>
 </html>

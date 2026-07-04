@@ -13,9 +13,10 @@ import os
 import json
 import subprocess
 import time
+from datetime import datetime, timedelta
 
 from sql import (select_Playlist_Que_Next, update_playlist_status, enqueue_single,
-                 appsettingFlagGet, appsettingFlagUpdate)
+                 appsettingFlagGet, appsettingFlagUpdate, playlist_pending_any)
 from ytid import canonical_watch_url
 
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -77,7 +78,11 @@ def _run_job(playlist_id, url, media_type, scene_ID, retry_count):
     if status != 'ok':
         new_retries = (retry_count or 0) + 1
         if new_retries < MAX_RETRIES:
-            update_playlist_status(playlist_id, 1, retry_count=new_retries, last_error=payload)
+            # Exponential backoff (2/4 min, mirroring meta_que) — without it the
+            # 3 retries burn ~2s apart and one network blip kills the whole job.
+            backoff = datetime.utcnow() + timedelta(minutes=2 ** new_retries)
+            update_playlist_status(playlist_id, 1, retry_count=new_retries, last_error=payload,
+                                   next_retry=backoff.strftime('%Y-%m-%d %H:%M:%S'))
         else:
             update_playlist_status(playlist_id, 4, retry_count=new_retries, last_error=payload)
         return
@@ -108,7 +113,11 @@ def PlaylistQue_threader():
                 continue
             jobs = select_Playlist_Que_Next()
             if not jobs:
-                appsettingFlagUpdate('playlist_que_switch', 0)
+                # Only go idle when nothing is pending at all — the selector
+                # excludes jobs in retry backoff, and switching off would
+                # strand them (see meta_que).
+                if not playlist_pending_any():
+                    appsettingFlagUpdate('playlist_que_switch', 0)
                 continue
             playlist_id, url, media_type, scene_ID, retry_count = jobs[0]
             _handle_job(playlist_id, url, media_type, scene_ID, retry_count or 0)

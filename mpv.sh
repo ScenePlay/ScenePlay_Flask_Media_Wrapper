@@ -1,8 +1,13 @@
 #!/bin/bash
-spd=$(echo $1)
-loop=$(echo $2)
-vol=$(echo $3)
-scr=$(echo $4)
-fi=$(echo $5)
+spd=$1
+loop=$2
+vol=$3
+scr=$4
+fi=$5
 
-DISPLAY=:0 mpv $fi --no-terminal --input-ipc-server=/tmp/mpvsocket --fullscreen=yes --speed=$spd --input-ipc-server=/tmp/mpvsocket --loop-file=$loop --volume=$vol --screen=$scr 
+# VIDEO mpv instance. Socket renamed mpvsocket -> mpvsocket-video now that a
+# second (audio-only) mpv exists on mpvsocket-music — commands and pkill -f
+# target instances by socket name, never by the bare process name.
+# exec: bash is replaced by mpv, so the stored/probed PID is mpv itself.
+export DISPLAY=:0
+exec mpv "$fi" --no-terminal --input-ipc-server=/tmp/mpvsocket-video --fullscreen=yes --speed="$spd" --loop-file="$loop" --volume="$vol" --screen="$scr"

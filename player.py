@@ -22,10 +22,11 @@ def play_mp3_local(fi,vol, a):
             vl = int(a[1])
          time.sleep(1) 
    else:
+      # mpv (audio-only) replaces mpg123: same one-file-per-process lifecycle,
+      # but with an IPC socket for pause/seek (/tmp/mpvsocket-music) and a
+      # direct 0-100 volume instead of mpg123's 32768 sample scaling.
       vol = int(max(0, min(100, vol)))
-      volume = int(32768*(vol/100))
-      #print(volume)
-      p = subprocess.Popen(['mpg123', '-q', '-f', str(volume), fi])
+      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi])
       appsettingAudioPlayFlagUpdatePID(p.pid)
       time.sleep(1)
       while p.poll() is None:

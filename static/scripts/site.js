@@ -108,12 +108,82 @@ function fmtQueueDur(sec) {
   return h > 0 ? ' (' + h + 'h ' + String(m).padStart(2, '0') + 'm)' : ' (' + m + 'm)';
 }
 
-// Info modal for the media tables: fetches /api/mediameta/<type>/<id> and
-// overlays the full extracted metadata. Built with textContent — titles and
-// descriptions come from YouTube and must not be injected as HTML.
+// /api/mediameta/<type>/<id>, cached per item — the now-playing hover would
+// otherwise refetch on every mouseenter. Failed fetches are evicted so a
+// server hiccup doesn't cache as permanent "no metadata".
+const _metaCache = {};
+function fetchMediaMeta(mediaType, mediaId) {
+  const key = mediaType + '/' + mediaId;
+  if (!_metaCache[key]) {
+    _metaCache[key] = fetch('/api/mediameta/' + key).then(r => r.json());
+    _metaCache[key].catch(() => delete _metaCache[key]);
+  }
+  return _metaCache[key];
+}
+
+// Metadata card shared by the table Info modal and the now-playing hover.
+// Built with textContent — titles and descriptions come from YouTube and must
+// not be injected as HTML. opts.hover trims it to tooltip size.
+function buildMetaCard(meta, opts) {
+  opts = opts || {};
+  const card = document.createElement('div');
+
+  if (!meta) {
+    const p = document.createElement('p');
+    p.textContent = 'No metadata extracted for this item yet.';
+    p.style = 'margin:0;';
+    card.appendChild(p);
+    return card;
+  }
+
+  if (meta.thumbnail) {
+    const img = document.createElement('img');
+    img.src = meta.thumbnail;
+    img.style = 'width:100%;border-radius:6px;margin-bottom:10px;';
+    card.appendChild(img);
+  }
+  const h = document.createElement(opts.hover ? 'h6' : 'h4');
+  h.textContent = meta.title || '(no title)';
+  card.appendChild(h);
+
+  const rows = [
+    ['Uploader', meta.uploader],
+    ['Uploaded', meta.upload_date ? String(meta.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : null],
+    ['Length', fmtDur(meta.duration)],
+    ['Views', meta.view_count != null ? Number(meta.view_count).toLocaleString() : null],
+    ['Categories', meta.categories ? JSON.parse(meta.categories).join(', ') : null],
+    ['Extracted', meta.extracted_at],
+    ['Last error', meta.last_error],
+  ];
+  const tbl = document.createElement('table');
+  tbl.style = 'font-size:.9em;margin-bottom:10px;';
+  rows.forEach(([label, val]) => {
+    if (!val) return;
+    const tr = document.createElement('tr');
+    const td1 = document.createElement('td');
+    td1.textContent = label;
+    td1.style = 'color:var(--sp-muted, #999);padding-right:12px;border:none;vertical-align:top;';
+    const td2 = document.createElement('td');
+    td2.textContent = val;
+    td2.style = 'border:none;';
+    tr.appendChild(td1); tr.appendChild(td2); tbl.appendChild(tr);
+  });
+  card.appendChild(tbl);
+
+  if (meta.description) {
+    const desc = document.createElement('div');
+    desc.textContent = meta.description;
+    // hover popover has pointer-events:none, so its description can't scroll — clip it
+    desc.style = 'white-space:pre-wrap;font-size:.85em;color:var(--sp-muted, #bbb);'
+               + (opts.hover ? 'max-height:90px;overflow:hidden;' : 'max-height:200px;overflow-y:auto;');
+    card.appendChild(desc);
+  }
+  return card;
+}
+
+// Info modal for the media tables (click).
 function showMediaMeta(mediaType, mediaId) {
-  fetch('/api/mediameta/' + mediaType + '/' + mediaId)
-    .then(r => r.json())
+  fetchMediaMeta(mediaType, mediaId)
     .then(meta => {
       const old = document.getElementById('mediaMetaOverlay');
       if (old) old.remove();
@@ -125,53 +195,7 @@ function showMediaMeta(mediaType, mediaId) {
 
       const card = document.createElement('div');
       card.style = 'background:var(--sp-bg, #222);color:var(--sp-text, #eee);max-width:560px;width:90%;max-height:80vh;overflow-y:auto;border-radius:8px;padding:20px;';
-
-      if (!meta) {
-        const p = document.createElement('p');
-        p.textContent = 'No metadata extracted for this item yet.';
-        card.appendChild(p);
-      } else {
-        if (meta.thumbnail) {
-          const img = document.createElement('img');
-          img.src = meta.thumbnail;
-          img.style = 'width:100%;border-radius:6px;margin-bottom:10px;';
-          card.appendChild(img);
-        }
-        const h = document.createElement('h4');
-        h.textContent = meta.title || '(no title)';
-        card.appendChild(h);
-
-        const rows = [
-          ['Uploader', meta.uploader],
-          ['Uploaded', meta.upload_date ? String(meta.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : null],
-          ['Length', fmtDur(meta.duration)],
-          ['Views', meta.view_count != null ? Number(meta.view_count).toLocaleString() : null],
-          ['Categories', meta.categories ? JSON.parse(meta.categories).join(', ') : null],
-          ['Extracted', meta.extracted_at],
-          ['Last error', meta.last_error],
-        ];
-        const tbl = document.createElement('table');
-        tbl.style = 'font-size:.9em;margin-bottom:10px;';
-        rows.forEach(([label, val]) => {
-          if (!val) return;
-          const tr = document.createElement('tr');
-          const td1 = document.createElement('td');
-          td1.textContent = label;
-          td1.style = 'color:var(--sp-muted, #999);padding-right:12px;border:none;vertical-align:top;';
-          const td2 = document.createElement('td');
-          td2.textContent = val;
-          td2.style = 'border:none;';
-          tr.appendChild(td1); tr.appendChild(td2); tbl.appendChild(tr);
-        });
-        card.appendChild(tbl);
-
-        if (meta.description) {
-          const desc = document.createElement('div');
-          desc.textContent = meta.description;
-          desc.style = 'white-space:pre-wrap;font-size:.85em;color:var(--sp-muted, #bbb);max-height:200px;overflow-y:auto;';
-          card.appendChild(desc);
-        }
-      }
+      card.appendChild(buildMetaCard(meta));
 
       const close = document.createElement('button');
       close.textContent = 'Close';
@@ -183,6 +207,242 @@ function showMediaMeta(mediaType, mediaId) {
       document.body.appendChild(overlay);
     })
     .catch(err => console.error('mediameta fetch failed:', err));
+}
+
+// Hover popover for the now-playing thumbnails: same card as the Info modal,
+// anchored to the element and dismissed on mouseleave.
+function showMetaHover(anchor, mediaType, mediaId) {
+  hideMetaHover();
+  fetchMediaMeta(mediaType, mediaId)
+    .then(meta => {
+      if (!anchor.matches(':hover')) return;   // mouse already left during fetch
+      hideMetaHover();
+      const pop = document.createElement('div');
+      pop.id = 'mediaMetaHover';
+      pop.style = 'position:fixed;z-index:1060;width:320px;max-height:70vh;overflow:hidden;'
+                + 'background:var(--sp-bg, #222);color:var(--sp-text, #eee);'
+                + 'border:1px solid var(--sp-muted, #555);border-radius:8px;padding:12px;'
+                + 'box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:none;';
+      pop.appendChild(buildMetaCard(meta, {hover: true}));
+      document.body.appendChild(pop);
+      // below the anchor, flipped above if it would run off-screen
+      const rect = anchor.getBoundingClientRect();
+      let top = rect.bottom + 8;
+      if (top + pop.offsetHeight > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - pop.offsetHeight - 8);
+      }
+      pop.style.top = top + 'px';
+      pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 336)) + 'px';
+    })
+    .catch(err => console.error('mediameta fetch failed:', err));
+}
+
+function hideMetaHover() {
+  const old = document.getElementById('mediaMetaHover');
+  if (old) old.remove();
+}
+
+// ── Media picker (scene tables) ──────────────────────────────────────────
+// ONE shared floating panel with search + thumb rows. Per-row <select>s each
+// cloning the full media list into their own options were what crashed big
+// pages — this list exists once, only while the picker is open, and its
+// thumbnails load lazily as the user scrolls.
+
+function shortMediaName(name, max) {
+  max = max || 48;
+  name = name || '';
+  return name.length > max ? name.slice(0, max - 1) + '…' : name;
+}
+
+// Stored thumbs are often maxresdefault (huge); list rows only need the small
+// variant. Non-YouTube URLs pass through untouched.
+function spSmallThumb(url) {
+  return url ? url.replace('/maxresdefault.', '/mqdefault.') : null;
+}
+
+let _pickerCleanup = null;
+
+function spCloseMediaPicker() {
+  const p = document.getElementById('spMediaPicker');
+  if (p) p.remove();
+  if (_pickerCleanup) { _pickerCleanup(); _pickerCleanup = null; }
+}
+
+// opts: {items, current, getId(it), getName(it), getThumb(it), getDur(it),
+//        onPick(id, itemOrNull)} — onPick fires with item null for "— none —".
+function spOpenMediaPicker(anchor, opts) {
+  spCloseMediaPicker();
+  const panel = document.createElement('div');
+  panel.id = 'spMediaPicker';
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'Filter…';
+  panel.appendChild(search);
+
+  const list = document.createElement('div');
+  list.className = 'sp-picker-list';
+  panel.appendChild(list);
+
+  const addRow = (id, name, thumb, dur, item) => {
+    const row = document.createElement('div');
+    row.className = 'sp-picker-row' + (parseInt(id) === parseInt(opts.current) ? ' current' : '');
+    if (thumb) {
+      const img = document.createElement('img');
+      img.src = thumb;
+      img.loading = 'lazy';
+      row.appendChild(img);
+    }
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = name;
+    row.appendChild(nm);
+    if (dur) {
+      const d = document.createElement('span');
+      d.className = 'dur';
+      d.textContent = dur;
+      row.appendChild(d);
+    }
+    row.onclick = () => { spCloseMediaPicker(); opts.onPick(id, item); };
+    list.appendChild(row);
+  };
+
+  addRow(0, '— none —', null, '', null);
+  opts.items.forEach(it => addRow(opts.getId(it), opts.getName(it), opts.getThumb(it),
+                                  opts.getDur ? opts.getDur(it) : '', it));
+
+  document.body.appendChild(panel);
+
+  // below the anchor, flipped above if it would run off-screen (as meta hover)
+  const rect = anchor.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  if (top + panel.offsetHeight > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - panel.offsetHeight - 6);
+  }
+  panel.style.top = top + 'px';
+  panel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - panel.offsetWidth - 16)) + 'px';
+
+  search.addEventListener('input', () => {
+    const q = search.value.toLowerCase();
+    list.querySelectorAll('.sp-picker-row').forEach(r => {
+      r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+  search.focus();
+  const cur = list.querySelector('.current');
+  if (cur) list.scrollTop = cur.offsetTop - list.clientHeight / 2;
+
+  const onDocClick = ev => {
+    if (!panel.contains(ev.target) && !anchor.contains(ev.target)) spCloseMediaPicker();
+  };
+  const onKey = ev => { if (ev.key === 'Escape') spCloseMediaPicker(); };
+  // defer so the click that opened the picker doesn't instantly close it
+  setTimeout(() => document.addEventListener('click', onDocClick), 0);
+  document.addEventListener('keydown', onKey);
+  _pickerCleanup = () => {
+    document.removeEventListener('click', onDocClick);
+    document.removeEventListener('keydown', onKey);
+  };
+}
+
+// ── Multi-select delete (all gridjs tables) ─────────────────────────────
+// A checkbox column feeds a Set of selected pks; "Delete Selected" loops the
+// table's EXISTING single-delete endpoint, so no new backend routes. The Set
+// survives gridjs page re-renders (formatters re-check from it), so a
+// selection can span pages. Ids stay strings — several delrow endpoints
+// concatenate them into reply text and would choke on ints.
+const spDelSel = new Set();
+let spBulkCfg = null;
+
+function spCheckHtml(id) {
+  return '<input type="checkbox" class="sp-row-check" data-id="' + id + '"'
+       + (spDelSel.has(String(id)) ? ' checked' : '') + ' onchange="spRowCheck(this)">';
+}
+
+function spRowCheck(cb) {
+  if (cb.checked) spDelSel.add(String(cb.dataset.id));
+  else spDelSel.delete(String(cb.dataset.id));
+  spUpdateDelBtn();
+}
+
+function spUpdateDelBtn() {
+  const btn = document.getElementById('spDelSelectedBtn');
+  if (!btn) return;
+  btn.value = 'Delete Selected (' + spDelSel.size + ')';
+  btn.disabled = spDelSel.size === 0;
+}
+
+// Toggle every checkbox on the current page (all on unless all already on).
+function spSelectPage() {
+  const boxes = document.querySelectorAll('.sp-row-check');
+  const allChecked = boxes.length > 0 && [...boxes].every(cb => cb.checked);
+  boxes.forEach(cb => { cb.checked = !allChecked; spRowCheck(cb); });
+}
+
+async function spDeleteSelected() {
+  const n = spDelSel.size;
+  if (!n || !spBulkCfg) return;
+  if (!confirm('Delete ' + n + ' selected row' + (n > 1 ? 's' : '') + '?')) return;
+  const btn = document.getElementById('spDelSelectedBtn');
+  btn.disabled = true;
+  btn.value = 'Deleting…';
+  let failed = 0;
+  for (const id of spDelSel) {           // sequential — media deletes remove files
+    try {
+      const r = await fetch(spBulkCfg.endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({[spBulkCfg.primeKey]: id}),
+      });
+      if (!r.ok) failed++;
+    } catch (e) { failed++; }
+  }
+  if (failed) alert(failed + ' of ' + n + ' deletes failed.');
+  spDelSel.clear();
+  window.location.reload();
+}
+
+// Insert the Select Page / Delete Selected buttons next to the gridjs search
+// box (same slot the Add New Row buttons use). Retries briefly because the
+// grid renders asynchronously after page load.
+function spInitBulkDelete(endpoint, primeKey) {
+  spBulkCfg = {endpoint: endpoint, primeKey: primeKey};
+  const tryInsert = attempts => {
+    const anchor = document.querySelector('div.gridjs-search');
+    if (!anchor) {
+      if (attempts > 0) setTimeout(() => tryInsert(attempts - 1), 200);
+      return;
+    }
+    if (document.getElementById('spDelSelectedBtn')) return;
+    const delBtn = document.createElement('input');
+    delBtn.type = 'button';
+    delBtn.id = 'spDelSelectedBtn';
+    delBtn.className = 'btn btn-danger';
+    delBtn.value = 'Delete Selected (0)';
+    delBtn.disabled = true;
+    delBtn.style = 'float: right; margin-left: 10px;';
+    delBtn.onclick = spDeleteSelected;
+    const selBtn = document.createElement('input');
+    selBtn.type = 'button';
+    selBtn.className = 'btn btn-secondary';
+    selBtn.value = 'Select Page';
+    selBtn.style = 'float: right; margin-left: 10px;';
+    selBtn.onclick = spSelectPage;
+    anchor.parentNode.insertBefore(delBtn, anchor.nextSibling);
+    anchor.parentNode.insertBefore(selBtn, anchor.nextSibling);
+  };
+  tryInsert(25);
+}
+
+// Refresh a picker button's face (thumb + short name) in place.
+function spSetPickerBtn(btn, name, thumb) {
+  const img = btn.querySelector('img');
+  const span = btn.querySelector('span');
+  if (span) span.textContent = name;
+  if (img) {
+    if (thumb) { img.src = thumb; img.style.display = ''; }
+    else { img.style.display = 'none'; }
+  }
 }
 
 function nextVideo(){
@@ -578,29 +838,22 @@ function submitOnEnter(e) {
 }
 
 
-function videoStartStop() {
-  const button = document.getElementById("playPauseButton");
-
-  // Make the API call to toggle video play/pause
-  fetch('/video_stopstart', {
-    method: 'POST',
-  })
+// Shared by the music and video transport controls — each mpv instance has a
+// twin route pair addressing its own IPC socket. The pause buttons are
+// <button> elements, so the ||/▶ label lives in textContent (not .value).
+function _playerStartStop(endpoint, buttonId) {
+  const button = document.getElementById(buttonId);
+  fetch(endpoint, { method: 'POST' })
   .then(response => response.json())
   .then(result => {
     console.log('Start/stop request successful:', result);
-
-    // Toggle the button's value based on the current state
-    if (button.value === "||") {
-      button.value = "▶"; // Change to play icon
-    } else {
-      button.value = "||"; // Change to pause icon
-    }
+    button.textContent = (button.textContent.trim() === '||') ? '▶' : '||';
   })
   .catch(error => console.error('Error in start/stop request:', error));
 }
 
-function videoSeek(value) {
-  fetch('/video_seek', {
+function _playerSeek(endpoint, value) {
+  fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: value })
@@ -611,3 +864,8 @@ function videoSeek(value) {
   })
   .catch(error => console.error('Error in seek request:', error));
 }
+
+function videoStartStop() { _playerStartStop('/video_stopstart', 'playPauseButton'); }
+function videoSeek(value) { _playerSeek('/video_seek', value); }
+function musicStartStop() { _playerStartStop('/music_stopstart', 'musicPauseButton'); }
+function musicSeek(value) { _playerSeek('/music_seek', value); }

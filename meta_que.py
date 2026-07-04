@@ -17,7 +17,8 @@ import time
 from datetime import datetime, timedelta
 
 from sql import (select_Meta_Que_Next, set_meta_status, upsert_media_metadata,
-                 fill_display_name_if_empty, appsettingFlagGet, appsettingFlagUpdate)
+                 fill_display_name_if_empty, appsettingFlagGet, appsettingFlagUpdate,
+                 meta_pending_any)
 
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
 _YTDLP = os.path.join(_START_DIR, 'yt-dlp', 'yt-dlp.sh')
@@ -138,7 +139,13 @@ def MetaQue_threader():
                 continue
             jobs = select_Meta_Que_Next()
             if not jobs:
-                appsettingFlagUpdate('meta_que_switch', 0)   # idle until next enqueue
+                # Only go idle when NOTHING is pending. The selector excludes
+                # rows in retry backoff, so switching off on an empty select
+                # would strand them: nothing re-raises the switch when their
+                # timer expires. Keep polling until they run or the queue is
+                # genuinely empty.
+                if not meta_pending_any():
+                    appsettingFlagUpdate('meta_que_switch', 0)   # idle until next enqueue
                 continue
             pkey, url, media_type, retry_count = jobs[0][0], jobs[0][1], jobs[0][2], jobs[0][3]
             _handle_job(pkey, url, media_type, retry_count or 0)
