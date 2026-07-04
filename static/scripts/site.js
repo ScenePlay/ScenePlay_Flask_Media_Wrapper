@@ -85,11 +85,104 @@ function songAndVideoCount(){
       .then(data => {
          const dataObj = JSON.parse(data);
          //console.log(dataObj);
-         document.getElementById("songQueueCount").textContent =  "Songs: " + dataObj[0].songQCnt || 0;
-         document.getElementById("videoQueueCount").textContent = "Video: " + dataObj[1].videoQCnt || 0;
+         document.getElementById("songQueueCount").textContent =  "Songs: " + (dataObj[0].songQCnt || 0) + fmtQueueDur(dataObj[0].songQDur);
+         document.getElementById("videoQueueCount").textContent = "Video: " + (dataObj[1].videoQCnt || 0) + fmtQueueDur(dataObj[1].videoQDur);
        });
   }
   Click()
+}
+
+// 7371 -> "2:02:51", 178 -> "2:58". Empty when no metadata duration yet.
+function fmtDur(sec) {
+  if (sec === null || sec === undefined || sec === '' || isNaN(sec)) return '';
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+               : m + ':' + String(s).padStart(2, '0');
+}
+
+// Pill-bar suffix: " (2h 03m)" / " (23m)". Must match the Jinja render in base.html.
+function fmtQueueDur(sec) {
+  if (!sec || sec < 60) return '';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h > 0 ? ' (' + h + 'h ' + String(m).padStart(2, '0') + 'm)' : ' (' + m + 'm)';
+}
+
+// Info modal for the media tables: fetches /api/mediameta/<type>/<id> and
+// overlays the full extracted metadata. Built with textContent — titles and
+// descriptions come from YouTube and must not be injected as HTML.
+function showMediaMeta(mediaType, mediaId) {
+  fetch('/api/mediameta/' + mediaType + '/' + mediaId)
+    .then(r => r.json())
+    .then(meta => {
+      const old = document.getElementById('mediaMetaOverlay');
+      if (old) old.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'mediaMetaOverlay';
+      overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;display:flex;align-items:center;justify-content:center;';
+      overlay.onclick = ev => { if (ev.target === overlay) overlay.remove(); };
+
+      const card = document.createElement('div');
+      card.style = 'background:var(--sp-bg, #222);color:var(--sp-text, #eee);max-width:560px;width:90%;max-height:80vh;overflow-y:auto;border-radius:8px;padding:20px;';
+
+      if (!meta) {
+        const p = document.createElement('p');
+        p.textContent = 'No metadata extracted for this item yet.';
+        card.appendChild(p);
+      } else {
+        if (meta.thumbnail) {
+          const img = document.createElement('img');
+          img.src = meta.thumbnail;
+          img.style = 'width:100%;border-radius:6px;margin-bottom:10px;';
+          card.appendChild(img);
+        }
+        const h = document.createElement('h4');
+        h.textContent = meta.title || '(no title)';
+        card.appendChild(h);
+
+        const rows = [
+          ['Uploader', meta.uploader],
+          ['Uploaded', meta.upload_date ? String(meta.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : null],
+          ['Length', fmtDur(meta.duration)],
+          ['Views', meta.view_count != null ? Number(meta.view_count).toLocaleString() : null],
+          ['Categories', meta.categories ? JSON.parse(meta.categories).join(', ') : null],
+          ['Extracted', meta.extracted_at],
+          ['Last error', meta.last_error],
+        ];
+        const tbl = document.createElement('table');
+        tbl.style = 'font-size:.9em;margin-bottom:10px;';
+        rows.forEach(([label, val]) => {
+          if (!val) return;
+          const tr = document.createElement('tr');
+          const td1 = document.createElement('td');
+          td1.textContent = label;
+          td1.style = 'color:var(--sp-muted, #999);padding-right:12px;border:none;vertical-align:top;';
+          const td2 = document.createElement('td');
+          td2.textContent = val;
+          td2.style = 'border:none;';
+          tr.appendChild(td1); tr.appendChild(td2); tbl.appendChild(tr);
+        });
+        card.appendChild(tbl);
+
+        if (meta.description) {
+          const desc = document.createElement('div');
+          desc.textContent = meta.description;
+          desc.style = 'white-space:pre-wrap;font-size:.85em;color:var(--sp-muted, #bbb);max-height:200px;overflow-y:auto;';
+          card.appendChild(desc);
+        }
+      }
+
+      const close = document.createElement('button');
+      close.textContent = 'Close';
+      close.className = 'btn btn-secondary mt-2';
+      close.onclick = () => overlay.remove();
+      card.appendChild(close);
+
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+    })
+    .catch(err => console.error('mediameta fetch failed:', err));
 }
 
 function nextVideo(){

@@ -159,6 +159,7 @@ app.register_blueprint(relay_admin_bp)
 with app.app_context():
     import models.tblTokenPositions  # noqa: F401
     import models.tblRollLog         # noqa: F401
+    import models.mediaMetadata      # noqa: F401
     db.create_all()
 
     # Lightweight migration: add tblBattleMaps.sort_order to older DBs (create_all
@@ -217,6 +218,47 @@ with app.app_context():
         db.session.rollback()
         print('tblServersIP.version migration skipped:', _e)
 
+    # Lightweight migration: video-id identity + metadata-queue columns on the two
+    # media tables (create_all never alters existing tables). videoId = canonical
+    # YouTube id (dedup key), displayName = human name from metadata, metaStatus =
+    # metadata-queue lifecycle (lutStatus lexicon + 5=Unavailable), metaNextRetry =
+    # backoff gate. Idempotent — each column added only if absent.
+    for _mtbl in ('tblMusic', 'tblVideoMedia'):
+        try:
+            _cols = [r[1] for r in db.session.execute(_sa_text(f"PRAGMA table_info({_mtbl})"))]
+            for _col, _decl in (('videoId', 'TEXT'), ('displayName', 'TEXT'),
+                                ('metaStatus', 'INTEGER DEFAULT 0'), ('metaNextRetry', 'TEXT')):
+                if _cols and _col not in _cols:
+                    db.session.execute(_sa_text(f"ALTER TABLE {_mtbl} ADD COLUMN {_col} {_decl}"))
+            db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            print(f'{_mtbl} metadata-column migration skipped:', _e)
+
+    # The partial UNIQUE index on videoId must exist AFTER the ALTERs above (a
+    # fresh DB gets it in create_table(); an upgraded DB needs it here).
+    for _mtbl, _idx in (('tblMusic', 'idx_tblMusic_videoId'),
+                        ('tblVideoMedia', 'idx_tblVideoMedia_videoId')):
+        try:
+            db.session.execute(_sa_text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {_idx} ON {_mtbl}(videoId) WHERE videoId IS NOT NULL"))
+            db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            print(f'{_idx} creation skipped:', _e)
+
+    # Seed lutStatus row 5 "Unavailable" (permanent metadata failure). The JSON
+    # loader only seeds when lutStatus is empty, so upgraded DBs need this insert.
+    try:
+        _has5 = db.session.execute(_sa_text("SELECT 1 FROM lutStatus WHERE status_ID = 5")).fetchone()
+        if not _has5:
+            db.session.execute(_sa_text(
+                "INSERT INTO lutStatus(status_ID, status) VALUES (5, 'Unavailable')"))
+            db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('lutStatus status-5 seed skipped:', _e)
+
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):
     os.makedirs(os.path.join(app.root_path, 'static', 'uploads', _upload_dir), exist_ok=True)
@@ -268,7 +310,10 @@ apparray = [
     ["ShowCampaign",int(arr[11]),"int"],
     ["CurrentCampaignPlaying",int(arr[12]),"int"],
     ["SceneFilter",int(arr[13]),"int"],
-    ["Empty2",int(arr[14]),"int"]
+    ["Empty2",int(arr[14]),"int"],
+    ["meta_que_switch",1,"int"],       # metadata worker gate (independent of arr)
+    ["playlist_que_switch",1,"int"],   # playlist expansion worker gate
+    ["CurrentScene",0,"int"]           # active scene for per-scene playback params
 ]
 
 def startTheadPlayer():
@@ -285,9 +330,21 @@ def startTheadPlayer():
     p.start()
     y = Process(target=YTQue_threader)
     y.start()
+    # Metadata + playlist workers: independent pollers mirroring the download worker
+    # (2s poll, appsetting-switch gated). Started here in startTheadPlayer (never in
+    # a forkserver child) alongside the others.
+    from meta_que import MetaQue_threader
+    from playlist_que import PlaylistQue_threader
+    recover_stuck_processing()   # re-queue jobs a crash left stranded at 'Processing'
+    mq = Process(target=MetaQue_threader)
+    mq.start()
+    pq = Process(target=PlaylistQue_threader)
+    pq.start()
     appsettingAudioPlayFlagUpdate(1)
     appsettingVideoPlayFlagUpdate(1)
     appsettingYT_QuePlayFlagUpdate(1)
+    appsettingFlagUpdate('meta_que_switch', 1)      # process any metadata backlog on boot
+    appsettingFlagUpdate('playlist_que_switch', 1)
 
     time.sleep(3)
     appsettingAudioPlayFlagUpdatePID(999999)  # clear stale PID so threader starts fresh

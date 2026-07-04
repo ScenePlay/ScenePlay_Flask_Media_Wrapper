@@ -1,5 +1,5 @@
 from flask import (Blueprint, render_template, request, abort, jsonify, json,
-                   redirect, url_for, current_app)
+                   redirect, url_for, current_app, flash)
 from extensions import *
 
 from sql import *
@@ -36,14 +36,24 @@ def main():
     if request.method == 'POST':
         pass
         if request.form['submit'] == 'Process Youtube':
+            # Pass the RAW url (no remove_list_param): addMediaToYT_que detects a
+            # playlist from &list= and enqueue_single canonicalizes single videos to
+            # watch?v=<id>, so the &list= no longer needs stripping here.
             url = request.form['URLLink']
-            url = remove_list_param(url)
-            flname = request.form['FileName']
-            flname = sanitize_filename(flname)
+            flname = request.form.get('FileName', '')     # optional display-name override
+            flname = sanitize_filename(flname) if flname else ''
             scene_ID = request.form.get("Scene")
             mediaType = request.form.get("Media")
-            addMediaToYT_que(url,flname, mediaType, scene_ID)
-            
+            addMediaToYT_que(url, flname, mediaType, scene_ID)
+
+            return  redirect(url_for('main.home'))
+        elif request.form['submit'] == 'Backfill Metadata':
+            # Tag legacy rows with their video id + queue metadata (see
+            # sql.backfill_video_ids). Manual trigger so it doesn't hammer YouTube
+            # on boot; pre-dedup duplicate videos are reported, not merged.
+            summary = backfill_video_ids()
+            flash(f"Backfill: tagged {summary['tagged']}, duplicates skipped "
+                  f"{summary['duplicates_skipped']}, unparseable {summary['unparseable']}.")
             return  redirect(url_for('main.home'))
         elif request.form['submit'] == 'Ping Network':
             # Concurrent TCP-connect scan for ScenePlay/WLED devices (discovery.py),

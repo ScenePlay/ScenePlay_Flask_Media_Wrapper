@@ -145,14 +145,27 @@
       // 7    que           INT      0                    0 
       // 8    urlSource     TEXT     0                    0 
       // 9    dnLoadStatus  INT      0                    0 
-      tblColumns = ['video_ID','path','title', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus'];
+      // duration/uploader/thumbnail come from tblMediaMetadata, grafted onto each
+      // row by /api/videomedia. Order here must match the column-definition order —
+      // the sort callback maps col.index into this array.
+      tblColumns = ['video_ID','path','title', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus', 'duration', 'uploader', 'thumbnail'];
       primeKey = tblColumns[0]
 
       new gridjs.Grid({
         columns: [
           { id: tblColumns[0], name:'video_ID', 'hidden': true},
           { id: tblColumns[1], name: 'Path', sort: true},
-          { id: tblColumns[2], name: 'Title' , sort: true},
+          { id: tblColumns[2], name: 'Name' , sort: true,
+              formatter: function (cellData, row) {
+                // Human name from metadata (hidden displayName cell, appended last)
+                // with the <videoId>.<ext> filename as fallback. textContent escapes.
+                const dnCell = row.cells[row.cells.length - 1];
+                const dn = (dnCell && dnCell.data) ? dnCell.data : cellData;
+                const span = document.createElement('span');
+                span.textContent = dn;
+                return gridjs.html(span.outerHTML);
+              }
+          },
           { id: tblColumns[3], name: 'Played Times', sort: true},
           { id: tblColumns[4], name: 'Played DTTM', sort: true  },
           { id: tblColumns[5], name: 'Active', sort: true, hidden: true },
@@ -225,19 +238,39 @@
                 return gridjs.html(statusDD.outerHTML)
               }
           },
+          { id: tblColumns[10], name: 'Length', sort: true,
+              formatter: (cellData) => fmtDur(cellData)
+          },
+          { id: tblColumns[11], name: 'Uploader', sort: true },
+          { id: tblColumns[12], name: 'Info', sort: false,
+              formatter: function (cellData, row) {
+                // Thumbnail doubles as the metadata-details button; empty until
+                // the metadata queue has processed this row.
+                if (!cellData) { return ''; }
+                const img = document.createElement('img');
+                img.src = cellData;
+                img.setAttribute('loading', 'lazy');
+                img.style = 'height:45px;border-radius:4px;cursor:pointer;';
+                img.setAttribute('onclick', "showMediaMeta('video', " + row.cells[0].data.toString() + ")");
+                return gridjs.html(img.outerHTML);
+              }
+          },
           {id: 'dlete', name: 'Delete' , sort: false,
-          formatter: function (cellData, row) { 
+          formatter: function (cellData, row) {
               const selectedValue = cellData
               const dlete = document.createElement("input");
               dlete.name = "Dlete"
               dlete.id = "Dlete"+ "_ID_" + row.cells[0].data.toString()
-              dlete.setAttribute("type","submit")           
+              dlete.setAttribute("type","submit")
               dlete.setAttribute("onclick","dlete(event)")
               dlete.setAttribute("value","Delete")
               dlete.className = "btn btn-primary";
               return gridjs.html(dlete.outerHTML);
-              } 
+              }
           },
+          // Hidden feed for the Name column's formatter (human title from metadata).
+          // Must stay LAST — the formatter reads row.cells[row.cells.length - 1].
+          { id: 'displayName', name: 'displayName', hidden: true },
         ],
         server: {
           url: '/api/videomedia',

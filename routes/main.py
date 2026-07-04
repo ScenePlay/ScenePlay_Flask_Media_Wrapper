@@ -2,6 +2,7 @@ from flask import Blueprint, render_template,redirect,url_for,  request, abort, 
 from extensions import *
 
 from sql import *
+from models.mediaMetadata import tblmediametadata
 import alsaaudio
 from multiprocessing import Process, Value, Array
 import time
@@ -70,9 +71,20 @@ def songandvideocount():
     data = select_data_stats()#arr)
     dataDict = []
     for item in data:
-        dataDict.append({item[0]: item[1]})
+        # songQCnt/videoQCnt keep their historic slot; QDur adds the queued
+        # seconds so the pill bar can show total remaining time.
+        dataDict.append({item[0]: item[1], item[0].replace('QCnt', 'QDur'): item[2]})
     #print(dataDict)
     return jsonify(dataDict)
+
+
+@main.route('/api/mediameta/<media_type>/<int:media_id>')
+def mediameta(media_type, media_id):
+    """Full extracted metadata for one media row — feeds the table info modal."""
+    if media_type not in ('music', 'video'):
+        abort(400)
+    m = tblmediametadata.query.filter_by(media_type=media_type, media_id=media_id).first()
+    return jsonify(m.to_dict() if m else None)
 
 
 def is_raspberry_pi() -> bool:
@@ -137,26 +149,18 @@ def ChromeExtensionAddVideo():
 
 def sanitize_filename(filename):
     return re.sub('[^A-Za-z0-9._-]', '_', filename)
-def addMediaToYT_que(url,flname,mediaType, scene_ID):
-            title = flname + '.' + mediaType
-            filePath = ''
-            if scene_ID == '':
-                scene_ID = 0
-            if mediaType == "mp3":
-                filePath = str(Path.home()) + "/Music/SP/"
-                row = [filePath, title, 0, '', 1, 0, 0, url, 1]
-                newrow_ID = CRUD_tblMusic(row, "C")
-                if  int(scene_ID) > 0:
-                    scene_row = [int(scene_ID), int(newrow_ID), 1, 100]
-                    CRUD_tblMusicScene(scene_row, "C")
-            else:
-                filePath = str(Path.home()) + "/Videos/SP/"
-                row = [filePath, title, 0, '', 1, 0, 0, url, 1]
-                newrow_ID = CRUD_tblvideomedia(row, "C")
-                if int(scene_ID) > 0:
-                    scene_row = [int(scene_ID), int(newrow_ID),0, 1, 100,0]
-                    CRUD_tblVideoScene(scene_row, "C")
-            appsettingYT_QuePlayFlagUpdate(1)         
+def addMediaToYT_que(url, flname, mediaType, scene_ID):
+    """Intake entry point (form + Chrome extension). A playlist URL is queued for
+    background expansion; a single video is deduped by its YouTube id and shares
+    one media row/file across scenes. `flname` is an OPTIONAL display-name override
+    (blank → metadata supplies the name). See sql.enqueue_single / enqueue_playlist.
+
+    NOTE: pass the RAW url here (do NOT pre-strip &list=) so playlists are detected."""
+    from ytid import is_playlist_url
+    media_type = 'music' if mediaType == 'mp3' else 'video'
+    if is_playlist_url(url):
+        return enqueue_playlist(url, media_type, scene_ID)
+    return enqueue_single(url, mediaType, scene_ID, flname or '')
 
 @main.route('/updateWLEDSupport', methods=['POST'])
 def updateWLEDSupport():
@@ -174,6 +178,12 @@ def updateWLEDSupport():
 @main.route('/activatescenes/', methods=['GET', 'POST'])
 def activatescene():
     id = request.args.get('id')
+    # Record the active scene so playback picks THIS scene's per-link volume/order/
+    # screen/loops for media rows now shared across scenes (video-id dedup).
+    try:
+        appsettingSetCurrentScene(int(id))
+    except (TypeError, ValueError):
+        pass
     scnID = []
     scnID.append(id)
     scnPat = CRUD_tblScenePattern(scnID,"bySceneID")
@@ -276,6 +286,11 @@ def receive_led_patterns():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
+@main.route('/api/nowplaying', methods=['GET'])
+def nowplaying():
+    """Dashboard poll: current song/video (human display names) + active scene."""
+    return jsonify(get_now_playing())
+
 @main.route('/nextsong', methods=["GET","POST"])
 def nextsong():
     PlayerBl = True

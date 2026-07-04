@@ -4,6 +4,7 @@ import os
 from glob import glob
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 import logging
 import unicodedata
 from unittest import case
@@ -39,19 +40,35 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblLED (  led_ID INTEGER PRIMARY KEY AUTOINCREMENT,  ledJSON TEXT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT, brightness Real,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDTypeModel (  ledTypeModel_ID INTEGER PRIMARY KEY AUTOINCREMENT,  modelName TEXT,  ledJSON TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  version TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblVideoMedia (  video_ID INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  title TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblVideoMedia (  video_ID INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  title TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblVideoScene (  videoScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  video_ID INT,  DisplayScreen_ID INT,  orderBy INT,  volume INT, loops INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblwledPattern (  wledPattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT, server_ID INT,  effect INT,  pallette INT,  color1 TEXT,  color2 TEXT,  color3 TEXT,  speed INT,  brightness INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tbleffect (  effect_ID INTEGER PRIMARY KEY AUTOINCREMENT,  effectName TEXT, ef_ID INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblpallette (  pallette_ID INTEGER PRIMARY KEY AUTOINCREMENT,  palletteName TEXT, pa_ID INT)")
     c.execute("CREATE TABLE IF NOT EXISTS lutStatus (pkey INTEGER PRIMARY KEY AUTOINCREMENT,  status_ID INT,  status TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblCronSchedule (  schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  minute TEXT,  hour TEXT,  day_of_month TEXT,  month TEXT,  day_of_week TEXT,  command TEXT,  description TEXT,  active INT)")
+    # yt-dlp metadata per media row (media_type 'music'|'video' + media_id soft-FK to
+    # tblMusic.song_id / tblVideoMedia.video_ID). Raw JSON kept alongside promoted columns.
+    c.execute("CREATE TABLE IF NOT EXISTS tblMediaMetadata (  metadata_id INTEGER PRIMARY KEY AUTOINCREMENT,  media_type TEXT,  media_id INT,  title TEXT,  duration INT,  uploader TEXT,  upload_date TEXT,  thumbnail TEXT,  view_count INT,  description TEXT,  categories TEXT,  raw_json TEXT,  retry_count INT DEFAULT 0,  last_error TEXT,  extracted_at TEXT,  active INT DEFAULT 1)")
+    # Playlist-expansion jobs: a playlist URL is queued here and a background worker
+    # expands it into single-video intakes. status uses the lutStatus lexicon (1-4).
+    c.execute("CREATE TABLE IF NOT EXISTS tblPlaylistQueue (  playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,  url TEXT,  media_type TEXT,  scene_ID INT,  status INT DEFAULT 1,  retry_count INT DEFAULT 0,  last_error TEXT,  created_at TEXT)")
+    # Dedup identity: one media row per YouTube video per table. Partial indexes so
+    # legacy rows (videoId NULL) stay legal; SQLite treats NULLs as distinct anyway,
+    # but the WHERE clause makes the intent explicit. try/except: on a legacy DB that
+    # hasn't run app.py's ALTER migrations yet the column doesn't exist — app boot
+    # always runs the ALTERs before this, so the index lands on first boot.
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tblMusic_videoId ON tblMusic(videoId) WHERE videoId IS NOT NULL")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tblVideoMedia_videoId ON tblVideoMedia(videoId) WHERE videoId IS NOT NULL")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     c.close()
 
@@ -116,13 +133,441 @@ def select_YT_Que_Next():
                              union \
                                 Select video_ID as pkey, path, title, urlSource,substr( title , INSTR(title,'.')+1 , LENGTH(title)) as media , 'tblVideoMedia' as tbl \
                                     from tblVideoMedia where urlSource not null and dnLoadStatus=1 \
-                             ) Order By RANDOM(), pkey ASC LIMIT 1;") 
-      
+                             ) Order By RANDOM(), pkey ASC LIMIT 1;")
+
     data = c.fetchall()
     conn.commit()
     c.close()
     conn.close()
     return data
+
+
+# ---------------------------------------------------------------------------
+# Metadata queue / video-id dedup helpers
+# ---------------------------------------------------------------------------
+
+def appsettingFlagUpdate(name, val):
+    """Generic switch setter for the new worker flags (meta_que_switch /
+    playlist_que_switch) — same row-update the bespoke yt_que helpers do."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("Update tblAppSettings set value = ?  where name = ?", (val, name))
+    conn.commit()
+    c.close()
+    conn.close()
+
+
+def appsettingFlagGet(name):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT value FROM tblAppSettings where name = ?", (name,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return row[0] if row else None
+
+
+def _media_cols(media_type):
+    """(table, pk column, name column) for 'music' | 'video'."""
+    if media_type == 'music':
+        return 'tblMusic', 'song_id', 'song'
+    return 'tblVideoMedia', 'video_ID', 'title'
+
+
+def get_media_by_videoid(media_type, videoId):
+    """Return (pk, dnLoadStatus, metaStatus) for the row holding this YouTube id,
+    or None. This is the dedup lookup."""
+    tbl, pk, _ = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"SELECT {pk}, dnLoadStatus, metaStatus FROM {tbl} WHERE videoId = ?", (videoId,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return row
+
+
+def insert_media_dedup(media_type, path, filename, url, videoId, displayName):
+    """Insert a media row keyed by videoId, safely under concurrency.
+
+    Returns (pk, created). The partial UNIQUE index on videoId turns a lost
+    SELECT-then-INSERT race into an IntegrityError here, and we re-SELECT the
+    winning row — so two simultaneous enqueues of the same video (form intake,
+    playlist worker, Chrome extension) always converge on ONE row."""
+    tbl, pk, namecol = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        c.execute(f"INSERT INTO {tbl}(path, {namecol}, pTimes, playedDTTM, active, genre, que, urlSource, dnLoadStatus, videoId, displayName, metaStatus) "
+                  "VALUES (?, ?, 0, '', 1, 0, 0, ?, 1, ?, ?, 1)",
+                  (path, filename, url, videoId, displayName))
+        conn.commit()
+        return c.lastrowid, True
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        c.execute(f"SELECT {pk} FROM {tbl} WHERE videoId = ?", (videoId,))
+        row = c.fetchone()
+        return (row[0] if row else None), False
+    finally:
+        c.close()
+        conn.close()
+
+
+def enqueue_single(url, mediaType, scene_ID, flname=''):
+    """Intake ONE video: extract its id, dedup by videoId, add a scene-link, and
+    enqueue download + metadata. Shared by the form intake, the Chrome-extension
+    route and the playlist worker (so all three dedup identically). Returns
+    (pk, created, reason). reason is '' on success or an error string.
+
+    - filename on disk is <videoId>.<ext> (metadata later fills the human name);
+    - a typed flname seeds displayName as an override metadata won't overwrite;
+    - on a dedup hit whose download failed (but is not permanently unavailable),
+      the shared row is re-queued so every scene benefits."""
+    from ytid import youtube_video_id, canonical_watch_url
+    media_type = 'music' if mediaType == 'mp3' else 'video'
+    try:
+        scene_ID = int(scene_ID) if str(scene_ID) != '' else 0
+    except (TypeError, ValueError):
+        scene_ID = 0
+
+    vid = youtube_video_id(url)
+    if not vid:
+        # No parseable id: only proceed if the caller supplied a name (legacy path).
+        if not flname:
+            return None, False, 'no video id and no name'
+        return _enqueue_legacy(url, mediaType, scene_ID, flname), True, ''
+
+    path = (str(Path.home()) + "/Music/SP/") if media_type == 'music' else (str(Path.home()) + "/Videos/SP/")
+    filename = f"{vid}.{mediaType}"
+    canonical = canonical_watch_url(vid)
+
+    existing = get_media_by_videoid(media_type, vid)
+    if existing:
+        pk, dn_status, meta_status = existing
+        created = False
+        # Re-queue a failed shared file (unless permanently unavailable, status 5).
+        if dn_status == 4 and meta_status != 5:
+            _set_dnload_status(media_type, pk, 1)
+            appsettingYT_QuePlayFlagUpdate(1)
+    else:
+        pk, created = insert_media_dedup(media_type, path, filename, canonical, vid, flname or '')
+        appsettingYT_QuePlayFlagUpdate(1)              # wake the download worker
+        appsettingFlagUpdate('meta_que_switch', 1)     # wake the metadata worker
+
+    if pk and scene_ID > 0 and not scene_link_exists(media_type, scene_ID, pk):
+        if media_type == 'music':
+            CRUD_tblMusicScene([scene_ID, pk, 1, 100], "C")
+        else:
+            CRUD_tblVideoScene([scene_ID, pk, 0, 1, 100, 0], "C")
+    return pk, created, ''
+
+
+def _enqueue_legacy(url, mediaType, scene_ID, flname):
+    """Old behavior for non-parseable URLs: name-based file, no dedup."""
+    from pathlib import Path as _Path
+    title = flname + '.' + mediaType
+    if mediaType == 'mp3':
+        path = str(_Path.home()) + "/Music/SP/"
+        pk = CRUD_tblMusic([path, title, 0, '', 1, 0, 0, url, 1], "C")
+        if scene_ID > 0:
+            CRUD_tblMusicScene([scene_ID, pk, 1, 100], "C")
+    else:
+        path = str(_Path.home()) + "/Videos/SP/"
+        pk = CRUD_tblvideomedia([path, title, 0, '', 1, 0, 0, url, 1], "C")
+        if scene_ID > 0:
+            CRUD_tblVideoScene([scene_ID, pk, 0, 1, 100, 0], "C")
+    appsettingYT_QuePlayFlagUpdate(1)
+    return pk
+
+
+def _set_dnload_status(media_type, pk, status):
+    if media_type == 'music':
+        CRUD_tblMusic([pk, status], "dnUpdate")
+    else:
+        CRUD_tblvideomedia([pk, status], "dnUpdate")
+
+
+def set_meta_status(media_type, pk, status, next_retry=None):
+    tbl, pkcol, _ = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"UPDATE {tbl} SET metaStatus = ?, metaNextRetry = ? WHERE {pkcol} = ?",
+              (status, next_retry, pk))
+    conn.commit()
+    c.close()
+    conn.close()
+
+
+def fill_display_name_if_empty(media_type, pk, name):
+    """Atomic fill: a user-typed override is never clobbered by metadata —
+    the CASE runs inside one UPDATE, so there is no read-then-write race."""
+    tbl, pkcol, _ = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"UPDATE {tbl} SET displayName = CASE WHEN displayName IS NULL OR displayName = '' THEN ? ELSE displayName END WHERE {pkcol} = ?",
+              (name, pk))
+    conn.commit()
+    c.close()
+    conn.close()
+
+
+def select_Meta_Que_Next():
+    """One queued metadata job whose backoff (if any) has expired.
+    Returns [(pkey, urlSource, media_type, retry_count)] or []."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("Select * from ( \
+                 Select song_id as pkey, urlSource, 'music' as media_type, \
+                        COALESCE((Select retry_count from tblMediaMetadata mm where mm.media_type='music' and mm.media_id=song_id),0) as retry_count, \
+                        metaNextRetry \
+                   from tblMusic where urlSource not null and urlSource <> '' and metaStatus = 1 \
+               union \
+                 Select video_ID as pkey, urlSource, 'video' as media_type, \
+                        COALESCE((Select retry_count from tblMediaMetadata mm where mm.media_type='video' and mm.media_id=video_ID),0) as retry_count, \
+                        metaNextRetry \
+                   from tblVideoMedia where urlSource not null and urlSource <> '' and metaStatus = 1 \
+               ) where metaNextRetry IS NULL or metaNextRetry <= datetime('now') \
+               Order By RANDOM(), pkey ASC LIMIT 1;")
+    data = c.fetchall()
+    c.close()
+    conn.close()
+    return data
+
+
+def upsert_media_metadata(media_type, media_id, fields):
+    """Create-or-update the tblMediaMetadata row for (media_type, media_id).
+    `fields` is a dict of column -> value (promoted columns / raw_json /
+    retry_count / last_error / extracted_at)."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT metadata_id FROM tblMediaMetadata WHERE media_type = ? AND media_id = ?",
+              (media_type, media_id))
+    row = c.fetchone()
+    if row:
+        sets = ', '.join(f"{k} = ?" for k in fields)
+        c.execute(f"UPDATE tblMediaMetadata SET {sets} WHERE metadata_id = ?",
+                  (*fields.values(), row[0]))
+        rid = row[0]
+    else:
+        cols = ', '.join(fields)
+        marks = ', '.join('?' for _ in fields)
+        c.execute(f"INSERT INTO tblMediaMetadata(media_type, media_id, {cols}) VALUES (?, ?, {marks})",
+                  (media_type, media_id, *fields.values()))
+        rid = c.lastrowid
+    conn.commit()
+    c.close()
+    conn.close()
+    return rid
+
+
+def scene_link_exists(media_type, scene_ID, media_pk):
+    """True if this scene already links this media row — prevents duplicate
+    links (which would make the item play twice per cycle)."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    if media_type == 'music':
+        c.execute("SELECT 1 FROM tblMusicScene WHERE scene_ID = ? AND song_ID = ? LIMIT 1",
+                  (scene_ID, media_pk))
+    else:
+        c.execute("SELECT 1 FROM tblVideoScene WHERE scene_ID = ? AND video_ID = ? LIMIT 1",
+                  (scene_ID, media_pk))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return row is not None
+
+
+def delete_media_row(media_type, pk):
+    """Remove a media row ENTIRELY: its scene-links, metadata row, DB row and
+    on-disk file. With videoId dedup a row (and its one file) can be shared by
+    many scenes, so per-scene removal is deleting the scene-LINK; this is the
+    'remove from everywhere' operation. Returns the number of scene links removed."""
+    tbl, pkcol, namecol = _media_cols(media_type)
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"SELECT (path || {namecol}) FROM {tbl} WHERE {pkcol} = ?", (pk,))
+    frow = c.fetchone()
+    if media_type == 'music':
+        c.execute("SELECT COUNT(*) FROM tblMusicScene WHERE song_ID = ?", (pk,))
+        links = c.fetchone()[0]
+        c.execute("DELETE FROM tblMusicScene WHERE song_ID = ?", (pk,))
+    else:
+        c.execute("SELECT COUNT(*) FROM tblVideoScene WHERE video_ID = ?", (pk,))
+        links = c.fetchone()[0]
+        c.execute("DELETE FROM tblVideoScene WHERE video_ID = ?", (pk,))
+    c.execute("DELETE FROM tblMediaMetadata WHERE media_type = ? AND media_id = ?", (media_type, pk))
+    c.execute(f"DELETE FROM {tbl} WHERE {pkcol} = ?", (pk,))
+    conn.commit()
+    c.close()
+    conn.close()
+    if frow and frow[0]:
+        try:
+            os.remove(frow[0])
+        except OSError:
+            pass  # file already gone / never downloaded
+    return links
+
+
+def recover_stuck_processing():
+    """Boot sweep: re-queue any metadata/playlist job left at 'Processing' (2) by
+    a crash or power loss mid-job. The queue selectors only pick status 1, so
+    without this a stranded row would never be retried. Safe at boot — the
+    workers that could legitimately hold status 2 haven't started yet."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    n = 0
+    for tbl, col in (('tblMusic', 'metaStatus'), ('tblVideoMedia', 'metaStatus'),
+                     ('tblPlaylistQueue', 'status')):
+        try:
+            c.execute(f"UPDATE {tbl} SET {col} = 1 WHERE {col} = 2")
+            n += c.rowcount
+        except sqlite3.OperationalError:
+            pass  # table/column not migrated yet (first boot ordering)
+    conn.commit()
+    c.close()
+    conn.close()
+    return n
+
+
+def get_now_playing():
+    """Dashboard snapshot: the playing song/video (ids written to the
+    currentsong/currentvideo appsettings by the player processes at play start,
+    zeroed on queue-drain/stop) resolved to human names, plus the active scene."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT name, value FROM tblAppSettings WHERE name IN ('currentsong','currentvideo','CurrentScene')")
+    vals = {r[0]: r[1] for r in c.fetchall()}
+
+    def _as_int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    out = {'song': None, 'video': None, 'scene': None}
+    sid = _as_int(vals.get('currentsong'))
+    if sid > 0:
+        c.execute("SELECT COALESCE(NULLIF(displayName,''), song) FROM tblMusic WHERE song_ID = ?", (sid,))
+        row = c.fetchone()
+        if row:
+            out['song'] = {'id': sid, 'name': row[0]}
+    vid = _as_int(vals.get('currentvideo'))
+    if vid > 0:
+        c.execute("SELECT COALESCE(NULLIF(displayName,''), title) FROM tblVideoMedia WHERE video_ID = ?", (vid,))
+        row = c.fetchone()
+        if row:
+            out['video'] = {'id': vid, 'name': row[0]}
+    scn = _as_int(vals.get('CurrentScene'))
+    if scn > 0:
+        c.execute("SELECT sceneName FROM tblScenes WHERE scene_ID = ?", (scn,))
+        row = c.fetchone()
+        if row:
+            out['scene'] = {'id': scn, 'name': row[0]}
+    c.close()
+    conn.close()
+    return out
+
+
+def appsettingSetCurrentScene(scene_id):
+    """Record the ACTIVE scene so playback picks the right per-scene
+    volume/order/screen/loops for media rows shared across scenes."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM tblAppSettings WHERE name = 'CurrentScene'")
+    if c.fetchone():
+        c.execute("UPDATE tblAppSettings SET value = ? WHERE name = 'CurrentScene'", (str(scene_id),))
+    else:
+        c.execute("INSERT INTO tblAppSettings(name, value, typevalue) VALUES ('CurrentScene', ?, 'int')",
+                  (str(scene_id),))
+    conn.commit()
+    c.close()
+    conn.close()
+
+
+def appsettingGetCurrentScene():
+    val = appsettingFlagGet('CurrentScene')
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Playlist queue helpers
+# ---------------------------------------------------------------------------
+
+def enqueue_playlist(url, media_type, scene_ID):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    now = str(datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
+    c.execute("INSERT INTO tblPlaylistQueue(url, media_type, scene_ID, status, retry_count, last_error, created_at) VALUES (?, ?, ?, 1, 0, '', ?)",
+              (url, media_type, scene_ID, now))
+    conn.commit()
+    rid = c.lastrowid
+    c.close()
+    conn.close()
+    appsettingFlagUpdate('playlist_que_switch', 1)
+    return rid
+
+
+def backfill_video_ids():
+    """One-shot: tag legacy rows with the videoId parsed from urlSource and queue
+    them for metadata. Only the LOWEST-pk row per video is tagged (the partial
+    UNIQUE index forbids two rows sharing a videoId) — pre-dedup duplicates are
+    left with videoId NULL and reported, so nothing is merged/deleted silently.
+    Returns a summary dict. Skips manual rows (empty urlSource)."""
+    from ytid import youtube_video_id
+    summary = {'tagged': 0, 'duplicates_skipped': 0, 'unparseable': 0, 'duplicates': []}
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    for media_type, tbl, pk, namecol in (('music', 'tblMusic', 'song_id', 'song'),
+                                         ('video', 'tblVideoMedia', 'video_ID', 'title')):
+        c.execute(f"SELECT {pk}, urlSource FROM {tbl} WHERE urlSource IS NOT NULL AND urlSource <> '' AND (videoId IS NULL OR videoId = '') ORDER BY {pk} ASC")
+        rows = c.fetchall()
+        seen = set()
+        for rid, url in rows:
+            vid = youtube_video_id(url)
+            if not vid:
+                summary['unparseable'] += 1
+                continue
+            # already tagged on a prior row this run, or on an existing row?
+            c.execute(f"SELECT {pk} FROM {tbl} WHERE videoId = ? LIMIT 1", (vid,))
+            if vid in seen or c.fetchone():
+                summary['duplicates_skipped'] += 1
+                summary['duplicates'].append({'media_type': media_type, pk: rid, 'videoId': vid})
+                continue
+            c.execute(f"UPDATE {tbl} SET videoId = ?, metaStatus = 1 WHERE {pk} = ?", (vid, rid))
+            seen.add(vid)
+            summary['tagged'] += 1
+        conn.commit()
+    c.close()
+    conn.close()
+    if summary['tagged']:
+        appsettingFlagUpdate('meta_que_switch', 1)
+    return summary
+
+
+def select_Playlist_Que_Next():
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute("SELECT playlist_id, url, media_type, scene_ID, retry_count FROM tblPlaylistQueue WHERE status = 1 ORDER BY playlist_id ASC LIMIT 1")
+    data = c.fetchall()
+    c.close()
+    conn.close()
+    return data
+
+
+def update_playlist_status(playlist_id, status, retry_count=None, last_error=None):
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    if retry_count is None and last_error is None:
+        c.execute("UPDATE tblPlaylistQueue SET status = ? WHERE playlist_id = ?", (status, playlist_id))
+    else:
+        c.execute("UPDATE tblPlaylistQueue SET status = ?, retry_count = COALESCE(?, retry_count), last_error = COALESCE(?, last_error) WHERE playlist_id = ?",
+                  (status, retry_count, last_error, playlist_id))
+    conn.commit()
+    c.close()
+    conn.close()
 
 
 
@@ -512,47 +957,6 @@ def CRUD_tblvideomedia(row,CRUD):
         return data
     c.close()
     conn.close()
-
-def CRUD_tblMusicScene(row,CRUD):
-    conn = sqlite3.connect(database)
-    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
-    c = conn.cursor()
-    unix = time.time()
-    if CRUD == "C": 
-        _scene_ID = row[0]
-        _song_ID = row[1]
-        _orderBy = row[2]
-        _volume = row[3]
-        c.execute("Insert INTO tblmusicScene(scene_ID, song_ID, orderBy, volume) VALUES (?, ?, ?, ?)",( _scene_ID, _song_ID, _orderBy, _volume))
-        conn.commit()
-        return c.lastrowid
-    elif CRUD == "R":
-        _musicScene_ID = row[0]
-        c.execute("SELECT * FROM tblmusicScene where id = ?", (_musicScene_ID,))
-        data = c.fetchall()
-        conn.commit()
-        return data
-    elif CRUD == "U":
-        _musicScene_ID = row[0]
-        _scene_ID= row[1]
-        _song_ID = row[2]
-        _orderBy = row[3]
-        _volume = row[4]
-        c.execute("UPDATE tblmusicScene SET  scene_ID = ?, song_ID = ?,  orderBy = ?, volume = ?  where musicScene_id = ?" ,( _scene_ID,_song_ID, _orderBy, _volume,  _musicScene_ID))
-        conn.commit()
-    elif CRUD == "D":
-        _musicScene_ID = row[0]
-        #print("id",_musicScene_ID)
-        c.execute("Delete From tblmusicScene where musicScene_ID = ?", (_musicScene_ID,))
-        conn.commit()
-    else:
-        c.execute("SELECT * FROM tblmusicScene")
-        data = c.fetchall()
-        conn.commit()
-        return data
-    c.close()
-    conn.close()
-
 
 def CRUD_tblMusic(row,CRUD):
     conn = sqlite3.connect(database)
@@ -1253,26 +1657,40 @@ def select_play_queue():
     conn.close()
 
 def select_play_threadQ():
+    # Filter the scene join to the ACTIVE scene: with videoId dedup one media row
+    # can be linked to many scenes, and the old unfiltered join returned one row
+    # PER LINK — playback could pick another scene's volume/order at random.
+    # LEFT JOIN keeps media queued outside any scene playable (volume falls back
+    # to 100), and the (IS NULL) sort keeps in-scene ordering first.
+    scene = appsettingGetCurrentScene()
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    #c.execute("SELECT song_ID, (path || song),path,song,pTimes,active,que FROM tblMusic WHERE que <> 0 ORDER BY RANDOM(), ROWID ASC LIMIT 1")
-    c.execute("SELECT m.song_ID, (m.path || m.song),m.path,m.song,m.pTimes,m.active,m.que, ms.volume FROM tblMusic m join tblMusicScene ms on m.song_ID = ms.song_ID WHERE m.que <> 0 and m.dnLoadStatus = 3 ORDER BY ms.orderby,RANDOM(), m.ROWID ASC LIMIT 1")
+    c.execute("SELECT m.song_ID, (m.path || m.song),m.path,m.song,m.pTimes,m.active,m.que, COALESCE(ms.volume, 100) "
+              "FROM tblMusic m LEFT JOIN tblMusicScene ms ON m.song_ID = ms.song_ID AND ms.scene_ID = ? "
+              "WHERE m.que <> 0 and m.dnLoadStatus = 3 "
+              "ORDER BY (ms.orderBy IS NULL), ms.orderBy, RANDOM(), m.ROWID ASC LIMIT 1", (scene,))
     data = c.fetchall()
     c.close()
-    conn.close()    
+    conn.close()
     for row in data:
         #update_data_entry(row)
         return row
     return ""
 
 def select_video_threadQ():
+    # Same active-scene filter as select_play_threadQ (see comment there).
+    scene = appsettingGetCurrentScene()
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    c.execute("SELECT vm.video_ID, (vm.path || vm.title),vm.path,vm.title,vm.pTimes,vm.active,vm.que, vs.displayScreen_ID, vs.volume, vs.loops FROM tblVideoMedia vm join tblVideoScene vs on vm.video_ID = vs.video_ID where vm.que <> 0  and vm.dnLoadStatus = 3 ORDER BY VS.orderby, RANDOM(), vm.ROWID ASC LIMIT 1;")
+    c.execute("SELECT vm.video_ID, (vm.path || vm.title),vm.path,vm.title,vm.pTimes,vm.active,vm.que, "
+              "COALESCE(vs.displayScreen_ID, 0), COALESCE(vs.volume, 100), COALESCE(vs.loops, 0) "
+              "FROM tblVideoMedia vm LEFT JOIN tblVideoScene vs ON vm.video_ID = vs.video_ID AND vs.scene_ID = ? "
+              "WHERE vm.que <> 0 and vm.dnLoadStatus = 3 "
+              "ORDER BY (vs.orderBy IS NULL), vs.orderBy, RANDOM(), vm.ROWID ASC LIMIT 1;", (scene,))
     data = c.fetchall()
     #print(f"Video {data}")
     c.close()
-    conn.close()    
+    conn.close()
     for row in data:
         #update_data_entry(row)
         return row
@@ -1292,11 +1710,16 @@ def queue_kill():
     conn = sqlite3.connect(database)
     c = conn.cursor()
     keep_music = appsettingGetKeepMusicPlaying()
+    # Video always stops here (mpv is killed below); music only when the
+    # keep-music toggle is off — mirror that in the now-playing settings.
+    c.execute("UPDATE tblAppSettings SET value = '0' WHERE name = 'currentvideo'")
     if not keep_music:
+        c.execute("UPDATE tblAppSettings SET value = '0' WHERE name = 'currentsong'")
         c.execute("UPDATE tblMusic SET  que = 0 where que = 1")
         conn.commit()
         c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
         conn.commit()
+    conn.commit()
     if os.name == "nt":
        #os.system("taskkill /f /im ffplay.exe")
        os.system("taskkill /f /im cmdmp3win.exe")
@@ -1480,14 +1903,18 @@ def select_data_stats():#a):
              # + "UNION SELECT 'Song Last' as T, song as c FROM tblMusic where song_id = " + str(a[3]) + " "
              # + "UNION SELECT 'Song Volume' as T, " + str(a[1]) + " as c"
             #  )
-    c.execute( #"SELECT 'Songs Stored' as T, Count(*) as C FROM tblMusic "
-              #+ "UNION 
-              "SELECT 'songQCnt' as T, Count(*) as C FROM tblMusic where que <> 0 "
-              + "UNION SELECT 'videoQCnt' as T, Count(*) as C FROM tblvideoMedia where que <> 0"
-             # + "UNION SELECT 'Total Songs Played' as T, SUM(pTimes) as C FROM tblMusic "
-             # + "UNION SELECT 'Song Current' as T, song as c FROM tblMusic where song_id = " + str(a[2]) + " "
-             # + "UNION SELECT 'Song Last' as T, song as c FROM tblMusic where song_id = " + str(a[3]) + " "
-             # + "UNION SELECT 'Song Volume' as T, " + str(a[1]) + " as c"
+    # Third column: total queued seconds. Duration lives only in tblMediaMetadata,
+    # so queued rows whose metadata hasn't been extracted yet contribute 0 — the
+    # total is a floor until the queue catches up. ORDER BY T pins song before
+    # video (base.html / site.js read these rows by index).
+    c.execute(
+              "SELECT 'songQCnt' as T, Count(*) as C, IFNULL(SUM(md.duration),0) as D "
+              + "FROM tblMusic m LEFT JOIN tblMediaMetadata md ON md.media_type='music' AND md.media_id=m.song_id "
+              + "WHERE m.que <> 0 "
+              + "UNION SELECT 'videoQCnt' as T, Count(*) as C, IFNULL(SUM(md.duration),0) as D "
+              + "FROM tblvideoMedia v LEFT JOIN tblMediaMetadata md ON md.media_type='video' AND md.media_id=v.video_id "
+              + "WHERE v.que <> 0 "
+              + "ORDER BY T"
              )
     data = c.fetchall()
     c.close()

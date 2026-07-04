@@ -11,7 +11,11 @@ class tblmusic(db.Model):
     que = db.Column(db.Integer)
     urlSource = db.Column(db.Text)
     dnLoadStatus = db.Column(db.Integer)
-    
+    videoId = db.Column(db.Text)
+    displayName = db.Column(db.Text)
+    metaStatus = db.Column(db.Integer)
+    metaNextRetry = db.Column(db.Text)
+
     def to_dict(self):
         return {
             'song_ID': self.song_id,
@@ -23,6 +27,9 @@ class tblmusic(db.Model):
             'genre': self.genre,
             'que': self.que,
             'urlSource': self.urlSource,
-            'dnLoadStatus': self.dnLoadStatus
+            'dnLoadStatus': self.dnLoadStatus,
+            'videoId': self.videoId,
+            'displayName': self.displayName,
+            'metaStatus': self.metaStatus
         }
         

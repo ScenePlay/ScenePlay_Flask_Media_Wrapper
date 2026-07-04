@@ -8,8 +8,8 @@
                 <form method="post" action="{{ url_for('ut.main') }}" class="form">
                     <div  style="border: 3px solid black;"> 
                     <h3>Youtube Import</h3>
-					 <input type="text" placeholder="URL Link" name="URLLink" class="form-control mb-3" />
-					 <input type="text" placeholder="File Name" name="FileName" class="form-control mb-3" />
+					 <input type="text" placeholder="Video or Playlist URL" name="URLLink" class="form-control mb-3" />
+					 <input type="text" placeholder="Optional display name — blank uses video metadata" name="FileName" class="form-control mb-3" />
                      <div style="display: flex; align-items: center;">
                         <label for="lblmedia" style="margin-right: 10px;">Choose Media:</label>
                         <select name="Media" id="mediaType">
@@ -32,6 +32,9 @@
                      <br />
                      <input type="submit" name="submit" value="Process Youtube"/>
                      <br />
+                     <br />
+                     <label for="form">Tag existing rows with their video id &amp; fetch metadata:</label>
+                     <input type="submit" name="submit" value="Backfill Metadata"/>
                      <br />
                      <br />
                      </div>

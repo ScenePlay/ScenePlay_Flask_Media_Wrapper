@@ -53,8 +53,9 @@ def threader(n, a):
             fi = select_play_threadQ()
             if len(fi) == 0:
                appsettingAudioPlayFlagUpdate(0)
+               appsettingFlagUpdate('currentsong', 0)   # queue drained — nothing playing
                n.value = 0
-               if a[2] != 0: 
+               if a[2] != 0:
                   a[3] = a[2]
                a[2] = 0
             else:
@@ -72,6 +73,9 @@ def threader(n, a):
                except:
                   if songRun == True:
                      songRun = False
+                     # Persist what's ACTUALLY starting (a[2] is process-local and
+                     # reshuffles every poll) so the dashboard can show it.
+                     appsettingFlagUpdate('currentsong', fi[0])
                      play_mp3_local(fi[1],fi[7], a)
                      update_data_entry(fi)
                   songRun = True

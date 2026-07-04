@@ -40,8 +40,9 @@ def threaderVideo():
             fi = select_video_threadQ()
             if len(fi) == 0:
                appsettingVideoPlayFlagUpdate(0)
+               appsettingFlagUpdate('currentvideo', 0)   # queue drained — nothing playing
                n.value = 0
-               if a[2] != 0: 
+               if a[2] != 0:
                   a[3] = a[2]
                a[2] = 0
             else:
@@ -59,6 +60,8 @@ def threaderVideo():
                   if videoRun == True:
                      videoRun = False
                      #print("Threader Video3")
+                     # Persist what's actually starting for the dashboard.
+                     appsettingFlagUpdate('currentvideo', fi[0])
                      play_mpv_local(fi[1], fi[7], fi[8], a, fi[9])
                      #              file    scrn  vol         loop
                      update_video_data_entry(fi)

@@ -41,29 +41,36 @@ if [ ! -f "yt-dlp/yt-dlp.sh" ]; then
   exit 1
 fi
 
+# Filenames are now the YouTube video id (<vid>.<ext>), which can START WITH '-'
+# (~1.6% of videos). --output=VALUE (the '=' form) stops optparse reading a
+# dash-leading id as a flag; 'mv --' and quoting stop the shell doing the same.
+# --no-playlist guards against a stray &list= making yt-dlp iterate a whole list.
 if [ "$mediaType" = "mp3" ]; then
-  bash yt-dlp/./yt-dlp.sh -i -x --audio-format $mediaType --output $name $http --proxy ""
+  bash yt-dlp/./yt-dlp.sh -i -x --audio-format "$mediaType" --no-playlist --output="$name" "$http" --proxy ""
 else
-  bash yt-dlp/./yt-dlp.sh  -f 'bestvideo[height<=720]+bestaudio/best[height<=720]' --merge-output-format $mediaType --output $name $http --proxy ""
+  bash yt-dlp/./yt-dlp.sh -f 'bestvideo[height<=720]+bestaudio/best[height<=720]' --merge-output-format "$mediaType" --no-playlist --output="$name" "$http" --proxy ""
 fi
 
-  mkdir -p $dir
-  mv $name $dir$name
+  mkdir -p "$dir"
+  mv -- "$name" "$dir$name"
 
- fl=$dir$name
+ fl="$dir$name"
 
-if [ -f $fl ]; then
+# sqlite3 CLI defaults to a 0 ms busy-timeout; with the extra metadata/playlist
+# writer processes a concurrent write would otherwise fail and wedge the row at
+# status 2. -cmd ".timeout 5000" gives it a 5s wait, matching Python's default.
+if [ -f "$fl" ]; then
   if [ "$mediaType" = "mp3" ]; then
-    sqlite3 ScenePlay.db "UPDATE tblMusic SET dnLoadStatus = 3  where song_id = '"$pkey"'"
+    sqlite3 -cmd ".timeout 5000" ScenePlay.db "UPDATE tblMusic SET dnLoadStatus = 3  where song_id = '"$pkey"'"
   else
-    sqlite3 ScenePlay.db "UPDATE tblVideoMedia SET dnLoadStatus = 3  where video_id = '"$pkey"'"
+    sqlite3 -cmd ".timeout 5000" ScenePlay.db "UPDATE tblVideoMedia SET dnLoadStatus = 3  where video_id = '"$pkey"'"
   fi
   mpg123 -q effects/finished.mp3
 else
     if [ "$mediaType" = "mp3" ]; then
-    sqlite3 ScenePlay.db "UPDATE tblMusic SET dnLoadStatus = 4  where song_id = '"$pkey"'"
+    sqlite3 -cmd ".timeout 5000" ScenePlay.db "UPDATE tblMusic SET dnLoadStatus = 4  where song_id = '"$pkey"'"
   else
-    sqlite3 ScenePlay.db "UPDATE tblVideoMedia SET dnLoadStatus = 4  where video_id = '"$pkey"'"
+    sqlite3 -cmd ".timeout 5000" ScenePlay.db "UPDATE tblVideoMedia SET dnLoadStatus = 4  where video_id = '"$pkey"'"
   fi
   mpg123 -q effects/failed.mp3
 fi

@@ -86,7 +86,13 @@
                            type="range" min="0" max="100" id="volume_slider"
                            value="{{ volume }}" oninput="volumeChange()">
                 </td>
-                <td style="border:none;"></td>
+                <td style="border:none;vertical-align:middle;">
+                  <!-- Now Playing: fed by /api/nowplaying (ids the player
+                       processes persist at play start, resolved to display names) -->
+                  <div id="npScene" style="color:var(--sp-muted);font-size:.8em;"></div>
+                  <div id="npSong"  style="color:var(--sp-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;">&#9835; &mdash;</div>
+                  <div id="npVideo" style="color:var(--sp-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;">&#9654; &mdash;</div>
+                </td>
                 <td style="vertical-align:middle;border:none;">
                   <input type="button" onclick="nextSong()" class="btn btn-primary" value="Next MP3">
                   <br><br>
@@ -97,9 +103,13 @@
                 </td>
                 <td style="border:none;">
                   <table style="border:none;">
-                    <tr><td style="border:none;color:var(--sp-text);" id="songQueueCount">Songs: {{ songQueueCount or items[0][1] }}</td></tr>
+                    <!-- (Nh NNm) suffix = summed metadata durations of queued rows;
+                         format must match site.js fmtQueueDur (poll overwrites this). -->
+                    {% set sQD = (items[0][2] or 0) | int %}
+                    {% set vQD = (items[1][2] or 0) | int %}
+                    <tr><td style="border:none;color:var(--sp-text);" id="songQueueCount">Songs: {{ songQueueCount or items[0][1] }}{% if sQD >= 3600 %} ({{ sQD // 3600 }}h {{ '%02d' % (sQD % 3600 // 60) }}m){% elif sQD >= 60 %} ({{ sQD // 60 }}m){% endif %}</td></tr>
                     <tr><td style="border:none;">&nbsp;</td></tr>
-                    <tr><td style="border:none;color:var(--sp-text);" id="videoQueueCount">Video: {{ videoQueueCount or items[1][1] }}</td></tr>
+                    <tr><td style="border:none;color:var(--sp-text);" id="videoQueueCount">Video: {{ videoQueueCount or items[1][1] }}{% if vQD >= 3600 %} ({{ vQD // 3600 }}h {{ '%02d' % (vQD % 3600 // 60) }}m){% elif vQD >= 60 %} ({{ vQD // 60 }}m){% endif %}</td></tr>
                     <script>setInterval(songAndVideoCount, 5000);</script>
                   </table>
                 </td>
@@ -121,6 +131,22 @@
         {% block content %}{% endblock %}
 
         <script>
+        async function refreshNowPlaying() {
+            try {
+                const r = await fetch('/api/nowplaying');
+                const np = await r.json();
+                // textContent everywhere — titles come from YouTube metadata.
+                document.getElementById('npSong').textContent =
+                    '♫ ' + (np.song ? np.song.name : '—');
+                document.getElementById('npVideo').textContent =
+                    '▶ ' + (np.video ? np.video.name : '—');
+                document.getElementById('npScene').textContent =
+                    np.scene ? 'Scene: ' + np.scene.name : '';
+            } catch (e) { /* server restarting — keep last shown values */ }
+        }
+        refreshNowPlaying();
+        setInterval(refreshNowPlaying, 4000);
+
         async function toggleKeepMusic() {
             const response = await fetch('/api/keepmusicplaying', { method: 'POST' });
             const data = await response.json();
