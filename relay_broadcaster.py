@@ -25,7 +25,12 @@ def _post(path, payload, cfg, timeout=5):
     import requests
     url = cfg['url'].rstrip('/') + path
     headers = {'X-Relay-Secret': cfg['secret'], 'Content-Type': 'application/json'}
-    requests.post(url, json=payload, headers=headers, timeout=timeout)
+    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    # The push queue's contract is "fn raises on failure" — without this, a
+    # relay-side 4xx/5xx (e.g. disk full while writing a map) counted as a
+    # SUCCESSFUL push and the payload was silently dropped.
+    resp.raise_for_status()
+    return resp
 
 
 # ── Push queue ────────────────────────────────────────────────────────────────
@@ -158,44 +163,55 @@ def _downscale_image(raw, orig_ext, max_dim, quality=82):
 
 _MAP_VIDEO_EXTS = ('mp4', 'webm', 'ogv')
 _MAP_VIDEO_CAP  = 30 * 1024 * 1024   # raw bytes; base64 adds ~33% on top
+_MAP_BG_CACHE   = {'key': None, 'val': (None, None, None)}   # (filename, mtime) → result
 
 
 def _battlemap_data(filename):
-    """Return (base64_data, ext) for a battlemap background, or (None, None).
+    """Return (base64_data, ext, sha) for a battlemap background, or (None,)*3.
 
-    Still images are downscaled/recompressed to keep the relay payload small.
-    Video backgrounds are embedded AS-IS up to _MAP_VIDEO_CAP so a remote relay
-    (which cannot reach this LAN server) can store and serve them; an oversize
-    video falls back to the URL — invisible to remote players — with a warning."""
+    Still images are downscaled/recompressed to keep the relay payload small;
+    video backgrounds are embedded AS-IS up to _MAP_VIDEO_CAP (an oversize video
+    falls back to the URL — invisible to remote players — with a warning).
+    `sha` is sha256[:32] of the bytes the relay would store, matching the
+    relay's on-disk filename so pushes can say "you already have this file"
+    instead of re-uploading it. Cached per (filename, mtime): map state pushes
+    fire on every token nudge and must not re-encode a video each time."""
     if not filename:
-        return None, None
-    import base64, os
+        return None, None, None
+    import base64, hashlib, os
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp') + _MAP_VIDEO_EXTS:
-        return None, None
+        return None, None, None
     try:
         from flask import current_app
         path = os.path.join(current_app.root_path, 'static', 'uploads', 'battlemaps', filename)
     except RuntimeError:
-        return None, None
+        return None, None, None
     if not os.path.exists(path):
-        return None, None
+        return None, None, None
     try:
+        key = (filename, os.path.getmtime(path))
+        if _MAP_BG_CACHE['key'] == key:
+            return _MAP_BG_CACHE['val']
         if ext in _MAP_VIDEO_EXTS:
             size = os.path.getsize(path)
             if size > _MAP_VIDEO_CAP:
                 log.warning('battlemap video %s is %.1f MB — over the %d MB relay embed '
                             'cap, remote players will not see it',
                             filename, size / 1048576, _MAP_VIDEO_CAP // 1048576)
-                return None, None
+                return None, None, None
             with open(path, 'rb') as f:
-                return base64.b64encode(f.read()).decode('ascii'), ext
-        with open(path, 'rb') as f:
-            raw = f.read()
-        data, new_ext = _downscale_image(raw, ext, max_dim=1920, quality=82)
-        return base64.b64encode(data).decode('ascii'), new_ext
+                out_bytes, out_ext = f.read(), ext
+        else:
+            with open(path, 'rb') as f:
+                raw = f.read()
+            out_bytes, out_ext = _downscale_image(raw, ext, max_dim=1920, quality=82)
+        val = (base64.b64encode(out_bytes).decode('ascii'), out_ext,
+               hashlib.sha256(out_bytes).hexdigest()[:32])
+        _MAP_BG_CACHE['key'], _MAP_BG_CACHE['val'] = key, val
+        return val
     except Exception:
-        return None, None
+        return None, None, None
 
 
 # _push_map_state fires from ~13 route call sites (every token nudge, effect
@@ -239,31 +255,43 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
             'movement_scale': movement_scale,
         },
     }
-    bg_data, bg_ext = _battlemap_data(bg_filename)
+    # Two-step background transfer: the normal push carries only a content sha
+    # (tiny — token moves on a video map must not re-upload megabytes each
+    # nudge). If the relay doesn't have that file it answers need_image and the
+    # heavy payload with the actual base64 bytes is sent once.
+    bg_data, bg_ext, bg_sha = _battlemap_data(bg_filename)
+    heavy = None
     if bg_data:
-        # Embed the background inline as a data: URL. The portal renders map.url
-        # directly (img or video element by mime), so the browser never needs to
-        # reach this LAN server. image_data/_ext let the relay write the bytes to
-        # its own disk and rewrite map.url to a relay-local file instead.
+        payload['map']['image_sha'] = bg_sha
+        payload['map']['image_ext'] = bg_ext
         if bg_ext in _MAP_VIDEO_EXTS:
             mime = 'video/' + ('ogg' if bg_ext == 'ogv' else bg_ext)
         else:
             mime = 'image/' + ('jpeg' if bg_ext == 'jpg' else bg_ext)
-        payload['map']['url']        = f'data:{mime};base64,{bg_data}'
-        payload['map']['image_data'] = bg_data
-        payload['map']['image_ext']  = bg_ext
+        # data: URL doubles as the fallback the portal can render directly if
+        # the relay cannot write the file (e.g. its disk is full).
+        heavy = dict(payload, map=dict(payload['map']))
+        heavy['map']['url']        = f'data:{mime};base64,{bg_data}'
+        heavy['map']['image_data'] = bg_data
 
     import hashlib
     import json as _json
     digest = hashlib.sha1(
-        _json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        _json.dumps(heavy or payload, sort_keys=True).encode()).hexdigest()
     if digest == _last_map_hash['v']:
         return   # nothing changed since the last successful push
 
     def _go():
-        # Map pushes can carry an embedded background image — allow a generous
-        # upload window so large maps aren't cut off on slow home uplinks.
-        _post('/api/v1/session/push', payload, cfg, timeout=60)
+        resp = _post('/api/v1/session/push', payload, cfg, timeout=20)
+        if heavy is not None:
+            try:
+                need = bool(resp.json().get('need_image'))
+            except Exception:
+                need = False
+            if need:
+                # Generous window: the heavy payload can carry a video on a
+                # slow home uplink. Only happens when the relay lacks the file.
+                _post('/api/v1/session/push', heavy, cfg, timeout=120)
         _last_map_hash['v'] = digest   # only remember payloads that landed
 
     _debounced_map_enqueue(_go)   # queue coalesces on 'map-state'; latest wins
