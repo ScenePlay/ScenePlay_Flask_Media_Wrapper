@@ -26,6 +26,43 @@ def _relay_cfg():
     }
 
 
+def _fmt_bytes(n):
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+        if n < 1024 or unit == 'TB':
+            return f'{n:.1f} {unit}' if unit != 'B' else f'{int(n)} B'
+        n /= 1024
+
+
+def _relay_disk(cfg):
+    """Disk tally from the relay (GET /api/v1/disk-usage), formatted for the
+    status card, or None when the relay is unreachable / runs an older build."""
+    try:
+        resp = requests.get(cfg['url'].rstrip('/') + '/api/v1/disk-usage',
+                            headers={'X-Relay-Secret': cfg['secret']}, timeout=5)
+        if not resp.ok:
+            return None
+        d = resp.json()
+        if not d.get('ok'):
+            return None
+        pct_used = round(100 * d['disk_used'] / max(1, d['disk_total']))
+        up = d.get('uploads', {})
+        return {
+            'data_h':   _fmt_bytes(d.get('data_bytes', 0)),
+            'free_h':   _fmt_bytes(d.get('disk_free', 0)),
+            'total_h':  _fmt_bytes(d.get('disk_total', 0)),
+            'pct_used': pct_used,
+            'badge':    ('bg-success' if pct_used < 80 else
+                         'bg-warning text-dark' if pct_used < 92 else 'bg-danger'),
+            'detail':   (f"db {_fmt_bytes(d.get('db_bytes', 0))}"
+                         f" • portraits {_fmt_bytes(up.get('portraits', 0))}"
+                         f" • maps {_fmt_bytes(up.get('battlemaps', 0))}"
+                         f" • monsters {_fmt_bytes(up.get('monsters', 0))}"),
+        }
+    except Exception as e:
+        log.debug('relay disk-usage fetch error: %s', e)
+        return None
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @relay_admin_bp.route('/')
@@ -46,6 +83,10 @@ def status():
         sync_age = int((datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds())
     except (ValueError, TypeError):
         pass
+
+    disk = None
+    if cfg['url'] and cfg['enabled'] == '1':
+        disk = _relay_disk(cfg)
 
     if cfg['session_id'] and cfg['url'] and cfg['enabled'] == '1':
         try:
@@ -80,7 +121,7 @@ def status():
             log.debug('status logged-in fetch error: %s', e)
 
     return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in,
-                           sync_age=sync_age)
+                           sync_age=sync_age, disk=disk)
 
 
 @relay_admin_bp.route('/toggle', methods=['POST'])
