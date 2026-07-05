@@ -148,6 +148,24 @@ def test_seq_lower_means_relay_reset_and_applies():
     assert rr._should_apply_relay_pos(1, 999, '', '') is True
 
 
+def test_map_match_allows_filtered_tokens():
+    """The push omits tokens whose entity is gone (e.g. a deleted monster), so
+    the relay knows a SUBSET of the local map's tokens — that must still match
+    or player moves are never applied (live bug: one dead monster token froze
+    all portal movement)."""
+    assert rr._relay_map_matches({43, 44, 45}, {22, 43, 44, 45}) is True
+    assert rr._relay_map_matches({43, 44}, {43, 44}) is True
+    assert rr._relay_map_matches(set(), {1, 2}) is True   # empty relay map
+
+
+def test_map_match_blocks_other_maps():
+    """Old-map rows (different token ids) must not move the new map's tokens;
+    a token removed locally (relay still lists it) also blocks until the
+    in-flight push lands."""
+    assert rr._relay_map_matches({1, 2, 3}, {43, 44, 45}) is False
+    assert rr._relay_map_matches({43, 44, 99}, {43, 44}) is False
+
+
 def test_seq_ignores_clock_skew():
     """With seqs present, timestamps are irrelevant — even a relay timestamp
     far in the past (skewed clock) must not suppress a genuinely newer write."""

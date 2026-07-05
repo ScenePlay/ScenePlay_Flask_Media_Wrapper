@@ -66,6 +66,17 @@ def _run(app):
             _stop.wait(delay)
 
 
+def _relay_map_matches(relay_ids, local_ids):
+    """True when the relay's pushed map describes the LOCAL active map.
+
+    Subset — not equality: the map push legitimately omits tokens whose entity
+    is gone (deleted monster, deactivated character), and a freshly added
+    token lags the in-flight push, so the relay often knows FEWER tokens than
+    the local map. A different map's rows can never pass: battlemap token ids
+    are unique per map, so any old-map id fails the subset test."""
+    return relay_ids <= local_ids
+
+
 def _should_apply_relay_pos(tok_seq, last_seq, tok_ts, bm_ts):
     """Decide whether a relay token position should overwrite the local one.
 
@@ -173,7 +184,7 @@ def _poll():
                              for t in (_json.loads(raw_map).get('tokens') or [])
                              if t.get('token_id') is not None}
                 local_ids = {t.token_id for t in active_bm.tokens}
-                relay_map_ok = relay_ids == local_ids
+                relay_map_ok = _relay_map_matches(relay_ids, local_ids)
             except (ValueError, TypeError, KeyError):
                 pass
     for tok in payload.get('tokens', []):

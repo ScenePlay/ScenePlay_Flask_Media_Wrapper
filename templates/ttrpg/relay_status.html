@@ -31,18 +31,6 @@
               {% endif %}
             {% endif %}
           </span>
-          {% if disk %}
-          <span class="small text-muted ms-3" title="Relay data: {{ disk.detail }}">
-            &#128190; {{ disk.data_h }} data
-            <span class="badge {{ disk.badge }} ms-1"
-                  title="Relay host disk {{ disk.pct_used }}% full ({{ disk.total_h }} total)">
-              {{ disk.free_h }} free</span>
-          </span>
-          {% elif cfg.enabled == '1' and cfg.url %}
-          <span class="small text-muted ms-3" title="The relay did not answer /api/v1/disk-usage — redeploy it to get the disk tally.">
-            &#128190; disk: n/a
-          </span>
-          {% endif %}
         </div>
         <form method="post" action="{{ url_for('relay_admin_bp.toggle') }}">
           <button class="btn btn-sm {% if cfg.enabled == '1' %}btn-outline-danger{% else %}btn-ttrpg{% endif %}">
