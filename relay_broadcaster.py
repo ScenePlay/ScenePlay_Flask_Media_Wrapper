@@ -156,17 +156,22 @@ def _downscale_image(raw, orig_ext, max_dim, quality=82):
     return raw, orig_ext
 
 
-def _battlemap_data(filename):
-    """Return (base64_data, ext) for a battlemap bg image, or (None, None).
+_MAP_VIDEO_EXTS = ('mp4', 'webm', 'ogv')
+_MAP_VIDEO_CAP  = 30 * 1024 * 1024   # raw bytes; base64 adds ~33% on top
 
-    Only still images are embedded so a remote relay can write the file itself;
-    video backgrounds (and missing files) fall back to the URL. Still images are
-    downscaled/recompressed first to keep the relay payload small."""
+
+def _battlemap_data(filename):
+    """Return (base64_data, ext) for a battlemap background, or (None, None).
+
+    Still images are downscaled/recompressed to keep the relay payload small.
+    Video backgrounds are embedded AS-IS up to _MAP_VIDEO_CAP so a remote relay
+    (which cannot reach this LAN server) can store and serve them; an oversize
+    video falls back to the URL — invisible to remote players — with a warning."""
     if not filename:
         return None, None
     import base64, os
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp') + _MAP_VIDEO_EXTS:
         return None, None
     try:
         from flask import current_app
@@ -176,6 +181,15 @@ def _battlemap_data(filename):
     if not os.path.exists(path):
         return None, None
     try:
+        if ext in _MAP_VIDEO_EXTS:
+            size = os.path.getsize(path)
+            if size > _MAP_VIDEO_CAP:
+                log.warning('battlemap video %s is %.1f MB — over the %d MB relay embed '
+                            'cap, remote players will not see it',
+                            filename, size / 1048576, _MAP_VIDEO_CAP // 1048576)
+                return None, None
+            with open(path, 'rb') as f:
+                return base64.b64encode(f.read()).decode('ascii'), ext
         with open(path, 'rb') as f:
             raw = f.read()
         data, new_ext = _downscale_image(raw, ext, max_dim=1920, quality=82)
@@ -227,11 +241,15 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
     }
     bg_data, bg_ext = _battlemap_data(bg_filename)
     if bg_data:
-        # Embed the image inline as a data: URL. The remote map <img> reads
-        # map.url, so the browser renders the bytes directly without reaching
-        # this LAN server. (image_data/_ext kept for any relay-side handler.)
-        mime = 'jpeg' if bg_ext == 'jpg' else bg_ext
-        payload['map']['url']        = f'data:image/{mime};base64,{bg_data}'
+        # Embed the background inline as a data: URL. The portal renders map.url
+        # directly (img or video element by mime), so the browser never needs to
+        # reach this LAN server. image_data/_ext let the relay write the bytes to
+        # its own disk and rewrite map.url to a relay-local file instead.
+        if bg_ext in _MAP_VIDEO_EXTS:
+            mime = 'video/' + ('ogg' if bg_ext == 'ogv' else bg_ext)
+        else:
+            mime = 'image/' + ('jpeg' if bg_ext == 'jpg' else bg_ext)
+        payload['map']['url']        = f'data:{mime};base64,{bg_data}'
         payload['map']['image_data'] = bg_data
         payload['map']['image_ext']  = bg_ext
 
