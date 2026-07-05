@@ -70,11 +70,13 @@ def _should_apply_relay_pos(tok_seq, last_seq, tok_ts, bm_ts):
     """Decide whether a relay token position should overwrite the local one.
 
     Preferred path: relay-assigned per-token write sequences (`seq`), which are
-    immune to clock skew between this machine and the relay host. Falls back to
-    the legacy cross-machine ISO-timestamp compare only when the relay predates
-    the seq column (mid-upgrade compatibility)."""
+    immune to clock skew between this machine and the relay host. A seq LOWER
+    than the last one we processed means the relay's counter restarted (its
+    token rows are cleared on map change / New Session) — that write is new,
+    not stale. Falls back to the legacy cross-machine ISO-timestamp compare
+    only when the relay predates the seq column (mid-upgrade compatibility)."""
     if tok_seq is not None:
-        return tok_seq > (last_seq or 0)
+        return tok_seq != (last_seq or 0)
     return not (bm_ts and tok_ts and tok_ts <= bm_ts)
 
 
@@ -154,6 +156,26 @@ def _poll():
     # must win, so that poll only RECORDS current relay seqs without applying
     # them (fast-forward), then resumes normal application next poll.
     baseline_only = appsettingGet('relay_token_baseline_pending', '0') == '1'
+
+    # Map-identity guard: relay token rows are matched to local tokens BY
+    # CHARACTER LABEL, so while the relay is still showing the PREVIOUS map
+    # (the map push is debounced/queued and can lag activation), its rows
+    # describe old-map positions and must not move tokens on the new map.
+    # The relay's current map_json carries the pushed token_ids — only apply
+    # relay moves when they equal the local active map's token ids.
+    relay_map_ok = True
+    if active_bm is not None:
+        raw_map = (payload.get('session') or {}).get('map_json')
+        if raw_map:
+            try:
+                import json as _json
+                relay_ids = {int(t['token_id'])
+                             for t in (_json.loads(raw_map).get('tokens') or [])
+                             if t.get('token_id') is not None}
+                local_ids = {t.token_id for t in active_bm.tokens}
+                relay_map_ok = relay_ids == local_ids
+            except (ValueError, TypeError, KeyError):
+                pass
     for tok in payload.get('tokens', []):
         label      = tok.get('label', '')
         x_pct      = tok.get('x_pct')
@@ -191,7 +213,7 @@ def _poll():
             continue   # seqs recorded above; do not move local tokens this poll
 
         # Update tblBattleMapTokens so the local battlemap poll sees relay moves.
-        if active_bm and token_type == 'player':
+        if active_bm and relay_map_ok and token_type == 'player':
             char = tblCharacters.query.filter_by(name=label, active=1).first()
             if char:
                 bm_tok = tblBattleMapTokens.query.filter_by(

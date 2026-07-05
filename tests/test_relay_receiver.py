@@ -135,10 +135,17 @@ def test_seq_newer_applies():
     assert rr._should_apply_relay_pos(5, 4, '', '') is True
 
 
-def test_seq_equal_or_older_skips():
+def test_seq_equal_skips():
     """Local wins ties — an echo of our own push must not count as a new move."""
     assert rr._should_apply_relay_pos(5, 5, '', '') is False
-    assert rr._should_apply_relay_pos(3, 5, '', '') is False
+
+
+def test_seq_lower_means_relay_reset_and_applies():
+    """The relay's per-token seq only increments; its rows are dropped on map
+    change / New Session. A LOWER seq therefore means the counter restarted —
+    the write is genuinely new (skipping it froze player moves after resets)."""
+    assert rr._should_apply_relay_pos(3, 5, '', '') is True
+    assert rr._should_apply_relay_pos(1, 999, '', '') is True
 
 
 def test_seq_ignores_clock_skew():
