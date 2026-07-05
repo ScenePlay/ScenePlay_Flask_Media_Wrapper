@@ -9,6 +9,7 @@ class tblCharacters(db.Model):
     user_id        = db.Column(db.Integer, db.ForeignKey('tblUsers.user_id'), nullable=False)
     name           = db.Column(db.Text, nullable=False)
     char_class     = db.Column(db.Text, default='')
+    subclass       = db.Column(db.Text, default='')   # archetype, e.g. Champion
     race           = db.Column(db.Text, default='')
     level          = db.Column(db.Integer, default=1)
     background     = db.Column(db.Text, default='')
@@ -460,3 +461,101 @@ class tblClassesLibrary(db.Model):
     description          = db.Column(db.Text, default='')
     source               = db.Column(db.Text, default='srd')
     created_at           = db.Column(db.Text, nullable=False)
+
+
+class tblConditionsLibrary(db.Model):
+    __tablename__ = 'tblConditionsLibrary'
+    condition_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index        = db.Column(db.Text, unique=True, nullable=True)
+    name             = db.Column(db.Text, nullable=False)
+    description      = db.Column(db.Text, default='')     # full SRD rule text
+    source           = db.Column(db.Text, default='srd')
+    created_at       = db.Column(db.Text, nullable=False)
+
+
+class tblMagicItemsLibrary(db.Model):
+    __tablename__ = 'tblMagicItemsLibrary'
+    magic_item_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index         = db.Column(db.Text, unique=True, nullable=True)
+    name              = db.Column(db.Text, nullable=False)
+    category          = db.Column(db.Text, default='')    # Wondrous Items, Ring, Potion…
+    rarity            = db.Column(db.Text, default='')    # Common … Legendary, Artifact
+    attunement        = db.Column(db.Integer, default=0)  # 1 = requires attunement
+    description       = db.Column(db.Text, default='')
+    image_url         = db.Column(db.Text, default='')
+    source            = db.Column(db.Text, default='srd')
+    created_at        = db.Column(db.Text, nullable=False)
+
+
+class tblFeaturesLibrary(db.Model):
+    __tablename__ = 'tblFeaturesLibrary'
+    feature_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index      = db.Column(db.Text, unique=True, nullable=True)
+    name           = db.Column(db.Text, nullable=False)
+    class_name     = db.Column(db.Text, default='')       # Barbarian, Wizard…
+    subclass_name  = db.Column(db.Text, default='')       # '' for base-class features
+    level          = db.Column(db.Integer, default=0)     # level the feature is gained
+    prerequisites  = db.Column(db.Text, default='')
+    description    = db.Column(db.Text, default='')
+    source         = db.Column(db.Text, default='srd')
+    created_at     = db.Column(db.Text, nullable=False)
+
+
+class tblClassLevelsLibrary(db.Model):
+    __tablename__ = 'tblClassLevelsLibrary'
+    class_level_id  = db.Column(db.Integer, primary_key=True)
+    api_index       = db.Column(db.Text, unique=True, nullable=True)  # e.g. "wizard-3"
+    class_name      = db.Column(db.Text, nullable=False)
+    level           = db.Column(db.Integer, default=1)
+    prof_bonus      = db.Column(db.Integer, default=2)
+    features_text   = db.Column(db.Text, default='')      # newline-separated feature names
+    cantrips_known  = db.Column(db.Integer, default=0)
+    spells_known    = db.Column(db.Integer, default=0)    # 0 = prepared caster / non-caster
+    spell_slots_json    = db.Column(db.Text, default='{}')  # {"1": 4, "2": 2, …}
+    class_specific_json = db.Column(db.Text, default='{}')  # rage_count, ki_points, …
+    source          = db.Column(db.Text, default='srd')
+    created_at      = db.Column(db.Text, nullable=False)
+
+
+class tblSubclassesLibrary(db.Model):
+    __tablename__ = 'tblSubclassesLibrary'
+    subclass_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index       = db.Column(db.Text, unique=True, nullable=True)
+    name            = db.Column(db.Text, nullable=False)
+    class_name      = db.Column(db.Text, default='')
+    flavor          = db.Column(db.Text, default='')      # "Martial Archetype", summary line
+    description     = db.Column(db.Text, default='')
+    source          = db.Column(db.Text, default='srd')
+    created_at      = db.Column(db.Text, nullable=False)
+
+
+class tblTraitsLibrary(db.Model):
+    __tablename__ = 'tblTraitsLibrary'
+    trait_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index    = db.Column(db.Text, unique=True, nullable=True)
+    name         = db.Column(db.Text, nullable=False)
+    races_text   = db.Column(db.Text, default='')         # races/species that get the trait
+    description  = db.Column(db.Text, default='')
+    source       = db.Column(db.Text, default='srd')
+    created_at   = db.Column(db.Text, nullable=False)
+
+
+class tblWeaponPropertiesLibrary(db.Model):
+    __tablename__ = 'tblWeaponPropertiesLibrary'
+    weapon_prop_id = db.Column(db.Integer, primary_key=True)
+    api_index      = db.Column(db.Text, unique=True, nullable=True)
+    name           = db.Column(db.Text, nullable=False)   # Finesse, Versatile, Reach…
+    description    = db.Column(db.Text, default='')
+    source         = db.Column(db.Text, default='srd')
+    created_at     = db.Column(db.Text, nullable=False)
+
+
+class tblRulesLibrary(db.Model):
+    __tablename__ = 'tblRulesLibrary'
+    rule_lib_id = db.Column(db.Integer, primary_key=True)
+    api_index   = db.Column(db.Text, unique=True, nullable=True)
+    name        = db.Column(db.Text, nullable=False)      # "Grappling", "Ability Checks"…
+    parent      = db.Column(db.Text, default='')          # "Combat", "Spellcasting"… ('' = top level)
+    description = db.Column(db.Text, default='')          # full SRD rules prose (markdown-ish)
+    source      = db.Column(db.Text, default='srd')
+    created_at  = db.Column(db.Text, nullable=False)

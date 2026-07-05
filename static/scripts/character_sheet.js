@@ -290,8 +290,19 @@ function equipSearch(q) {
   const box = document.getElementById('equip-suggestions');
   if (!box) return;
   _equipSearchTimer = setTimeout(() => {
-    fetch(`/ttrpg/reference/equipment/search?q=${encodeURIComponent(q)}`)
-      .then(r => r.json()).then(results => {
+    // Mundane equipment AND magic items in one dropdown; magic entries carry a
+    // tag and their rarity/attunement line rides into the item's notes on pick.
+    Promise.all([
+      fetch(`/ttrpg/reference/equipment/search?q=${encodeURIComponent(q)}`)
+        .then(r => r.json()).catch(() => []),
+      fetch(`/ttrpg/reference/lookup/magicitems?q=${encodeURIComponent(q)}&limit=10`)
+        .then(r => r.json()).catch(() => []),
+    ]).then(([equip, magic]) => {
+        const results = [
+          ...equip,
+          ...magic.map(m => ({name: m.name, category: '✦ ' + (m.sub || 'Magic Item'),
+                              description: m.desc || '', magicSub: m.sub || '', magic: true})),
+        ];
         if (!results.length) { box.style.display = 'none'; return; }
         _equipResults = results;
         box.innerHTML = results.map((it, i) => `
@@ -321,6 +332,15 @@ function equipPick(it) {
   document.getElementById('new_item_name').value   = it.name;
   document.getElementById('new_item_weight').value = it.weight || '';
   document.getElementById('equip-suggestions').style.display = 'none';
+
+  // Magic items: carry rarity/attunement + description into the notes field so
+  // the item's text lives on the sheet (and rides to the relay with it).
+  if (it.magic) {
+    const notes = [it.magicSub, (it.description || '').slice(0, 240)
+                   + ((it.description || '').length > 240 ? '…' : '')]
+      .filter(Boolean).join(' — ');
+    document.getElementById('new_item_notes').value = notes;
+  }
 
   // Show detail preview card
   document.getElementById('equip-prev-name').textContent = it.name;
@@ -494,6 +514,7 @@ function weapLibPick(w) {
   document.getElementById('new_weap_range_normal').value = w.range_normal;
   document.getElementById('new_weap_range_long').value   = w.range_long;
   document.getElementById('new_weap_properties').value   = w.properties;
+  document.getElementById('new_weap_notes').value        = w.notes || '';
   document.getElementById('weap-suggestions').style.display = 'none';
   addWeaponToChar();
 }
@@ -520,6 +541,7 @@ function addWeaponToChar() {
       range_normal:           parseInt(document.getElementById('new_weap_range_normal').value) || 0,
       range_long:             parseInt(document.getElementById('new_weap_range_long').value)   || 0,
       properties:             document.getElementById('new_weap_properties').value,
+      notes:                  document.getElementById('new_weap_notes').value,
       attack_bonus: 0, damage_bonus: 0, equipped: 0,
     })
   }).then(() => reloadKeepTab());
@@ -656,6 +678,7 @@ function armorLibPick(a) {
   document.getElementById('new_armor_class_base').value = a.armor_class_base;
   document.getElementById('new_armor_dex_bonus').value  = a.dex_bonus;
   document.getElementById('new_armor_max_dex').value    = a.max_dex_bonus !== null ? a.max_dex_bonus : '';
+  document.getElementById('new_armor_notes').value      = a.notes || '';
   document.getElementById('armor-suggestions').style.display = 'none';
   addArmorToChar();
 }
@@ -678,6 +701,7 @@ function addArmorToChar() {
       armor_class_base: parseInt(document.getElementById('new_armor_class_base').value) || 0,
       dex_bonus:        parseInt(document.getElementById('new_armor_dex_bonus').value) || 0,
       max_dex_bonus:    maxDexRaw === '' ? null : parseInt(maxDexRaw),
+      notes:            document.getElementById('new_armor_notes').value,
       ac_bonus: 0, equipped: 0,
     })
   }).then(() => reloadKeepTab());
@@ -1230,6 +1254,7 @@ function _refCard(key, it) {
           ${it.weight ? ` &nbsp; ⚖ ${it.weight} lb` : ''}
         </div>
         ${it.properties ? `<div style="font-size:.7rem;color:var(--sp-muted);">${_escH(it.properties)}</div>` : ''}
+        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.notes, 400))}</div>` : ''}
       </div>`;
     }
     case 'armor': {
@@ -1245,6 +1270,7 @@ function _refCard(key, it) {
           ${it.str_minimum ? ` &nbsp; STR ${it.str_minimum}+` : ''}
           ${it.cost ? ` &nbsp; 💰 ${_escH(it.cost)}` : ''}
         </div>
+        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.notes, 400))}</div>` : ''}
       </div>`;
     }
     case 'equipment': {
@@ -1300,8 +1326,34 @@ function _refCard(key, it) {
         ${subs.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${subs.map(s => _escH(s.trim())).join(' · ')}</div>` : ''}
       </div>`;
     }
-    default: return '';
+    default: {
+      // Generic name/sub/desc card — conditions, magic items, class features,
+      // subclasses, traits, weapon properties, rules (the /lookup/<cat> shape).
+      if (!it.name) return '';
+      return `<div style="${base}">
+        <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
+          ${it.sub ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.sub)}</span>` : ''}</div>
+        ${it.desc ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.desc, 600))}</div>` : ''}
+      </div>`;
+    }
   }
+}
+
+// ── Suggest resources from the synced class level tables ─────────────────────
+
+function suggestResources() {
+  const msg = document.getElementById('suggest-res-msg');
+  if (msg) msg.textContent = '…';
+  fetch(`/ttrpg/character/${CHAR_ID}/suggest-resources`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok && d.added && d.added.length) {
+        location.reload();               // new resource rows need server render
+      } else if (msg) {
+        msg.textContent = d.message || d.error || 'Nothing added.';
+      }
+    })
+    .catch(() => { if (msg) msg.textContent = 'Request failed.'; });
 }
 
 // ── LLM prompt / portrait paste (formerly the second inline script) ──────────

@@ -414,7 +414,7 @@ _ATTR_WHITELIST = frozenset({
     'ac', 'speed', 'initiative_bonus', 'passive_perception',
     'str_val', 'dex_val', 'con_val', 'int_val', 'wis_val', 'cha_val',
     'gold', 'silver', 'copper', 'level',
-    'char_class', 'race', 'background',
+    'char_class', 'subclass', 'race', 'background',
 })
 
 
@@ -709,7 +709,7 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
                 break
 
     elif mutation_type == 'attr_save':
-        _txt_keys = {'char_class', 'race', 'background'}
+        _txt_keys = {'char_class', 'subclass', 'race', 'background'}
         for key, val in data.items():
             if key in _ATTR_WHITELIST:
                 if key in _txt_keys:

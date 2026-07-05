@@ -1,0 +1,197 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+
+{% block head %}
+<style>
+  .sub-card { transition: border-color .15s; }
+  .sub-card:hover { border-color: var(--ttrpg-accent) !important; }
+  .sub-desc { white-space: pre-wrap; font-size: .85rem; color: var(--sp-muted); }
+  .class-badge {
+    font-size: .72rem; padding: 2px 7px; border-radius: 10px;
+    background: color-mix(in srgb, var(--sp-accent) 14%, transparent);
+    border: 1px solid var(--sp-border); color: var(--ttrpg-accent);
+  }
+  .feat-row { border-top: 1px dashed var(--sp-border); padding: 4px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 style="color:var(--ttrpg-accent);" class="mb-0">Subclasses Library</h3>
+    <span class="small text-muted">{{ total }} subclass{{ 'es' if total != 1 }} stored locally &mdash;
+      players pick theirs on the character sheet's Reference tab</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">+ Homebrew Subclass</button>
+    <a href="{{ url_for('reference_bp.api_settings') }}"
+       class="btn btn-outline-secondary btn-sm" title="Change API source">
+      &#9881; {{ api_options.get(current_api, {}).get('label', 'Custom') }}
+    </a>
+    <button id="sync-btn-subclasses" class="btn btn-ttrpg btn-sm"
+            onclick="startSync('subclasses','{{ url_for('reference_bp.sync_run', job_type='subclasses') }}','{{ url_for('reference_bp.sync_status', job_type='subclasses') }}')">
+      &#8635; Sync SRD
+    </button>
+  </div>
+</div>
+
+<!-- Add homebrew subclass (hidden by default) -->
+<div id="add-sub-form" class="ttrpg-card p-3 mb-3" style="display:none;">
+  <div class="fw-bold mb-3" style="color:var(--ttrpg-accent);">Add Homebrew Subclass</div>
+  <form method="POST" action="{{ url_for('reference_bp.subclass_add') }}">
+    <div class="row g-2 mb-2">
+      <div class="col-sm-4">
+        <label class="form-label small text-muted mb-1">Name *</label>
+        <input type="text" name="name" class="form-control form-control-sm"
+               required placeholder="e.g. Way of the Storm" id="sub-name-input">
+      </div>
+      <div class="col-sm-4">
+        <label class="form-label small text-muted mb-1">Class *</label>
+        <select name="class_name" class="form-select form-select-sm" required>
+          <option value="">&mdash; pick a class &mdash;</option>
+          {% for c in class_names %}
+          <option value="{{ c }}">{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-4">
+        <label class="form-label small text-muted mb-1">Flavor line</label>
+        <input type="text" name="flavor" class="form-control form-control-sm"
+               placeholder="e.g. Primal Path / Arcane Tradition">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label small text-muted mb-1">Description</label>
+      <textarea name="description" class="form-control form-control-sm" rows="4"
+                style="resize:vertical;"
+                placeholder="What defines this archetype? (Add its per-level features after saving.)"></textarea>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-ttrpg btn-sm">Add to Library</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAddForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Filter bar -->
+<div class="ttrpg-card p-3 mb-3">
+  <form method="GET" action="{{ url_for('reference_bp.subclasses_library') }}" class="row g-2 align-items-end">
+    <div class="col-sm-4">
+      <label class="form-label small text-muted mb-1">Search</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Subclass name…">
+    </div>
+    <div class="col-sm-3">
+      <label class="form-label small text-muted mb-1">Class</label>
+      <select name="cls" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in class_names %}
+        <option value="{{ c }}" {% if cls == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Source</label>
+      <select name="src" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="srd" {% if src == 'srd' %}selected{% endif %}>SRD</option>
+        <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Homebrew</option>
+      </select>
+    </div>
+    <div class="col-sm-1">
+      <button type="submit" class="btn btn-ttrpg btn-sm w-100">Filter</button>
+    </div>
+    {% if q or cls or src %}
+    <div class="col-sm-2">
+      <a href="{{ url_for('reference_bp.subclasses_library') }}" class="btn btn-outline-secondary btn-sm w-100">Clear</a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+{% if subclasses %}
+{% for s in subclasses %}
+{% set feats = feats_by_sub.get(s.name.lower(), []) %}
+<div class="ttrpg-card p-3 mb-2 sub-card" style="border-color:var(--sp-border);">
+  <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+    <div>
+      <span class="fw-bold" style="color:var(--ttrpg-accent);font-size:1.05rem;">{{ s.name }}</span>
+      <span class="class-badge ms-2">{{ s.class_name }}</span>
+      {% if s.flavor %}<span class="small text-muted fst-italic ms-2">{{ s.flavor }}</span>{% endif %}
+      {% if s.source == 'homebrew' %}
+      <span class="badge ms-2" style="background:var(--sp-primary);color:var(--sp-accent);font-size:.65rem;">Homebrew</span>
+      {% endif %}
+    </div>
+    {% if s.source == 'homebrew' %}
+    <form method="POST" action="{{ url_for('reference_bp.subclass_delete', subclass_lib_id=s.subclass_lib_id) }}"
+          onsubmit="return confirm('Delete {{ s.name }} and its homebrew features?')" class="flex-shrink-0">
+      <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if s.description %}<div class="sub-desc mb-2">{{ s.description }}</div>{% endif %}
+
+  <!-- Features at each level -->
+  <details {% if s.source == 'homebrew' %}open{% endif %}>
+    <summary class="small" style="cursor:pointer;color:var(--ttrpg-accent);">
+      Features ({{ feats|length }})
+    </summary>
+    {% for f in feats %}
+    <div class="feat-row d-flex gap-2 align-items-start">
+      <span class="text-muted small flex-shrink-0" style="min-width:28px;">L{{ f.level }}</span>
+      <div class="flex-grow-1">
+        <span style="color:var(--ttrpg-accent);font-weight:600;font-size:.9rem;">{{ f.name }}</span>
+        {% if f.description %}<div class="sub-desc">{{ f.description }}</div>{% endif %}
+      </div>
+      {% if f.source == 'homebrew' %}
+      <form method="POST" action="{{ url_for('reference_bp.feature_delete', feature_lib_id=f.feature_lib_id) }}"
+            onsubmit="return confirm('Delete feature {{ f.name }}?')" class="flex-shrink-0">
+        <button class="btn btn-outline-danger btn-sm py-0 px-1">&#10005;</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-muted small fst-italic mb-1 mt-1">No features stored for this subclass yet.</p>
+    {% endfor %}
+
+    <!-- Add a homebrew feature to THIS subclass (works on SRD archetypes too) -->
+    <form method="POST" action="{{ url_for('reference_bp.subclass_feature_add') }}"
+          class="d-flex gap-2 flex-wrap align-items-end mt-2 pt-2" style="border-top:1px solid var(--sp-border);">
+      <input type="hidden" name="subclass_lib_id" value="{{ s.subclass_lib_id }}">
+      <div>
+        <label class="form-label small text-muted mb-1">Lvl</label>
+        <input type="number" name="level" value="3" min="1" max="20"
+               class="form-control form-control-sm text-center" style="width:60px;">
+      </div>
+      <div style="flex:1 1 140px;max-width:220px;">
+        <label class="form-label small text-muted mb-1">Feature name</label>
+        <input type="text" name="name" required class="form-control form-control-sm" placeholder="e.g. Storm Strike">
+      </div>
+      <div style="flex:2 1 240px;">
+        <label class="form-label small text-muted mb-1">Description</label>
+        <input type="text" name="description" class="form-control form-control-sm" placeholder="What it does…">
+      </div>
+      <button type="submit" class="btn btn-ttrpg btn-sm">+ Feature</button>
+    </form>
+  </details>
+</div>
+{% endfor %}
+{% else %}
+<div class="ttrpg-card p-4 text-center text-muted">
+  {% if q or cls or src %}
+  <p>No subclasses match your filters.</p>
+  {% else %}
+  <p>No subclasses stored yet. Click <strong>Sync SRD</strong> to pull the official archetypes,
+     or add a <strong>Homebrew Subclass</strong> above.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% block scripts %}
+<script>
+function toggleAddForm() {
+  const f = document.getElementById('add-sub-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') document.getElementById('sub-name-input').focus();
+}
+</script>
+{% endblock %}
+{% endblock %}

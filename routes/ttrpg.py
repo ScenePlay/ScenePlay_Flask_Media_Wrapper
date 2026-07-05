@@ -12,12 +12,13 @@ from models.ttrpg import (tblCharacters, tblCharacterResources,
                            tblCharacterFeats, tblCharacterArmor,
                            tblCharacterWeapons, tblCharacterSpells,
                            tblSessions, tblSessionParty,
-                           tblRacesLibrary, tblClassesLibrary, tblDiceRolls)
+                           tblRacesLibrary, tblClassesLibrary, tblDiceRolls,
+                           tblFeaturesLibrary, tblClassLevelsLibrary)
 from models.campaigns import tblcampaigns
 from models.scenes import tblscenes
 from models.ttrpg import tblSessionMonsters as _tblSessionMonsters
 from routes.auth import dm_required
-from routes.monsters import CONDITIONS
+from routes.monsters import condition_texts
 import relay_broadcaster
 
 ttrpg = Blueprint('ttrpg', __name__, url_prefix='/ttrpg')
@@ -195,6 +196,117 @@ def character_new():
     return render_template('ttrpg/character_new.html', error=error)
 
 
+# ── Class progression (synced from the D&D API's class level tables) ──────────
+
+# class_specific counters that behave like spendable resources. Everything else
+# in class_specific (dice sizes, passive numbers like aura range) is skipped.
+_CLASS_RESOURCE_NAMES = {
+    'rage_count':               'Rages',
+    'ki_points':                'Ki Points',
+    'sorcery_points':           'Sorcery Points',
+    'channel_divinity_charges': 'Channel Divinity',
+    'action_surges':            'Action Surge',
+    'indomitable_uses':         'Indomitable',
+}
+
+
+def _class_progression(char):
+    """(features, level_info) for the character's class at its current level.
+
+    features: tblFeaturesLibrary rows for the base class, level <= char.level.
+    level_info: {'prof_bonus', 'slots': {lvl: n}, 'cantrips_known',
+                 'spells_known', 'counters': {label: n}} from the class level
+    table, or None when the class/level isn't synced."""
+    import json as _json
+    from sqlalchemy import func
+    cls = (char.char_class or '').strip()
+    if not cls:
+        return [], None
+    sub = (getattr(char, 'subclass', '') or '').strip()
+    feat_filter = (func.lower(tblFeaturesLibrary.class_name) == cls.lower())
+    if sub:
+        from sqlalchemy import or_
+        subclass_match = or_(tblFeaturesLibrary.subclass_name == '',
+                             func.lower(tblFeaturesLibrary.subclass_name) == sub.lower())
+    else:
+        subclass_match = (tblFeaturesLibrary.subclass_name == '')
+    features = (tblFeaturesLibrary.query
+                .filter(feat_filter, subclass_match,
+                        tblFeaturesLibrary.level <= (char.level or 1))
+                .order_by(tblFeaturesLibrary.level, tblFeaturesLibrary.name)
+                .all())
+    # Libraries synced before the same-name skip existed hold both editions of a
+    # feature ('rage' + 'barbarian-rage', same display name). Collapse duplicates
+    # per (level, name), keeping the fuller text.
+    best = {}
+    for f in features:
+        key = (f.level, (f.name or '').lower(), (f.subclass_name or '').lower())
+        if key not in best or len(f.description or '') > len(best[key].description or ''):
+            best[key] = f
+    features = sorted(best.values(), key=lambda f: (f.level, (f.name or '').lower()))
+    row = (tblClassLevelsLibrary.query
+           .filter(func.lower(tblClassLevelsLibrary.class_name) == cls.lower(),
+                   tblClassLevelsLibrary.level == (char.level or 1))
+           .first())
+    level_info = None
+    if row:
+        try:
+            slots = {int(k): v for k, v in _json.loads(row.spell_slots_json or '{}').items() if v}
+        except Exception:
+            slots = {}
+        try:
+            specific = _json.loads(row.class_specific_json or '{}')
+        except Exception:
+            specific = {}
+        counters = {label: specific[key] for key, label in _CLASS_RESOURCE_NAMES.items()
+                    if isinstance(specific.get(key), int) and specific[key] > 0}
+        level_info = {
+            'prof_bonus':     row.prof_bonus,
+            'slots':          slots,
+            'cantrips_known': row.cantrips_known,
+            'spells_known':   row.spells_known,
+            'counters':       counters,
+        }
+    return features, level_info
+
+
+@ttrpg.route('/character/<int:character_id>/suggest-resources', methods=['POST'])
+@login_required
+def suggest_resources(character_id):
+    """Create spell-slot / class-counter resources from the synced class level
+    table. Only ADDS resources whose names don't exist yet — anything the
+    player typed by hand is never touched or overwritten."""
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+
+    _, level_info = _class_progression(char)
+    if not level_info:
+        return jsonify({'ok': False,
+                        'error': f'No synced class table for "{char.char_class}" level {char.level}. '
+                                 f'Run Sync All on the API Settings page first.'}), 404
+
+    existing = {(r.resource_name or '').strip().lower() for r in char.resources}
+    order = max([r.order_by or 0 for r in char.resources], default=0)
+    added = []
+
+    wanted = [(f'Spell Slots L{lvl}', n) for lvl, n in sorted(level_info['slots'].items())]
+    wanted += sorted(level_info['counters'].items())
+    for name, count in wanted:
+        if name.lower() in existing:
+            continue
+        order += 1
+        db.session.add(tblCharacterResources(
+            character_id=character_id, resource_name=name,
+            current_val=count, max_val=count, order_by=order))
+        added.append(name)
+    db.session.commit()
+    relay_broadcaster.push_character(char)
+    return jsonify({'ok': True, 'added': added,
+                    'message': (f'Added: {", ".join(added)}' if added
+                                else 'Nothing to add — all suggested resources already exist.')})
+
+
 # ── Character sheet — view ─────────────────────────────────────────────────────
 
 @ttrpg.route('/character/<int:character_id>')
@@ -211,9 +323,25 @@ def character_sheet(character_id):
     races_lib   = {r.name.lower(): r for r in tblRacesLibrary.query.all()}
     classes_lib = {c.name.lower(): c for c in tblClassesLibrary.query.all()}
     can_edit = current_user.is_dm() or char.user_id == current_user.user_id
+    class_features, class_level_info = _class_progression(char)
+    subclass_options = []
+    if char.char_class:
+        from sqlalchemy import func
+        from models.ttrpg import tblSubclassesLibrary
+        subclass_options = [s.name for s in tblSubclassesLibrary.query
+                            .filter(func.lower(tblSubclassesLibrary.class_name)
+                                    == char.char_class.strip().lower())
+                            .order_by(tblSubclassesLibrary.name).all()]
+    from models.ttrpg import tblWeaponPropertiesLibrary
+    weapon_props = {w.name.lower(): w.description
+                    for w in tblWeaponPropertiesLibrary.query.all() if w.description}
     return render_template('ttrpg/character_sheet.html', char=char,
-                           all_players=all_players, conditions=CONDITIONS,
+                           all_players=all_players, conditions=condition_texts(),
                            races_lib=races_lib, classes_lib=classes_lib,
+                           class_features=class_features,
+                           class_level_info=class_level_info,
+                           subclass_options=subclass_options,
+                           weapon_props=weapon_props,
                            can_edit=can_edit)
 
 
@@ -233,7 +361,7 @@ def save_field(character_id):
     int_fields = {'hp_current', 'hp_max', 'ac', 'str_val', 'dex_val', 'con_val',
                   'int_val', 'wis_val', 'cha_val', 'speed', 'initiative_bonus',
                   'passive_perception', 'gold', 'silver', 'copper', 'level'}
-    text_fields = {'name', 'char_class', 'race', 'background'}
+    text_fields = {'name', 'char_class', 'subclass', 'race', 'background'}
 
     if field in int_fields:
         setattr(char, field, int(value or 0))
@@ -994,7 +1122,7 @@ def session_detail(session_id):
                            campaigns=campaigns,
                            all_chars=all_chars,
                            party_ids=party_ids,
-                           conditions=CONDITIONS,
+                           conditions=condition_texts(),
                            campaign_scenes=campaign_scenes,
                            current_vol=current_vol)
 

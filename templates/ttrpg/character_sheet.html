@@ -614,6 +614,13 @@
               <input type="number" id="new_res_max" class="form-control form-control-sm text-center" style="max-width:90px;" value="0">
             </div>
             <button class="btn btn-ttrpg btn-sm" onclick="addResource()">Add</button>
+            {% if char.char_class %}
+            <button class="btn btn-outline-secondary btn-sm" onclick="suggestResources()"
+                    title="Add spell slots and class counters (rages, ki, sorcery points…) for a {{ char.char_class }} {{ char.level }} from the synced class tables. Existing resources are never changed.">
+              &#10024; Suggest from class
+            </button>
+            <span id="suggest-res-msg" class="small text-muted"></span>
+            {% endif %}
           </div>
           {% endif %}
           <div id="resource-list">
@@ -741,7 +748,7 @@
             <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
               <div style="position:relative;flex:1 1 200px;max-width:320px;">
                 <input type="text" id="new_item_name" class="form-control form-control-sm"
-                       placeholder="Search equipment or type a custom name…"
+                       placeholder="Search equipment &amp; magic items, or type a custom name…"
                        autocomplete="off"
                        oninput="equipSearch(this.value)"
                        onfocus="equipSearch(this.value)">
@@ -893,6 +900,7 @@
             <input type="hidden" id="new_weap_range_normal"   value="0">
             <input type="hidden" id="new_weap_range_long"     value="0">
             <input type="hidden" id="new_weap_properties"     value="">
+            <input type="hidden" id="new_weap_notes"          value="">
 
             <!-- Custom weapon form (collapsed by default) -->
             <div id="custom-weap-form" style="display:none;margin-top:8px;padding:12px;
@@ -1038,7 +1046,15 @@
                   <span style="color:var(--ttrpg-accent);">+{{ w.attack_bonus }} to hit</span>
                   {% endif %}
                   {% if w.properties %}
-                  <span class="fst-italic">{{ w.properties }}</span>
+                  <span class="fst-italic">
+                    {%- for p in w.properties.split(',') %}{% set pn = p.strip() -%}
+                    {%- set pd = weapon_props.get(pn.split('(')[0].strip().lower(), '') -%}
+                    {%- if pd %}<span data-bs-toggle="tooltip" data-bs-placement="top"
+                          data-bs-custom-class="feat-tooltip" title="{{ pd }}"
+                          style="cursor:help;border-bottom:1px dotted var(--sp-muted);">{{ pn }}</span>
+                    {%- else %}{{ pn }}{% endif %}{% if not loop.last %}, {% endif %}
+                    {%- endfor %}
+                  </span>
                   {% endif %}
                   {% if w.notes %}
                   <span class="fst-italic">{{ w.notes }}</span>
@@ -1151,6 +1167,7 @@
             <input type="hidden" id="new_armor_class_base" value="0">
             <input type="hidden" id="new_armor_dex_bonus"  value="0">
             <input type="hidden" id="new_armor_max_dex"    value="">
+            <input type="hidden" id="new_armor_notes"      value="">
           </div>
           {% endif %}
 
@@ -1699,22 +1716,93 @@
                 {% else %}
                 <div class="small text-muted fst-italic">No class set.</div>
                 {% endif %}
+                {% if char.char_class %}
+                {% if can_edit and subclass_options %}
+                <div class="d-flex align-items-center gap-2 mt-2">
+                  <label class="small text-muted mb-0">Subclass</label>
+                  <select class="form-select form-select-sm" style="max-width:210px;"
+                          onchange="saveField('subclass', this.value, () => reloadKeepTab())">
+                    <option value="">&mdash; none &mdash;</option>
+                    {% for s in subclass_options %}
+                    <option value="{{ s }}" {% if char.subclass == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                {% elif char.subclass %}
+                <div class="small mt-2"><span class="text-muted">Subclass:</span>
+                  <span style="color:var(--ttrpg-accent);font-weight:600;">{{ char.subclass }}</span></div>
+                {% elif can_edit %}
+                <div class="small text-muted fst-italic mt-2" style="font-size:.72rem;">
+                  Sync Subclasses on the API Settings page to pick an archetype here.</div>
+                {% endif %}
+                {% endif %}
               </div>
             </div>
           </div>
+
+          <!-- Class progression & features (synced from the D&D API level tables) -->
+          {% if class_level_info or class_features %}
+          <div class="ttrpg-card p-2 mb-3" style="border-color:var(--sp-border);">
+            <div class="small fw-bold text-muted mb-1" style="text-transform:uppercase;letter-spacing:.06em;">
+              {{ char.char_class }}{% if char.subclass %} ({{ char.subclass }}){% endif %} {{ char.level }} — Progression
+            </div>
+            {% if class_level_info %}
+            <div class="d-flex gap-3 small flex-wrap mb-2">
+              <span>Prof. bonus <span style="color:var(--ttrpg-accent);font-weight:600;">+{{ class_level_info.prof_bonus }}</span></span>
+              {% if class_level_info.slots %}
+              <span>Spell slots:
+                {% for lvl, n in class_level_info.slots.items() | sort %}
+                <span style="font-size:.72rem;padding:1px 6px;border-radius:8px;margin-left:2px;
+                             border:1px solid var(--ttrpg-accent);color:var(--ttrpg-accent);">L{{ lvl }}&times;{{ n }}</span>
+                {% endfor %}
+              </span>
+              {% endif %}
+              {% if class_level_info.cantrips_known %}<span class="text-muted">{{ class_level_info.cantrips_known }} cantrips</span>{% endif %}
+              {% if class_level_info.spells_known %}<span class="text-muted">{{ class_level_info.spells_known }} spells known</span>{% endif %}
+              {% for label, n in class_level_info.counters.items() %}
+              <span class="text-muted">{{ label }}: <span style="color:var(--ttrpg-accent);">{{ n }}</span></span>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if class_features %}
+            <div class="small fw-bold text-muted mb-1" style="text-transform:uppercase;letter-spacing:.06em;">Class Features</div>
+            {% for f in class_features %}
+            <details class="mb-1" style="border:1px solid var(--sp-border);border-radius:5px;padding:4px 8px;background:var(--sp-surface);">
+              <summary style="cursor:pointer;font-size:.85rem;">
+                <span class="text-muted" style="font-size:.72rem;">L{{ f.level }}</span>
+                <span style="color:var(--ttrpg-accent);font-weight:600;">{{ f.name }}</span>
+                {% if f.subclass_name %}<span style="font-size:.68rem;padding:1px 5px;border-radius:6px;
+                      border:1px solid var(--ttrpg-accent);color:var(--ttrpg-accent);">{{ f.subclass_name }}</span>{% endif %}
+                {% if f.prerequisites %}<span class="text-muted fst-italic" style="font-size:.72rem;">({{ f.prerequisites }})</span>{% endif %}
+              </summary>
+              <div class="small mt-1" style="white-space:pre-wrap;color:var(--sp-text);">{{ f.description }}</div>
+            </details>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted small fst-italic mb-0">No synced features for this class — run Sync All on the API Settings page.</p>
+            {% endif %}
+          </div>
+          {% endif %}
 
           <!-- Library search accordion -->
           <div class="small fw-bold text-muted mb-2" style="text-transform:uppercase;letter-spacing:.06em;">Browse Libraries</div>
           <div id="ref-accordion">
             {% set lib_sections = [
-              ('armor',     'Armor',     '🛡'),
-              ('classes',   'Classes',   '🏰'),
-              ('equipment', 'Equipment', '🎒'),
-              ('feats',     'Feats',     '⭐'),
-              ('races',     'Races',     '🧬'),
-              ('skills',    'Skills',    '🎯'),
-              ('spells',    'Spells',    '✦'),
-              ('weapons',   'Weapons',   '⚔'),
+              ('armor',       'Armor',             '🛡'),
+              ('features',    'Class Features',    '📖'),
+              ('classes',     'Classes',           '🏰'),
+              ('conditions',  'Conditions',        '☠'),
+              ('equipment',   'Equipment',         '🎒'),
+              ('feats',       'Feats',             '⭐'),
+              ('magicitems',  'Magic Items',       '🔮'),
+              ('races',       'Races',             '🧬'),
+              ('rules',       'Rules',             '📜'),
+              ('skills',      'Skills',            '🎯'),
+              ('spells',      'Spells',            '✦'),
+              ('subclasses',  'Subclasses',        '🧭'),
+              ('traits',      'Traits',            '🌿'),
+              ('weaponprops', 'Weapon Properties', '🏷'),
+              ('weapons',     'Weapons',           '⚔'),
             ] %}
             {% for key, label, icon in lib_sections %}
             <div class="ref-section mb-1" style="border:1px solid var(--sp-border);border-radius:6px;overflow:hidden;">
@@ -1867,6 +1955,13 @@ const _refUrls = {
   skills:    "{{ url_for('reference_bp.skills_search') }}",
   races:     "{{ url_for('reference_bp.races_search') }}",
   classes:   "{{ url_for('reference_bp.classes_search') }}",
+  conditions:  "{{ url_for('reference_bp.reference_lookup', category='conditions') }}",
+  magicitems:  "{{ url_for('reference_bp.reference_lookup', category='magicitems') }}",
+  features:    "{{ url_for('reference_bp.reference_lookup', category='features') }}",
+  subclasses:  "{{ url_for('reference_bp.reference_lookup', category='subclasses') }}",
+  traits:      "{{ url_for('reference_bp.reference_lookup', category='traits') }}",
+  weaponprops: "{{ url_for('reference_bp.reference_lookup', category='weaponprops') }}",
+  rules:       "{{ url_for('reference_bp.reference_lookup', category='rules') }}",
 };
 
 // ── Page data for character_sheet.js ─────────────────────────

@@ -9,7 +9,11 @@ from flask_login import login_required
 from werkzeug.utils import secure_filename
 from sqlalchemy import text
 from extensions import db
-from models.ttrpg import tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig, tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary, tblClassesLibrary
+from models.ttrpg import (tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary, tblDnDAPIConfig,
+                          tblSpellsLibrary, tblSkillsLibrary, tblRacesLibrary, tblEquipmentLibrary,
+                          tblClassesLibrary, tblConditionsLibrary, tblMagicItemsLibrary,
+                          tblFeaturesLibrary, tblClassLevelsLibrary, tblSubclassesLibrary,
+                          tblTraitsLibrary, tblWeaponPropertiesLibrary, tblRulesLibrary)
 from routes.auth import dm_required
 
 WEAPON_IMG_FOLDER = os.path.join('static', 'uploads', 'weapons')
@@ -45,22 +49,35 @@ reference_bp = Blueprint('reference_bp', __name__, url_prefix='/ttrpg/reference'
 
 _sync_states = {}   # {job_type: {total, done, added, skipped, errors, running, message}}
 
-DEFAULT_API_BASE = 'https://www.dnd5eapi.co/api/2014'
+API_2014 = 'https://www.dnd5eapi.co/api/2014'
+API_2024 = 'https://www.dnd5eapi.co/api/2024'
+MERGED_API = 'merged'   # sentinel stored in tblDnDAPIConfig — pull 2024 first, fill from 2014
+
+DEFAULT_API_BASE = MERGED_API
 
 API_OPTIONS = {
-    'https://www.dnd5eapi.co/api/2014': {
+    MERGED_API: {
+        'label':    'Merged — 2024 + 2014 SRD',
+        'monsters': '~335',
+        'feats':    '~18',
+        'weapons':  '~70',
+        'note':     'Recommended. Pulls from the 2024 API first and fills everything it '
+                    'does not have yet (spells, monsters, rules, subraces…) from 2014.',
+    },
+    API_2014: {
         'label':    '2014 SRD',
         'monsters': '335',
         'feats':    '1',
         'weapons':  '~67',
         'note':     'Best monster coverage. Limited feats (PHB not open).',
     },
-    'https://www.dnd5eapi.co/api/2024': {
+    API_2024: {
         'label':    '2024 (PHB 2024)',
         'monsters': '3',
         'feats':    '17',
         'weapons':  '38',
-        'note':     'More feats available. Monster library is very limited.',
+        'note':     'More feats available, but still incomplete: no spells, monsters, '
+                    'rules or per-level class tables yet.',
     },
 }
 
@@ -100,23 +117,123 @@ def _api_version(api_base):
     return '2024' if '2024' in api_base else '2014'
 
 
+# ── Merged-API fetch layer ─────────────────────────────────────────────────────
+# The 2024 API is still being built out (no spells, monsters, rules, subraces,
+# per-class level tables…). In merged mode every sync reads BOTH versions:
+# 2024 wins where an index exists in both, 2014 fills the gaps. Each entry
+# remembers which base it came from so detail fetches and version-specific
+# parsing use the right API.
+
+# 2024 renamed some resources; alias per version so 'races' works everywhere.
+_RESOURCE_ALIASES = {
+    '2024': {'races': 'species', 'subraces': 'subspecies'},
+}
+
+
+def api_sources():
+    """API bases to sync from, in priority order (first listing an index wins)."""
+    base = get_api_base()
+    if base == MERGED_API:
+        return [API_2024, API_2014]
+    return [base]
+
+
+def _resource_path(api_base, resource):
+    return _RESOURCE_ALIASES.get(_api_version(api_base), {}).get(resource, resource)
+
+
+def merged_resource_list(resource, list_key='results'):
+    """Fetch a resource index from every api_source and merge by 'index'.
+
+    Returns ([(entry, api_base), …], error). A base that lacks the endpoint
+    (404 / network error) simply contributes nothing; `error` is set only when
+    EVERY source failed, mirroring the old single-base failure behaviour."""
+    seen, out, errs = set(), [], []
+    ok = False
+    for base in api_sources():
+        try:
+            resp = requests.get(f'{base}/{_resource_path(base, resource)}', timeout=15)
+            resp.raise_for_status()
+            results = resp.json().get(list_key, [])
+            ok = True
+        except Exception as e:
+            errs.append(f'{_api_version(base)}: {e}')
+            continue
+        for entry in results:
+            idx = entry.get('index')
+            if idx and idx not in seen:
+                seen.add(idx)
+                out.append((entry, base))
+    if not ok:
+        return [], '; '.join(errs) or 'no API sources responded'
+    return out, None
+
+
+def merged_category_list(category_by_version):
+    """Like merged_resource_list but for /equipment-categories/<cat> lists
+    (weapons/armor), whose category slug differs per version.
+    `category_by_version` maps version -> slug, e.g. {'2014': 'weapon', '2024': 'weapons'}."""
+    seen, out, errs = set(), [], []
+    ok = False
+    for base in api_sources():
+        cat = category_by_version.get(_api_version(base))
+        if not cat:
+            continue
+        try:
+            resp = requests.get(f'{base}/equipment-categories/{cat}', timeout=15)
+            resp.raise_for_status()
+            results = resp.json().get('equipment', [])
+            ok = True
+        except Exception as e:
+            errs.append(f'{_api_version(base)}: {e}')
+            continue
+        for entry in results:
+            idx = entry.get('index')
+            if idx and idx not in seen:
+                seen.add(idx)
+                out.append((entry, base))
+    if not ok:
+        return [], '; '.join(errs) or 'no API sources responded'
+    return out, None
+
+
+def _desc_text(data):
+    """Long-form text across API versions: 2014 uses desc (list of paragraphs,
+    or a plain string for rule-sections), 2024 uses description (string)."""
+    d = data.get('desc')
+    if isinstance(d, list):
+        return '\n'.join(d)
+    if isinstance(d, str):
+        return d
+    return data.get('description', '') or ''
+
+
+def _feature_level(data):
+    """Feature level across versions: 2014 is an int; 2024 is a ref dict whose
+    index ends in the level number (e.g. 'barbarian-4' or 'barbarian-4-nyi')."""
+    lvl = data.get('level')
+    if isinstance(lvl, int):
+        return lvl
+    if isinstance(lvl, dict):
+        for part in reversed((lvl.get('index') or '').split('-')):
+            if part.isdigit():
+                return int(part)
+    return 0
+
+
 # ── Feats sync ─────────────────────────────────────────────────────────────────
 
 def sync_feats_from_api(state=None):
-    api_base = get_api_base()
-    version = _api_version(api_base)
-    try:
-        resp = requests.get(f'{api_base}/feats', timeout=15)
-        resp.raise_for_status()
-        feat_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    feat_list, err = merged_resource_list('feats')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(feat_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(feat_list):
+    for i, (entry, api_base) in enumerate(feat_list):
+        version = _api_version(api_base)
         try:
             index = entry['index']
             if tblFeatsLibrary.query.filter_by(api_index=index).first():
@@ -161,22 +278,16 @@ def sync_feats_from_api(state=None):
 # ── Weapons sync ───────────────────────────────────────────────────────────────
 
 def sync_weapons_from_api(state=None):
-    api_base = get_api_base()
-    version = _api_version(api_base)
-    cat_path = 'weapons' if version == '2024' else 'weapon'
-
-    try:
-        resp = requests.get(f'{api_base}/equipment-categories/{cat_path}', timeout=15)
-        resp.raise_for_status()
-        weapon_list = resp.json().get('equipment', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    weapon_list, err = merged_category_list({'2014': 'weapon', '2024': 'weapons'})
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(weapon_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(weapon_list):
+    for i, (entry, api_base) in enumerate(weapon_list):
+        version = _api_version(api_base)
         _outcome = 'skip'
         try:
             index = entry['index']
@@ -331,6 +442,17 @@ def api_settings():
 @dm_required
 def api_test():
     api_base = request.args.get('url', get_api_base()).strip()
+    if api_base == MERGED_API:
+        # merged mode has no single URL — test both real bases
+        results = []
+        for base in (API_2024, API_2014):
+            try:
+                resp = requests.get(base, timeout=8)
+                resp.raise_for_status()
+                results.append(f'{_api_version(base)} ok ({len(resp.json())} endpoints)')
+            except Exception as e:
+                return jsonify({'ok': False, 'error': f'{_api_version(base)}: {e}'})
+        return jsonify({'ok': True, 'endpoints': results})
     try:
         resp = requests.get(api_base, timeout=8)
         resp.raise_for_status()
@@ -368,13 +490,13 @@ def library_browse():
     weapons = [{'name': w.name,
                 'sub': _join([w.weapon_category or '', w.weapon_range or '',
                               _join([w.damage_dice or '', w.damage_type or '']), w.properties or '']),
-                'desc': ''}
+                'desc': w.notes or ''}
                for w in tblWeaponsLibrary.query.order_by(tblWeaponsLibrary.name).all()]
     armor = [{'name': a.name,
               'sub': _join([a.armor_category or '',
                             (f'AC {a.armor_class_base}' if a.armor_class_base is not None else ''),
                             ('Stealth disadv.' if a.stealth_disadvantage else '')]),
-              'desc': ''}
+              'desc': a.notes or ''}
              for a in tblArmorLibrary.query.order_by(tblArmorLibrary.name).all()]
     equipment = [{'name': e.name,
                   'sub': _join([' › '.join([p for p in [e.category, e.subcategory] if p]),
@@ -392,13 +514,43 @@ def library_browse():
                               c.spellcasting_ability or '', c.saving_throws or '']),
                 'desc': c.description or ''}
                for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()]
+    conditions = [{'name': c.name, 'sub': '', 'desc': c.description or ''}
+                  for c in tblConditionsLibrary.query.order_by(tblConditionsLibrary.name).all()]
+    magic_items = [{'name': m.name,
+                    'sub': _join([m.category or '', m.rarity or '',
+                                  ('Requires attunement' if m.attunement else '')]),
+                    'desc': m.description or ''}
+                   for m in tblMagicItemsLibrary.query.order_by(tblMagicItemsLibrary.name).all()]
+    features = [{'name': f.name,
+                 'sub': _join([f.class_name or '', f.subclass_name or '',
+                               (f'Level {f.level}' if f.level else '')]),
+                 'desc': f.description or ''}
+                for f in tblFeaturesLibrary.query.order_by(
+                    tblFeaturesLibrary.class_name, tblFeaturesLibrary.level,
+                    tblFeaturesLibrary.name).all()]
+    subclasses = [{'name': s.name, 'sub': _join([s.class_name or '', s.flavor or '']),
+                   'desc': s.description or ''}
+                  for s in tblSubclassesLibrary.query.order_by(
+                      tblSubclassesLibrary.class_name, tblSubclassesLibrary.name).all()]
+    traits = [{'name': t.name, 'sub': t.races_text or '', 'desc': t.description or ''}
+              for t in tblTraitsLibrary.query.order_by(tblTraitsLibrary.name).all()]
+    weapon_props = [{'name': w.name, 'sub': '', 'desc': w.description or ''}
+                    for w in tblWeaponPropertiesLibrary.query.order_by(
+                        tblWeaponPropertiesLibrary.name).all()]
+    rules = [{'name': r.name, 'sub': r.parent or '', 'desc': r.description or ''}
+             for r in tblRulesLibrary.query.order_by(
+                 tblRulesLibrary.parent, tblRulesLibrary.name).all()]
 
     # Sections listed alphabetically by label.
     categories = [
-        ('armor', 'Armor', armor), ('classes', 'Classes', classes),
+        ('armor', 'Armor', armor), ('features', 'Class Features', features),
+        ('classes', 'Classes', classes), ('conditions', 'Conditions', conditions),
         ('equipment', 'Equipment', equipment), ('feats', 'Feats', feats),
-        ('races', 'Races', races), ('skills', 'Skills', skills),
-        ('spells', 'Spells', spells), ('weapons', 'Weapons', weapons),
+        ('magicitems', 'Magic Items', magic_items), ('races', 'Races', races),
+        ('rules', 'Rules', rules), ('skills', 'Skills', skills),
+        ('spells', 'Spells', spells), ('subclasses', 'Subclasses', subclasses),
+        ('traits', 'Traits', traits), ('weaponprops', 'Weapon Properties', weapon_props),
+        ('weapons', 'Weapons', weapons),
     ]
     return render_template('ttrpg/library_browse.html', categories=categories)
 
@@ -415,7 +567,10 @@ def libraries_clear():
     before Sync All. scope='homebrew': delete only custom (homebrew) rows.
     Characters, sessions, and the monster library are never touched."""
     models = (tblSpellsLibrary, tblFeatsLibrary, tblWeaponsLibrary, tblArmorLibrary,
-              tblEquipmentLibrary, tblSkillsLibrary, tblRacesLibrary, tblClassesLibrary)
+              tblEquipmentLibrary, tblSkillsLibrary, tblRacesLibrary, tblClassesLibrary,
+              tblConditionsLibrary, tblMagicItemsLibrary, tblFeaturesLibrary,
+              tblClassLevelsLibrary, tblSubclassesLibrary, tblTraitsLibrary,
+              tblWeaponPropertiesLibrary, tblRulesLibrary)
     scope = request.form.get('scope', 'srd')
     total = 0
     for model in models:
@@ -688,27 +843,23 @@ def weapons_search():
         'mastery':                w.mastery,
         'cost':                   w.cost,
         'weight':                 w.weight,
+        'notes':                  w.notes,
     } for w in weapons])
 
 
 # ── Armor sync ─────────────────────────────────────────────────────────────────
 
 def sync_armor_from_api(state=None):
-    api_base = get_api_base()
-    version = _api_version(api_base)
-
-    try:
-        resp = requests.get(f'{api_base}/equipment-categories/armor', timeout=15)
-        resp.raise_for_status()
-        armor_list = resp.json().get('equipment', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    armor_list, err = merged_category_list({'2014': 'armor', '2024': 'armor'})
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(armor_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(armor_list):
+    for i, (entry, api_base) in enumerate(armor_list):
+        version = _api_version(api_base)
         try:
             index = entry['index']
             if tblArmorLibrary.query.filter_by(api_index=index).first():
@@ -766,7 +917,7 @@ def sync_armor_from_api(state=None):
                 weight=data.get('weight', 0) or 0,
                 cost=f"{cost_obj.get('quantity', '')} {cost_obj.get('unit', '')}".strip(),
                 properties=', '.join(p.get('name', '') for p in data.get('properties', [])),
-                notes=data.get('desc', [''])[0] if data.get('desc') else '',
+                notes=_desc_text(data),
                 image_url='',
                 source='srd',
                 created_at=_now(),
@@ -919,25 +1070,22 @@ def armor_search():
         'stealth_disadvantage': a.stealth_disadvantage,
         'cost':              a.cost,
         'weight':            a.weight,
+        'notes':             a.notes,
     } for a in armor])
 
 
 # ── Spells sync ────────────────────────────────────────────────────────────────
 
 def sync_spells_from_api(state=None):
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/spells', timeout=15)
-        resp.raise_for_status()
-        spell_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    spell_list, err = merged_resource_list('spells')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(spell_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(spell_list):
+    for i, (entry, api_base) in enumerate(spell_list):
         try:
             index = entry['index']
             if tblSpellsLibrary.query.filter_by(api_index=index).first():
@@ -954,7 +1102,7 @@ def sync_spells_from_api(state=None):
             else:
                 components_str = ', '.join(components_list)
 
-            _spell_desc = '\n'.join(data.get('desc', []))
+            _spell_desc = _desc_text(data)
             _dmg_dice, _dmg_type = parse_spell_damage(_spell_desc)
             spell = tblSpellsLibrary(
                 api_index    = index,
@@ -1128,19 +1276,15 @@ def spells_search():
 # ── Skills sync ────────────────────────────────────────────────────────────────
 
 def sync_skills_from_api(state=None):
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/skills', timeout=15)
-        resp.raise_for_status()
-        skill_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    skill_list, err = merged_resource_list('skills')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(skill_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(skill_list):
+    for i, (entry, api_base) in enumerate(skill_list):
         try:
             index = entry['index']
             if tblSkillsLibrary.query.filter_by(api_index=index).first():
@@ -1157,7 +1301,7 @@ def sync_skills_from_api(state=None):
                 api_index     = index,
                 name          = data['name'],
                 ability_score = ability_score,
-                description   = '\n'.join(data.get('desc', [])),
+                description   = _desc_text(data),
                 source        = 'srd',
                 created_at    = _now(),
             )
@@ -1270,25 +1414,23 @@ def skills_search():
 # ── Races sync ─────────────────────────────────────────────────────────────────
 
 def sync_races_from_api(state=None):
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/races', timeout=15)
-        resp.raise_for_status()
-        race_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    # merged mode: 2024 renamed races -> species (aliased); species entries lack
+    # ability bonuses/languages, which stay blank — 2014 fills classic races.
+    race_list, err = merged_resource_list('races')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(race_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(race_list):
+    for i, (entry, api_base) in enumerate(race_list):
         try:
             index = entry['index']
             if tblRacesLibrary.query.filter_by(api_index=index).first():
                 skipped += 1
                 continue
-            detail = requests.get(f'{api_base}/races/{index}', timeout=10)
+            detail = requests.get(f'{api_base}/{_resource_path(api_base, "races")}/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
 
@@ -1408,19 +1550,15 @@ def race_delete(race_lib_id):
 SKIP_EQUIPMENT_CATEGORIES = {'armor', 'weapon', 'weapons', 'armor and shields'}
 
 def sync_equipment_from_api(state=None):
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/equipment', timeout=15)
-        resp.raise_for_status()
-        eq_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    eq_list, err = merged_resource_list('equipment')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(eq_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(eq_list):
+    for i, (entry, api_base) in enumerate(eq_list):
         try:
             index = entry['index']
             if tblEquipmentLibrary.query.filter_by(api_index=index).first():
@@ -1455,7 +1593,7 @@ def sync_equipment_from_api(state=None):
                 subcategory = subcat,
                 weight      = float(data.get('weight', 0) or 0),
                 cost        = cost_str,
-                description = '\n'.join(data.get('desc', [])),
+                description = _desc_text(data),
                 source      = 'srd',
                 created_at  = _now(),
             )
@@ -1583,19 +1721,15 @@ def equipment_search():
 # ── Classes sync ────────────────────────────────────────────────────────────────
 
 def sync_classes_from_api(state=None):
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/classes', timeout=15)
-        resp.raise_for_status()
-        class_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    class_list, err = merged_resource_list('classes')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(class_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(class_list):
+    for i, (entry, api_base) in enumerate(class_list):
         try:
             index = entry['index']
             if tblClassesLibrary.query.filter_by(api_index=index).first():
@@ -1749,6 +1883,624 @@ def races_search():
         'languages':      r.languages,
         'description':    r.description,
     } for r in races])
+
+
+# ── Conditions sync ─────────────────────────────────────────────────────────────
+
+def sync_conditions_from_api(state=None):
+    cond_list, err = merged_resource_list('conditions')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(cond_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(cond_list):
+        try:
+            index = entry['index']
+            if tblConditionsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/conditions/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+            db.session.add(tblConditionsLibrary(
+                api_index   = index,
+                name        = data['name'],
+                description = _desc_text(data),
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Magic items sync ────────────────────────────────────────────────────────────
+
+def sync_magic_items_from_api(state=None):
+    item_list, err = merged_resource_list('magic-items')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(item_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(item_list):
+        try:
+            index = entry['index']
+            if tblMagicItemsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/magic-items/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            description = _desc_text(data)
+            # attunement: explicit bool on 2024; 2014 states it in the type line
+            # of desc[0], e.g. "Wondrous item, rare (requires attunement)"
+            attune = data.get('attunement')
+            if attune is None:
+                attune = 'requires attunement' in description[:200].lower()
+            raw_img = data.get('image', '')
+            db.session.add(tblMagicItemsLibrary(
+                api_index   = index,
+                name        = data['name'],
+                category    = (data.get('equipment_category') or {}).get('name', ''),
+                rarity      = (data.get('rarity') or {}).get('name', ''),
+                attunement  = 1 if attune else 0,
+                description = description,
+                image_url   = ('https://www.dnd5eapi.co' + raw_img) if raw_img else '',
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Class features sync ─────────────────────────────────────────────────────────
+
+def sync_features_from_api(state=None):
+    feature_list, err = merged_resource_list('features')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(feature_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(feature_list):
+        try:
+            index = entry['index']
+            if tblFeaturesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/features/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            prereqs = ', '.join(
+                p.get('name', p.get('type', '')) if isinstance(p, dict) else str(p)
+                for p in data.get('prerequisites', [])
+            )
+            cls_name = (data.get('class') or {}).get('name', '')
+            sub_name = (data.get('subclass') or {}).get('name', '')
+            level    = _feature_level(data)
+            # The two API editions index the same feature differently ('rage' vs
+            # 'barbarian-rage'), so index dedup alone would store both editions.
+            # Skip when the class/subclass/level/name combination already exists —
+            # in merged mode 2024 syncs first, so its text wins.
+            from sqlalchemy import func as _f
+            if (tblFeaturesLibrary.query
+                    .filter(_f.lower(tblFeaturesLibrary.name) == data['name'].lower(),
+                            _f.lower(tblFeaturesLibrary.class_name) == cls_name.lower(),
+                            _f.lower(tblFeaturesLibrary.subclass_name) == sub_name.lower(),
+                            tblFeaturesLibrary.level == level)
+                    .first()):
+                skipped += 1
+                continue
+            db.session.add(tblFeaturesLibrary(
+                api_index     = index,
+                name          = data['name'],
+                class_name    = cls_name,
+                subclass_name = sub_name,
+                level         = level,
+                prerequisites = prereqs,
+                description   = _desc_text(data),
+                source        = 'srd',
+                created_at    = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Class level tables sync (proficiency bonus, spell slots, class counters) ────
+
+def sync_class_levels_from_api(state=None):
+    """Per-level progression for every class: /classes/{index}/levels.
+
+    Only the 2014 API serves level tables today; in merged mode each class
+    tries its own base first, then the remaining sources — so 2024-sourced
+    classes still get their 2014 progression."""
+    class_list, err = merged_resource_list('classes')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(class_list) * 20   # ~20 levels per class
+
+    added = skipped = errors = 0
+    done = 0
+    for entry, entry_base in class_list:
+        index = entry['index']
+        levels = []
+        bases = [entry_base] + [b for b in api_sources() if b != entry_base]
+        for base in bases:
+            try:
+                resp = requests.get(f'{base}/classes/{index}/levels', timeout=15)
+                if not resp.ok or not resp.content:
+                    continue
+                data = resp.json()
+                if isinstance(data, list) and data:
+                    levels = data
+                    break
+            except Exception:
+                continue
+
+        for lvl in levels:
+            done += 1
+            try:
+                # subclass-specific level rows ride along in some tables — skip them
+                if lvl.get('subclass'):
+                    skipped += 1
+                    continue
+                lvl_no = lvl.get('level', 0)
+                api_idx = lvl.get('index') or f'{index}-{lvl_no}'
+                if tblClassLevelsLibrary.query.filter_by(api_index=api_idx).first():
+                    skipped += 1
+                    continue
+                spellcasting = lvl.get('spellcasting') or {}
+                slots = {str(n): spellcasting.get(f'spell_slots_level_{n}', 0) or 0
+                         for n in range(1, 10)}
+                import json as _json
+                db.session.add(tblClassLevelsLibrary(
+                    api_index      = api_idx,
+                    class_name     = (lvl.get('class') or {}).get('name', index.title()),
+                    level          = lvl_no,
+                    prof_bonus     = lvl.get('prof_bonus', 2) or 2,
+                    features_text  = '\n'.join(f['name'] for f in lvl.get('features', [])),
+                    cantrips_known = spellcasting.get('cantrips_known', 0) or 0,
+                    spells_known   = spellcasting.get('spells_known', 0) or 0,
+                    spell_slots_json    = _json.dumps(slots),
+                    class_specific_json = _json.dumps(lvl.get('class_specific') or {}),
+                    source         = 'srd',
+                    created_at     = _now(),
+                ))
+                db.session.commit()
+                added += 1
+            except Exception:
+                db.session.rollback()
+                errors += 1
+            finally:
+                if state is not None:
+                    state.update({'done': done, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Subclasses sync ─────────────────────────────────────────────────────────────
+
+def sync_subclasses_from_api(state=None):
+    sub_list, err = merged_resource_list('subclasses')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(sub_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(sub_list):
+        try:
+            index = entry['index']
+            if tblSubclassesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/subclasses/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            description = _desc_text(data)
+            # 2024 embeds the subclass features right in the detail — keep them
+            # with the description so the archetype reads as one entry.
+            embedded = data.get('features')
+            if isinstance(embedded, list) and embedded:
+                lines = [f"L{f.get('level', '?')} {f.get('name', '')}: {f.get('description', '')}"
+                         for f in embedded if isinstance(f, dict)]
+                description = (description + '\n\n' + '\n\n'.join(lines)).strip()
+
+            db.session.add(tblSubclassesLibrary(
+                api_index   = index,
+                name        = data['name'],
+                class_name  = (data.get('class') or {}).get('name', ''),
+                flavor      = data.get('subclass_flavor') or data.get('summary', ''),
+                description = description,
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Racial traits sync ──────────────────────────────────────────────────────────
+
+def sync_traits_from_api(state=None):
+    trait_list, err = merged_resource_list('traits')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(trait_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(trait_list):
+        try:
+            index = entry['index']
+            if tblTraitsLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/traits/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+
+            # 2014 back-references races/subraces; 2024 uses species/subspecies
+            holders = []
+            for key in ('races', 'subraces', 'species', 'subspecies'):
+                holders += [r.get('name', '') for r in data.get(key) or []]
+            db.session.add(tblTraitsLibrary(
+                api_index   = index,
+                name        = data['name'],
+                races_text  = ', '.join(h for h in holders if h),
+                description = _desc_text(data),
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Weapon properties sync ──────────────────────────────────────────────────────
+
+def sync_weapon_properties_from_api(state=None):
+    prop_list, err = merged_resource_list('weapon-properties')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(prop_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(prop_list):
+        try:
+            index = entry['index']
+            if tblWeaponPropertiesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/weapon-properties/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+            db.session.add(tblWeaponPropertiesLibrary(
+                api_index   = index,
+                name        = data['name'],
+                description = _desc_text(data),
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Rules sync (rule categories + rule sections) ────────────────────────────────
+
+def sync_rules_from_api(state=None):
+    """SRD rules prose: /rules (6 chapters) gives grouping, /rule-sections (33)
+    gives the actual text. Sections store their chapter as `parent`. 2014-only
+    today; merged mode just finds nothing on 2024 and moves on."""
+    section_parent = {}
+    rules_list, _rules_err = merged_resource_list('rules')
+    for entry, api_base in rules_list:
+        try:
+            detail = requests.get(f'{api_base}/rules/{entry["index"]}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+            for sub in data.get('subsections', []):
+                section_parent[sub.get('index')] = data.get('name', '')
+        except Exception:
+            continue
+
+    sec_list, err = merged_resource_list('rule-sections')
+    if err:
+        return 0, 0, err
+    if state is not None:
+        state['total'] = len(sec_list)
+
+    added = skipped = errors = 0
+    for i, (entry, api_base) in enumerate(sec_list):
+        try:
+            index = entry['index']
+            if tblRulesLibrary.query.filter_by(api_index=index).first():
+                skipped += 1
+                continue
+            detail = requests.get(f'{api_base}/rule-sections/{index}', timeout=10)
+            detail.raise_for_status()
+            data = detail.json()
+            db.session.add(tblRulesLibrary(
+                api_index   = index,
+                name        = data['name'],
+                parent      = section_parent.get(index, ''),
+                description = _desc_text(data),
+                source      = 'srd',
+                created_at  = _now(),
+            ))
+            db.session.commit()
+            added += 1
+        except Exception:
+            db.session.rollback()
+            errors += 1
+        finally:
+            if state is not None:
+                state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
+    return added, skipped, errors
+
+
+# ── Subclasses library (browse, homebrew subclasses + their features) ───────────
+
+@reference_bp.route('/subclasses')
+@login_required
+@dm_required
+def subclasses_library():
+    total = tblSubclassesLibrary.query.count()
+    q   = request.args.get('q',   '').strip()
+    cls = request.args.get('cls', '').strip()
+    src = request.args.get('src', '').strip()
+
+    subs = tblSubclassesLibrary.query
+    if q:
+        subs = subs.filter(tblSubclassesLibrary.name.ilike(f'%{q}%'))
+    if cls:
+        subs = subs.filter(tblSubclassesLibrary.class_name == cls)
+    if src:
+        subs = subs.filter(tblSubclassesLibrary.source == src)
+    subs = subs.order_by(tblSubclassesLibrary.class_name, tblSubclassesLibrary.name).all()
+
+    # features grouped per subclass name (lowercased) for the card expanders
+    feats_by_sub = {}
+    for f in (tblFeaturesLibrary.query
+              .filter(tblFeaturesLibrary.subclass_name != '')
+              .order_by(tblFeaturesLibrary.level, tblFeaturesLibrary.name).all()):
+        feats_by_sub.setdefault(f.subclass_name.lower(), []).append(f)
+
+    class_names = [c.name for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()]
+    current_api = get_api_base()
+    return render_template('ttrpg/subclasses_library.html',
+                           subclasses=subs, total=total, q=q, cls=cls, src=src,
+                           feats_by_sub=feats_by_sub, class_names=class_names,
+                           current_api=current_api, api_options=API_OPTIONS)
+
+
+@reference_bp.route('/subclasses/add', methods=['POST'])
+@login_required
+@dm_required
+def subclass_add():
+    name       = request.form.get('name', '').strip()
+    class_name = request.form.get('class_name', '').strip()
+    if not name or not class_name:
+        flash('Subclass name and class are both required.')
+        return redirect(url_for('reference_bp.subclasses_library'))
+    if (tblSubclassesLibrary.query
+            .filter(db.func.lower(tblSubclassesLibrary.name) == name.lower())
+            .first()):
+        flash(f'A subclass named "{name}" already exists.')
+        return redirect(url_for('reference_bp.subclasses_library'))
+    db.session.add(tblSubclassesLibrary(
+        api_index   = None,
+        name        = name,
+        class_name  = class_name,
+        flavor      = request.form.get('flavor', '').strip(),
+        description = request.form.get('description', '').strip(),
+        source      = 'homebrew',
+        created_at  = _now(),
+    ))
+    db.session.commit()
+    flash(f'Added homebrew subclass "{name}" ({class_name}). Add its features below, '
+          f'then players can pick it on their sheet.')
+    return redirect(url_for('reference_bp.subclasses_library'))
+
+
+@reference_bp.route('/subclasses/<int:subclass_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def subclass_delete(subclass_lib_id):
+    sub = tblSubclassesLibrary.query.get_or_404(subclass_lib_id)
+    if sub.source != 'homebrew':
+        flash('Only homebrew subclasses can be deleted.')
+        return redirect(url_for('reference_bp.subclasses_library'))
+    name = sub.name
+    # its homebrew features go with it (SRD features are never touched)
+    dropped = (tblFeaturesLibrary.query
+               .filter(db.func.lower(tblFeaturesLibrary.subclass_name) == name.lower(),
+                       tblFeaturesLibrary.source == 'homebrew')
+               .delete(synchronize_session=False))
+    db.session.delete(sub)
+    db.session.commit()
+    flash(f'Deleted "{name}"' + (f' and its {dropped} homebrew features.' if dropped else '.'))
+    return redirect(url_for('reference_bp.subclasses_library'))
+
+
+@reference_bp.route('/subclasses/features/add', methods=['POST'])
+@login_required
+@dm_required
+def subclass_feature_add():
+    sub = tblSubclassesLibrary.query.get_or_404(
+        int(request.form.get('subclass_lib_id', 0) or 0))
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Feature name is required.')
+        return redirect(url_for('reference_bp.subclasses_library'))
+    try:
+        level = max(1, min(20, int(request.form.get('level', 1) or 1)))
+    except ValueError:
+        level = 1
+    db.session.add(tblFeaturesLibrary(
+        api_index     = None,
+        name          = name,
+        class_name    = sub.class_name,
+        subclass_name = sub.name,
+        level         = level,
+        prerequisites = '',
+        description   = request.form.get('description', '').strip(),
+        source        = 'homebrew',
+        created_at    = _now(),
+    ))
+    db.session.commit()
+    flash(f'Added "{name}" (level {level}) to {sub.name}.')
+    return redirect(url_for('reference_bp.subclasses_library'))
+
+
+@reference_bp.route('/features/<int:feature_lib_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def feature_delete(feature_lib_id):
+    f = tblFeaturesLibrary.query.get_or_404(feature_lib_id)
+    if f.source != 'homebrew':
+        flash('Only homebrew features can be deleted.')
+        return redirect(url_for('reference_bp.subclasses_library'))
+    name = f.name
+    db.session.delete(f)
+    db.session.commit()
+    flash(f'Deleted feature "{name}".')
+    return redirect(url_for('reference_bp.subclasses_library'))
+
+
+# ── Generic sync runner for the new libraries ────────────────────────────────────
+# The classic libraries each grew a bespoke /X/sync route; the newer ones share
+# one runner keyed by job type (same background-thread + _sync_states pattern,
+# same /sync/status/<job_type> poller).
+
+EXTRA_SYNCS = {
+    'conditions':  sync_conditions_from_api,
+    'magicitems':  sync_magic_items_from_api,
+    'features':    sync_features_from_api,
+    'classlevels': sync_class_levels_from_api,
+    'subclasses':  sync_subclasses_from_api,
+    'traits':      sync_traits_from_api,
+    'weaponprops': sync_weapon_properties_from_api,
+    'rules':       sync_rules_from_api,
+}
+
+
+def _join_sub(parts):
+    return ' • '.join(p for p in parts if p)
+
+
+# name/sub/desc lookups for the newer libraries — one generic search endpoint
+# (used by the sheet's Reference tab) instead of a bespoke /X/search per type.
+LOOKUP_MODELS = {
+    'conditions':  (tblConditionsLibrary, lambda r: {
+        'name': r.name, 'sub': '', 'desc': r.description or ''}),
+    'magicitems':  (tblMagicItemsLibrary, lambda r: {
+        'name': r.name,
+        'sub': _join_sub([r.category or '', r.rarity or '',
+                          'Requires attunement' if r.attunement else '']),
+        'desc': r.description or ''}),
+    'features':    (tblFeaturesLibrary, lambda r: {
+        'name': r.name,
+        'sub': _join_sub([r.class_name or '', r.subclass_name or '',
+                          f'Level {r.level}' if r.level else '']),
+        'desc': r.description or ''}),
+    'subclasses':  (tblSubclassesLibrary, lambda r: {
+        'name': r.name, 'sub': _join_sub([r.class_name or '', r.flavor or '']),
+        'desc': r.description or ''}),
+    'traits':      (tblTraitsLibrary, lambda r: {
+        'name': r.name, 'sub': r.races_text or '', 'desc': r.description or ''}),
+    'weaponprops': (tblWeaponPropertiesLibrary, lambda r: {
+        'name': r.name, 'sub': '', 'desc': r.description or ''}),
+    'rules':       (tblRulesLibrary, lambda r: {
+        'name': r.name, 'sub': r.parent or '', 'desc': r.description or ''}),
+}
+
+
+@reference_bp.route('/lookup/<category>')
+@login_required
+def reference_lookup(category):
+    entry = LOOKUP_MODELS.get(category)
+    if entry is None:
+        return jsonify([]), 404
+    model, to_dict = entry
+    q = request.args.get('q', '').strip()
+    try:
+        limit = min(int(request.args.get('limit', 20)), 200)
+    except ValueError:
+        limit = 20
+    query = model.query
+    if q:
+        query = query.filter(model.name.ilike(f'%{q}%'))
+    rows = query.order_by(model.name).limit(limit).all()
+    return jsonify([to_dict(r) for r in rows])
+
+
+@reference_bp.route('/sync/run/<job_type>', methods=['POST'])
+@login_required
+@dm_required
+def sync_run(job_type):
+    fn = EXTRA_SYNCS.get(job_type)
+    if fn is None:
+        return jsonify({'error': f'unknown sync job {job_type!r}'}), 404
+    if _sync_states.get(job_type, {}).get('running'):
+        return jsonify({'error': 'Sync already in progress'}), 409
+    state = {'total': 0, 'done': 0, 'added': 0, 'skipped': 0, 'errors': 0, 'running': True, 'message': ''}
+    _sync_states[job_type] = state
+    app = current_app._get_current_object()
+    def _run():
+        with app.app_context():
+            added, skipped, errors = fn(state=state)
+            state.update({'running': False, 'message': f'{added} added, {skipped} skipped, {errors} errors.'})
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job': job_type})
 
 
 @reference_bp.route('/classes/search')

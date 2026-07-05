@@ -205,6 +205,19 @@ with app.app_context():
         db.session.rollback()
         print('tblTokenPositions.relay_seq migration skipped:', _e)
 
+    # Lightweight migration: add tblCharacters.subclass — the archetype picked
+    # from the synced subclasses library (Champion, Evoker…); drives subclass
+    # features on the sheet. Idempotent — skipped once the column exists.
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblCharacters)"))]
+        if _cols and 'subclass' not in _cols:
+            db.session.execute(_sa_text(
+                "ALTER TABLE tblCharacters ADD COLUMN subclass TEXT DEFAULT ''"))
+            db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('tblCharacters.subclass migration skipped:', _e)
+
     # Lightweight migration: add tblServersIP.version — the app/firmware version a
     # discovered device reports via /api/server-info (ScenePlay) or /json/info
     # (WLED), shown next to its name in the server table. Idempotent.

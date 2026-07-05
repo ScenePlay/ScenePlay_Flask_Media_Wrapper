@@ -334,6 +334,7 @@ def _char_to_payload(char):
     sheet = {
         'name':               char.name,
         'class':              char.char_class,
+        'subclass':           getattr(char, 'subclass', '') or '',
         'race':               char.race,
         'level':              char.level,
         'background':         char.background,
@@ -529,9 +530,19 @@ def push_library():
     if not cfg:
         return
 
+    import json as _json
     from models.ttrpg import (tblSpellsLibrary, tblFeatsLibrary, tblWeaponsLibrary,
                                tblArmorLibrary, tblEquipmentLibrary, tblSkillsLibrary,
-                               tblRacesLibrary, tblClassesLibrary)
+                               tblRacesLibrary, tblClassesLibrary, tblConditionsLibrary,
+                               tblMagicItemsLibrary, tblFeaturesLibrary,
+                               tblClassLevelsLibrary, tblSubclassesLibrary,
+                               tblTraitsLibrary, tblWeaponPropertiesLibrary, tblRulesLibrary)
+
+    def _loads(s):
+        try:
+            return _json.loads(s or '{}')
+        except Exception:
+            return {}
 
     payload = {
         'spells': [
@@ -588,6 +599,50 @@ def push_library():
              'spellcasting_ability': c.spellcasting_ability or '',
              'description': c.description or ''}
             for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()
+        ],
+        'conditions': [
+            {'name': c.name, 'description': c.description or ''}
+            for c in tblConditionsLibrary.query.order_by(tblConditionsLibrary.name).all()
+        ],
+        'magic_items': [
+            {'name': m.name, 'category': m.category or '', 'rarity': m.rarity or '',
+             'attunement': bool(m.attunement), 'description': m.description or ''}
+            for m in tblMagicItemsLibrary.query.order_by(tblMagicItemsLibrary.name).all()
+        ],
+        'features': [
+            {'name': f.name, 'class': f.class_name or '', 'subclass': f.subclass_name or '',
+             'level': f.level or 0, 'description': f.description or ''}
+            for f in tblFeaturesLibrary.query.order_by(
+                tblFeaturesLibrary.class_name, tblFeaturesLibrary.level,
+                tblFeaturesLibrary.name).all()
+        ],
+        'class_levels': [
+            {'class': cl.class_name, 'level': cl.level, 'prof_bonus': cl.prof_bonus,
+             'features': cl.features_text or '', 'cantrips_known': cl.cantrips_known or 0,
+             'spells_known': cl.spells_known or 0,
+             'spell_slots': _loads(cl.spell_slots_json),
+             'class_specific': _loads(cl.class_specific_json)}
+            for cl in tblClassLevelsLibrary.query.order_by(
+                tblClassLevelsLibrary.class_name, tblClassLevelsLibrary.level).all()
+        ],
+        'subclasses': [
+            {'name': s.name, 'class': s.class_name or '', 'flavor': s.flavor or '',
+             'description': s.description or ''}
+            for s in tblSubclassesLibrary.query.order_by(tblSubclassesLibrary.name).all()
+        ],
+        'traits': [
+            {'name': t.name, 'races': t.races_text or '', 'description': t.description or ''}
+            for t in tblTraitsLibrary.query.order_by(tblTraitsLibrary.name).all()
+        ],
+        'weapon_properties': [
+            {'name': w.name, 'description': w.description or ''}
+            for w in tblWeaponPropertiesLibrary.query.order_by(
+                tblWeaponPropertiesLibrary.name).all()
+        ],
+        'rules': [
+            {'name': r.name, 'parent': r.parent or '', 'description': r.description or ''}
+            for r in tblRulesLibrary.query.order_by(
+                tblRulesLibrary.parent, tblRulesLibrary.name).all()
         ],
     }
 

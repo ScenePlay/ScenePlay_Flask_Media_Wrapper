@@ -35,7 +35,6 @@ def _save_monster_image(file_storage):
 import relay_broadcaster
 _sync_states = {}
 
-API_BASE = 'https://www.dnd5eapi.co/api/2014'
 CONDITIONS = {
     'Blinded':       "Can't see. Auto-fails checks requiring sight. Attacks against: advantage. Own attacks: disadvantage.",
     'Charmed':       "Can't attack the charmer or target them with harmful effects. Charmer has advantage on social checks against you.",
@@ -56,6 +55,21 @@ CONDITIONS = {
 
 
 from routes._util import _now  # shared timestamp format (relay sync compares these strings)
+
+
+def condition_texts():
+    """Condition name -> rule text. Prefers the full SRD text synced into
+    tblConditionsLibrary; the hardcoded one-liners above remain the fallback
+    for anything not (yet) synced."""
+    out = dict(CONDITIONS)
+    try:
+        from models.ttrpg import tblConditionsLibrary
+        for c in tblConditionsLibrary.query.all():
+            if c.description:
+                out[c.name] = c.description
+    except Exception:
+        pass
+    return out
 
 
 def _cr_display(cr):
@@ -91,20 +105,16 @@ def _extract_ac(armor_class):
 # ── Sync all monsters from the SRD API ────────────────────────────────────────
 
 def sync_monsters_from_api(state=None):
-    from routes.reference import get_api_base
-    api_base = get_api_base()
-    try:
-        resp = requests.get(f'{api_base}/monsters', timeout=15)
-        resp.raise_for_status()
-        monster_list = resp.json().get('results', [])
-    except Exception as e:
-        return 0, 0, str(e)
+    from routes.reference import merged_resource_list
+    monster_list, err = merged_resource_list('monsters')
+    if err:
+        return 0, 0, err
 
     if state is not None:
         state['total'] = len(monster_list)
 
     added = skipped = errors = 0
-    for i, entry in enumerate(monster_list):
+    for i, (entry, api_base) in enumerate(monster_list):
         try:
             index = entry['index']
             if tblMonsterTemplates.query.filter_by(api_index=index).first():
@@ -158,7 +168,7 @@ def library():
     return render_template('ttrpg/monsters.html',
                            synced=synced,
                            sessions=sessions,
-                           conditions=CONDITIONS,
+                           conditions=condition_texts(),
                            monster_types=monster_types,
                            current_api=current_api,
                            api_options=API_OPTIONS)

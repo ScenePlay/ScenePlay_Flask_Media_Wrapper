@@ -77,7 +77,15 @@ Login-based, with DM and player roles.
   The DM sidebar includes the campaign's **Scenes** (with live now-playing
   pills and volume) so atmosphere control never leaves the map screen.
 - **Monsters** — library plus homebrew, with per-session instances.
-- **Reference libraries** — spells, armor, equipment, feats, classes.
+- **Reference libraries** — synced from dnd5eapi.co: spells, weapons, armor,
+  equipment, feats, skills, races, classes, monsters, plus conditions (full
+  rule text), magic items, class features, per-level class tables (spell
+  slots, rages, ki…), subclasses, racial traits, weapon properties and the
+  SRD rules chapters. The **Merged** API mode reads the 2024 SRD first and
+  fills everything it doesn't have yet from 2014. Character sheets use them
+  live: condition badges show full rules, the Reference tab lists your
+  class's features for your level, and *Suggest from class* fills in spell
+  slot / class counter resources automatically.
 - **Remote play relay** (optional) — a companion portal (`ScenePlayRemote`)
   lets remote players see maps, rolls and characters. The local server is the
   authority; the relay only stages changes for the local box to pick up.

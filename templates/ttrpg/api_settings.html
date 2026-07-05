@@ -86,7 +86,7 @@
           <span class="badge" style="background:var(--sp-primary);color:var(--sp-accent);font-size:.65rem;">Active</span>
           {% endif %}
         </div>
-        <code class="small text-muted d-block mb-2">{{ url }}</code>
+        <code class="small text-muted d-block mb-2">{% if url == 'merged' %}api/2024 first, api/2014 fills the gaps{% else %}{{ url }}{% endif %}</code>
         <div class="d-flex gap-2 flex-wrap mb-2">
           <span class="stat-pill">&#9881; {{ info.monsters }} monsters</span>
           <span class="stat-pill">&#10022; {{ info.feats }} feats</span>
@@ -159,6 +159,14 @@ function syncAll() {
     { label: 'Races',     syncUrl: '{{ url_for("reference_bp.races_sync") }}',                             statusUrl: '{{ url_for("reference_bp.sync_status", job_type="races") }}' },
     { label: 'Equipment', syncUrl: '{{ url_for("reference_bp.equipment_sync") }}',                         statusUrl: '{{ url_for("reference_bp.sync_status", job_type="equipment") }}' },
     { label: 'Classes',   syncUrl: '{{ url_for("reference_bp.classes_sync") }}',                           statusUrl: '{{ url_for("reference_bp.sync_status", job_type="classes") }}' },
+    { label: 'Conditions',        syncUrl: '{{ url_for("reference_bp.sync_run", job_type="conditions") }}',  statusUrl: '{{ url_for("reference_bp.sync_status", job_type="conditions") }}' },
+    { label: 'Magic Items',       syncUrl: '{{ url_for("reference_bp.sync_run", job_type="magicitems") }}',  statusUrl: '{{ url_for("reference_bp.sync_status", job_type="magicitems") }}' },
+    { label: 'Class Features',    syncUrl: '{{ url_for("reference_bp.sync_run", job_type="features") }}',    statusUrl: '{{ url_for("reference_bp.sync_status", job_type="features") }}' },
+    { label: 'Class Levels',      syncUrl: '{{ url_for("reference_bp.sync_run", job_type="classlevels") }}', statusUrl: '{{ url_for("reference_bp.sync_status", job_type="classlevels") }}' },
+    { label: 'Subclasses',        syncUrl: '{{ url_for("reference_bp.sync_run", job_type="subclasses") }}',  statusUrl: '{{ url_for("reference_bp.sync_status", job_type="subclasses") }}' },
+    { label: 'Traits',            syncUrl: '{{ url_for("reference_bp.sync_run", job_type="traits") }}',      statusUrl: '{{ url_for("reference_bp.sync_status", job_type="traits") }}' },
+    { label: 'Weapon Properties', syncUrl: '{{ url_for("reference_bp.sync_run", job_type="weaponprops") }}', statusUrl: '{{ url_for("reference_bp.sync_status", job_type="weaponprops") }}' },
+    { label: 'Rules',             syncUrl: '{{ url_for("reference_bp.sync_run", job_type="rules") }}',       statusUrl: '{{ url_for("reference_bp.sync_status", job_type="rules") }}' },
   ];
 
   const totalJobs = jobs.length;
