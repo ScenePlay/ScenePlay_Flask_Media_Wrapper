@@ -250,6 +250,9 @@ def active_map():
         if bm:
             return redirect(url_for('battlemap_bp.map_view', map_id=bm.map_id))
     flash('No active battle map right now.')
+    # DMs land where they can fix that (the map manager); players on their sheet.
+    if current_user.is_authenticated and current_user.is_dm():
+        return redirect(url_for('battlemap_bp.all_maps'))
     return redirect(url_for('ttrpg.my_character'))
 
 
