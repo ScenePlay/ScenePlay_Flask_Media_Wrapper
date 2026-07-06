@@ -5,7 +5,6 @@ from models.music import tblmusic as tbl
 from models.mediaMetadata import tblmediametadata as metaTbl
 
 from sql import *
-import alsaaudio
 
 mu = Blueprint('mu', __name__)
 

@@ -1,40 +1,36 @@
 from sql import *
+from procutil import pid_alive
 #from fileHold.volume import *
 import os
 import subprocess
 import time
 
 def play_mp3_local(fi,vol, a):
-   vl = 0
-   start_dir = os.path.dirname(os.path.realpath(__file__))
+   # mpv (audio-only) replaces mpg123: same one-file-per-process lifecycle,
+   # but with an IPC socket for pause/seek and a direct 0-100 volume instead
+   # of mpg123's 32768 sample scaling. On Windows the same mpv runs directly
+   # (no bash wrapper) with the IPC socket as a named pipe.
+   vol = int(max(0, min(100, vol)))
    if os.name == "nt":
-      #player = start_dir+"\\ffplay.exe"
-      player = start_dir+"\\cmdmp3win.exe"
-      player.replace("\\","\\\\",0)
-      fi.replace("\\","\\\\",0)
-      #set_volume(a)
-      #p = subprocess.Popen([player, '-autoexit', fi],shell=False)
-      p = subprocess.Popen([player, fi],shell=False)
-      while p.poll() is None:
-         #print(p.poll())
-         if vl != a[1]:
-            #set_volume(a[1])
-            vl = int(a[1])
-         time.sleep(1) 
+      # CREATE_NO_WINDOW: mpv.exe is a console app, so without it Windows pops
+      # a console window for every track (--no-terminal only mutes the output).
+      # --force-window=no: Windows mpv builds default force-window ON, which
+      # opens a player window for audio even with --no-video.
+      p = subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
+                            '--force-window=no',
+                            '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
+                            '--volume=' + str(vol)], shell=False,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
    else:
-      # mpv (audio-only) replaces mpg123: same one-file-per-process lifecycle,
-      # but with an IPC socket for pause/seek (/tmp/mpvsocket-music) and a
-      # direct 0-100 volume instead of mpg123's 32768 sample scaling.
-      vol = int(max(0, min(100, vol)))
       p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi])
-      appsettingAudioPlayFlagUpdatePID(p.pid)
+   appsettingAudioPlayFlagUpdatePID(p.pid)
+   time.sleep(1)
+   while p.poll() is None:
+      #print(p.poll())
+      # if vl != a[1]:
+      #    #set_volume(a[1])
+      #    vl = int(a[1])
       time.sleep(1)
-      while p.poll() is None:
-         #print(p.poll())
-         # if vl != a[1]:
-         #    #set_volume(a[1])
-         #    vl = int(a[1])
-         time.sleep(1)
 
 
 def threader(n, a):
@@ -66,12 +62,11 @@ def threader(n, a):
                playerInfo = appsettingAudioPlayPID()
               #print(playerInfo)
                playerPID = int(playerInfo[0][2])
-               try:
-                  if(os.kill(playerPID, 0) is None):
-                     pass
-                  else:
-                     pass
-               except:
+               # pid_alive replaces os.kill(pid, 0), which is not a liveness
+               # probe on Windows (signal 0 sends CTRL_C_EVENT).
+               if pid_alive(playerPID):
+                  songRun = False
+               else:
                   if songRun == True:
                      songRun = False
                      # Persist what's ACTUALLY starting (a[2] is process-local and
@@ -80,9 +75,6 @@ def threader(n, a):
                      play_mp3_local(fi[1],fi[7], a)
                      update_data_entry(fi)
                   songRun = True
-               else:
-                  songRun = False
-                  pass
             #time.sleep(2)
             
       elif n.value == 0:

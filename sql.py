@@ -1824,8 +1824,9 @@ def queue_kill():
         conn.commit()
     conn.commit()
     if os.name == "nt":
-       #os.system("taskkill /f /im ffplay.exe")
-       os.system("taskkill /f /im cmdmp3win.exe")
+       _nt_kill_by_cmdline("mpvsocket-video")
+       if not keep_music:
+           _nt_kill_by_cmdline("mpvsocket-music")
     else:
        # Music and video are now SEPARATE mpv instances — kills target the
        # instance by its IPC socket name on the command line, never the bare
@@ -1838,17 +1839,32 @@ def queue_kill():
     conn.close()
 
 
+def _nt_kill_by_cmdline(substr):
+    """Windows `pkill -f` equivalent: taskkill can only match by image name,
+    which can't tell the two mpv instances apart — psutil matches the IPC
+    socket name on the command line, exactly like pkill -f does on Linux."""
+    try:
+        import psutil
+        for proc in psutil.process_iter(['cmdline']):
+            try:
+                if any(substr in arg for arg in (proc.info['cmdline'] or [])):
+                    proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception:
+        pass
+
+
 def queue_next():
     if os.name == "nt":
-       #os.system("taskkill /f /im ffplay.exe")
-       os.system("taskkill /f /im cmdmp3win.exe")
+       _nt_kill_by_cmdline("mpvsocket-music")
     else:
        os.system("pkill mpg123")   # legacy player, in case one is still up
        os.system("pkill -f mpvsocket-music")
 def queueVideo_next():
     if os.name == "nt":
-       #os.system("taskkill /f /im ffplay.exe")
-       os.system("taskkill /f /im cmdmp3win.exe")
+       # was `taskkill /im cmdmp3win.exe` — which killed the AUDIO player
+       _nt_kill_by_cmdline("mpvsocket-video")
     else:
        os.system("pkill -f mpvsocket-video")
 
@@ -1972,12 +1988,15 @@ def find_store_files():
     
 
 def play_mp3(fi):
-   start_dir = os.path.dirname(os.path.realpath(__file__))
    if os.name == "nt":
-      player = start_dir+"\\ffplay.exe"
-      player.replace("\\","\\\\",0)
-      fi.replace("\\","\\\\",0)
-      subprocess.Popen([player, '-autoexit', fi]).wait()
+      # mpv is already the required player on Windows — no bundled ffplay.exe.
+      # No IPC socket: this is fire-and-wait (chimes / legacy scene loops).
+      # CREATE_NO_WINDOW: without it each spawn pops a console window.
+      # --force-window=no: Windows mpv builds default force-window ON, which
+      # opens a player window for audio even with --no-video.
+      subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
+                        '--force-window=no'],
+                       creationflags=subprocess.CREATE_NO_WINDOW).wait()
    else:
       subprocess.Popen(['mpg123', '-q', fi]).wait()
 

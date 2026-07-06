@@ -169,6 +169,33 @@ or `python3 app.py -flask` for Flask's dev server.
 
 Updating: `git -C ~/ScenePlay stash && git -C ~/ScenePlay pull`, then restart.
 
+### Windows (second / travel server)
+
+Everything works except the Pi-wired RPiLED strips (WLED controllers still
+work — they're network devices).
+
+**Easy way:** clone the repo and double-click **`install.bat`** — it installs
+Python/mpv/ffmpeg via winget as needed, builds the venv, installs the Python
+packages, and offers a desktop shortcut + start-at-logon. (If it installs new
+tools it will ask you to re-run it once from a fresh window so PATH updates.)
+Then run `startApp.bat` → open `http://localhost:8086`.
+
+**Manual checklist** (what install.bat automates):
+
+1. Install **Python 3.11+** (check "Add to PATH").
+2. Install the players/tools (must end up on PATH):
+   `winget install mpv` and `winget install Gyan.FFmpeg`
+3. Clone the repo, then from its folder:
+   `python -m venv .venv && .venv\Scripts\pip install -r requirements.txt`
+   (the requirements file picks the right per-OS packages automatically).
+4. Run `startApp.bat` → open `http://localhost:8086`.
+5. Optional autostart:
+   `schtasks /create /sc onlogon /tn ScenePlay /tr "C:\path\to\startApp.bat"`
+
+Scheduled jobs on Windows install into **Task Scheduler** (the Apply button /
+wizard handle it); schedules the wizard creates map exactly, hand-written
+cron patterns that Task Scheduler can't express are skipped with a count.
+
 ---
 
 ## Browser extensions (the fast way to import)

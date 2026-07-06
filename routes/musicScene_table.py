@@ -2,7 +2,6 @@
 from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for
 from models.musicScene import tblmusicscene as tbl
 from models.scenes import tblscenes as sc
-import alsaaudio
 from extensions import *
 
 from sql import *

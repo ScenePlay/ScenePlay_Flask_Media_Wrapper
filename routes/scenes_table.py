@@ -3,7 +3,6 @@ from extensions import *
 
 from models.scenes import tblscenes as tbl
 from sql import *
-import alsaaudio
 
 
 

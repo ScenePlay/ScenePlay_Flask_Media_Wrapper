@@ -1,7 +1,6 @@
 from flask import Blueprint, render_template, request, abort, jsonify, json, redirect, url_for
 from extensions import *
 
-import alsaaudio
 from models.campaigns import tblcampaigns as tbl
 from sql import *
 

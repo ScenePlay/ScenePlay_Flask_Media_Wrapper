@@ -21,6 +21,15 @@ def _active():
     return cfg
 
 
+def _exec_cfg():
+    """Config resolved at EXECUTION time, not enqueue time. 'Generate code'
+    can replace the relay session while a push waits in the queue; aimed at
+    the dead session id, the push 404s and is dropped as permanent (the
+    'library: 404' health-banner drop). Returns None when the relay was
+    disabled after enqueue — skip the push rather than fail it."""
+    return _active()
+
+
 def _post(path, payload, cfg, timeout=5):
     import requests
     url = cfg['url'].rstrip('/') + path
@@ -161,7 +170,10 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
     }
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/push-roll', payload, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/push-roll', payload, c)
 
     _enqueue(f'roll-{next(_seq)}', _go)   # unique key: every roll is delivered
 
@@ -322,8 +334,13 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
         return   # nothing changed since the last successful push
 
     def _go():
-        resp = _post('/api/v1/session/push', payload, cfg, timeout=20)
+        c = _exec_cfg()
+        if not c:
+            return
+        payload['session_id'] = c['session_id']
+        resp = _post('/api/v1/session/push', payload, c, timeout=20)
         if heavy is not None:
+            heavy['session_id'] = c['session_id']
             try:
                 need = bool(resp.json().get('need_image'))
             except Exception:
@@ -331,7 +348,7 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
             if need:
                 # Generous window: the heavy payload can carry a video on a
                 # slow home uplink. Only happens when the relay lacks the file.
-                _post('/api/v1/session/push', heavy, cfg, timeout=120)
+                _post('/api/v1/session/push', heavy, c, timeout=120)
         _last_map_hash['v'] = digest   # only remember payloads that landed
 
     _debounced_map_enqueue(_go)   # queue coalesces on 'map-state'; latest wins
@@ -355,7 +372,11 @@ def broadcast_token_move(token_id, x_pct, y_pct,
         body['character_id'] = str(character_id)
 
     def _go():
-        _post('/api/v1/token/move', body, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        body['session_id'] = c['session_id']
+        _post('/api/v1/token/move', body, c)
 
     _enqueue(f'token-move-{token_id}', _go)   # coalesce per token
 
@@ -369,7 +390,11 @@ def broadcast_token_health(token_id, hp_current, hp_max):
             'session_id': cfg['session_id']}
 
     def _go():
-        _post('/api/v1/token/health', body, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        body['session_id'] = c['session_id']
+        _post('/api/v1/token/health', body, c)
 
     _enqueue(f'token-health-{token_id}', _go)   # coalesce per token
 
@@ -386,7 +411,10 @@ def broadcast_condition_update(conditions, token_id=None, player_name=None):
         body['player_name'] = player_name
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/condition-update', body, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/condition-update', body, c)
 
     _enqueue(f'condition-{token_id or player_name}', _go)   # coalesce per target
 
@@ -555,7 +583,10 @@ def push_all_characters():
     payload = {'characters': characters}
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/characters', payload, c)
         log.info('push_all_characters: pushed %d characters', len(characters))
 
     _enqueue('all-characters', _go)   # coalesce: latest full party wins
@@ -587,7 +618,10 @@ def push_character(char):
     payload = {'characters': [_char_to_payload(char)]}
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/characters', payload, c)
 
     _enqueue(f'character-{char.character_id}', _go)   # coalesce per character
 
@@ -603,9 +637,12 @@ def push_character_and_broadcast(char):
     player_name = char.name
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/characters', payload, cfg)
-        _post(f'/api/v1/session/{cfg["session_id"]}/character-sheet-broadcast',
-              {'player_name': player_name}, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/characters', payload, c)
+        _post(f'/api/v1/session/{c["session_id"]}/character-sheet-broadcast',
+              {'player_name': player_name}, c)
 
     _enqueue(f'character-bcast-{char.character_id}', _go)   # coalesce per character
 
@@ -733,7 +770,10 @@ def push_library():
     }
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/library', payload, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/library', payload, c)
         log.info('push_library: pushed library data to relay')
 
     _enqueue('library', _go)   # coalesce: latest library snapshot wins
@@ -789,7 +829,10 @@ def push_session_users():
     payload = {'users': users}
 
     def _go():
-        _post(f'/api/v1/session/{cfg["session_id"]}/users', payload, cfg)
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/users', payload, c)
         log.info('push_session_users: pushed %d users', len(users))
 
     _enqueue('session-users', _go)   # coalesce: latest user list wins
@@ -806,10 +849,13 @@ def remove_character(player_name):
 
     def _go():
         import requests
-        url = (cfg['url'].rstrip('/')
-               + f'/api/v1/session/{cfg["session_id"]}/characters/'
+        c = _exec_cfg()
+        if not c:
+            return
+        url = (c['url'].rstrip('/')
+               + f'/api/v1/session/{c["session_id"]}/characters/'
                + quote(player_name, safe=''))
-        resp = requests.delete(url, headers={'X-Relay-Secret': cfg['secret']}, timeout=5)
+        resp = requests.delete(url, headers={'X-Relay-Secret': c['secret']}, timeout=5)
         # 404 = already gone on the relay; success as far as we're concerned
         # (retrying a delete of nothing would wedge the queue pointlessly).
         if resp.status_code not in (200, 404):

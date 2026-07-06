@@ -54,8 +54,10 @@ def reap_child(signum, frame):
         except OSError:
             pass
             
-# Set up the SIGCHLD signal handler
-signal.signal(signal.SIGCHLD, reap_child)
+# Set up the SIGCHLD signal handler. Windows has no SIGCHLD (and no zombie
+# processes to reap) — the workers there run as threads, so skip it entirely.
+if hasattr(signal, 'SIGCHLD'):
+    signal.signal(signal.SIGCHLD, reap_child)
 
 
 app = Flask(__name__)
@@ -348,27 +350,34 @@ def startTheadPlayer():
     data = select_data_stats()#arr)
     #\
     
-    v = Process(target=threaderVideo)#, args=(num, arr))
-    v.start()
-    p = Process(target=threader, args=(num, arr))
-    p.start()
-    y = Process(target=YTQue_threader)
-    y.start()
+    # All six workers are IO-bound sqlite pollers. On Linux they run as
+    # detached Processes (unchanged). On Windows they run as daemon THREADS:
+    # multiprocessing there uses spawn, which would re-import app.py's
+    # module-level side effects (db.create_all, seeding, worker autostart)
+    # into every child and lose the shared Value/Array state.
+    def start_worker(target, args=()):
+        if os.name == 'nt':
+            import threading
+            threading.Thread(target=target, args=args, daemon=True,
+                             name=f'worker-{target.__name__}').start()
+        else:
+            Process(target=target, args=args).start()
+
+    start_worker(threaderVideo)
+    start_worker(threader, (num, arr))
+    start_worker(YTQue_threader)
     # Metadata + playlist workers: independent pollers mirroring the download worker
     # (2s poll, appsetting-switch gated). Started here in startTheadPlayer (never in
     # a forkserver child) alongside the others.
     from meta_que import MetaQue_threader
     from playlist_que import PlaylistQue_threader
     recover_stuck_processing()   # re-queue jobs a crash left stranded at 'Processing'
-    mq = Process(target=MetaQue_threader)
-    mq.start()
-    pq = Process(target=PlaylistQue_threader)
-    pq.start()
+    start_worker(MetaQue_threader)
+    start_worker(PlaylistQue_threader)
     # Nightly backup scheduler — no-op unless backup_auto is switched on
     # (Utilities page). Same detached-worker pattern as the queues above.
     from backup_restore import Backup_threader
-    bk = Process(target=Backup_threader)
-    bk.start()
+    start_worker(Backup_threader)
     appsettingAudioPlayFlagUpdate(1)
     appsettingVideoPlayFlagUpdate(1)
     appsettingYT_QuePlayFlagUpdate(1)
@@ -377,6 +386,9 @@ def startTheadPlayer():
 
     time.sleep(3)
     appsettingAudioPlayFlagUpdatePID(999999)  # clear stale PID so threader starts fresh
+    # Same for the download queue: a stale yt_que_PID that collides with a
+    # live process would make the worker wait on it and never start downloads.
+    appsettingYT_QuePlayFlagUpdatePID(999999)
     queue_next()
 
     # Start relay receiver and push current party + library to relay
@@ -390,8 +402,32 @@ def startTheadPlayer():
             relay_broadcaster.push_library()
     
     
+def _another_instance_running(port=8086):
+    """True when the app already runs elsewhere (dev-server F5 while the
+    waitress instance is up). Starting anyway would add a second set of queue
+    workers racing for the same DB rows — and the loser can't even serve."""
+    import socket
+    probe = socket.socket()
+    # Linux: without SO_REUSEADDR a fresh restart false-positives on the old
+    # socket's TIME_WAIT. Windows must NOT set it (it lets bind hijack a LIVE
+    # listener, defeating the check); its bind ignores TIME_WAIT anyway.
+    if os.name != 'nt':
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(('0.0.0.0', port))
+        return False
+    except OSError:
+        return True
+    finally:
+        probe.close()
+
+
 if arr[0] > 0:
     if __name__ == '__main__':
+        if _another_instance_running():
+            print('*** ScenePlay is already running (port 8086 in use) — '
+                  'not starting a second instance. ***')
+            sys.exit(1)
         startTheadPlayer()
     
     

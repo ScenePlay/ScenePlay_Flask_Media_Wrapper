@@ -4,7 +4,6 @@ from extensions import *
 from models.videoMedia import tblvideomedia as tbl
 from models.mediaMetadata import tblmediametadata as metaTbl
 from sql import *
-import alsaaudio
 
     #   // cid  name          type     notnull  dflt_value  pk
     #   // ---  ------------  -------  -------  ----------  --

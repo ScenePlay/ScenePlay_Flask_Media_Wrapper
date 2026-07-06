@@ -12,6 +12,7 @@ SIGCHLD reaper eats them) — success == stdout parses to JSON with entries.
 import os
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timedelta
 
@@ -20,7 +21,14 @@ from sql import (select_Playlist_Que_Next, update_playlist_status, enqueue_singl
 from ytid import canonical_watch_url
 
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
-_YTDLP = os.path.join(_START_DIR, 'yt-dlp', 'yt-dlp.sh')
+# pip-installed yt-dlp run as a module — no bash / no repo checkout, works on
+# both OSes. Same JSON-on-stdout contract as the old yt-dlp.sh wrapper.
+import ytdlp_source
+
+_YTDLP_CMD = [sys.executable, '-m', 'yt_dlp']
+# Suppress the console window each spawn would pop on Windows (0 is a no-op
+# elsewhere — POSIX requires creationflags=0).
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
 MAX_RETRIES = 3
 POLL_SECONDS = 2
@@ -43,8 +51,9 @@ def expand_playlist(url):
     flat-playlist dict; callers use entry['id']."""
     try:
         proc = subprocess.run(
-            ['bash', _YTDLP, '--flat-playlist', '-J', '--no-warnings', url],
-            capture_output=True, text=True, timeout=EXPAND_TIMEOUT)
+            _YTDLP_CMD + ['--flat-playlist', '-J', '--no-warnings', url],
+            capture_output=True, text=True, timeout=EXPAND_TIMEOUT,
+            creationflags=_NO_WINDOW, env=ytdlp_source.popen_env())
     except subprocess.TimeoutExpired:
         return 'transient', 'playlist expansion timed out'
     except Exception as e:  # pragma: no cover

@@ -1,4 +1,5 @@
 from sql import *
+from procutil import pid_alive
 #from fileHold.volume import *
 import os
 import subprocess
@@ -17,8 +18,19 @@ def play_mpv_local(fi, scrn, vol, a, loop):
   
    #VideoCommand = f"DISPLAY=:0 mpv --no-terminal --fullscreen=yes --speed={str(speed)} --input-ipc-server=/tmp/mpvsocket --loop-file={str(loops)} --volume={str(volume)} --screen={str(screen)} {str(fi)}"
    print(f"Trying to play: {fi}")
-   p = subprocess.Popen(['./mpv.sh',speed,loops,volume,screen,fi],shell=False)
-   #p = subprocess.Popen(['mpv', '--no-terminal','--fullscreen=yes','--speed='+str(speed),'--input-ipc-server=/tmp/mpvsocket','--loop-file='+str(loops),'--volume='+str(volume), '--screen='+str(screen), str(fi)])
+   if os.name == 'nt':
+      # Same flags as mpv.sh, spawned directly (no bash on Windows); the IPC
+      # socket becomes a named pipe — mpv accepts the \\.\pipe\ form natively.
+      # CREATE_NO_WINDOW suppresses only the console mpv.exe would pop; the
+      # fullscreen video window is a GUI window and still appears.
+      p = subprocess.Popen(['mpv', fi, '--no-terminal',
+                            '--input-ipc-server=\\\\.\\pipe\\mpvsocket-video',
+                            '--fullscreen=yes', '--speed=' + speed,
+                            '--loop-file=' + loops, '--volume=' + volume,
+                            '--screen=' + screen], shell=False,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+   else:
+      p = subprocess.Popen(['./mpv.sh',speed,loops,volume,screen,fi],shell=False)
    appsettingVideoPlayFlagUpdatePID(p.pid)
    time.sleep(1)
    while p.poll() is None:
@@ -29,6 +41,11 @@ def play_mpv_local(fi, scrn, vol, a, loop):
 def threaderVideo():
     n = Value('i', 1)
     a = Array('i', range(10))
+    # a[0] is the parent-liveness sentinel probed at the bottom of the loop.
+    # range(10) leaves a[0]==0: on Linux os.kill(0,0) signals our own process
+    # group and happens to succeed, but the Windows OpenProcess(…, 0) check
+    # fails and would exit the worker after one pass. Point it at ourselves.
+    a[0] = os.getpid()
     videoRun = False
     breaker = 1
     appsettingVideoPlayFlagUpdate(0)
@@ -51,12 +68,11 @@ def threaderVideo():
                a[2] = fi[0]
                vplayerInfo = appsettingVideoPlayPID()
                vplayerPID = int(vplayerInfo[0][2])
-               try:
-                  if(os.kill(vplayerPID, 0) is None):
-                     pass
-                  else:
-                     pass
-               except:
+               # pid_alive replaces os.kill(pid, 0), which is not a liveness
+               # probe on Windows (signal 0 sends CTRL_C_EVENT).
+               if pid_alive(vplayerPID):
+                  videoRun = False
+               else:
                   if videoRun == True:
                      videoRun = False
                      #print("Threader Video3")
@@ -66,9 +82,6 @@ def threaderVideo():
                      #              file    scrn  vol         loop
                      update_video_data_entry(fi)
                   videoRun = True
-               else:
-                  videoRun = False
-                  pass
             #time.sleep(2)
             
       elif n.value == 0:

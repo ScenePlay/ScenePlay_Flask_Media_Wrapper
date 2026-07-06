@@ -2,7 +2,6 @@ from flask import Blueprint, render_template, request, abort, jsonify, json, red
 from extensions import *
 
 from sql import *
-import alsaaudio
 from models.ledTypeModel import tblledtypemodel as tbl
 
 

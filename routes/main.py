@@ -3,7 +3,6 @@ from extensions import *
 
 from sql import *
 from models.mediaMetadata import tblmediametadata
-import alsaaudio
 from multiprocessing import Process, Value, Array
 import time
 from ledPlayer import *
@@ -323,30 +322,38 @@ def isAlive():
 
 # Transport controls: each mpv instance is addressed by its own IPC socket
 # (video: mpvsocket-video / music: mpvsocket-music, see mpv.sh / mpvAudio.sh).
-# socat against a dead socket fails silently — same as before when idle.
+# On Linux commands go through socat (unchanged); on Windows the socket is a
+# named pipe (see player.py / mpvPlayer.py launch flags) written directly.
+# Either way a dead socket fails SILENTLY — same contract as before when idle.
+
+def _mpv_command(kind, command):
+    if os.name == 'nt':
+        try:
+            with open(f'\\\\.\\pipe\\mpvsocket-{kind}', 'r+b', buffering=0) as pipe:
+                pipe.write(command.encode() + b'\n')
+        except OSError:
+            pass   # player not running — no-op, like socat against a dead socket
+    else:
+        os.system(f"echo {command} | socat - /tmp/mpvsocket-{kind}")
 
 @main.route('/video_seek', methods=['POST'])
 def video_seek():
     value = request.json['value']
-    command = f"echo seek {value} | socat - /tmp/mpvsocket-video"
-    os.system(command)
+    _mpv_command('video', f'seek {value}')
     return jsonify({'success': True})
 
 @main.route('/video_stopstart', methods=['POST'])
 def video_stopstart():
-    command = f"echo cycle pause | socat - /tmp/mpvsocket-video"
-    os.system(command)
+    _mpv_command('video', 'cycle pause')
     return jsonify({'success': True})
 
 @main.route('/music_seek', methods=['POST'])
 def music_seek():
     value = request.json['value']
-    command = f"echo seek {value} | socat - /tmp/mpvsocket-music"
-    os.system(command)
+    _mpv_command('music', f'seek {value}')
     return jsonify({'success': True})
 
 @main.route('/music_stopstart', methods=['POST'])
 def music_stopstart():
-    command = f"echo cycle pause | socat - /tmp/mpvsocket-music"
-    os.system(command)
+    _mpv_command('music', 'cycle pause')
     return jsonify({'success': True})

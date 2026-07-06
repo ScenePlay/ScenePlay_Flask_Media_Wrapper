@@ -4,6 +4,8 @@ Uses app.test_request_context for request.host; only DB-free actions are
 exercised (scene lookup would hit the live database).
 """
 
+import os
+
 import pytest
 
 from app import app
@@ -44,7 +46,10 @@ class TestCommands:
         assert 'activatescenes/?id=-1' in cmd
         assert label == 'stop all music and video'
 
-    def test_volume_bounds(self, ctx):
+    def test_volume_bounds(self, ctx, monkeypatch):
+        # These assert the Linux command strings — force the posix branch
+        # so the test passes on any host OS.
+        monkeypatch.setattr(os, 'name', 'posix')
         cmd, label = cw._wizard_command('volume', {'volume': 50})
         assert '"volume": 50' in cmd and 'set_volume' in cmd
         with pytest.raises(ValueError):
@@ -52,7 +57,8 @@ class TestCommands:
         with pytest.raises(ValueError):
             cw._wizard_command('volume', {'volume': -1})
 
-    def test_repeat_and_reboot_and_update(self, ctx):
+    def test_repeat_and_reboot_and_update(self, ctx, monkeypatch):
+        monkeypatch.setattr(os, 'name', 'posix')   # Linux command strings
         assert 'keepmusicplaying/on' in cw._wizard_command('repeat_on', {})[0]
         assert 'keepmusicplaying/off' in cw._wizard_command('repeat_off', {})[0]
         assert cw._wizard_command('reboot', {})[0] == '/usr/bin/sudo /sbin/reboot'

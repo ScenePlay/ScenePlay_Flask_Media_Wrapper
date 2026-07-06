@@ -6,7 +6,6 @@ from sql import *
 from sql import appsettingGetKeepMusicPlaying, appsettingSetKeepMusicPlaying
 from ledPlayer import *
 from sys import platform
-import alsaaudio
 import os
 import subprocess
 
@@ -21,8 +20,11 @@ ut = Blueprint('ut', __name__)
 
 
 def restart_computer():
-    """Fire the repo-root restartComputer.sh (relocated here from the old
-    ipsearch.py so that whole ping chain could be deleted)."""
+    """Reboot the box: shutdown.exe on Windows, the repo-root
+    restartComputer.sh (sudo shutdown -r now) on Linux."""
+    if os.name == 'nt':
+        subprocess.Popen(['shutdown', '/r', '/t', '3'], shell=False)
+        return
     repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     subprocess.Popen(['bash', os.path.join(repo_root, 'restartComputer.sh')],
                      shell=False)
@@ -186,6 +188,7 @@ def processyt():
     flname = request.form['FileName']
     #print(flname)
     yt_process(url,flname)
-    mixer = alsaaudio.Mixer("Master")
-    volume = mixer.getvolume()[0]
+    # currentvolume() (Pulse on Linux / Core Audio on Windows) — this was the
+    # one remaining direct ALSA read; every other page already reads this way.
+    volume = currentvolume()
     return render_template('utils.html',volume=volume)

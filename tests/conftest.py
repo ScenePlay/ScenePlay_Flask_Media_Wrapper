@@ -10,9 +10,10 @@ import types
 
 import pytest
 
-# Stub hardware audio libs BEFORE extensions is imported (it imports them
-# at module level). Harmless if the real ones are installed.
-for _mod in ('alsaaudio', 'pulsectl'):
+# Stub the Linux audio lib BEFORE extensions is imported (it imports pulsectl
+# at module level on posix; alsaaudio is gone from the codebase). Harmless if
+# the real one is installed.
+for _mod in ('pulsectl',):
     if _mod not in sys.modules:
         try:
             __import__(_mod)

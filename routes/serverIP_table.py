@@ -3,7 +3,6 @@ from extensions import *
 
 from models.serverIP import tblserversip as tbl
 from sql import *
-import alsaaudio
 import discovery
 
 # cid  name          type     notnull  dflt_value  pk

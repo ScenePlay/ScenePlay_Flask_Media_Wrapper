@@ -4,7 +4,6 @@ from models.scenes import tblscenes as sc
 from models.wledPattern import tbleffect as ef
 from models.wledPattern import tblpallette as pt
 
-import alsaaudio
 from extensions import *
 
 from sql import *

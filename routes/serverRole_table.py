@@ -3,7 +3,6 @@ from extensions import *
 
 from models.serverRole import tblserverrole as tbl
 from sql import *
-import alsaaudio
 
 # 0|ID|INTEGER|0||1
 # 1|name|TEXT|0||0
