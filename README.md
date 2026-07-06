@@ -107,8 +107,11 @@ URL, so a restore re-queues missing downloads through the normal pipeline.
 - **Import → Merge** — share content between servers: the archive's campaigns,
   scenes, media and scene-links fold into the live library, deduped by video
   id and by name (scenes/campaigns/genres). Metadata rides along; new media
-  queues for download. LED patterns and TTRPG data are box-specific and only
-  move with Replace.
+  queues for download. **Homebrew** reference-library entries (custom feats,
+  weapons, spells, subclasses + features, monsters…) merge too, deduped by
+  name — SRD rows don't (each box re-syncs those from the D&D API). LED
+  patterns, characters/sessions/maps and server rows are box-specific and
+  only move with Replace.
 
 ### Utilities page
 YouTube import form, **Backfill Metadata** (tags legacy rows with video ids

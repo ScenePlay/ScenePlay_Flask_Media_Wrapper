@@ -25,6 +25,9 @@ SCHEMA = [
     "CREATE TABLE tblMusicScene (musicScene_ID INTEGER PRIMARY KEY, scene_ID INT, song_ID INT, orderBy INT, volume INT)",
     "CREATE TABLE tblVideoScene (videoScene_ID INTEGER PRIMARY KEY, scene_ID INT, video_ID INT, DisplayScreen_ID INT, orderBy INT, volume INT, loops INT)",
     "CREATE TABLE tblAppSettings (name TEXT, value TEXT, typevalue TEXT)",
+    "CREATE TABLE tblSubclassesLibrary (subclass_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, class_name TEXT, flavor TEXT, description TEXT, source TEXT, created_at TEXT)",
+    "CREATE TABLE tblFeaturesLibrary (feature_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, class_name TEXT, subclass_name TEXT, level INT, prerequisites TEXT, description TEXT, source TEXT, created_at TEXT)",
+    "CREATE TABLE tblMonsterTemplates (template_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, cr TEXT, monster_type TEXT, size TEXT, hp_max INT, ac INT, source TEXT, stats_json TEXT, created_at TEXT)",
 ]
 
 
@@ -192,3 +195,64 @@ class TestMerge:
         br.restore_merge(archive)
         s2 = br.restore_merge(archive)
         assert (s2['campaigns'], s2['scenes'], s2['music'], s2['video'], s2['links']) == (0, 0, 0, 0, 0)
+
+
+class TestMergeHomebrew:
+    def _archive_with_homebrew(self, env):
+        """Source server: a homebrew subclass + its feature + a homebrew
+        monster, PLUS an SRD subclass that must stay behind."""
+        src = str(env['tmp'] / 'brew.db')
+        make_db(src)
+        x(src, "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
+               "VALUES (NULL, 'Way of the Storm', 'Monk', 'Monastic Tradition', 'zap', 'homebrew', '2026-01-01')")
+        x(src, "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
+               "VALUES ('open-hand', 'Open Hand', 'Monk', 'Monastic Tradition', 'srd text', 'srd', '2026-01-01')")
+        x(src, "INSERT INTO tblFeaturesLibrary(api_index, name, class_name, subclass_name, level, prerequisites, description, source, created_at) "
+               "VALUES (NULL, 'Storm Strike', 'Monk', 'Way of the Storm', 3, '', 'boom', 'homebrew', '2026-01-01')")
+        x(src, "INSERT INTO tblMonsterTemplates(api_index, name, cr, monster_type, size, hp_max, ac, source, stats_json, created_at) "
+               "VALUES (NULL, 'Frost Golem', '5', 'construct', 'Large', 90, 15, 'homebrew', '{}', '2026-01-01')")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='brew')
+        finally:
+            sql.database = old
+
+    def test_homebrew_merges_srd_does_not(self, env):
+        archive = self._archive_with_homebrew(env)
+        s = br.restore_merge(archive)
+        assert s['homebrew'] == 3
+        assert q(env['live'], "SELECT source FROM tblSubclassesLibrary WHERE name='Way of the Storm'")[0][0] == 'homebrew'
+        assert q(env['live'], "SELECT level FROM tblFeaturesLibrary WHERE name='Storm Strike'")[0][0] == 3
+        assert q(env['live'], "SELECT hp_max FROM tblMonsterTemplates WHERE name='Frost Golem'")[0][0] == 90
+        # SRD subclass stays behind — each box re-syncs those itself
+        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary WHERE name='Open Hand'")[0][0] == 0
+
+    def test_homebrew_merge_dedups_by_name(self, env):
+        x(env['live'], "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
+                       "VALUES (NULL, 'way of the storm', 'Monk', '', 'mine, edited', 'homebrew', '2025-01-01')")
+        archive = self._archive_with_homebrew(env)
+        s = br.restore_merge(archive)
+        assert s['homebrew'] == 2            # subclass deduped (case-insensitive); feature + monster copied
+        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary")[0][0] == 1
+        assert q(env['live'], "SELECT description FROM tblSubclassesLibrary")[0][0] == 'mine, edited'  # local wins
+
+    def test_homebrew_merge_idempotent_and_tolerates_missing_tables(self, env):
+        archive = self._archive_with_homebrew(env)
+        assert br.restore_merge(archive)['homebrew'] == 3
+        assert br.restore_merge(archive)['homebrew'] == 0
+        # archive from an OLDER version without library tables merges cleanly
+        old_src = str(env['tmp'] / 'old.db')
+        conn = sqlite3.connect(old_src)
+        for stmt in SCHEMA:
+            if 'Library' in stmt or 'MonsterTemplates' in stmt:
+                continue
+            conn.execute(stmt)
+        conn.commit(); conn.close()
+        old = sql.database
+        sql.database = old_src
+        try:
+            old_archive = br.create_backup(label='old-version')
+        finally:
+            sql.database = old
+        assert br.restore_merge(old_archive)['homebrew'] == 0

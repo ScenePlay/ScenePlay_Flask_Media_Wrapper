@@ -29,6 +29,12 @@
                     No accounts yet? Create the DM account &rarr;
                 </a>
             </div>
+            {% else %}
+            <div class="text-center mt-3">
+                <a href="{{ url_for('auth.recover_password') }}" class="text-muted" style="font-size:0.85em;">
+                    Forgot password? (requires access to the server)
+                </a>
+            </div>
             {% endif %}
         </div>
     </div>

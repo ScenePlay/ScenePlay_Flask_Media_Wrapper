@@ -57,6 +57,17 @@ def main():
             flash(f"Backfill: tagged {summary['tagged']}, duplicates skipped "
                   f"{summary['duplicates_skipped']}, unparseable {summary['unparseable']}.")
             return  redirect(url_for('main.home'))
+        elif request.form['submit'] == 'Scan Media Files':
+            # Re-queue rows whose file is missing on disk (imported/merged data,
+            # files removed outside the app, failed downloads worth retrying).
+            from sql import scan_missing_media
+            summary = scan_missing_media()
+            if summary['music'] or summary['video']:
+                flash(f"Scan: re-queued {summary['music']} songs and {summary['video']} videos "
+                      f"for download — they are downloading now.")
+            else:
+                flash("Scan: all downloadable media files are present on disk.")
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Create Backup':
             path = backup_restore.create_backup(label='manual')
             flash(f"Backup created: {os.path.basename(path)}")
@@ -67,8 +78,13 @@ def main():
             flash(f"Nightly backup {'enabled' if enable else 'disabled'}.")
             return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
-            restart_computer()
-            return  redirect(url_for('main.home'))
+            # Show the wait-for-reboot page FIRST, then reboot: the response
+            # (and the page itself, fully self-contained) must reach the
+            # browser before the network drops. It polls /api/server-info and
+            # loads the app again once the box is back.
+            import threading
+            threading.Timer(3.0, restart_computer).start()
+            return render_template('restarting.html')
         else:
             pass
 
@@ -132,7 +148,8 @@ def backup_import():
             summary = backup_restore.restore_merge(staged)
             flash(f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
                   f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
-                  f"{summary['links']} scene links, {summary['uploads_added']} images "
+                  f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
+                  f"{summary['uploads_added']} images "
                   f"({summary['skipped_legacy']} legacy rows skipped). New media is downloading.")
     except ValueError as e:
         flash(f'Import failed: {e}')

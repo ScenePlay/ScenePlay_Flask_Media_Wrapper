@@ -79,6 +79,18 @@ def _is_permanent(exc):
     return code is not None and 400 <= code < 500
 
 
+def _record_push_drop(key, exc):
+    """Persist the most recent dropped push so the DM health banner can show
+    it — a drop is silent data loss toward the portal and worth surfacing."""
+    try:
+        from datetime import datetime, timezone
+        from sql import appsettingSet
+        ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        appsettingSet('relay_push_last_drop', f'{ts}|{key}|{str(exc)[:120]}')
+    except Exception:
+        pass   # never let telemetry break the worker
+
+
 def _worker_run():
     while True:
         _queue_evt.wait()
@@ -113,6 +125,7 @@ def _worker_run():
                 log.warning('relay push %r dropped (attempt %d, %s): %s',
                             key, attempts,
                             'rejected' if _is_permanent(e) else 'gave up', e)
+                _record_push_drop(key, e)
                 with _queue_lock:
                     if _queue.get(key) is entry:
                         del _queue[key]

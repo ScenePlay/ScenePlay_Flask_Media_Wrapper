@@ -83,6 +83,57 @@ def status():
                            sync_age=sync_age)
 
 
+@relay_admin_bp.route('/api/health')
+@login_required
+@dm_required
+def api_health():
+    """Lightweight relay-health check for the DM banner on every TTRPG page.
+
+    Signals: relay_last_sync (receiver heartbeat — written after each
+    successful poll, so staleness means the portal<->local sync is broken)
+    and relay_push_last_drop (a push the queue gave up on — silent data loss
+    toward the portal). Only alarms when the relay is enabled AND a session
+    exists; an idle relay is not an error."""
+    from datetime import datetime, timezone
+    cfg = _relay_cfg()
+    if cfg['enabled'] != '1' or not cfg['url'] or not cfg['session_id']:
+        return jsonify({'enabled': False, 'ok': True, 'problems': []})
+
+    problems = []
+
+    # receiver heartbeat
+    sync_age = None
+    try:
+        ts = datetime.strptime(cfg['last_sync'], '%Y-%m-%d %H:%M:%S')
+        sync_age = int((datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds())
+    except (ValueError, TypeError):
+        pass
+    if sync_age is None:
+        problems.append('Relay sync has not completed yet — players are not syncing.')
+    elif sync_age > 90:
+        mins = sync_age // 60
+        problems.append(f'Relay sync stalled — last contact '
+                        f'{f"{mins}m" if mins else f"{sync_age}s"} ago. '
+                        f'Player moves and sheet changes are NOT reaching this server.')
+
+    # dropped pushes (local -> relay data loss)
+    drop = appsettingGet('relay_push_last_drop', '') or ''
+    if drop:
+        try:
+            ts_s, key, err = drop.split('|', 2)
+            age = (datetime.now(timezone.utc).replace(tzinfo=None)
+                   - datetime.strptime(ts_s, '%Y-%m-%d %H:%M:%S')).total_seconds()
+            if age < 600:   # only recent drops — old noise self-clears
+                problems.append(f'A push to the relay was dropped {int(age // 60)}m ago '
+                                f'({key}: {err}). Remote players may be out of date — '
+                                f'use Sync Characters to re-push.')
+        except ValueError:
+            pass
+
+    return jsonify({'enabled': True, 'ok': not problems, 'problems': problems,
+                    'sync_age': sync_age})
+
+
 @relay_admin_bp.route('/toggle', methods=['POST'])
 @login_required
 @dm_required

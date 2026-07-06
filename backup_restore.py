@@ -16,9 +16,12 @@ Two restore modes:
     paths for THIS machine and re-queues missing files.
   * restore_merge    — dedup-aware import of campaigns / scenes / media links
     from the archive into the live database (sharing between servers).
-    Media dedups by videoId, scenes/campaigns/genres match by name. LED
-    patterns, TTRPG data and server rows are hardware/box-specific and are
-    NOT merged — use replace mode to move a whole box.
+    Media dedups by videoId, scenes/campaigns/genres match by name.
+    HOMEBREW reference-library rows (custom feats, weapons, spells,
+    subclasses + their features, monsters, ...) also merge, deduped by name —
+    SRD rows never do (each box re-syncs those from the D&D API). LED
+    patterns, characters/sessions/maps and server rows are hardware/box-
+    specific and are NOT merged — use replace mode to move a whole box.
 
 All DB work is plain sqlite3 against sql.database (same idiom as the queue
 helpers), so tests can point it at a scratch file.
@@ -242,6 +245,75 @@ def restore_replace(zip_path):
 # Merge mode
 # ---------------------------------------------------------------------------
 
+# Reference libraries whose HOMEBREW rows travel in a merge: (table, pk).
+# Dedup is by lower(name) — tblFeaturesLibrary by (name, class, subclass,
+# level) since the same feature name can exist across archetypes. SRD rows
+# never merge: each box re-syncs those from the D&D API. Columns are copied
+# by NAME INTERSECTION between the two schemas, so archives from older or
+# newer versions merge cleanly.
+HOMEBREW_LIBS = [
+    ('tblFeatsLibrary',            'feat_lib_id'),
+    ('tblWeaponsLibrary',          'weapon_lib_id'),
+    ('tblArmorLibrary',            'armor_lib_id'),
+    ('tblSpellsLibrary',           'spell_lib_id'),
+    ('tblSkillsLibrary',           'skill_lib_id'),
+    ('tblRacesLibrary',            'race_lib_id'),
+    ('tblEquipmentLibrary',        'equipment_lib_id'),
+    ('tblClassesLibrary',          'class_lib_id'),
+    ('tblSubclassesLibrary',       'subclass_lib_id'),
+    ('tblFeaturesLibrary',         'feature_lib_id'),
+    ('tblMagicItemsLibrary',       'magic_item_lib_id'),
+    ('tblConditionsLibrary',       'condition_lib_id'),
+    ('tblTraitsLibrary',           'trait_lib_id'),
+    ('tblWeaponPropertiesLibrary', 'weapon_prop_id'),
+    ('tblRulesLibrary',            'rule_lib_id'),
+    ('tblMonsterTemplates',        'template_id'),
+]
+
+
+def _merge_homebrew_libraries(c):
+    """Copy source='homebrew' library rows from the attached src db, deduped
+    by name. Tables absent on either side (older archive / older server) are
+    skipped. Returns the number of rows copied."""
+    copied = 0
+    for tbl, pk in HOMEBREW_LIBS:
+        if not c.execute("SELECT 1 FROM src.sqlite_master WHERE type='table' AND lower(name)=lower(?)",
+                         (tbl,)).fetchone():
+            continue
+        if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND lower(name)=lower(?)",
+                         (tbl,)).fetchone():
+            continue
+        src_cols  = [r[1] for r in c.execute(f"PRAGMA src.table_info({tbl})")]
+        live_cols = [r[1] for r in c.execute(f"PRAGMA table_info({tbl})")]
+        if 'source' not in src_cols or 'name' not in src_cols:
+            continue
+        cols = [col for col in src_cols if col in live_cols and col != pk]
+        col_list = ', '.join(cols)
+        rows = c.execute(f"SELECT {col_list} FROM src.{tbl} WHERE source = 'homebrew'").fetchall()
+        for row in rows:
+            data = dict(zip(cols, row))
+            name = (data.get('name') or '').strip()
+            if not name:
+                continue
+            if tbl == 'tblFeaturesLibrary':
+                exists = c.execute(
+                    "SELECT 1 FROM tblFeaturesLibrary WHERE lower(name)=lower(?) "
+                    "AND lower(coalesce(class_name,''))=lower(?) "
+                    "AND lower(coalesce(subclass_name,''))=lower(?) AND coalesce(level,0)=?",
+                    (name, data.get('class_name') or '', data.get('subclass_name') or '',
+                     data.get('level') or 0)).fetchone()
+            else:
+                exists = c.execute(f"SELECT 1 FROM {tbl} WHERE lower(name) = lower(?)",
+                                   (name,)).fetchone()
+            if exists:
+                continue
+            placeholders = ', '.join('?' for _ in cols)
+            c.execute(f"INSERT INTO {tbl}({col_list}) VALUES ({placeholders})",
+                      tuple(data[col] for col in cols))
+            copied += 1
+    return copied
+
+
 def restore_merge(zip_path):
     """Dedup-aware import of the archive's campaigns, scenes, media and
     scene-links into the live database. Media rows match by videoId, genres/
@@ -255,7 +327,7 @@ def restore_merge(zip_path):
     music_path = str(Path.home()) + '/Music/SP/'
     video_path = str(Path.home()) + '/Videos/SP/'
     s = {'campaigns': 0, 'scenes': 0, 'music': 0, 'video': 0,
-         'links': 0, 'skipped_legacy': 0}
+         'links': 0, 'skipped_legacy': 0, 'homebrew': 0}
 
     conn = sqlite3.connect(sql.database)
     c = conn.cursor()
@@ -369,6 +441,10 @@ def restore_merge(zip_path):
                       "VALUES (?, ?, ?, ?, ?, ?)",
                       (tgt_scene, tgt_video, screen, order_by, volume, loops))
             s['links'] += 1
+
+        # homebrew reference libraries (custom feats/weapons/spells/subclasses/
+        # features/monsters...) — SRD rows stay behind, they re-sync per box
+        s['homebrew'] = _merge_homebrew_libraries(c)
 
         conn.commit()
         c.execute("DETACH DATABASE src")

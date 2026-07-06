@@ -45,6 +45,10 @@
                      <input type="submit" name="submit" value="Backfill Metadata"/>
                      <br />
                      <br />
+                     <label for="form">Re-queue downloads for table rows whose file is missing on disk:</label>
+                     <input type="submit" name="submit" value="Scan Media Files"/>
+                     <br />
+                     <br />
                      </div>
                      <!-- <label for="form">Load Test Data</label>
                      <input type="submit" name="submit" value="loadtestdata"/> -->
@@ -104,7 +108,7 @@
                     <br />
                     <label style="display:inline-block;margin:6px 12px 6px 0;">
                       <input type="radio" name="mode" value="merge" checked>
-                      Merge — add its campaigns/scenes/media to this server (dedup by video id / name)
+                      Merge — add its campaigns/scenes/media and homebrew library entries to this server (dedup by video id / name)
                     </label>
                     <br />
                     <label style="display:inline-block;margin:0 12px 6px 0;">

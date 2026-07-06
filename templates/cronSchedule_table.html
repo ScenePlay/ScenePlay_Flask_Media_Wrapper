@@ -4,10 +4,147 @@
     <div>
       <h1>Cron Schedules</h1>
       <hr>
+
+      <!-- ── Schedule wizard: plain-language creation; the raw table below
+           remains the power-user view (custom commands, exotic cron). ── -->
+      <div style="border:1px solid var(--sp-border);border-radius:8px;padding:14px 16px;margin:0 0 14px;background:var(--sp-surface);max-width:900px;">
+        <h4 style="margin:0 0 10px;">&#10024; New Schedule</h4>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <b>1. What?</b>
+          <select id="wiz-action" class="form-select form-select-sm" style="width:auto;" onchange="wizActionChange()">
+            <option value="scene">Activate a scene</option>
+            <option value="allstop">All Stop — silence everything</option>
+            <option value="volume">Set the volume</option>
+            <option value="repeat_on">Music repeat ON</option>
+            <option value="repeat_off">Music repeat OFF</option>
+            <option value="reboot">Restart the computer</option>
+            <option value="update">Update ScenePlay &amp; restart</option>
+          </select>
+          <select id="wiz-scene" class="form-select form-select-sm" style="width:auto;">
+            {% for s in scenes %}<option value="{{ s.scene_ID }}">{{ s.sceneName }}</option>{% endfor %}
+          </select>
+          <span id="wiz-volume-wrap" style="display:none;">
+            <input type="number" id="wiz-volume" value="50" min="0" max="100"
+                   class="form-control form-control-sm" style="width:80px;display:inline-block;"> %
+          </span>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <b>2. When?</b>
+          <input type="time" id="wiz-time" value="18:00" class="form-control form-control-sm" style="width:auto;" onchange="wizPreview()">
+          <span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="wizDays([0,1,2,3,4,5,6])">Every day</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="wizDays([1,2,3,4,5])">Weekdays</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="wizDays([0,6])">Weekends</button>
+          </span>
+          <span id="wiz-day-boxes" style="white-space:nowrap;">
+            <!-- cron convention: 0 = Sunday -->
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="0" checked onchange="wizPreview()"> Su</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="1" checked onchange="wizPreview()"> Mo</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="2" checked onchange="wizPreview()"> Tu</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="3" checked onchange="wizPreview()"> We</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="4" checked onchange="wizPreview()"> Th</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="5" checked onchange="wizPreview()"> Fr</label>
+            <label style="margin-right:6px;"><input type="checkbox" class="wiz-day" value="6" checked onchange="wizPreview()"> Sa</label>
+          </span>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <b>3. Name</b>
+          <input type="text" id="wiz-name" placeholder="(optional — auto-named)"
+                 class="form-control form-control-sm" style="width:240px;">
+          <button type="button" class="btn btn-success btn-sm" onclick="wizSave()">Save &amp; Apply</button>
+          <span id="wiz-preview" style="color:var(--sp-muted);font-style:italic;"></span>
+        </div>
+        <div id="wiz-msg" style="margin-top:8px;"></div>
+      </div>
+
       <div id="table"></div>
     </div>
     <script>
       const tableDiv = document.getElementById('table');
+
+      // ── Schedule wizard ─────────────────────────────────────────────────
+      const WIZ_ACTION_LABELS = {
+        scene:      s => "activate scene '" + s + "'",
+        allstop:    () => 'stop all music and video',
+        volume:     () => 'set volume to ' + (document.getElementById('wiz-volume').value || '?') + '%',
+        repeat_on:  () => 'turn music repeat ON',
+        repeat_off: () => 'turn music repeat OFF',
+        reboot:     () => 'restart the computer',
+        update:     () => 'update ScenePlay and restart',
+      };
+      const WIZ_DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+      function wizActionChange() {
+        const a = document.getElementById('wiz-action').value;
+        document.getElementById('wiz-scene').style.display       = a === 'scene'  ? '' : 'none';
+        document.getElementById('wiz-volume-wrap').style.display = a === 'volume' ? '' : 'none';
+        wizPreview();
+      }
+
+      function wizDays(days) {
+        document.querySelectorAll('.wiz-day').forEach(cb => {
+          cb.checked = days.includes(parseInt(cb.value));
+        });
+        wizPreview();
+      }
+
+      function wizSelectedDays() {
+        return [...document.querySelectorAll('.wiz-day:checked')].map(cb => parseInt(cb.value));
+      }
+
+      function wizPreview() {
+        const a = document.getElementById('wiz-action').value;
+        const sceneSel = document.getElementById('wiz-scene');
+        const sceneName = sceneSel.options[sceneSel.selectedIndex] ? sceneSel.options[sceneSel.selectedIndex].text : '?';
+        const days = wizSelectedDays();
+        const t = document.getElementById('wiz-time').value || '18:00';
+        let when;
+        if (days.length === 7) when = 'Every day';
+        else if (days.join() === '1,2,3,4,5') when = 'Weekdays';
+        else if (days.join() === '0,6') when = 'Weekends';
+        else if (days.length === 0) when = '(pick at least one day)';
+        else when = days.map(d => WIZ_DAY_SHORT[d]).join(', ');
+        const [h, m] = t.split(':').map(Number);
+        const ampm = ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h >= 12 ? 'PM' : 'AM');
+        document.getElementById('wiz-preview').textContent =
+          when + ' at ' + ampm + ' — ' + WIZ_ACTION_LABELS[a](sceneName);
+      }
+
+      async function wizSave() {
+        const msg = document.getElementById('wiz-msg');
+        msg.textContent = 'Saving…'; msg.style.color = 'var(--sp-muted)';
+        const body = {
+          action:   document.getElementById('wiz-action').value,
+          scene_id: document.getElementById('wiz-scene').value,
+          volume:   document.getElementById('wiz-volume').value,
+          time:     document.getElementById('wiz-time').value,
+          days:     wizSelectedDays(),
+          name:     document.getElementById('wiz-name').value,
+        };
+        try {
+          const r = await fetch('/api/cronwizard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const res = await r.json();
+          if (res.success) {
+            msg.style.color = '#28a745';
+            msg.textContent = '✓ Scheduled and applied to the crontab: ' + res.description;
+            setTimeout(() => window.location.reload(), 1200);
+          } else {
+            msg.style.color = '#dc3545';
+            msg.textContent = '✗ ' + (res.error || 'Failed to save.');
+          }
+        } catch (e) {
+          msg.style.color = '#dc3545';
+          msg.textContent = '✗ Request failed: ' + e.message;
+        }
+      }
+      wizActionChange();   // initialize picker visibility + preview
 
       function addButton() {
         var element = document.querySelector("div.gridjs-search");

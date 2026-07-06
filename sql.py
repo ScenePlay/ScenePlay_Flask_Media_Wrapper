@@ -442,6 +442,35 @@ def delete_media_row(media_type, pk):
     return links
 
 
+def scan_missing_media():
+    """Utilities 'Scan Media Files': re-queue any downloadable row whose file is
+    missing from disk, so imported/merged data (or files deleted outside the
+    app) gets downloaded through the normal pipeline.
+
+    Per-status behaviour: Finished(3) with a missing file and Failed(4) go back
+    to Queued(1); Processing(2) is mid-download and left alone; Queued(1)
+    already is; Unavailable(5) is permanent; legacy rows (no urlSource) have
+    nothing to download from. Returns {'music': n, 'video': n}."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    out = {'music': 0, 'video': 0}
+    for kind, tbl, pkcol, namecol in (('music', 'tblMusic', 'song_id', 'song'),
+                                      ('video', 'tblVideoMedia', 'video_ID', 'title')):
+        c.execute(f"SELECT {pkcol}, path || {namecol}, dnLoadStatus FROM {tbl} "
+                  f"WHERE urlSource IS NOT NULL AND urlSource <> '' AND dnLoadStatus IN (3, 4)")
+        for pk, full, status in c.fetchall():
+            if status == 3 and full and os.path.exists(full):
+                continue                     # downloaded and present — fine
+            c.execute(f"UPDATE {tbl} SET dnLoadStatus = 1 WHERE {pkcol} = ?", (pk,))
+            out[kind] += 1
+    conn.commit()
+    c.close()
+    conn.close()
+    if out['music'] or out['video']:
+        appsettingYT_QuePlayFlagUpdate(1)    # wake the downloader
+    return out
+
+
 def recover_stuck_processing():
     """Boot sweep: re-queue any metadata/playlist job left at 'Processing' (2) by
     a crash or power loss mid-job. The queue selectors only pick status 1, so

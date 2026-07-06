@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Restarting — ScenePlay</title>
+<!-- Fully self-contained on purpose: the server goes DOWN moments after this
+     page is delivered, so it can't rely on any stylesheet, script or image
+     being fetchable. Everything is inline. -->
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#1a1a2e; color:#e0e0e0; font-family: system-ui, -apple-system, sans-serif; }
+  .card { text-align:center; padding:40px 48px; background:#16213e; border:1px solid #c8aa6e;
+          border-radius:12px; max-width:420px; }
+  h1 { color:#c8aa6e; font-size:1.4rem; margin:0 0 8px; }
+  #status { min-height:2.4em; margin:14px 0 6px; }
+  #elapsed { color:#8a8fa3; font-size:.85rem; }
+  #note { color:#8a8fa3; font-size:.8rem; margin-top:14px; display:none; }
+  .spinner { width:44px; height:44px; margin:0 auto 18px; border-radius:50%;
+             border:4px solid #2a2f4a; border-top-color:#c8aa6e; animation: spin 1s linear infinite; }
+  .up .spinner { border-top-color:#28a745; animation-duration:.5s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="spinner"></div>
+    <h1>&#128260; Restarting the computer</h1>
+    <div id="status">Sending the restart command&hellip;</div>
+    <div id="elapsed"></div>
+    <div id="note"></div>
+  </div>
+
+<script>
+(function () {
+  var start = Date.now();
+  var wentDown = false;
+  var status  = document.getElementById('status');
+  var elapsed = document.getElementById('elapsed');
+  var note    = document.getElementById('note');
+
+  function secs() { return Math.round((Date.now() - start) / 1000); }
+
+  function tick() {
+    elapsed.textContent = secs() + 's elapsed';
+
+    // AbortSignal.timeout keeps a hung socket from stalling the poll loop.
+    var opts = { cache: 'no-store' };
+    if (window.AbortSignal && AbortSignal.timeout) opts.signal = AbortSignal.timeout(2500);
+
+    fetch('/api/server-info', opts).then(function (r) {
+      if (!r.ok) throw new Error('down');
+      if (wentDown) {
+        // down -> up transition: the reboot completed
+        document.getElementById('card').className = 'up';
+        status.textContent = 'Server is back online — loading ScenePlay…';
+        setTimeout(function () { window.location.href = '/'; }, 1200);
+        return;
+      }
+      // still up: the box hasn't gone down yet
+      status.textContent = 'Restart command sent — waiting for the server to go down…';
+      if (secs() > 60) {
+        note.style.display = 'block';
+        note.textContent = 'The server never went down — the restart may have failed ' +
+                           '(check that passwordless sudo is configured). It is still running: ';
+        note.innerHTML += '<a href="/" style="color:#c8aa6e;">back to ScenePlay</a>';
+      }
+      schedule();
+    }).catch(function () {
+      wentDown = true;
+      status.textContent = 'Server is down — waiting for it to boot back up…';
+      if (secs() > 240) {
+        note.style.display = 'block';
+        note.textContent = 'Taking longer than usual. This page keeps checking every ' +
+                           'few seconds — leave it open, or check the machine.';
+      }
+      schedule();
+    });
+  }
+
+  function schedule() { setTimeout(tick, 2000); }
+
+  // Give the server a moment to actually issue the reboot before first poll.
+  setTimeout(tick, 1500);
+})();
+</script>
+</body>
+</html>

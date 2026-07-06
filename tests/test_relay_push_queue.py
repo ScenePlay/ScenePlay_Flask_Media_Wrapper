@@ -8,7 +8,16 @@ tail) rather than a worker-blocking sleep.
 import threading
 import time
 
+import pytest
+
 import relay_broadcaster as rb
+
+
+@pytest.fixture(autouse=True)
+def _no_live_telemetry(monkeypatch):
+    """Dropped test pushes must not write relay_push_last_drop into the LIVE
+    app settings (it would raise a false DM health-banner alarm)."""
+    monkeypatch.setattr(rb, '_record_push_drop', lambda key, exc: None)
 
 
 class _FakeHTTPError(Exception):
