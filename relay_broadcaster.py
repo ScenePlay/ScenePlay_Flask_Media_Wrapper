@@ -40,12 +40,19 @@ def _post(path, payload, cfg, timeout=5):
 #
 # Coalescing: enqueueing with an existing key REPLACES that entry, so while the
 # relay is unreachable only the LATEST map state / character payload per key is
-# kept (dice rolls use unique keys and all queue). Failures retry with backoff
-# (1s → 30s cap) and are dropped with a warning after _MAX_ATTEMPTS.
+# kept (dice rolls use unique keys and all queue).
+#
+# Failure handling: a 4xx from the relay is a permanent rejection — drop it
+# immediately (retrying a 404/422 forever can't succeed). Network errors and
+# 5xx retry with per-ENTRY backoff: the failed entry is stamped with a
+# next-retry time and moved to the tail, so one doomed push can never block
+# the healthy ones behind it (the old worker slept in the loop, wedging every
+# queued token/HP/character push for minutes per doomed entry).
 import itertools
+import time as _time
 from collections import OrderedDict
 
-_queue      = OrderedDict()      # key -> [fn, attempts]
+_queue      = OrderedDict()      # key -> [fn, attempts, next_retry_monotonic]
 _queue_lock = threading.Lock()
 _queue_evt  = threading.Event()
 _worker     = None
@@ -57,7 +64,7 @@ def _enqueue(key, fn):
     """Queue `fn` (which must RAISE on failure) under a coalescing key."""
     global _worker
     with _queue_lock:
-        _queue[key] = [fn, 0]
+        _queue[key] = [fn, 0, 0.0]
         if _worker is None or not _worker.is_alive():
             _worker = threading.Thread(target=_worker_run, daemon=True,
                                        name='relay-push')
@@ -65,39 +72,59 @@ def _enqueue(key, fn):
     _queue_evt.set()
 
 
+def _is_permanent(exc):
+    """4xx = the relay understood and refused; retrying cannot help."""
+    resp = getattr(exc, 'response', None)
+    code = getattr(resp, 'status_code', None)
+    return code is not None and 400 <= code < 500
+
+
 def _worker_run():
-    import time
-    backoff = 1.0
     while True:
         _queue_evt.wait()
+        now = _time.monotonic()
         with _queue_lock:
             if not _queue:
                 _queue_evt.clear()
                 continue
-            key   = next(iter(_queue))
-            entry = _queue[key]
-        fn, attempts = entry
+            key = entry = None
+            soonest = None
+            for k, e in _queue.items():
+                if e[2] <= now:
+                    key, entry = k, e
+                    break
+                soonest = e[2] if soonest is None else min(soonest, e[2])
+        if entry is None:
+            # everything is backing off — sleep until the earliest retry,
+            # but wake early if a new push arrives
+            _queue_evt.clear()
+            _queue_evt.wait(timeout=max(0.05, (soonest or now) - now))
+            _queue_evt.set()
+            continue
+        fn, attempts = entry[0], entry[1]
         try:
             fn()
-            backoff = 1.0
             with _queue_lock:
                 if _queue.get(key) is entry:   # not replaced by a newer payload
                     del _queue[key]
         except Exception as e:
             attempts += 1
-            if attempts >= _MAX_ATTEMPTS:
-                log.warning('relay push %r dropped after %d attempts: %s',
-                            key, attempts, e)
-                backoff = 1.0
+            if _is_permanent(e) or attempts >= _MAX_ATTEMPTS:
+                log.warning('relay push %r dropped (attempt %d, %s): %s',
+                            key, attempts,
+                            'rejected' if _is_permanent(e) else 'gave up', e)
                 with _queue_lock:
                     if _queue.get(key) is entry:
                         del _queue[key]
             else:
+                backoff = min(2.0 ** attempts, 30.0)
                 entry[1] = attempts
+                entry[2] = _time.monotonic() + backoff
                 log.info('relay push %r failed (attempt %d, retry in %.0fs): %s',
                          key, attempts, backoff, e)
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                with _queue_lock:
+                    if _queue.get(key) is entry:
+                        _queue.move_to_end(key)   # let healthy pushes proceed
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

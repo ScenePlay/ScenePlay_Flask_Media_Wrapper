@@ -145,6 +145,14 @@ def generate_code():
         appsettingSet('relay_session_code', code)
         appsettingSet('relay_session_id',   session_id)
 
+        # New relay session = all relay token rows purged and seq counters
+        # restarted; drop the local relay-seq mirror so no stale value can
+        # collide with (and swallow) a fresh move.
+        from extensions import db
+        from models.tblTokenPositions import tblTokenPositions
+        tblTokenPositions.query.delete(synchronize_session=False)
+        db.session.commit()
+
         # Push all current party characters and D&D library into the fresh session immediately
         import relay_broadcaster
         relay_broadcaster.push_all_characters()

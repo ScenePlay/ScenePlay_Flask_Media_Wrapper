@@ -156,211 +156,217 @@ def _poll():
                    .filter_by(session_id=local_sid, is_active=1)
                    .first()) if local_sid else None
 
-    # --- token positions (relay tokens array) ---
-    # Relay token shape: { id, session_id, character_id, label, x_pct, y_pct,
-    #                      token_type, updated_at, seq }
-    # `seq` is the relay's per-token write counter; we track the last seq we
-    # processed in tblTokenPositions.relay_seq and only apply strictly newer
-    # writes — no cross-machine clock comparison involved.
-    #
-    # Baseline mode: right after map activation the DM's explicit placements
-    # must win, so that poll only RECORDS current relay seqs without applying
-    # them (fast-forward), then resumes normal application next poll.
-    baseline_only = appsettingGet('relay_token_baseline_pending', '0') == '1'
+    # Token and roll syncing must NEVER starve mutation processing below —
+    # a deterministic error here would otherwise kill HP/sheet mutations on
+    # every poll. Failures roll back and retry next poll.
+    try:
+        # --- token positions (relay tokens array) ---
+        # Relay token shape: { id, session_id, character_id, label, x_pct, y_pct,
+        #                      token_type, updated_at, seq }
+        # `seq` comes from the relay's SESSION-monotonic write counter; we track
+        # the last seq we processed in tblTokenPositions.relay_seq and apply only
+        # unseen writes — no cross-machine clock comparison involved.
+        #
+        # (The old 'baseline fast-forward' flag is gone: the relay clears its
+        # token rows when a new map lands, so there are no stale rows to fast-
+        # forward past — and the flag was eating moves made right after a map
+        # load. Stale-row protection is the map-identity guard below.)
 
-    # Map-identity guard: relay token rows are matched to local tokens BY
-    # CHARACTER LABEL, so while the relay is still showing the PREVIOUS map
-    # (the map push is debounced/queued and can lag activation), its rows
-    # describe old-map positions and must not move tokens on the new map.
-    # The relay's current map_json carries the pushed token_ids — only apply
-    # relay moves when they equal the local active map's token ids.
-    relay_map_ok = True
-    if active_bm is not None:
-        raw_map = (payload.get('session') or {}).get('map_json')
-        if raw_map:
+        # Map-identity guard: relay token rows are matched to local tokens BY
+        # CHARACTER LABEL, so while the relay is still showing the PREVIOUS map
+        # (the map push is debounced/queued and can lag activation), its rows
+        # describe old-map positions and must not move tokens on the new map.
+        # The relay's current map_json carries the pushed token_ids — only apply
+        # relay moves when they match the local active map's token ids.
+        relay_map_ok = True
+        if active_bm is not None:
+            raw_map = (payload.get('session') or {}).get('map_json')
+            if raw_map:
+                try:
+                    import json as _json
+                    relay_ids = {int(t['token_id'])
+                                 for t in (_json.loads(raw_map).get('tokens') or [])
+                                 if t.get('token_id') is not None}
+                    local_ids = {t.token_id for t in active_bm.tokens}
+                    relay_map_ok = _relay_map_matches(relay_ids, local_ids)
+                except (ValueError, TypeError, KeyError):
+                    pass
+
+        # While the relay lags (map push in flight), skip its token rows ENTIRELY —
+        # recording old-map seqs into the mirror would poison the reset the map
+        # activation just performed.
+        for tok in (payload.get('tokens', []) if relay_map_ok else []):
+            label      = tok.get('label', '')
+            x_pct      = tok.get('x_pct')
+            y_pct      = tok.get('y_pct')
+            token_type = tok.get('token_type', 'player')
+            if not label or local_sid is None or x_pct is None or y_pct is None:
+                continue
             try:
-                import json as _json
-                relay_ids = {int(t['token_id'])
-                             for t in (_json.loads(raw_map).get('tokens') or [])
-                             if t.get('token_id') is not None}
-                local_ids = {t.token_id for t in active_bm.tokens}
-                relay_map_ok = _relay_map_matches(relay_ids, local_ids)
-            except (ValueError, TypeError, KeyError):
-                pass
-    for tok in payload.get('tokens', []):
-        label      = tok.get('label', '')
-        x_pct      = tok.get('x_pct')
-        y_pct      = tok.get('y_pct')
-        token_type = tok.get('token_type', 'player')
-        if not label or local_sid is None or x_pct is None or y_pct is None:
-            continue
-        try:
-            tok_seq = int(tok['seq']) if tok.get('seq') is not None else None
-        except (TypeError, ValueError):
-            tok_seq = None
+                tok_seq = int(tok['seq']) if tok.get('seq') is not None else None
+            except (TypeError, ValueError):
+                tok_seq = None
 
-        # Update tblTokenPositions (relay mirror) and read the previously
-        # processed seq BEFORE overwriting it.
-        tp = tblTokenPositions.query.filter_by(session_id=local_sid, label=label).first()
-        prev_seq = tp.relay_seq if tp else 0
-        if tp:
-            tp.x_pct      = x_pct
-            tp.y_pct      = y_pct
-            tp.updated_at = now
-            if tok_seq is not None:
-                tp.relay_seq = tok_seq
-        else:
-            db.session.add(tblTokenPositions(
-                session_id  = local_sid,
-                label       = label,
-                x_pct       = x_pct,
-                y_pct       = y_pct,
-                token_type  = token_type,
-                updated_at  = now,
-                relay_seq   = tok_seq or 0,
-            ))
+            # Update tblTokenPositions (relay mirror) and read the previously
+            # processed seq BEFORE overwriting it.
+            tp = tblTokenPositions.query.filter_by(session_id=local_sid, label=label).first()
+            prev_seq = tp.relay_seq if tp else 0
+            if tp:
+                tp.x_pct      = x_pct
+                tp.y_pct      = y_pct
+                tp.updated_at = now
+                if tok_seq is not None:
+                    tp.relay_seq = tok_seq
+            else:
+                db.session.add(tblTokenPositions(
+                    session_id  = local_sid,
+                    label       = label,
+                    x_pct       = x_pct,
+                    y_pct       = y_pct,
+                    token_type  = token_type,
+                    updated_at  = now,
+                    relay_seq   = tok_seq or 0,
+                ))
 
-        if baseline_only:
-            continue   # seqs recorded above; do not move local tokens this poll
+            # Update tblBattleMapTokens so the local battlemap poll sees relay moves.
+            if active_bm and relay_map_ok and token_type == 'player':
+                char = tblCharacters.query.filter_by(name=label, active=1).first()
+                if char:
+                    bm_tok = tblBattleMapTokens.query.filter_by(
+                        map_id=active_bm.map_id, entity_type='player', entity_id=char.character_id
+                    ).first()
+                    if bm_tok:
+                        if not _should_apply_relay_pos(tok_seq, prev_seq,
+                                                       tok.get('updated_at', ''),
+                                                       bm_tok.updated_at or ''):
+                            continue
+                        bm_tok.col        = max(0, min(active_bm.grid_cols - 1,
+                                                       round(x_pct * (active_bm.grid_cols - 1))))
+                        bm_tok.row        = max(0, min(active_bm.grid_rows - 1,
+                                                       round(y_pct * (active_bm.grid_rows - 1))))
+                        bm_tok.updated_at = bm_tok_ts
 
-        # Update tblBattleMapTokens so the local battlemap poll sees relay moves.
-        if active_bm and relay_map_ok and token_type == 'player':
-            char = tblCharacters.query.filter_by(name=label, active=1).first()
-            if char:
-                bm_tok = tblBattleMapTokens.query.filter_by(
-                    map_id=active_bm.map_id, entity_type='player', entity_id=char.character_id
-                ).first()
-                if bm_tok:
-                    if not _should_apply_relay_pos(tok_seq, prev_seq,
-                                                   tok.get('updated_at', ''),
-                                                   bm_tok.updated_at or ''):
-                        continue
-                    bm_tok.col        = max(0, min(active_bm.grid_cols - 1,
-                                                   round(x_pct * (active_bm.grid_cols - 1))))
-                    bm_tok.row        = max(0, min(active_bm.grid_rows - 1,
-                                                   round(y_pct * (active_bm.grid_rows - 1))))
-                    bm_tok.updated_at = bm_tok_ts
+        # --- roll log (relay roll_log array) ---
+        # Relay roll shape: { id, session_id, player_name, roll_expr, result, breakdown, rolled_at }
+        # De-dupe on the relay's UNIQUE roll id so fast or identical rolls are never
+        # dropped (the old value/second-timestamp match collapsed same-second and
+        # same-result rolls into one). Fall back to the fuzzy match only for a relay
+        # that sends no id.
+        import re as _re
+        roll_cleared_at = appsettingGet('relay_roll_cleared_at', '')
+        for roll in payload.get('roll_log', []):
+            rolled_at = roll.get('rolled_at', '')
+            if not rolled_at or local_sid is None:
+                continue
+            if roll_cleared_at and rolled_at <= roll_cleared_at:
+                continue
 
-    if baseline_only:
-        appsettingSet('relay_token_baseline_pending', '0')
+            try:
+                rid = int(roll['id']) if roll.get('id') is not None else None
+            except (TypeError, ValueError, KeyError):
+                rid = None
 
-    # --- roll log (relay roll_log array) ---
-    # Relay roll shape: { id, session_id, player_name, roll_expr, result, breakdown, rolled_at }
-    # De-dupe on the relay's UNIQUE roll id so fast or identical rolls are never
-    # dropped (the old value/second-timestamp match collapsed same-second and
-    # same-result rolls into one). Fall back to the fuzzy match only for a relay
-    # that sends no id.
-    import re as _re
-    roll_cleared_at = appsettingGet('relay_roll_cleared_at', '')
-    for roll in payload.get('roll_log', []):
-        rolled_at = roll.get('rolled_at', '')
-        if not rolled_at or local_sid is None:
-            continue
-        if roll_cleared_at and rolled_at <= roll_cleared_at:
-            continue
+            player_name = roll.get('player_name', '')
+            relay_expr  = roll.get('roll_expr', '')
+            relay_total = roll.get('result', 0)
 
-        try:
-            rid = int(roll['id']) if roll.get('id') is not None else None
-        except (TypeError, ValueError, KeyError):
-            rid = None
+            # tblRollLog — full history. Dedup by relay id when present, else timestamp.
+            if rid is not None:
+                log_exists = tblRollLog.query.filter_by(session_id=local_sid, relay_roll_id=rid).first()
+            else:
+                log_exists = tblRollLog.query.filter_by(
+                    session_id=local_sid, player_name=player_name, rolled_at=rolled_at).first()
+            if not log_exists:
+                db.session.add(tblRollLog(
+                    session_id    = local_sid,
+                    player_name   = player_name,
+                    roll_expr     = relay_expr,
+                    result        = relay_total,
+                    breakdown     = roll.get('breakdown', ''),
+                    rolled_at     = rolled_at,
+                    relay_roll_id = rid,
+                ))
+                if tblRollLog.query.filter_by(session_id=local_sid).count() > 500:
+                    oldest = (tblRollLog.query
+                              .filter_by(session_id=local_sid)
+                              .order_by(tblRollLog.id)
+                              .first())
+                    if oldest:
+                        db.session.delete(oldest)
 
-        player_name = roll.get('player_name', '')
-        relay_expr  = roll.get('roll_expr', '')
-        relay_total = roll.get('result', 0)
+            # tblDiceRolls — the 50-roll display feed. Store the roll time in LOCAL
+            # wall-clock (relay sends UTC) so it interleaves correctly with local rolls.
+            ts_norm = _relay_ts_to_local(rolled_at)
 
-        # tblRollLog — full history. Dedup by relay id when present, else timestamp.
-        if rid is not None:
-            log_exists = tblRollLog.query.filter_by(session_id=local_sid, relay_roll_id=rid).first()
-        else:
-            log_exists = tblRollLog.query.filter_by(
-                session_id=local_sid, player_name=player_name, rolled_at=rolled_at).first()
-        if not log_exists:
-            db.session.add(tblRollLog(
-                session_id    = local_sid,
-                player_name   = player_name,
-                roll_expr     = relay_expr,
-                result        = relay_total,
-                breakdown     = roll.get('breakdown', ''),
-                rolled_at     = rolled_at,
+            # Parse expr_base + label. Portal format: "{count}d{sides}{mod} [{mode}] {label}"
+            _m = _re.match(
+                r'^(\d*d\d+(?:[+-]\d+)?)'
+                r'(?:\s*\[(?:advantage|disadvantage)\])?'
+                r'(?:\s+(.+))?$',
+                relay_expr, _re.IGNORECASE
+            )
+            if _m:
+                expr_base  = _m.group(1) or ''
+                roll_label = (_m.group(2) or '').strip()
+            else:
+                expr_base  = relay_expr.split()[0] if relay_expr else ''
+                roll_label = ''
+
+            if rid is not None:
+                # Already recorded (as a relay roll, or as a claimed local echo)?
+                if tblDiceRolls.query.filter_by(relay_roll_id=rid).first():
+                    continue
+                # Echo of a LOCAL roll we already show? Claim the most recent unclaimed
+                # local row with the same signature instead of adding a duplicate. This
+                # suppresses local-broadcast echoes WITHOUT dropping genuinely distinct
+                # relay rolls (which each carry their own unique id).
+                echo = (tblDiceRolls.query
+                        .filter_by(char_name=player_name, total=relay_total, relay_roll_id=None)
+                        .filter(tblDiceRolls.expression == expr_base)
+                        .order_by(tblDiceRolls.roll_id.desc())
+                        .first())
+                if echo:
+                    echo.relay_roll_id = rid
+                    continue
+            else:
+                # Legacy relay with no id: original fuzzy dedup (timestamp, then value).
+                existing_dr = tblDiceRolls.query.filter_by(char_name=player_name, rolled_at=ts_norm).first()
+                if not existing_dr:
+                    existing_dr = (tblDiceRolls.query
+                        .filter_by(char_name=player_name, total=relay_total)
+                        .filter(tblDiceRolls.expression == expr_base)
+                        .first())
+                if existing_dr:
+                    continue
+
+            # New relay roll → add it to the feed.
+            breakdown_str = roll.get('breakdown', '')
+            try:
+                dice_list = [int(x.strip()) for x in breakdown_str.split(',') if x.strip()]
+            except (ValueError, AttributeError):
+                dice_list = []
+            db.session.add(tblDiceRolls(
+                char_name     = player_name,
+                expression    = expr_base or relay_expr,
+                label         = roll_label,
+                dice_json     = _json.dumps(dice_list),
+                modifier      = 0,
+                total         = relay_total,
+                adv_mode      = 'normal',
+                rolled_at     = ts_norm,
                 relay_roll_id = rid,
             ))
-            if tblRollLog.query.filter_by(session_id=local_sid).count() > 500:
-                oldest = (tblRollLog.query
-                          .filter_by(session_id=local_sid)
-                          .order_by(tblRollLog.id)
-                          .first())
-                if oldest:
-                    db.session.delete(oldest)
+            db.session.flush()
+            old = db.session.query(tblDiceRolls.roll_id).order_by(
+                tblDiceRolls.roll_id.desc()).offset(50).all()
+            if old:
+                tblDiceRolls.query.filter(
+                    tblDiceRolls.roll_id.in_([r[0] for r in old])
+                ).delete(synchronize_session=False)
 
-        # tblDiceRolls — the 50-roll display feed. Store the roll time in LOCAL
-        # wall-clock (relay sends UTC) so it interleaves correctly with local rolls.
-        ts_norm = _relay_ts_to_local(rolled_at)
-
-        # Parse expr_base + label. Portal format: "{count}d{sides}{mod} [{mode}] {label}"
-        _m = _re.match(
-            r'^(\d*d\d+(?:[+-]\d+)?)'
-            r'(?:\s*\[(?:advantage|disadvantage)\])?'
-            r'(?:\s+(.+))?$',
-            relay_expr, _re.IGNORECASE
-        )
-        if _m:
-            expr_base  = _m.group(1) or ''
-            roll_label = (_m.group(2) or '').strip()
-        else:
-            expr_base  = relay_expr.split()[0] if relay_expr else ''
-            roll_label = ''
-
-        if rid is not None:
-            # Already recorded (as a relay roll, or as a claimed local echo)?
-            if tblDiceRolls.query.filter_by(relay_roll_id=rid).first():
-                continue
-            # Echo of a LOCAL roll we already show? Claim the most recent unclaimed
-            # local row with the same signature instead of adding a duplicate. This
-            # suppresses local-broadcast echoes WITHOUT dropping genuinely distinct
-            # relay rolls (which each carry their own unique id).
-            echo = (tblDiceRolls.query
-                    .filter_by(char_name=player_name, total=relay_total, relay_roll_id=None)
-                    .filter(tblDiceRolls.expression == expr_base)
-                    .order_by(tblDiceRolls.roll_id.desc())
-                    .first())
-            if echo:
-                echo.relay_roll_id = rid
-                continue
-        else:
-            # Legacy relay with no id: original fuzzy dedup (timestamp, then value).
-            existing_dr = tblDiceRolls.query.filter_by(char_name=player_name, rolled_at=ts_norm).first()
-            if not existing_dr:
-                existing_dr = (tblDiceRolls.query
-                    .filter_by(char_name=player_name, total=relay_total)
-                    .filter(tblDiceRolls.expression == expr_base)
-                    .first())
-            if existing_dr:
-                continue
-
-        # New relay roll → add it to the feed.
-        breakdown_str = roll.get('breakdown', '')
-        try:
-            dice_list = [int(x.strip()) for x in breakdown_str.split(',') if x.strip()]
-        except (ValueError, AttributeError):
-            dice_list = []
-        db.session.add(tblDiceRolls(
-            char_name     = player_name,
-            expression    = expr_base or relay_expr,
-            label         = roll_label,
-            dice_json     = _json.dumps(dice_list),
-            modifier      = 0,
-            total         = relay_total,
-            adv_mode      = 'normal',
-            rolled_at     = ts_norm,
-            relay_roll_id = rid,
-        ))
-        db.session.flush()
-        old = db.session.query(tblDiceRolls.roll_id).order_by(
-            tblDiceRolls.roll_id.desc()).offset(50).all()
-        if old:
-            tblDiceRolls.query.filter(
-                tblDiceRolls.roll_id.in_([r[0] for r in old])
-            ).delete(synchronize_session=False)
+    except Exception as exc:
+        log.warning('Relay token/roll sync error (mutations still processed): %s', exc)
+        db.session.rollback()
 
     # --- character HP ---
     # Intentionally NOT copied from the relay. Local Flask is the single authority
@@ -376,7 +382,15 @@ def _poll():
     pending_mutations = payload.get('pending_mutations', [])
     applied_ids    = []
     changed_chars  = set()  # character_id values that need push_character_and_broadcast
-    ledger         = _applied_ledger_load()
+    # The ledger is only meaningful within ONE relay session: a new session (or
+    # a relay redeploy with a fresh database) restarts mutation ids at 1, and
+    # stale ledger entries would silently swallow-and-ack those fresh mutations.
+    if appsettingGet('relay_applied_ledger_session', '') != session_id:
+        _applied_ledger_save(set(), [])          # reset to empty
+        appsettingSet('relay_applied_ledger_session', session_id)
+        ledger = set()
+    else:
+        ledger = _applied_ledger_load()
     newly_applied  = []
 
     for mut in pending_mutations:

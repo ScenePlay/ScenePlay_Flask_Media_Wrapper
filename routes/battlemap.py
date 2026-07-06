@@ -331,11 +331,15 @@ def map_activate(map_id):
         t.updated_at = activation_ts
     db.session.commit()
 
-    # Seq-based reconciliation: tell the receiver to fast-forward past all
-    # current relay token seqs on its next poll (record without applying), so
-    # stale relay positions can't overwrite this map's explicit placements.
-    from sql import appsettingSet
-    appsettingSet('relay_token_baseline_pending', '1')
+    # Reset the relay-seq mirror: the relay clears its token rows when the new
+    # map lands, so every recorded seq is about to describe a dead row. A stale
+    # value equal to a fresh post-clear seq made the receiver drop a player's
+    # first move on the new map as an echo. (Stale-position protection during
+    # the handover is the receiver's map-identity guard, which holds off until
+    # the relay actually shows this map.)
+    from models.tblTokenPositions import tblTokenPositions
+    tblTokenPositions.query.filter_by(session_id=bm.session_id).delete(synchronize_session=False)
+    db.session.commit()
 
     # Called via fetch from the map view ("Set Active" button): reply JSON so the
     # DM stays on the map. The maps-manage page posts a normal form → redirect.
@@ -751,8 +755,10 @@ def token_move(map_id):
     x_pct = t.col / max(1, bm.grid_cols - 1)
     y_pct = t.row / max(1, bm.grid_rows - 1)
     # Only mirror moves on the active session's live map; positioning tokens on
-    # any other map must not reach the relay.
-    if _is_live_map(bm):
+    # any other map must not reach the relay. Orphaned tokens (entity deleted)
+    # resolve to label='' which the relay's create path rejects with a 422 —
+    # nothing useful to mirror, so skip the push entirely.
+    if _is_live_map(bm) and label:
         relay_broadcaster.broadcast_token_move(
             t.token_id, x_pct, y_pct,
             label=label, token_type=t.entity_type, character_id=character_id,
