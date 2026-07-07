@@ -124,9 +124,21 @@ def api_health():
             age = (datetime.now(timezone.utc).replace(tzinfo=None)
                    - datetime.strptime(ts_s, '%Y-%m-%d %H:%M:%S')).total_seconds()
             if age < 600:   # only recent drops — old noise self-clears
-                problems.append(f'A push to the relay was dropped {int(age // 60)}m ago '
-                                f'({key}: {err}). Remote players may be out of date — '
-                                f'use Sync Characters to re-push.')
+                if '/session/' in err and cfg['session_id'] not in err:
+                    # drop targeted a session that is no longer ours — stale
+                    pass
+                elif '404' in err:
+                    # the relay doesn't know our session (redeployed, or a New
+                    # Session was made from another ScenePlay box) — re-pushing
+                    # can't help; a fresh session can.
+                    problems.append('The relay no longer knows this session '
+                                    '(it may have restarted, or New Session was used '
+                                    'on another server). Create a New Session and have '
+                                    'players log in again.')
+                else:
+                    problems.append(f'A push to the relay was dropped {int(age // 60)}m ago '
+                                    f'({key}: {err}). Remote players may be out of date — '
+                                    f'use Sync Characters to re-push.')
         except ValueError:
             pass
 
@@ -203,6 +215,10 @@ def generate_code():
         from models.tblTokenPositions import tblTokenPositions
         tblTokenPositions.query.delete(synchronize_session=False)
         db.session.commit()
+
+        # Push drops recorded against the PREVIOUS session are moot now —
+        # clear them so the health banner doesn't nag about a dead session.
+        appsettingSet('relay_push_last_drop', '')
 
         # Push all current party characters and D&D library into the fresh session immediately
         import relay_broadcaster

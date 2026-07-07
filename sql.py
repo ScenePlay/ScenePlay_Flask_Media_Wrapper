@@ -1996,7 +1996,7 @@ def play_mp3(fi):
       # opens a player window for audio even with --no-video.
       subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
                         '--force-window=no'],
-                       creationflags=subprocess.CREATE_NO_WINDOW).wait()
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).wait()
    else:
       subprocess.Popen(['mpg123', '-q', fi]).wait()
 

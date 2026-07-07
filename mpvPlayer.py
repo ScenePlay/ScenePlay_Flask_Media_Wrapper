@@ -28,7 +28,7 @@ def play_mpv_local(fi, scrn, vol, a, loop):
                             '--fullscreen=yes', '--speed=' + speed,
                             '--loop-file=' + loops, '--volume=' + volume,
                             '--screen=' + screen], shell=False,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
       p = subprocess.Popen(['./mpv.sh',speed,loops,volume,screen,fi],shell=False)
    appsettingVideoPlayFlagUpdatePID(p.pid)

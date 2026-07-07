@@ -46,7 +46,7 @@ def YT_Exec(fi):
    else:
       # Suppress the console window each yt-dlp spawn would otherwise pop;
       # ffmpeg grandchildren inherit the hidden console too.
-      kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+      kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
    # Keep the last download's yt-dlp output on disk — a status-4 row with no
    # diagnostics is undebuggable (the workers have no visible console).
    log_path = os.path.join(start_dir, 'instance', 'ytdlp_last.log')

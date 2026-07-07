@@ -20,7 +20,7 @@ def play_mp3_local(fi,vol, a):
                             '--force-window=no',
                             '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
                             '--volume=' + str(vol)], shell=False,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
       p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi])
    appsettingAudioPlayFlagUpdatePID(p.pid)
