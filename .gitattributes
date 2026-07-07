@@ -1,0 +1,11 @@
+# This working tree is SHARED between Linux and Windows (dual-boot, one drive).
+# Linux executes these files directly from this checkout, so a CRLF rewrite by
+# the Windows side (core.autocrlf=true) would break every #!/bin/bash shebang,
+# systemd unit, and cron-invoked script. Pin them to LF regardless of local
+# autocrlf settings; .bat is the one family cmd.exe wants CRLF.
+*.sh      text eol=lf
+*.py      text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf
+Makefile  text eol=lf
+*.bat     text eol=crlf

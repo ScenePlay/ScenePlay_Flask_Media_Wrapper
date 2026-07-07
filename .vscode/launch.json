@@ -13,6 +13,11 @@
             "args": ["-flask"],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
+            // debugpy's subprocess auto-attach rewrites the workers' `python -m
+            // yt_dlp` spawns through pydevd, whose -m resolution is broken on
+            // Python 3.14 (pkgutil.get_loader removed) — every download fails
+            // with "No module named yt_dlp". We never debug those children.
+            "subProcess": false,
             "windows": {
                 "python": "${workspaceFolder}/.venv-win/Scripts/python.exe"
             },
@@ -27,6 +32,7 @@
             "program": "${workspaceFolder}/ws.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
+            "subProcess": false,   // same yt-dlp/pydevd issue as above
             "windows": {
                 "python": "${workspaceFolder}/.venv-win/Scripts/python.exe"
             },

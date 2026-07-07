@@ -36,6 +36,7 @@ if os.name == 'nt':
 
     def _audio_worker():
         import comtypes
+        import gc
         from ctypes import POINTER, cast
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
         comtypes.CoInitialize()
@@ -55,6 +56,17 @@ if os.name == 'nt':
                 del endpoint, interface, devices   # release on the COM thread, not via GC elsewhere
             except Exception:
                 result = None
+            # The del above is NOT enough: comtypes leaves a POINTER(IUnknown)
+            # in a reference CYCLE (verified with gc.DEBUG_SAVEALL), so only the
+            # cyclic collector can free it — later, on whichever thread happens
+            # to trip GC. Its Release() then reads freed memory and hard-kills
+            # the process (_ctypes.pyd 0xC0000005, the recurring Event-ID-1000
+            # crash). Collecting HERE keeps that finalizer on the COM thread,
+            # where ctypes catches the bad Release as a plain ignored OSError.
+            try:
+                gc.collect()
+            except Exception:
+                pass
             if reply is not None:
                 reply.put(result)
 
