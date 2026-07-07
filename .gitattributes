@@ -8,4 +8,6 @@
 *.service text eol=lf
 *.desktop text eol=lf
 Makefile  text eol=lf
-*.bat     text eol=crlf
+# -text (not "text eol=crlf"): the .bat blobs are committed WITH CRLF already;
+# a text attribute would demand LF-normalized blobs and flag them all modified.
+*.bat     -text
