@@ -354,6 +354,84 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
     _debounced_map_enqueue(_go)   # queue coalesces on 'map-state'; latest wins
 
 
+def broadcast_led(led_pattern_json):
+    """POST /api/v1/session/{id}/led — mirror the LAN LED push to remote
+    players' home Pis (via the relay portal). Takes the same JSON string
+    remoteSend() takes: {"patterns": [...]}. Always the LAN variant (no
+    outPinID/brightness) — each remote Pi applies its own strip config."""
+    cfg = _active()
+    if not cfg:
+        return
+    import json as _json
+    try:
+        patterns = _json.loads(led_pattern_json).get('patterns')
+    except (ValueError, TypeError, AttributeError):
+        log.warning('broadcast_led: bad LED pattern JSON')
+        return
+    if not patterns:
+        return
+    payload = {'patterns': patterns}
+
+    def _go():
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/led', payload, c)
+
+    _enqueue('led-state', _go)   # coalesce: only the latest lighting state matters
+
+
+def broadcast_wled(wled_rows):
+    """POST /api/v1/session/{id}/wled — mirror the scene's WLED lighting to
+    remote players' home WLED controllers (via the relay portal).
+
+    Takes the tblwledPattern rows for the scene (or None/empty → lights off).
+    Effect/palette IDs are resolved to NAMES here — indices vary by WLED
+    firmware version, so each player's browser re-resolves names against its
+    own device. server_ID targets a DM-LAN device and is dropped."""
+    cfg = _active()
+    if not cfg:
+        return
+    import json as _json
+
+    patterns = []
+    if wled_rows:
+        from models.wledPattern import tbleffect as ef
+        from models.wledPattern import tblpallette as pt
+
+        def _color(raw):
+            try:
+                return _json.loads(raw)
+            except (ValueError, TypeError):
+                return [0, 0, 0]
+
+        for row in wled_rows:
+            effect = ef.query.filter(ef.ef_ID == row.effect).first()
+            if effect is None:
+                continue   # can't name the effect — the browser couldn't resolve it
+            pallette = pt.query.filter(pt.pa_ID == row.pallette).first()
+            # WLED effect names carry metadata after '@' (e.g. "Fireworks@!,!")
+            name = effect.effectName.split('@')[0] if '@' in effect.effectName \
+                else effect.effectName
+            patterns.append({
+                'effect':     name,
+                'palette':    pallette.palletteName if pallette else None,
+                'colors':     [_color(row.color1), _color(row.color2), _color(row.color3)],
+                'speed':      row.speed,
+                'brightness': row.brightness,
+            })
+
+    payload = {'off': True} if not patterns else {'patterns': patterns}
+
+    def _go():
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/wled', payload, c)
+
+    _enqueue('wled-state', _go)   # coalesce: only the latest lighting state matters
+
+
 def broadcast_token_move(token_id, x_pct, y_pct,
                          label='', token_type='player', character_id=None):
     """POST /api/v1/token/move  body: { token_id, x_pct, y_pct, session_id?, label?, ... }"""

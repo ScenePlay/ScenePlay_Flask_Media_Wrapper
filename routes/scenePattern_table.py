@@ -6,6 +6,7 @@ from extensions import *
 
 from sql import *
 from remotes import *
+import relay_broadcaster
 from routes.main import is_raspberry_pi
 from ledPlayer import *
 
@@ -149,6 +150,7 @@ def WLEDTest():
         ledPattern = json.dumps(str(ledPattern))
         ledPattern = json.loads(ledPattern)
         remoteSend(ledPattern)
+        relay_broadcaster.broadcast_led(ledPattern)
         if is_raspberry_pi() == True:
             ledPattern = prepJsonRemote(ledMdl, scnPat, True)
             ledPattern = ledPattern.replace("\"",'"')

@@ -9,6 +9,7 @@ from ledPlayer import *
 from sys import platform
 import platform
 from remotes import *
+import relay_broadcaster
 from pathlib import Path
 from wLed.wledCommand import *
 from routes.wledPattern_table import getWledPatternBySceneID
@@ -225,13 +226,17 @@ def activatescene():
             setWledEffect(row.effect,row.pallette,row.color1, row.color2, row.color3, row.speed, row.brightness, row.server_ID)
     if len(data) == 0:
         wled_Off()
-        
+    # Mirror the scene's WLED lighting (or lights-off) to remote players'
+    # home WLED controllers via the relay
+    relay_broadcaster.broadcast_wled(data)
+
     if ledMdl is not None and len(ledMdl) > 0:
             ledPattern = prepJsonRemote(ledMdl, scnPat)
             ledPattern = ledPattern.replace("\"",'"')
             ledPattern = json.dumps(str(ledPattern))
             ledPattern = json.loads(ledPattern)
             remoteSend(ledPattern)
+            relay_broadcaster.broadcast_led(ledPattern)
             if is_raspberry_pi() == True:
                 ledPattern = prepJsonRemote(ledMdl, scnPat, True)
                 ledPattern = ledPattern.replace("\"",'"')
@@ -244,6 +249,7 @@ def activatescene():
         ledPattern = json.dumps(str(ledPattern))
         ledPattern = json.loads(ledPattern)
         remoteSend(ledPattern)
+        relay_broadcaster.broadcast_led(ledPattern)
         if is_raspberry_pi() == True:
             insert_LEDJSON(ledPattern)
             threaderLED()
@@ -267,8 +273,22 @@ def activatescene():
     queue_next()
     return redirect(url_for('main.home'))
 
-@main.route('/receive_led_patterns', methods=['POST'])
+# Preflight headers for browser-origin LED pushes (remote players' portal
+# pages POST here across their LAN). Access-Control-Allow-Origin and
+# Allow-Headers are already ADDED to every response by the blueprint-wide
+# after_request above — repeating them here would duplicate the header and
+# make browsers reject the response. Allow-Private-Network answers Chrome's
+# private-network-access preflight for HTTPS pages calling a LAN address.
+_LED_CORS = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Private-Network': 'true',
+    'Access-Control-Max-Age': '86400',
+}
+
+@main.route('/receive_led_patterns', methods=['POST', 'OPTIONS'])
 def receive_led_patterns():
+    if request.method == 'OPTIONS':   # CORS/PNA preflight from a portal page
+        return ('', 204, _LED_CORS)
     try:
         json_data = json.dumps(request.get_json())
         create_table()

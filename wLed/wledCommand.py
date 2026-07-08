@@ -11,17 +11,25 @@ from extensions import *
 log = logging.getLogger(__name__)
 
 
+def _wled_role_id():
+    role = tblServerRole.query.filter(tblServerRole.name == "WLED").first()
+    return role.ID if role else None
+
+
 def wled_devices():
-    """Yield (ServerIP row, Wled client) for every device with the WLED role.
+    """Yield (ServerIP row, Wled client) for every ENABLED device with the
+    WLED role — a server the operator deactivated must stop receiving
+    commands without being deleted.
 
     Single home for the role->devices lookup that used to be copy-pasted — with
     a shadowed `for each` loop and a stray `sr[0]` — into every command below.
     Constructing a Wled() no longer touches the network, so an offline board
     costs nothing here; it only matters when a command is actually sent."""
-    role = tblServerRole.query.filter(tblServerRole.name == "WLED").first()
-    if role is None:
+    role_id = _wled_role_id()
+    if role_id is None:
         return
-    for server in tblServerIP.query.filter(tblServerIP.serverroleid == role.ID).all():
+    for server in tblServerIP.query.filter(tblServerIP.serverroleid == role_id,
+                                           tblServerIP.active == 1).all():
         yield server, Wled(server.ipAddress)
 
 
@@ -75,6 +83,11 @@ def setWledEffect(_effect,_pallette,_color, _color2, _color3, _speed, _brightnes
     # `.all()` + inner loop over what is always one row.
     server = tblServerIP.query.filter(tblServerIP.ServerIP_ID == _serverIP_ID).first()
     if server is None:
+        return
+    # Gate on the CURRENT server row: scene pattern rows keep their server_ID
+    # after the operator disables the server or moves it off the WLED role,
+    # and must stop firing at it when they do.
+    if not server.active or server.serverroleid != _wled_role_id():
         return
     effect = ef.query.filter(ef.ef_ID == _effect).first()
     pallette = pt.query.filter(pt.pa_ID == _pallette).first()

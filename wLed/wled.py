@@ -20,7 +20,14 @@ class Wled():
     host = None
 
     def __init__(self, host):
-        self.host = host
+        # Server rows hold anything an operator typed — a bare IP, a hostname,
+        # or a full URL like "http://c9786983.eero.online/". Every request
+        # below is built as http://{host}/..., so strip any scheme and
+        # trailing slash or the URL comes out as http://http://...//json.
+        host = str(host or '').strip()
+        if '://' in host:
+            host = host.split('://', 1)[1]
+        self.host = host.rstrip('/')
 
         # Effects are fetched lazily (get_effects / update), NOT here: making a
         # network call in the constructor meant an offline board hung the whole
