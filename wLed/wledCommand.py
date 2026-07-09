@@ -79,8 +79,7 @@ def wledRandom():
 
 def setWledEffect(_effect,_pallette,_color, _color2, _color3, _speed, _brightness, _serverIP_ID):
     # Applies one pattern to the single server identified by _serverIP_ID (a PK).
-    # The old code wrapped this in a pointless `for row in sr` role loop plus a
-    # `.all()` + inner loop over what is always one row.
+    # Scenes assign a pattern row PER DEVICE — each row targets its own server.
     server = tblServerIP.query.filter(tblServerIP.ServerIP_ID == _serverIP_ID).first()
     if server is None:
         return
@@ -90,6 +89,8 @@ def setWledEffect(_effect,_pallette,_color, _color2, _color3, _speed, _brightnes
     if not server.active or server.serverroleid != _wled_role_id():
         return
     effect = ef.query.filter(ef.ef_ID == _effect).first()
+    if effect is None:
+        return
     pallette = pt.query.filter(pt.pa_ID == _pallette).first()
     try:
         led_strip = Wled(server.ipAddress)
