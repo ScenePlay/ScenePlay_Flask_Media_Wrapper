@@ -5,6 +5,16 @@ import os
 import subprocess
 import time
 
+# Optional live streaming to the relay portal — a broken/missing streaming
+# module must never take down local playback, so all hooks no-op on failure.
+try:
+    import relay_audio_stream as _relay_audio
+except Exception:
+    class _RelayAudioNoop:
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+    _relay_audio = _RelayAudioNoop()
+
 def play_mp3_local(fi,vol, a):
    # mpv (audio-only) replaces mpg123: same one-file-per-process lifecycle,
    # but with an IPC socket for pause/seek and a direct 0-100 volume instead
@@ -22,7 +32,11 @@ def play_mp3_local(fi,vol, a):
                             '--volume=' + str(vol)], shell=False,
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
-      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi])
+      # When the relay stream's capture sink is up, mpv plays into it (the
+      # loopback module mirrors it to the real speakers, so the GM hears the
+      # same thing). Empty sink -> mpvAudio.sh omits --audio-device.
+      sink = _relay_audio.sink_name() or ''
+      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink])
    appsettingAudioPlayFlagUpdatePID(p.pid)
    time.sleep(1)
    while p.poll() is None:
@@ -51,6 +65,7 @@ def threader(n, a):
             if len(fi) == 0:
                appsettingAudioPlayFlagUpdate(0)
                appsettingFlagUpdate('currentsong', 0)   # queue drained — nothing playing
+               _relay_audio.on_playback_stopped()
                n.value = 0
                if a[2] != 0:
                   a[3] = a[2]
@@ -72,7 +87,9 @@ def threader(n, a):
                      # Persist what's ACTUALLY starting (a[2] is process-local and
                      # reshuffles every poll) so the dashboard can show it.
                      appsettingFlagUpdate('currentsong', fi[0])
+                     _relay_audio.on_track_start(fi[0])
                      play_mp3_local(fi[1],fi[7], a)
+                     _relay_audio.on_track_end()
                      update_data_entry(fi)
                   songRun = True
             #time.sleep(2)

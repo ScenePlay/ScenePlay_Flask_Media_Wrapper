@@ -381,6 +381,43 @@ def broadcast_led(led_pattern_json):
     _enqueue('led-state', _go)   # coalesce: only the latest lighting state matters
 
 
+def broadcast_now_playing(song_id, stream_active):
+    """POST /api/v1/session/{id}/now-playing — current music track (name +
+    thumbnail) and whether a live audio stream is up, for the portal's music
+    widget. song_id None/0 + stream_active False means playback stopped."""
+    cfg = _active()
+    if not cfg:
+        return
+    payload = {'song_id': None, 'name': None, 'thumbnail': None,
+               'stream_active': bool(stream_active)}
+    if song_id:
+        try:
+            import sqlite3
+            from sql import database as _dbpath
+            conn = sqlite3.connect(_dbpath)
+            c = conn.cursor()
+            # Same name/thumbnail resolution as sql.get_now_playing's music half
+            c.execute("SELECT COALESCE(NULLIF(m.displayName,''), m.song), md.thumbnail "
+                      "FROM tblMusic m LEFT JOIN tblMediaMetadata md "
+                      "ON md.media_type='music' AND md.media_id=m.song_ID "
+                      "WHERE m.song_ID = ?", (song_id,))
+            row = c.fetchone()
+            c.close()
+            conn.close()
+            if row:
+                payload.update(song_id=int(song_id), name=row[0], thumbnail=row[1])
+        except Exception:
+            log.warning('broadcast_now_playing: metadata lookup failed')
+
+    def _go():
+        c = _exec_cfg()
+        if not c:
+            return
+        _post(f'/api/v1/session/{c["session_id"]}/now-playing', payload, c)
+
+    _enqueue('now-playing', _go)   # coalesce: only the latest track matters
+
+
 def broadcast_wled(wled_rows):
     """POST /api/v1/session/{id}/wled — mirror the scene's WLED lighting to
     remote players' home WLED controllers (via the relay portal).

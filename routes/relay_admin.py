@@ -23,6 +23,7 @@ def _relay_cfg():
         'code':             appsettingGet('relay_session_code',    ''),
         'last_sync':        appsettingGet('relay_last_sync',       '—'),
         'roll_cleared_at':  appsettingGet('relay_roll_cleared_at', ''),
+        'audio_enabled':    appsettingGet('relay_audio_enabled',   '1'),
     }
 
 
@@ -177,6 +178,10 @@ def save_config():
         appsettingSet('relay_url',    relay_url)
     if relay_secret:
         appsettingSet('relay_secret', relay_secret)
+    # Checkbox: absent from the form data when unchecked. Applies at the
+    # next track start / push rotation (relay_audio_stream re-reads config).
+    appsettingSet('relay_audio_enabled',
+                  '1' if request.form.get('relay_audio_enabled') else '0')
     flash('Relay configuration saved.')
     return redirect(url_for('relay_admin_bp.status'))
 
