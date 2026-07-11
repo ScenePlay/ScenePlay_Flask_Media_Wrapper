@@ -25,7 +25,8 @@ from ctypes import POINTER, byref, sizeof, wintypes
 import comtypes
 from comtypes import COMMETHOD, GUID, HRESULT, IUnknown, COMObject
 
-from pycaw.api.audioclient import IAudioClient, WAVEFORMATEX
+from pycaw.api.audioclient import IAudioClient
+from pycaw.api.audioclient import WAVEFORMATEX as _PycawWfx
 
 SAMPLE_RATE = 48_000
 CHANNELS = 2
@@ -44,6 +45,21 @@ _VT_BLOB = 65
 _WAIT_OBJECT_0 = 0
 
 _kernel32 = ctypes.windll.kernel32
+
+
+class WAVEFORMATEX(ctypes.Structure):
+    """Correct mmreg.h layout. pycaw's WAVEFORMATEX declares nSamplesPerSec
+    and nAvgBytesPerSec as 16-bit WORDs, shifting every later field — an
+    Initialize call through it fails with E_INVALIDARG. pycaw only ever uses
+    the type as an opaque pointer target, so the bug is invisible there."""
+    _pack_ = 1
+    _fields_ = [("wFormatTag", wintypes.WORD),
+                ("nChannels", wintypes.WORD),
+                ("nSamplesPerSec", wintypes.DWORD),
+                ("nAvgBytesPerSec", wintypes.DWORD),
+                ("nBlockAlign", wintypes.WORD),
+                ("wBitsPerSample", wintypes.WORD),
+                ("cbSize", wintypes.WORD)]
 
 
 class _ProcessLoopbackParams(ctypes.Structure):
@@ -200,7 +216,8 @@ class ProcessLoopbackCapture:
         self._client.Initialize(
             _AUDCLNT_SHAREMODE_SHARED,
             _AUDCLNT_STREAMFLAGS_LOOPBACK | _AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            2_000_000, 0, ctypes.pointer(wfx), None)
+            2_000_000, 0,
+            ctypes.cast(ctypes.pointer(wfx), POINTER(_PycawWfx)), None)
         self._event = _kernel32.CreateEventW(None, False, False, None)
         self._client.SetEventHandle(self._event)
         service = self._client.GetService(byref(IAudioCaptureClient._iid_))
