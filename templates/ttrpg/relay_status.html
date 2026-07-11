@@ -96,7 +96,8 @@
             </thead>
             <tbody>
               {% for p in logged_in %}
-              <tr data-player="{{ p.player_name }}" {% if not p.online %}style="opacity:.55;"{% endif %}>
+              <tr data-player="{{ p.player_name }}" data-username="{{ p.username }}"
+                  {% if not p.online %}style="opacity:.55;"{% endif %}>
                 <td class="presence-cell">
                   {% if p.online %}
                     <span class="badge bg-success" style="font-size:.65rem;">&#9679; Online</span>
@@ -231,7 +232,9 @@
       if (!d.enabled) return;
       let online = 0;
       rows.forEach(tr => {
-        const on = !!d.online[tr.dataset.player];
+        // Presence may be keyed by character name or username depending on
+        // the relay version — accept either.
+        const on = !!(d.online[tr.dataset.player] || d.online[tr.dataset.username]);
         if (on) online++;
         tr.style.opacity = on ? '' : '.55';
         const cell = tr.querySelector('.presence-cell');

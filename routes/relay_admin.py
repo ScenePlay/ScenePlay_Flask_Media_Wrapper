@@ -96,7 +96,11 @@ def status():
         except Exception as e:
             log.debug('status presence fetch error: %s', e)
         for p in logged_in:
+            # Presence keys vary by relay version: character name on newer
+            # code, username on the currently deployed one — accept either.
             age = presence.get(p['player_name'])
+            if age is None:
+                age = presence.get(p['username'])
             p['online'] = age is not None and age < 90
 
     return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in,
