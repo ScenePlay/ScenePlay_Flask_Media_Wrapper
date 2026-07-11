@@ -1,15 +1,19 @@
 #!/bin/bash
 #if xhost >& /dev/null ; then echo "Display exists"
 sudo apt-get update
-sudo apt-get -y upgrade 
-sudo apt-get -y install byobu 
-sudo apt-get -y install mpg123 
-sudo apt-get -y install python3-pip 
-sudo apt-get -y install mpv 
-sudo apt-get -y install sqlite3 
-sudo apt-get -y install libasound2-dev
+sudo apt-get -y upgrade
+sudo apt-get -y install mpg123
+sudo apt-get -y install python3-pip
+sudo apt-get -y install python3-venv
+sudo apt-get -y install mpv
+# ffmpeg: yt-dlp extract/merge + relay_audio_stream encoding (ws.py warns at
+# boot if it's missing; mpv does NOT provide the ffmpeg CLI)
+sudo apt-get -y install ffmpeg
+sudo apt-get -y install sqlite3
 sudo apt-get -y install socat
-sudo apt-get -y install jq
+# pactl: relay_audio_stream's pulse backend (works against pipewire-pulse too;
+# desktop images ship it, Lite/server images don't)
+sudo apt-get -y install pulseaudio-utils
 
 is_raspberry_pi() {
     local CPUINFO_PATH="/proc/cpuinfo"
@@ -35,22 +39,13 @@ if is_raspberry_pi; then
 fi
 pip3 install -r ~/ScenePlay/requirements.txt $BREAK_SYSTEM_PACKAGES
 
-#pip3 install waitress $BREAK_SYSTEM_PACKAGES
-#pip3 install pathlib $BREAK_SYSTEM_PACKAGES
-#pip3 install flask $BREAK_SYSTEM_PACKAGES 
-#pip3 install gtts $BREAK_SYSTEM_PACKAGES
-#pip3 install pyalsaaudio $BREAK_SYSTEM_PACKAGES
-#pip3 install flask_sqlalchemy $BREAK_SYSTEM_PACKAGES 
-#pip3 install flask_migrate $BREAK_SYSTEM_PACKAGES
-#pip3 install psutil $BREAK_SYSTEM_PACKAGES
-#pip3 install pulsectl $BREAK_SYSTEM_PACKAGES
-#pip3 install python-crontab $BREAK_SYSTEM_PACKAGES
-#pip3 install flask_login $BREAK_SYSTEM_PACKAGES
-#pip3 install flask_bcrypt $BREAK_SYSTEM_PACKAGES
-python3 -m ensurepip
-sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel $BREAK_SYSTEM_PACKAGES
-sudo python3 -m pip install --force-reinstall adafruit-blinka $BREAK_SYSTEM_PACKAGES
-deactivated
+# LED support: led_Run.py runs via `sudo python3` (system Python, not the
+# venv), so its libraries must be installed with sudo — but only on a Pi.
+if is_raspberry_pi; then
+    sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel $BREAK_SYSTEM_PACKAGES
+    sudo python3 -m pip install --force-reinstall adafruit-blinka $BREAK_SYSTEM_PACKAGES
+fi
+deactivate
 
 chmod +x *.sh
 chmod +x ~/ScenePlay/supportFiles/*.sh
