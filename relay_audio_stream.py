@@ -36,11 +36,15 @@ _ROTATE_S = 300        # end + reopen the ingest POST this often
 _IDLE_STOP_S = 20      # capture/push stops this long after the last track
 _ATTACH_WAIT_S = 10    # Windows: max wait for the new mpv PID to appear
 
+_SUPERVISE_S = 2       # how quickly the admin streaming switch takes effect
+
 _lock = threading.RLock()
 _worker = None
 _stop = threading.Event()
+_supervisor = None
 _playing = False
 _last_end = 0.0
+_current_song_id = 0   # song announced when the switch is flipped on mid-track
 _track_epoch = 0       # bumped per track; Windows capture re-attaches on change
 _graph_modules = []    # pactl module ids we loaded (pactl backend)
 _loopback_proc = None  # pw-loopback child (pipewire backend)
@@ -68,6 +72,18 @@ def _cfg_active():
             or not cfg["url"] or not cfg["session_id"]:
         return None
     return cfg
+
+
+def _relay_on():
+    """Relay itself is enabled (regardless of the audio switch). The capture
+    graph is kept up whenever this holds, so mpv is always playing into the
+    sink and flipping the audio switch mid-track streams sound immediately
+    instead of dead air until the next song."""
+    try:
+        from sql import appsettingGet
+        return appsettingGet("relay_enabled", "0") == "1"
+    except Exception:
+        return False
 
 
 # ── Linux capture graph (null sink + loopback to the GM's speakers) ──────────
@@ -374,6 +390,37 @@ def _stop_worker():
     _stop.set()
 
 
+def _supervise():
+    """Applies the admin 'Stream music to portal' switch within ~2 s in both
+    directions, mid-track. The admin UI lives in the Flask process; this
+    (player) process only shares the sqlite DB, so the switch has to be
+    polled — the per-track/per-rotation checks alone made it look broken on
+    long ambience tracks."""
+    while True:
+        time.sleep(_SUPERVISE_S)
+        try:
+            cfg = _cfg_active()
+            with _lock:
+                worker_alive = _worker is not None and _worker.is_alive()
+                if cfg and _playing and not worker_alive:
+                    if _ensure_graph():
+                        _ensure_worker(cfg)
+                        _broadcast_now_playing(_current_song_id or None, True)
+                elif not cfg and worker_alive:
+                    _stop.set()   # worker exits within a chunk (~250 ms)
+        except Exception:
+            log.debug("audio supervisor tick failed", exc_info=True)
+
+
+def _ensure_supervisor():
+    global _supervisor
+    if _supervisor is not None and _supervisor.is_alive():
+        return
+    _supervisor = threading.Thread(target=_supervise, daemon=True,
+                                   name="relay-audio-supervisor")
+    _supervisor.start()
+
+
 def _broadcast_now_playing(song_id, stream_active):
     try:
         import relay_broadcaster
@@ -387,14 +434,21 @@ def _broadcast_now_playing(song_id, stream_active):
 def on_track_start(song_id):
     """Called just before mpv spawns. Ensures the capture graph exists (so
     play_mp3_local can point mpv at it), (re)starts the push worker, and
-    announces the track to the portal."""
-    global _playing, _track_epoch
+    announces the track to the portal. The graph goes up whenever the RELAY
+    is enabled — even with the audio switch off — so mpv always plays into
+    the sink and the switch can start streaming mid-track (the supervisor
+    applies switch flips within ~2 s)."""
+    global _playing, _track_epoch, _current_song_id
     try:
         with _lock:
             _playing = True
             _track_epoch += 1
+            _current_song_id = song_id
+            if _relay_on():
+                _ensure_graph()
+                _ensure_supervisor()
             cfg = _cfg_active()
-            streaming = bool(cfg) and _ensure_graph()
+            streaming = bool(cfg) and (_IS_WIN or _graph_ready)
             if streaming:
                 _ensure_worker(cfg)
         _broadcast_now_playing(song_id, streaming)
@@ -417,6 +471,8 @@ def on_track_end():
 def on_playback_stopped():
     """Called on queue drain — a definite stop, so tell the portal now
     instead of waiting out the idle window."""
+    global _current_song_id
+    _current_song_id = 0
     on_track_end()
     _broadcast_now_playing(None, False)
 

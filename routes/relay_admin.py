@@ -80,6 +80,25 @@ def status():
         except Exception as e:
             log.debug('status logged-in fetch error: %s', e)
 
+        # Live presence: the relay marks players present on SSE connect +
+        # 30s heartbeats and absent on disconnect, so this distinguishes
+        # "has an account and joined at some point" from "connected right
+        # now". Missing from the dict or stale-hearted (>90s) = offline.
+        presence = {}
+        try:
+            presp = requests.get(
+                cfg['url'].rstrip('/') + f"/api/v1/session/{cfg['session_id']}/presence",
+                headers={'X-Relay-Secret': cfg['secret']},
+                timeout=5,
+            )
+            if presp.ok:
+                presence = presp.json().get('presence', {}) or {}
+        except Exception as e:
+            log.debug('status presence fetch error: %s', e)
+        for p in logged_in:
+            age = presence.get(p['player_name'])
+            p['online'] = age is not None and age < 90
+
     return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in,
                            sync_age=sync_age)
 
@@ -145,6 +164,32 @@ def api_health():
 
     return jsonify({'enabled': True, 'ok': not problems, 'problems': problems,
                     'sync_age': sync_age})
+
+
+@relay_admin_bp.route('/api/presence')
+@login_required
+@dm_required
+def api_presence():
+    """Live online/offline per portal player, polled by the status page so
+    the Players Online table updates without a refresh."""
+    cfg = _relay_cfg()
+    if cfg['enabled'] != '1' or not cfg['url'] or not cfg['session_id']:
+        return jsonify({'enabled': False, 'online': {}})
+    presence = {}
+    try:
+        resp = requests.get(
+            cfg['url'].rstrip('/') + f"/api/v1/session/{cfg['session_id']}/presence",
+            headers={'X-Relay-Secret': cfg['secret']},
+            timeout=5,
+        )
+        if resp.ok:
+            presence = resp.json().get('presence', {}) or {}
+    except Exception as e:
+        log.debug('api_presence fetch error: %s', e)
+    # Same liveness rule as the page render: heartbeat younger than 90s
+    online = {name: (age is not None and age < 90)
+              for name, age in presence.items()}
+    return jsonify({'enabled': True, 'online': online})
 
 
 @relay_admin_bp.route('/toggle', methods=['POST'])

@@ -73,8 +73,10 @@
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-3">
         &#128100; Players Online
-        <span class="badge {% if logged_in %}bg-success{% else %}bg-secondary{% endif %} ms-2">
-          {{ logged_in|length }}
+        {% set online_count = logged_in|selectattr('online')|list|length %}
+        <span id="online-count-badge"
+              class="badge {% if online_count %}bg-success{% else %}bg-secondary{% endif %} ms-2">
+          {{ online_count }} / {{ logged_in|length }}
         </span>
       </h6>
       {% if not logged_in %}
@@ -84,6 +86,7 @@
           <table class="table table-sm mb-0" style="color:var(--sp-text);">
             <thead>
               <tr>
+                <th class="small text-muted fw-normal">Status</th>
                 <th class="small text-muted fw-normal">Username</th>
                 <th class="small text-muted fw-normal">Character</th>
                 <th class="small text-muted fw-normal">Class / Lv</th>
@@ -93,11 +96,15 @@
             </thead>
             <tbody>
               {% for p in logged_in %}
-              <tr>
-                <td>
-                  <span class="badge bg-success me-1" style="font-size:.6rem;">&#9679;</span>
-                  {{ p.username }}
+              <tr data-player="{{ p.player_name }}" {% if not p.online %}style="opacity:.55;"{% endif %}>
+                <td class="presence-cell">
+                  {% if p.online %}
+                    <span class="badge bg-success" style="font-size:.65rem;">&#9679; Online</span>
+                  {% else %}
+                    <span class="badge bg-secondary" style="font-size:.65rem;">&#9675; Offline</span>
+                  {% endif %}
                 </td>
+                <td>{{ p.username }}</td>
                 <td class="fw-bold" style="color:var(--ttrpg-accent);">{{ p.player_name }}</td>
                 <td class="small">{{ p.char_class }} Lv{{ p.level }}</td>
                 <td>
@@ -205,4 +212,39 @@
 
   </div>
 </div>
+
+<script>
+// Live presence: flip the Online/Offline badges without a page refresh.
+// Polls the local server (which relays to the portal's presence endpoint).
+(function () {
+  const rows = document.querySelectorAll('tr[data-player]');
+  if (!rows.length) return;
+  const badge = document.getElementById('online-count-badge');
+  const ON  = '<span class="badge bg-success" style="font-size:.65rem;">&#9679; Online</span>';
+  const OFF = '<span class="badge bg-secondary" style="font-size:.65rem;">&#9675; Offline</span>';
+
+  async function tick() {
+    try {
+      const r = await fetch('{{ url_for("relay_admin_bp.api_presence") }}');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.enabled) return;
+      let online = 0;
+      rows.forEach(tr => {
+        const on = !!d.online[tr.dataset.player];
+        if (on) online++;
+        tr.style.opacity = on ? '' : '.55';
+        const cell = tr.querySelector('.presence-cell');
+        if (cell) cell.innerHTML = on ? ON : OFF;
+      });
+      if (badge) {
+        badge.textContent = online + ' / ' + rows.length;
+        badge.className = 'badge ms-2 ' + (online ? 'bg-success' : 'bg-secondary');
+      }
+    } catch (e) { /* transient — keep last known state */ }
+  }
+
+  setInterval(tick, 10000);
+})();
+</script>
 {% endblock %}
