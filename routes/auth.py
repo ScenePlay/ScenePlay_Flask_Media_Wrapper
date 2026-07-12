@@ -275,8 +275,21 @@ def delete_user(user_id):
     if user.is_dm():
         flash('Cannot delete a DM account.')
         return redirect(url_for('auth.register'))
+
+    # Characters outlive the account: hand them to the deleting DM (the
+    # character sheet's owner dropdown can reassign them later). user_id is
+    # NOT NULL, so they can't simply be orphaned.
+    moved = 0
+    for char in list(user.characters):
+        char.user = current_user
+        moved += 1
+
     db.session.delete(user)
     db.session.commit()
+    if moved:
+        flash(f'Deleted {user.display_name}; {moved} character(s) reassigned to you.')
+    else:
+        flash(f'Deleted {user.display_name}.')
     return redirect(url_for('auth.register'))
 
 

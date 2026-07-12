@@ -156,7 +156,7 @@ class tblSessionParty(db.Model):
     is_active    = db.Column(db.Integer, default=1)
     joined_at    = db.Column(db.Text, nullable=False)
 
-    character = db.relationship('tblCharacters', backref='session_entries', lazy=True)
+    character = db.relationship('tblCharacters', backref=db.backref('session_entries', cascade='all, delete-orphan'), lazy=True)
     session   = db.relationship('tblSessions',   backref='party',          lazy=True)
 
 
