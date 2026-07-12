@@ -220,6 +220,19 @@ with app.app_context():
         db.session.rollback()
         print('tblCharacters.subclass migration skipped:', _e)
 
+    # Lightweight migration: add tblCharacters.genre — which genre pack skins
+    # the character's flavor and AI-portrait art direction (genre_packs.py);
+    # 'fantasy' is plain D&D. Idempotent.
+    try:
+        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblCharacters)"))]
+        if _cols and 'genre' not in _cols:
+            db.session.execute(_sa_text(
+                "ALTER TABLE tblCharacters ADD COLUMN genre TEXT DEFAULT 'fantasy'"))
+            db.session.commit()
+    except Exception as _e:
+        db.session.rollback()
+        print('tblCharacters.genre migration skipped:', _e)
+
     # Lightweight migration: add tblServersIP.version — the app/firmware version a
     # discovered device reports via /api/server-info (ScenePlay) or /json/info
     # (WLED), shown next to its name in the server table. Idempotent.

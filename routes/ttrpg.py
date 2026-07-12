@@ -144,6 +144,21 @@ def my_character():
 
 # ── Character create ───────────────────────────────────────────────────────────
 
+@ttrpg.route('/character/random')
+@login_required
+def character_random():
+    """Roll a complete random character (level, stats, name, traits) as JSON
+    for the create-character form to fill in."""
+    from char_randgen import generate_character
+    try:
+        min_level = int(request.args.get('min_level', 1))
+        max_level = int(request.args.get('max_level', 20))
+    except ValueError:
+        min_level, max_level = 1, 20
+    genre = request.args.get('genre', 'fantasy')
+    return jsonify(generate_character(min_level, max_level, genre=genre))
+
+
 @ttrpg.route('/character/new', methods=['GET', 'POST'])
 @login_required
 def character_new():
@@ -157,9 +172,11 @@ def character_new():
                 user_id    = current_user.user_id,
                 name       = name,
                 char_class = request.form.get('char_class', '').strip(),
+                subclass   = request.form.get('subclass', '').strip(),
                 race       = request.form.get('race', '').strip(),
                 level      = int(request.form.get('level', 1) or 1),
                 background = request.form.get('background', '').strip(),
+                genre      = request.form.get('genre', 'fantasy').strip() or 'fantasy',
                 hp_max     = int(request.form.get('hp_max', 0) or 0),
                 hp_current = int(request.form.get('hp_max', 0) or 0),
                 ac         = int(request.form.get('ac', 10) or 10),
@@ -181,6 +198,15 @@ def character_new():
             db.session.add(char)
             db.session.flush()  # get character_id before portrait save
 
+            # Personality/ideal/bond/flaw from the randomizer -> first note
+            traits_note = request.form.get('traits_note', '').strip()
+            if traits_note:
+                db.session.add(tblCharacterNotes(
+                    character_id=char.character_id,
+                    note_text=traits_note,
+                    created_at=_now(),
+                ))
+
             # Portrait upload
             portrait = request.files.get('portrait')
             if portrait and portrait.filename and _allowed_file(portrait.filename):
@@ -193,7 +219,10 @@ def character_new():
             db.session.commit()
             return redirect(url_for('ttrpg.character_sheet', character_id=char.character_id))
 
-    return render_template('ttrpg/character_new.html', error=error)
+    from genre_packs import genre_labels, client_data
+    return render_template('ttrpg/character_new.html', error=error,
+                           genre_options=genre_labels(),
+                           genre_client_data=client_data())
 
 
 # ── Class progression (synced from the D&D API's class level tables) ──────────
@@ -335,6 +364,15 @@ def character_sheet(character_id):
     from models.ttrpg import tblWeaponPropertiesLibrary
     weapon_props = {w.name.lower(): w.description
                     for w in tblWeaponPropertiesLibrary.query.all() if w.description}
+
+    # Genre skin for the AI portrait prompt (display labels + art direction)
+    from genre_packs import get_pack, genre_display
+    _pack = get_pack(getattr(char, 'genre', '') or '')
+    genre_archetype, genre_species = genre_display(
+        char.genre, char.char_class, char.race) if _pack else ('', '')
+    genre_art = _pack['art_style'] if _pack else []
+    genre_label = _pack['label'] if _pack else ''
+
     return render_template('ttrpg/character_sheet.html', char=char,
                            all_players=all_players, conditions=condition_texts(),
                            races_lib=races_lib, classes_lib=classes_lib,
@@ -342,6 +380,10 @@ def character_sheet(character_id):
                            class_level_info=class_level_info,
                            subclass_options=subclass_options,
                            weapon_props=weapon_props,
+                           genre_archetype=genre_archetype,
+                           genre_species=genre_species,
+                           genre_art=genre_art,
+                           genre_label=genre_label,
                            can_edit=can_edit)
 
 

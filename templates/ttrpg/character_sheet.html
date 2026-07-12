@@ -1969,7 +1969,12 @@ const _llmChar = {
   name:               {{ char.name | tojson }},
   level:              {{ char.level }},
   char_class:         {{ (char.char_class or '') | tojson }},
+  subclass:           {{ (char.subclass or '') | tojson }},
   race:               {{ (char.race or '') | tojson }},
+  genre_label:        {{ genre_label | tojson }},
+  archetype:          {{ genre_archetype | tojson }},
+  species:            {{ genre_species | tojson }},
+  genre_art:          {{ genre_art | tojson }},
   background:         {{ (char.background or '') | tojson }},
   player:             {{ char.user.display_name | tojson }},
   hp_current:         {{ char.hp_current }},
@@ -2043,6 +2048,7 @@ const _llmChar = {
 };
 const _pasteUploadUrl = {% if can_edit %}{{ url_for('ttrpg.portrait_paste', character_id=char.character_id) | tojson }}{% else %}null{% endif %};
 </script>
+<script src="{{ static_v('scripts/portrait_prompt.js') }}"></script>
 <script src="{{ static_v('scripts/character_sheet.js') }}"></script>
 <script src="{{ static_v('scripts/sfx-control.js') }}"></script>
 {% endblock %}

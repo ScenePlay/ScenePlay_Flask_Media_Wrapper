@@ -1371,29 +1371,39 @@ function _buildPrompt(c) {
   // Opening request
   lines.push('Please generate a close-up portrait of the following fantasy TTRPG character.\n');
 
-  // Core identity — the most visually relevant facts first
+  // Core identity — the most visually relevant facts first. Genre skins
+  // (archetype/species) replace the 5e labels when the character has a genre.
+  const inGenre = !!c.archetype;
+  const dispRace  = inGenre ? (c.species || c.race) : c.race;
+  const dispClass = inGenre ? c.archetype : c.char_class;
   const identity = [];
-  if (c.race)       identity.push(c.race);
-  if (c.char_class) identity.push(c.char_class + ' (Level ' + c.level + ')');
+  if (c.race)       identity.push(dispRace);
+  if (c.char_class) identity.push((!inGenre && c.subclass ? c.subclass + ' ' : '') + dispClass + ' (Level ' + c.level + ')');
   if (c.background) identity.push(c.background + ' background');
   lines.push('CHARACTER: ' + c.name + (identity.length ? ', a ' + identity.join(', ') : '') + '.');
+  if (inGenre && c.genre_label) lines.push('SETTING: ' + c.genre_label + ' — not medieval fantasy.');
   lines.push('');
 
-  // Stat-driven appearance hints
-  lines.push('PHYSICAL PRESENCE:');
-  const strMod = Math.floor((c.str_val - 10) / 2);
-  const dexMod = Math.floor((c.dex_val - 10) / 2);
-  const chaMod = Math.floor((c.cha_val - 10) / 2);
-  const conMod = Math.floor((c.con_val - 10) / 2);
-  if (strMod >= 3)       lines.push('- Powerfully built, heavily muscled');
-  else if (strMod >= 1)  lines.push('- Athletic, strong build');
-  else if (strMod <= -2) lines.push('- Slight, lean frame');
-  if (dexMod >= 3)       lines.push('- Graceful, agile posture');
-  else if (dexMod >= 1)  lines.push('- Nimble, balanced stance');
-  if (conMod >= 3)       lines.push('- Robust, hardy appearance');
-  if (chaMod >= 3)       lines.push('- Striking, commanding presence');
-  else if (chaMod <= -2) lines.push('- Unremarkable, plain features');
-  lines.push('');
+  // Personality note (from the randomizer or hand-written) — pull it out of
+  // the notes so it shapes expression and mood explicitly
+  const personalityNotes = c.notes.filter(n => /^\s*Personality\s*:/i.test(n));
+  if (personalityNotes.length) {
+    lines.push('PERSONALITY (let this shape expression, bearing, and mood):');
+    personalityNotes.forEach(n =>
+      n.split('\n').forEach(l => { if (l.trim()) lines.push('- ' + l.trim()); }));
+    lines.push('');
+  }
+
+  // Stat-driven appearance hints — randomized wording from shared pools
+  const presence = portraitPresenceLines({
+    str: c.str_val, dex: c.dex_val, con: c.con_val,
+    int: c.int_val, wis: c.wis_val, cha: c.cha_val,
+  });
+  if (presence.length) {
+    lines.push('PHYSICAL PRESENCE:');
+    presence.forEach(l => lines.push(l));
+    lines.push('');
+  }
 
   // Equipped armor — what they are wearing
   const wornArmor = c.armor.filter(a => a.equipped);
@@ -1446,17 +1456,9 @@ function _buildPrompt(c) {
     lines.push('');
   }
 
-  // Style guidance
-  lines.push('PORTRAIT STYLE:');
-  lines.push('- Close-up portrait, face and upper body filling the frame; the face must be centered in the image');
-  lines.push('- High quality digital fantasy RPG character art');
-  lines.push('- Dramatic lighting that highlights facial features and expression');
-  lines.push('- Detailed textures on skin, hair, and any visible armor or clothing');
-  lines.push('- Confident, characterful expression that reflects their background');
-  lines.push('- Epic fantasy illustration style');
-  if (c.portrait_url) {
-    lines.push('- Reference the attached portrait image for facial features and likeness');
-  }
+  // Style guidance — shared composition block (portrait orientation, centered
+  // face) with the genre pack's art direction when the character has one
+  portraitStyleLines(!!c.portrait_url, c.genre_art).forEach(l => lines.push(l));
   lines.push('');
 
   lines.push('Generate a vivid, detailed close-up portrait that captures the face, personality, and power of ' + c.name + '.');

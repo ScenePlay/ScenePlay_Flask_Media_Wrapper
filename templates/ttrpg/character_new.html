@@ -4,7 +4,7 @@
 <div class="row justify-content-center">
   <div class="col-md-10 col-lg-8">
     <div class="ttrpg-card p-4">
-      <div class="d-flex align-items-center gap-3 mb-1">
+      <div class="d-flex align-items-center gap-3 mb-1 flex-wrap">
         <h3 style="color:var(--ttrpg-accent);margin:0;">Create Character</h3>
         <button type="button" id="btn-randomize" onclick="randomizeCharacter()"
                 class="btn btn-sm"
@@ -12,10 +12,28 @@
                        border:1px solid var(--ttrpg-accent);font-size:.8rem;">
           &#127922; Randomize
         </button>
+        <div class="d-flex align-items-center gap-1">
+          <span class="text-muted" style="font-size:.75rem;">Level</span>
+          <input type="number" id="rand-min-level" value="1" min="1" max="20"
+                 class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                 style="width:58px;" title="Minimum random level">
+          <span class="text-muted">&ndash;</span>
+          <input type="number" id="rand-max-level" value="20" min="1" max="20"
+                 class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                 style="width:58px;" title="Maximum random level">
+        </div>
+        <select id="rand-genre" onchange="syncGenre()"
+                class="form-select form-select-sm bg-dark text-light border-secondary"
+                style="width:auto;" title="Genre skin for names, traits, and portrait style">
+          {% for key, label in genre_options %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
       </div>
       {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 
       <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="genre" id="form-genre" value="fantasy">
 
         <!-- Identity -->
         <h6 class="text-muted mt-3 mb-2 text-uppercase" style="letter-spacing:.08em;">Identity</h6>
@@ -57,6 +75,10 @@
           <div class="col-sm-3">
             <label class="form-label">Level</label>
             <input type="number" name="level" class="form-control bg-dark text-light border-secondary" value="1" min="1" max="30">
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label">Subclass</label>
+            <input type="text" name="subclass" class="form-control bg-dark text-light border-secondary" placeholder="Champion… (level 3+)">
           </div>
           <div class="col-sm-6">
             <label class="form-label">Background</label>
@@ -122,6 +144,12 @@
           {% endfor %}
         </div>
 
+        <!-- Personality -->
+        <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Personality &amp; Traits</h6>
+        <textarea name="traits_note" id="traits-note" rows="4"
+                  class="form-control bg-dark text-light border-secondary"
+                  placeholder="Personality, ideal, bond, flaw — filled by Randomize, or write your own. Saved as the character's first note."></textarea>
+
         <!-- Currency -->
         <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Currency</h6>
         <div class="row g-3">
@@ -181,11 +209,22 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_v('scripts/portrait_prompt.js') }}"></script>
 <script>
 const _newLibUrls = {
   'class': "{{ url_for('reference_bp.classes_search') }}",
   'race':  "{{ url_for('reference_bp.races_search') }}"
 };
+// Genre pack display data: {key: {label, class_skins, race_skins, art_style}}
+const _GENRE_DATA = {{ genre_client_data | tojson }};
+
+function _currentGenre() {
+  return document.getElementById('rand-genre').value || 'fantasy';
+}
+
+function syncGenre() {
+  document.getElementById('form-genre').value = _currentGenre();
+}
 const _newLibTimers = {};
 
 function newLibSearch(type, q) {
@@ -238,60 +277,28 @@ async function randomizeCharacter() {
   btn.textContent = 'Rolling…';
 
   try {
-    const [classData, raceData] = await Promise.all([
-      fetch(_newLibUrls['class'] + '?q=').then(r => r.json()),
-      fetch(_newLibUrls['race']  + '?q=').then(r => r.json())
-    ]);
+    const lo = parseInt(document.getElementById('rand-min-level').value) || 1;
+    const hi = parseInt(document.getElementById('rand-max-level').value) || 20;
+    const r = await fetch("{{ url_for('ttrpg.character_random') }}"
+                          + '?min_level=' + Math.min(lo, hi) + '&max_level=' + Math.max(lo, hi)
+                          + '&genre=' + encodeURIComponent(_currentGenre()));
+    const c = await r.json();
+    syncGenre();
 
-    const classes = Array.isArray(classData) ? classData : (classData.results || []);
-    const races   = Array.isArray(raceData)  ? raceData  : (raceData.results  || []);
-    const cls  = classes.length ? classes[Math.floor(Math.random() * classes.length)] : null;
-    const race = races.length  ? races[Math.floor(Math.random()  * races.length)]  : null;
+    document.querySelector('[name="name"]').value       = c.name;
+    document.querySelector('[name="level"]').value      = c.level;
+    document.querySelector('[name="subclass"]').value   = c.subclass || '';
+    document.querySelector('[name="background"]').value = c.background;
+    document.getElementById('new-char-class').value     = c.char_class;
+    document.getElementById('new-race').value           = c.race;
 
-    // Distribute exactly 27 points across 6 stats (each min 1)
-    function distribute27() {
-      const scores = [1, 1, 1, 1, 1, 1];
-      for (let p = 0; p < 21; p++) {
-        scores[Math.floor(Math.random() * 6)]++;
-      }
-      return scores;
-    }
-    function mod(score) { return Math.floor((score - 10) / 2); }
+    ['str_val','dex_val','con_val','int_val','wis_val','cha_val',
+     'hp_max','ac','speed','initiative_bonus','passive_perception',
+     'gold','silver','copper'].forEach(f => {
+      document.querySelector('[name="' + f + '"]').value = c[f];
+    });
 
-    const [str, dex, con, int, wis, cha] = distribute27();
-
-    const NAMES = [
-      'Aldric','Brynn','Caelum','Dara','Elowen','Fenn','Gareth','Hana','Ivor','Jessa',
-      'Kael','Lyra','Mira','Nolan','Oryn','Pira','Quill','Reva','Soren','Tara',
-      'Ulric','Vex','Wren','Xara','Yael','Zora','Aiden','Bex','Cora','Dwyn',
-      'Emric','Fyra','Gryn','Hex','Isha','Jorn','Kira','Lox','Myra','Nyx'
-    ];
-    const BACKGROUNDS = [
-      'Acolyte','Charlatan','Criminal','Entertainer','Folk Hero',
-      'Guild Artisan','Hermit','Noble','Outlander','Sage','Sailor','Soldier','Urchin'
-    ];
-
-    const pick = arr => arr[Math.floor(Math.random() * arr.length)];
-
-    document.querySelector('[name="name"]').value       = pick(NAMES);
-    document.querySelector('[name="background"]').value = pick(BACKGROUNDS);
-    document.getElementById('new-char-class').value     = cls  ? cls.name  : '';
-    document.getElementById('new-race').value           = race ? race.name : '';
-
-    document.querySelector('[name="str_val"]').value = str;
-    document.querySelector('[name="dex_val"]').value = dex;
-    document.querySelector('[name="con_val"]').value = con;
-    document.querySelector('[name="int_val"]').value = int;
-    document.querySelector('[name="wis_val"]').value = wis;
-    document.querySelector('[name="cha_val"]').value = cha;
-
-    const hitDie = cls ? (cls.hit_die || 8) : 8;
-    const conMod = mod(con);
-    document.querySelector('[name="hp_max"]').value           = Math.max(hitDie + conMod, hitDie - 1);
-    document.querySelector('[name="speed"]').value            = (race && race.speed) ? race.speed : 30;
-    document.querySelector('[name="ac"]').value               = 10 + mod(dex);
-    document.querySelector('[name="initiative_bonus"]').value = mod(dex);
-    document.querySelector('[name="passive_perception"]').value = 10 + mod(wis);
+    document.getElementById('traits-note').value = c.traits_note || '';
   } catch(err) {
     console.error('Randomize failed:', err);
   }
@@ -383,44 +390,47 @@ function _buildNewCharPrompt() {
 
   const name       = fv('name').trim() || 'the character';
   const charClass  = document.getElementById('new-char-class').value.trim();
+  const subclass   = fv('subclass').trim();
   const race       = document.getElementById('new-race').value.trim();
   const background = fv('background').trim();
+  const traitsNote = fv('traits_note').trim();
   const level      = fi('level') || 1;
-  const str = fi('str_val'), dex = fi('dex_val'), con = fi('con_val');
-  const wis = fi('wis_val'), cha = fi('cha_val');
-
-  function mod(s) { return Math.floor((s - 10) / 2); }
 
   const lines = [];
 
   lines.push('Please generate a close-up portrait of the following fantasy TTRPG character.\n');
 
+  // Genre skins: show the archetype/species labels in genre mode, keeping the
+  // 5e class in parentheses so the image model still gets the familiar anchor
+  const pack = _GENRE_DATA[_currentGenre()];
+  const dispRace  = pack ? (pack.race_skins[race] || race) : race;
+  const dispClass = pack ? (pack.class_skins[charClass] || charClass) : charClass;
+
   const identity = [];
-  if (race)       identity.push(race);
-  if (charClass)  identity.push(charClass + ' (Level ' + level + ')');
+  if (race)       identity.push(dispRace);
+  if (charClass)  identity.push((!pack && subclass ? subclass + ' ' : '') + dispClass + ' (Level ' + level + ')');
   if (background) identity.push(background + ' background');
   lines.push('CHARACTER: ' + name + (identity.length ? ', a ' + identity.join(', ') : '') + '.');
+  if (pack) lines.push('SETTING: ' + pack.label + ' — not medieval fantasy.');
   lines.push('');
 
-  lines.push('PHYSICAL PRESENCE:');
-  const strMod = mod(str), dexMod = mod(dex), conMod = mod(con), chaMod = mod(cha);
-  if (strMod >= 3)       lines.push('- Powerfully built, heavily muscled');
-  else if (strMod >= 1)  lines.push('- Athletic, strong build');
-  else if (strMod <= -2) lines.push('- Slight, lean frame');
-  if (dexMod >= 3)       lines.push('- Graceful, nimble posture');
-  else if (dexMod >= 1)  lines.push('- Balanced, agile stance');
-  if (conMod >= 3)       lines.push('- Robust, hardy appearance');
-  if (chaMod >= 3)       lines.push('- Striking, commanding presence');
-  else if (chaMod <= -2) lines.push('- Unremarkable, plain features');
-  lines.push('');
+  if (traitsNote) {
+    lines.push('PERSONALITY (let this shape expression, bearing, and mood):');
+    traitsNote.split('\n').forEach(l => { if (l.trim()) lines.push('- ' + l.trim()); });
+    lines.push('');
+  }
 
-  lines.push('PORTRAIT STYLE:');
-  lines.push('- Close-up portrait, face and upper body filling the frame; the face must be centered in the image');
-  lines.push('- High quality digital fantasy RPG character art');
-  lines.push('- Dramatic lighting that highlights facial features and expression');
-  lines.push('- Detailed textures on skin, hair, and any visible armor or clothing');
-  lines.push('- Confident, characterful expression that reflects their background');
-  lines.push('- Epic fantasy illustration style');
+  const presence = portraitPresenceLines({
+    str: fi('str_val'), dex: fi('dex_val'), con: fi('con_val'),
+    int: fi('int_val'), wis: fi('wis_val'), cha: fi('cha_val'),
+  });
+  if (presence.length) {
+    lines.push('PHYSICAL PRESENCE:');
+    presence.forEach(l => lines.push(l));
+    lines.push('');
+  }
+
+  portraitStyleLines(false, pack ? pack.art_style : null).forEach(l => lines.push(l));
   lines.push('');
 
   lines.push('Generate a vivid, detailed close-up portrait that captures the face, personality, and essence of ' + name + '.');

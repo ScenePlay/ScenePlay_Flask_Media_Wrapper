@@ -13,6 +13,7 @@ class tblCharacters(db.Model):
     race           = db.Column(db.Text, default='')
     level          = db.Column(db.Integer, default=1)
     background     = db.Column(db.Text, default='')
+    genre          = db.Column(db.Text, default='fantasy')  # genre_packs.py key
     portrait_path  = db.Column(db.Text, default='')
 
     # Core stats stored as columns for fast access
