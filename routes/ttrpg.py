@@ -1181,6 +1181,12 @@ def session_status(session_id):
             tblSessions.query.filter_by(status='active').update({'status': 'ended'})
         sess.status = new_status
         db.session.commit()
+        # The relay mirrors the ACTIVE session's party. Re-push it on
+        # activation (authoritative replace) so players never see the
+        # previous session's characters on their sheets.
+        if new_status == 'active':
+            relay_broadcaster.push_all_characters()
+            relay_broadcaster.push_session_users()
     return redirect(url_for('ttrpg.session_detail', session_id=session_id))
 
 

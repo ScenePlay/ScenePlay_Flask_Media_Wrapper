@@ -676,10 +676,14 @@ def _char_to_payload(char):
 
 
 def push_all_characters():
-    """Push every active-session party member to the relay so they exist before login.
+    """Push the active session's COMPLETE party to the relay.
 
-    Calls POST /api/v1/session/{session_id}/characters with GM secret.
-    The relay upserts by player_name so this is safe to call repeatedly.
+    Calls POST /api/v1/session/{session_id}/characters with GM secret and
+    replace=True: the relay upserts these and REMOVES any character in the
+    relay session that isn't in this list — so activating a different local
+    session (while keeping the same relay session/join code) can't leave
+    players seeing characters from the previous session. An empty party is
+    pushed too, for the same reason: it clears the relay's set.
     """
     cfg = _active()
     if not cfg:
@@ -697,18 +701,15 @@ def push_all_characters():
         if char:
             characters.append(_char_to_payload(char))
 
-    if not characters:
-        log.info('push_all_characters: party is empty')
-        return
-
-    payload = {'characters': characters}
+    payload = {'characters': characters, 'replace': True}
 
     def _go():
         c = _exec_cfg()
         if not c:
             return
         _post(f'/api/v1/session/{c["session_id"]}/characters', payload, c)
-        log.info('push_all_characters: pushed %d characters', len(characters))
+        log.info('push_all_characters: pushed %d characters (authoritative)',
+                 len(characters))
 
     _enqueue('all-characters', _go)   # coalesce: latest full party wins
 
