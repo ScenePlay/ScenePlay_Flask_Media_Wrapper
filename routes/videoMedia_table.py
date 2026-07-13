@@ -3,6 +3,8 @@ from extensions import *
 
 from models.videoMedia import tblvideomedia as tbl
 from models.mediaMetadata import tblmediametadata as metaTbl
+from models.videoScene import tblvideoscene as sceneLinkTbl
+from models.scenes import tblscenes as sc
 from sql import *
 
     #   // cid  name          type     notnull  dflt_value  pk
@@ -36,12 +38,25 @@ _meta_sort = {'duration': metaTbl.duration, 'uploader': metaTbl.uploader}
 def edittbl():
     data = select_data_stats()
     volume = currentvolume()
-    return render_template('videoMedia_table.html',items=data,volume=volume)
+    scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
+    sceneFilter = appsettingGetSceneFilter()
+    return render_template('videoMedia_table.html',items=data,volume=volume,
+                           scenes=scenes,sceneFilter=int(sceneFilter[0][0]))
 
 
 @vm.route('/api/videomedia')
 def data():
     query = tbl.query
+
+    # Scene filter (same global setting the Scene * tables use): limit to
+    # videos linked to the selected scene via tblVideoScene. Applied first so
+    # search/sort/pagination and the total all respect it.
+    sceneFilter = int(appsettingGetSceneFilter()[0][0])
+    if sceneFilter != 0:
+        scene_video_ids = db.session.query(sceneLinkTbl.video_ID).filter(
+            sceneLinkTbl.scene_ID == sceneFilter)
+        query = query.filter(tbl.video_id.in_(scene_video_ids))
+
     search = request.args.get('search')
 
     if search:

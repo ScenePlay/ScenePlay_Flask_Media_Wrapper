@@ -209,6 +209,7 @@ def toggle():
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
         relay_broadcaster.push_session_users()
+        relay_broadcaster.push_library()   # same set as generate-code / Party Sync
         flash('Relay enabled — receiver started and party synced.')
     else:
         _stop_receiver()

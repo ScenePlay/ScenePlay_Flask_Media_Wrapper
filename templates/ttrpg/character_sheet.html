@@ -190,7 +190,7 @@
             <h3 class="mb-0" style="color:var(--ttrpg-accent);">{{ char.name }}</h3>
           </div>
           <div class="d-flex gap-1 flex-wrap align-items-center">
-            <button class="btn btn-sm btn-outline-secondary" onclick="toggleDicePanel()" title="Dice Roller">&#127922;</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="toggleDicePanel()" title="Dice Roller"><span class="dice-ico">&#127922;</span></button>
             {% if can_edit %}
             <a href="{{ url_for('ttrpg.character_edit', character_id=char.character_id) }}"
                class="btn btn-sm btn-outline-secondary">&#9998; Edit Sheet</a>
@@ -432,7 +432,7 @@
           <div class="d-flex gap-2 align-items-center flex-wrap">
             <input type="text" id="dice-label" class="form-control form-control-sm"
                    placeholder="Label (optional)…" style="max-width:180px;">
-            <button class="btn btn-ttrpg" onclick="doRoll()">&#127922; Roll</button>
+            <button class="btn btn-ttrpg" onclick="doRoll()"><span class="dice-ico">&#127922;</span> Roll</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="resetDice()" title="Reset to 1d20 +0">&#8635;</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="clearDiceFeed()" title="Clear feed">&#128465;</button>
           </div>
@@ -457,7 +457,7 @@
         <div style="flex:1 1 260px;min-width:220px;max-height:320px;overflow-y:auto;"
              id="dice-feed-box">
           <div class="small text-muted text-uppercase mb-1" style="letter-spacing:.06em;">
-            &#127922; Roll Feed
+            <span class="dice-ico">&#127922;</span> Roll Feed
           </div>
           <div id="dice-feed-list">
             <p class="small text-muted">No rolls yet.</p>

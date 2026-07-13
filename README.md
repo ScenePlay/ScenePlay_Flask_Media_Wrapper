@@ -240,6 +240,7 @@ Layout, briefly:
 | `templates/`, `static/` | UI (server-rendered + grid.js tables), shared JS/CSS |
 | `ChromeExt/`, `FireFoxExt/` | Browser extensions |
 | `tests/` | pytest suite (URL parsing, queue backoff, dedup rules) |
+| `docs/MQTT_LIGHTING.md` | Remote lighting pathways (diagram) + WLED-over-MQTT setup guide |
 
 ---
 

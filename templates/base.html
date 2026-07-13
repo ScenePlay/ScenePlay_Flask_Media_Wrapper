@@ -30,6 +30,7 @@
                     <a class="nav-link dropdown-toggle" href="#" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">Tables</a>
                     <ul class="dropdown-menu">
+                      <li><a class="dropdown-item" href="{{ url_for('cp.edittbl') }}">Campaigns</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('sn.edittbl') }}">Scenes</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('sp.edittbl') }}">Scene RPiLED</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('wl.edittbl') }}">Scene WLED</a></li>
@@ -39,7 +40,6 @@
                       <li><a class="dropdown-item" href="{{ url_for('mu.edittbl') }}">Music Media</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('vm.edittbl') }}">Video Media</a></li>
                       <li><hr class="dropdown-divider"></li>
-                      <li><a class="dropdown-item" href="{{ url_for('cp.edittbl') }}">Campaigns</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('ltm.edittbl') }}">LED Type Model</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('lcf.edittbl') }}">LED Config</a></li>
                       <li><a class="dropdown-item" href="{{ url_for('ip.edittbl') }}">Servers</a></li>

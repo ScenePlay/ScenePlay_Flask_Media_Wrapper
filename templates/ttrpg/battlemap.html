@@ -377,7 +377,7 @@
          class="btn btn-sm btn-outline-secondary">Maps</a>
       {% endif %}
       <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
-              onclick="toggleMapDicePanel()" title="Dice Roller">&#127922; Dice</button>
+              onclick="toggleMapDicePanel()" title="Dice Roller"><span class="dice-ico">&#127922;</span> Dice</button>
       <a href="{{ url_for('ttrpg.my_character') }}"
          class="btn btn-sm btn-outline-secondary">Character(s)</a>
 
@@ -724,7 +724,7 @@
 <!-- ── Dice Roller Panel ─────────────────────────────────────────────────── -->
 <div id="dice-map-panel">
   <div id="dice-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <span style="font-weight:bold;color:var(--ttrpg-accent);">&#127922; Dice Roller</span>
+    <span style="font-weight:bold;color:var(--ttrpg-accent);"><span class="dice-ico">&#127922;</span> Dice Roller</span>
     <div style="display:flex;gap:4px;">
       <button id="map-dice-minimize-btn" class="fx-close-btn" onclick="minimizeMapDicePanel()" style="cursor:pointer;" title="Minimize">&#8722;</button>
       <button class="fx-close-btn" onclick="toggleMapDicePanel()" style="cursor:pointer;" title="Close">&#10005;</button>
@@ -798,7 +798,7 @@
 
   <!-- Roll button -->
   <div class="d-flex gap-1 mb-2">
-    <button class="btn btn-sm btn-ttrpg flex-grow-1" onclick="mapDoRoll()">&#127922; Roll</button>
+    <button class="btn btn-sm btn-ttrpg flex-grow-1" onclick="mapDoRoll()"><span class="dice-ico">&#127922;</span> Roll</button>
     <button class="btn btn-sm btn-outline-secondary px-2" onclick="mapResetDice()" title="Reset to 1d20 +0">&#8635;</button>
   </div>
 

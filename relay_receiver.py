@@ -455,6 +455,22 @@ def _poll():
 
     appsettingSet('relay_last_sync', now)
 
+    # Self-healing resync: a recorded push drop means the broadcaster gave up
+    # on something while the relay was unreachable — the party on the portal
+    # may be stale. This poll just succeeded, so contact is back: re-push the
+    # full party/users/library ONCE and clear the marker (re-armed only by the
+    # next drop, so this never turns into a per-poll full push).
+    if (appsettingGet('relay_push_last_drop', '') or '').strip():
+        appsettingSet('relay_push_last_drop', '')
+        try:
+            import relay_broadcaster
+            relay_broadcaster.push_all_characters()
+            relay_broadcaster.push_session_users()
+            relay_broadcaster.push_library()
+            log.info('Relay contact restored after a dropped push — full party resync queued.')
+        except Exception as exc:
+            log.warning('Post-drop resync failed (will re-arm on next drop): %s', exc)
+
 
 # Whitelist of tblCharacters columns that a relay player may update via attr_save
 _ATTR_WHITELIST = frozenset({

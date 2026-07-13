@@ -9,6 +9,8 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
     <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
     <style>
+        /* Dice glyphs render small relative to text — double them wherever used */
+        .dice-ico { font-size: 2em; line-height: 1; vertical-align: -0.18em; }
         body {
             background-color: var(--ttrpg-bg);
             color: var(--ttrpg-text);

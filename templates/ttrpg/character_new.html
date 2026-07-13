@@ -10,7 +10,7 @@
                 class="btn btn-sm"
                 style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);
                        border:1px solid var(--ttrpg-accent);font-size:.8rem;">
-          &#127922; Randomize
+          <span class="dice-ico">&#127922;</span> Randomize
         </button>
         <div class="d-flex align-items-center gap-1">
           <span class="text-muted" style="font-size:.75rem;">Level</span>
@@ -304,7 +304,7 @@ async function randomizeCharacter() {
   }
 
   btn.disabled = false;
-  btn.innerHTML = '&#127922; Randomize';
+  btn.innerHTML = '<span class="dice-ico">&#127922;</span> Randomize';
 }
 
 document.addEventListener('click', e => {

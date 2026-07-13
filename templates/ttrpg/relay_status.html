@@ -150,7 +150,7 @@
           <label class="form-check-label small" for="relay-audio-enabled">
             Stream music to portal players
             <span class="text-muted">(live audio of the music player; players
-            use the &#9834; control in the portal to listen)</span>
+            use the &#128266; control in the portal to listen)</span>
           </label>
         </div>
         <button type="submit" class="btn btn-sm btn-ttrpg">Save</button>
@@ -176,7 +176,7 @@
     <div class="ttrpg-card p-3 mb-3">
       <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
         <div>
-          <span class="fw-bold">&#127922; Roll History Reset</span>
+          <span class="fw-bold"><span class="dice-ico">&#127922;</span> Roll History Reset</span>
           <div class="small text-muted mt-1">
             Clears local roll history and sets a watermark so the receiver ignores relay rolls
             made before this moment. New rolls made after clicking will sync normally.
@@ -204,7 +204,7 @@
     <!-- Quick links -->
     <div class="d-flex gap-2 flex-wrap">
       <a href="{{ url_for('relay_admin_bp.rolls') }}" class="btn btn-sm btn-outline-secondary">
-        &#127922; Roll Log
+        <span class="dice-ico">&#127922;</span> Roll Log
       </a>
       <a href="{{ url_for('ttrpg.dashboard') }}" class="btn btn-sm btn-outline-secondary">
         &larr; Dashboard
