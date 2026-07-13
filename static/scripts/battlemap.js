@@ -51,7 +51,7 @@ function showTooltip(e, tok) {
   bar.style.background = tok.hp_pct > 50 ? '#28a745' : tok.hp_pct > 20 ? '#ffc107' : '#dc3545';
 
   document.getElementById('tt-speed').textContent =
-    tok.speed ? `Speed: ${tok.speed} ft.` : '';
+    tok.speed ? `Speed: ${tok.speed}` : '';
 
   const condEl = document.getElementById('tt-conditions');
   condEl.innerHTML = '';
@@ -115,7 +115,7 @@ function _showMoveRing(cx, cy) {
   _moveLabel.className = 'move-radius-label';
   _moveLabel.style.left = cx + 'px';
   _moveLabel.style.top  = cy + 'px';
-  _moveLabel.textContent = '0 ft';
+  _moveLabel.textContent = '0';
   grid.appendChild(_moveLabel);
 }
 function _updateMoveRing(cx, cy) {
@@ -126,7 +126,7 @@ function _updateMoveRing(cx, cy) {
   _moveRing.style.top    = (_moveCy - r) + 'px';
   _moveRing.style.width  = (2 * r) + 'px';
   _moveRing.style.height = (2 * r) + 'px';
-  _moveLabel.textContent = feet + ' ft';
+  _moveLabel.textContent = String(feet);
 }
 function _removeMoveRing() {
   if (_moveRing)  _moveRing.remove();
@@ -1300,7 +1300,7 @@ function _applyDrawMode() {
 function selectEffect(effectId) {
   fxSelectedId = effectId;
   const eff  = currentEffects[effectId];
-  const name = eff ? (eff.label || `${eff.shape} (${eff.size_ft}ft)`) : '';
+  const name = eff ? (eff.label || `${eff.shape} (${eff.size_ft})`) : '';
   const sel  = document.getElementById('fx-selected');
   if (sel) {
     document.getElementById('fx-selected-name').textContent = name;

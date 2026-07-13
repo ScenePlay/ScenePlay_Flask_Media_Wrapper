@@ -112,3 +112,34 @@ def test_generate_character_unknown_genre_falls_back(library):
                               genre='no-such-genre')
     assert c['genre'] == 'fantasy'
     assert c['background'] in rg.BACKGROUNDS
+
+
+# ── Map prompt data (battle/travel environments per genre) ─────────────────────
+
+def test_map_prompts_shape():
+    assert set(gp.MAP_PROMPTS) == set(gp.GENRE_PACKS) | {'fantasy'}
+    for key, m in gp.MAP_PROMPTS.items():
+        assert m['label'], key
+        assert len(m['battle_envs']) >= 6, key
+        assert len(m['travel_envs']) >= 4, key
+        assert len(m['flavor']) >= 2, key
+        for env in m['travel_envs']:
+            assert env['name'], (key, env)
+            # every travel env's default scale must be a selectable option
+            assert env['scale'] in gp.TRAVEL_SCALES, (key, env)
+
+
+def test_map_prompt_client_data():
+    data = gp.map_prompt_client_data()
+    assert set(data) == {'genres', 'scales'}
+    assert 'fantasy' in data['genres']
+    assert data['scales'] == gp.TRAVEL_SCALES
+
+
+def test_icon_prompt_client_data():
+    data = gp.icon_prompt_client_data()
+    assert set(data) == set(gp.MAP_PROMPTS)
+    for key, entry in data.items():
+        assert entry['label'], key
+        assert len(entry['topdown']) >= 2, key
+        assert len(entry['portrait']) >= 2, key

@@ -842,3 +842,185 @@ def client_data():
         }
         for key, pack in GENRE_PACKS.items()
     }
+
+
+# ── Map prompts: per-genre battlemap + travel-map generation data ─────────────
+# Same idea as the character packs, applied to the battlemap Image Prompt
+# modal. 'battle' environments are encounter-scale (5-ft squares); 'travel'
+# environments are large-scale maps for tracking the party across long
+# distances — each carries a sensible default for what one grid square
+# represents. 'flavor' lines are cartographic art direction appended to the
+# prompt. 'fantasy' is a full entry here (unlike GENRE_PACKS, where plain
+# D&D is the absence of a pack) because maps always need environment lists.
+
+MAP_PROMPTS = {
+    'fantasy': {
+        'label': 'Fantasy (D&D)',
+        'battle_envs': [
+            'Dungeon / Underground', 'Forest / Wilderness', 'Tavern / Inn',
+            'Cave / Cavern', 'City Street / Town', 'Ocean / Ship Deck',
+            'Mountain / Cliffside', 'Swamp / Marsh', 'Castle / Keep',
+            'Ancient Ruins', 'Hell / Abyss', 'Celestial / Ethereal Plane',
+        ],
+        'travel_envs': [
+            {'name': 'World / Continent Map',        'scale': '60 miles'},
+            {'name': 'Kingdom / Region Map',         'scale': '6 miles'},
+            {'name': 'Ocean / Nautical Chart',       'scale': '30 miles'},
+            {'name': 'Wilderness Hex-Crawl Region',  'scale': '3 miles'},
+            {'name': 'City & Surroundings Overview', 'scale': '1 mile'},
+            {'name': 'Underdark Depths',             'scale': '6 miles'},
+            {'name': 'Planar / Astral Sea Chart',    'scale': '100 miles'},
+        ],
+        'flavor': [
+            'Hand-drawn fantasy cartography on aged parchment',
+            'Inked coastlines, mountain ranges as tiny peaks, forests as clustered trees',
+            'A compass rose and subtle rhumb lines where fitting',
+            'Muted sepia base with colored accents for realms, roads, and sea routes',
+        ],
+    },
+    'litrpg': {
+        'label': 'Dungeon Crawl (LitRPG)',
+        'battle_envs': [
+            'Dungeon Floor — Stone Corridors', 'Boss Arena', 'Safe Room / Vendor Hub',
+            'Trap Gauntlet', 'Neon-Lit Cavern', 'Collapsed Subway / Urban Ruins',
+            'Mob Spawner Warrens', 'Stairwell Nexus Between Floors',
+        ],
+        'travel_envs': [
+            {'name': 'Full Dungeon Floor Overview',      'scale': '500 feet'},
+            {'name': 'Floor Hub & Tunnel Network',       'scale': '1000 feet'},
+            {'name': 'Overrun City Overview',            'scale': '1 mile'},
+            {'name': 'Post-System Continental Surface',  'scale': '60 miles'},
+        ],
+        'flavor': [
+            "Dungeon-crawl auto-map aesthetic — crisp room outlines like an explorer's minimap",
+            'A hint of game-interface styling: glowing waypoints and zone markers (abstract, no readable text)',
+            'Vibrant torchlight-and-neon palette over dark stone',
+        ],
+    },
+    'voidmarines': {
+        'label': 'Void Marines (sci-fi)',
+        'battle_envs': [
+            'Starship Corridors / Boarding Action', 'Hangar Bay', 'Bridge / Command Deck',
+            'Engine Room', 'Derelict Hulk Interior', 'Orbital Station Docking Ring',
+            'Trench Line / Cratered Battlefield', 'Hive-City Alley',
+        ],
+        'travel_envs': [
+            {'name': 'Star System Chart',          'scale': '1 AU'},
+            {'name': 'Sector Starmap',             'scale': '5 light-years'},
+            {'name': 'Planetary Assault Theater',  'scale': '25 miles'},
+            {'name': 'Fleet Deployment Grid',      'scale': '10,000 km'},
+        ],
+        'flavor': [
+            'Grimdark military starmap — near-black void with an etched grid and glowing unit markers',
+            'Planets and stations as stark iconography; threat zones hatched in red',
+            'Gothic-industrial chart framing, bone-white linework, ember accents (no readable text)',
+        ],
+    },
+    'wasteland': {
+        'label': 'Wasteland (road war)',
+        'battle_envs': [
+            'Ruined Highway Stretch', 'Scrap Fort / Compound', 'Canyon Ambush Pass',
+            'Irradiated Crater', 'Fuel Depot', 'Dust-Storm Flats',
+            'Collapsed Overpass Camp', 'Arena Pit',
+        ],
+        'travel_envs': [
+            {'name': 'Wasteland Region Map',         'scale': '6 miles'},
+            {'name': 'Trade Route Map',              'scale': '25 miles'},
+            {'name': 'Continental Dead-Zone Map',    'scale': '100 miles'},
+            {'name': 'City Ruin Overview',           'scale': '1 mile'},
+        ],
+        'flavor': [
+            "Scavenger's road map — sun-bleached, oil-stained, hand-annotated look",
+            'Highways as cracked arteries, settlements as scrap-metal icons, rad zones cross-hatched',
+            'Faded ink over dust and rust tones (annotations abstract — no readable text)',
+        ],
+    },
+    'spacefaring': {
+        'label': 'Spacefaring Society',
+        'battle_envs': [
+            'Starship Deck Plan', 'Space Station Promenade', 'Colony Dome Interior',
+            'Terraforming Outpost', 'Asteroid Mining Rig', 'Alien Ruin Site',
+            'Shuttle Crash Site', 'Zero-G Cargo Hold',
+        ],
+        'travel_envs': [
+            {'name': 'Star System Chart',          'scale': '1 AU'},
+            {'name': 'Interstellar Route Map',     'scale': '1 light-year'},
+            {'name': 'Planet Surface Survey Map',  'scale': '100 miles'},
+            {'name': 'Orbital Traffic Chart',      'scale': '10,000 km'},
+        ],
+        'flavor': [
+            'Clean, optimistic space-opera chart — deep blue void with luminous orbit lines',
+            'Planets as beautiful detailed discs, stations and ships as crisp icons',
+            'Soft holographic elegance without readable text or UI panels',
+        ],
+    },
+}
+
+# Travel maps: what one grid square can represent (the dropdown's option list;
+# each travel_env above names its default).
+TRAVEL_SCALES = [
+    '500 feet', '1000 feet', '1 mile', '3 miles', '6 miles', '25 miles',
+    '30 miles', '60 miles', '100 miles', '500 miles', '10,000 km',
+    '1 AU', '1 light-year', '5 light-years',
+]
+
+
+def map_prompt_client_data():
+    """MAP_PROMPTS + scale list for the battlemap manage page's JS."""
+    return {'genres': MAP_PROMPTS, 'scales': TRAVEL_SCALES}
+
+
+# ── Token icon prompts (homebrew monsters / ships / vehicles) ─────────────────
+# Art direction for generating a TOKEN image — the picture on a homebrew
+# entry that gets placed on a map. 'topdown' suits vehicles/ships/objects
+# viewed from above on travel maps; portraits reuse the character packs'
+# art_style. Both keyed like MAP_PROMPTS (fantasy included).
+
+ICON_STYLES = {
+    'fantasy': [
+        'Rich painted-miniature style with crisp detail',
+        'Weathered natural materials — wood, canvas, iron, rope, leather',
+        'Colors that stand out against parchment-toned maps',
+    ],
+    'litrpg': [
+        'Vibrant game-asset style with a subtle outline so it pops on dark dungeon floors',
+        'A faint magical glow accent on key features',
+        'Clean readable silhouette, like a high-end game sprite',
+    ],
+    'voidmarines': [
+        'Grimdark military hardware — battle-scarred plating, gothic trim, purity seals',
+        'Gunmetal and bone-white with ember engine accents',
+        'Hard-edged silhouette readable against a black starfield',
+    ],
+    'wasteland': [
+        'Welded scrap, rust streaks, sun-bleached paint, improvised armor plating',
+        'Dust-caked wheels and hull details',
+        'Warm desert palette that reads against cracked-earth maps',
+    ],
+    'spacefaring': [
+        'Sleek clean hull design with luminous engine accents',
+        'Believable hard-sci-fi surface detail; mission markings as shapes only (no readable text)',
+        'Cool palette that reads against deep-blue space charts',
+    ],
+}
+
+_FANTASY_PORTRAIT_STYLE = [
+    'High quality digital fantasy RPG creature art',
+    'Dramatic lighting that highlights form and texture',
+    'Detailed textures on hide, scale, fur, or armor',
+    'Epic fantasy illustration style',
+]
+
+
+def icon_prompt_client_data():
+    """Per-genre art direction for the homebrew token-icon prompt builder:
+    {key: {label, topdown: [...], portrait: [...]}}, fantasy first."""
+    out = {}
+    for key, m in MAP_PROMPTS.items():
+        pack = GENRE_PACKS.get(key)
+        out[key] = {
+            'label': m['label'],
+            'topdown': ICON_STYLES[key],
+            'portrait': pack['art_style'] if pack else _FANTASY_PORTRAIT_STYLE,
+        }
+    return out

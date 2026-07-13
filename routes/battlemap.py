@@ -76,19 +76,24 @@ def _monster_stats(sm):
 
     Single home for the speed/type/ac/image extraction that used to be
     duplicated (with drift) between map_state and the relay payload.
-    Returns {'speed': int, 'type': str, 'ac': int, 'image': raw-path-or-''}."""
+    Returns {'speed': int-or-str, 'type': str, 'ac': int, 'image': raw-path-or-''}.
+
+    speed is display-only downstream (hover tooltip, portal token details):
+    plain numbers come back as ints ('30 ft.' -> 30), but descriptive values
+    ('16 (V8 roar)', '8 (full sail)') pass through as-is instead of being
+    zeroed out — vehicles and homebrew entries carry units/flavor in speed."""
     try:
         raw = json.loads(sm.template.stats_json or '{}') if sm.template else {}
     except (ValueError, TypeError):
         raw = {}
     raw_spd = raw.get('speed', {})
-    walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else 0
+    walk = raw_spd.get('walk', 0) if isinstance(raw_spd, dict) else (raw_spd or 0)
     if isinstance(walk, str):
-        walk = walk.replace(' ft.', '').strip()
-    try:
-        walk = int(walk)
-    except (ValueError, TypeError):
-        walk = 0
+        walk = walk.replace(' ft.', '').replace(' ft', '').strip()
+        try:
+            walk = int(walk)
+        except ValueError:
+            walk = walk or 0    # keep the descriptive string; '' -> 0 (hidden)
     return {
         'speed': walk,
         'type':  raw.get('type', ''),
@@ -267,7 +272,9 @@ def session_maps(session_id):
             .filter_by(session_id=session_id)
             .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
             .all())
-    return render_template('ttrpg/battlemap_manage.html', sess=sess, maps=maps)
+    from genre_packs import map_prompt_client_data
+    return render_template('ttrpg/battlemap_manage.html', sess=sess, maps=maps,
+                           map_prompt_data=map_prompt_client_data())
 
 
 @battlemap_bp.route('/session/<int:session_id>/new', methods=['POST'])

@@ -366,10 +366,26 @@ def homebrew_new():
             )
             db.session.add(t)
             db.session.commit()
-            flash(f'Homebrew monster "{name}" created.')
+            flash(f'Homebrew entry "{name}" created.')
             return redirect(url_for('monsters_bp.library'))
 
-    return render_template('ttrpg/monster_homebrew.html', error=error)
+    from genre_packs import icon_prompt_client_data
+    return render_template('ttrpg/monster_homebrew.html', error=error,
+                           icon_genres=icon_prompt_client_data())
+
+
+@monsters_bp.route('/homebrew/random')
+@login_required
+@dm_required
+def homebrew_random():
+    """Roll a complete homebrew entry (monster / vehicle / asset) as JSON for
+    the homebrew form to fill in."""
+    from homebrew_randgen import generate_homebrew
+    return jsonify(generate_homebrew(
+        kind=request.args.get('kind', 'monster'),
+        genre=request.args.get('genre', 'fantasy'),
+        tier=request.args.get('tier', 'standard'),
+    ))
 
 
 @monsters_bp.route('/homebrew/<int:template_id>/edit', methods=['GET', 'POST'])
@@ -429,10 +445,12 @@ def homebrew_edit(template_id):
             m.ac           = int(request.form.get('ac', 10) or 10)
             m.stats_json   = json.dumps(stats)
             db.session.commit()
-            flash(f'Homebrew monster "{name}" updated.')
+            flash(f'Homebrew entry "{name}" updated.')
             return redirect(url_for('monsters_bp.library'))
 
-    return render_template('ttrpg/monster_homebrew.html', error=error, m=m, stats=stats)
+    from genre_packs import icon_prompt_client_data
+    return render_template('ttrpg/monster_homebrew.html', error=error, m=m, stats=stats,
+                           icon_genres=icon_prompt_client_data())
 
 
 @monsters_bp.route('/homebrew/<int:template_id>/image', methods=['POST'])

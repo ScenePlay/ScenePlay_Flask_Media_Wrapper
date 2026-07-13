@@ -215,8 +215,8 @@
   <div class="col-12">
     <div class="ttrpg-card p-3">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 style="color:var(--ttrpg-accent);" class="mb-0">&#9876; Monsters</h5>
-        <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-ttrpg">Monster Library</a>
+        <h5 style="color:var(--ttrpg-accent);" class="mb-0">&#9876; Monsters &amp; Assets</h5>
+        <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-ttrpg">Monsters &amp; Assets Library</a>
       </div>
 
       {% set alive   = sess.monsters | selectattr('is_alive','eq',1) | list %}
@@ -335,7 +335,7 @@
 
       {% else %}
       <p class="text-muted small">No monsters added yet. Use the <a href="{{ url_for('monsters_bp.library') }}"
-         style="color:var(--ttrpg-accent);">Monster Library</a> to add monsters to this session.</p>
+         style="color:var(--ttrpg-accent);">Monsters &amp; Assets Library</a> to add monsters to this session.</p>
       {% endif %}
     </div>
   </div>

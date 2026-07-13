@@ -4,7 +4,7 @@
 {% set is_edit = m is defined and m %}
 {% set st = stats if stats is defined and stats else {} %}
 {% set cur_size  = (m.size if is_edit else '') or 'Medium' %}
-{% set cur_speed = (st.get('speed') or {}).get('walk', '30 ft.') %}
+{% set cur_speed = (st.get('speed') or {}).get('walk', '30') %}
 {% set A = {
   'str_val': st.get('strength', 10),    'dex_val': st.get('dexterity', 10),
   'con_val': st.get('constitution', 10),'int_val': st.get('intelligence', 10),
@@ -12,7 +12,7 @@
 } %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 style="color:var(--ttrpg-accent);">{{ 'Edit Homebrew Monster' if is_edit else 'New Homebrew Monster' }}</h3>
+  <h3 style="color:var(--ttrpg-accent);">{{ 'Edit Homebrew — Monsters &amp; Assets' if is_edit else 'New Homebrew — Monsters &amp; Assets' }}</h3>
   <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">&larr; Library</a>
 </div>
 
@@ -23,6 +23,51 @@
 <form method="POST" enctype="multipart/form-data"
       {% if is_edit %}action="{{ url_for('monsters_bp.homebrew_edit', template_id=m.template_id) }}"{% endif %}>
   <div class="row g-3">
+    <!-- What are you creating? Pure UI convenience — writes to the Type
+         field and picks sensible defaults; everything shares one table. -->
+    <div class="col-12">
+      <div class="d-flex gap-2">
+        <button type="button" id="hb-kind-monster" onclick="setHbKind('monster')"
+                class="btn btn-sm flex-grow-1"
+                style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
+          &#128058; Monster / NPC
+        </button>
+        <button type="button" id="hb-kind-vehicle" onclick="setHbKind('vehicle')"
+                class="btn btn-sm flex-grow-1"
+                style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
+          &#128674; Ship / Vehicle
+        </button>
+        <button type="button" id="hb-kind-asset" onclick="setHbKind('asset')"
+                class="btn btn-sm flex-grow-1"
+                style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
+          &#128230; Other Asset
+        </button>
+      </div>
+      <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+        <select id="hb-genre" class="form-select form-select-sm" style="width:auto;
+                background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);"
+                title="Genre flavor for the randomizer and icon prompt">
+          {% for key, gnr in icon_genres.items() %}
+          <option value="{{ key }}">{{ gnr.label }}</option>
+          {% endfor %}
+        </select>
+        <select id="hb-tier" class="form-select form-select-sm" style="width:auto;
+                background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);"
+                title="How dangerous / substantial the entry is">
+          <option value="minion">Minion (CR &frac14;&ndash;2)</option>
+          <option value="standard" selected>Standard (CR 2&ndash;6)</option>
+          <option value="elite">Elite (CR 7&ndash;11)</option>
+          <option value="boss">Boss (CR 12&ndash;17)</option>
+          <option value="legendary">Legendary (CR 18&ndash;24)</option>
+        </select>
+        <button type="button" id="hb-random-btn" class="btn btn-sm"
+                style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);"
+                onclick="randomizeHomebrew()">
+          <span class="dice-ico">&#127922;</span> Randomize
+        </button>
+      </div>
+    </div>
+
     <!-- Identity -->
     <div class="col-12">
       <div class="ttrpg-card p-3">
@@ -43,6 +88,10 @@
               {% endif %}
               <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
                      class="form-control bg-dark text-light border-secondary">
+              <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
+                      onclick="openIconPrompt()" title="Generate an AI image prompt for this token">
+                &#127748; Icon Prompt
+              </button>
             </div>
             {% if is_edit and st.get('image') %}
             <div class="form-text text-muted">Leave empty to keep the current picture.</div>
@@ -115,7 +164,7 @@
                                   ('int_val','INT'),('wis_val','WIS'),('cha_val','CHA')] %}
           <div class="col-4 col-sm-2">
             <label class="form-label small text-muted mb-1">{{ label }}</label>
-            <input type="number" name="{{ stat }}" value="{{ A[stat] }}" min="1" max="30"
+            <input type="number" name="{{ stat }}" value="{{ A[stat] }}" min="0" max="30"
                    class="form-control form-control-sm bg-dark text-light border-secondary text-center">
           </div>
           {% endfor %}
@@ -143,9 +192,236 @@
     </div>
 
     <div class="col-12 d-flex gap-2">
-      <button type="submit" class="btn btn-ttrpg">{{ 'Save Changes' if is_edit else 'Create Monster' }}</button>
+      <button type="submit" class="btn btn-ttrpg">{{ 'Save Changes' if is_edit else 'Create' }}</button>
       <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-outline-secondary">Cancel</a>
     </div>
   </div>
 </form>
+
+<!-- ── Token Icon Prompt Modal ─────────────────────────────────────────────── -->
+<div class="modal fade" id="iconPromptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content"
+         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+      <div class="modal-header" style="border-color:var(--ttrpg-accent);">
+        <h5 class="modal-title" style="color:var(--ttrpg-accent);">&#127748; Token Icon Prompt</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Top-down / Portrait toggle -->
+        <div class="d-flex gap-2 mb-3">
+          <button id="icp-topdown-btn" onclick="setIconView('topdown')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
+            &#128676; Top-Down Token <span style="opacity:.75;">(ships, vehicles, objects)</span>
+          </button>
+          <button id="icp-portrait-btn" onclick="setIconView('portrait')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
+            &#128058; Creature Portrait <span style="opacity:.75;">(monsters, NPCs)</span>
+          </button>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Genre</label>
+            <select id="icp-genre" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+              {% for key, g in icon_genres.items() %}
+              <option value="{{ key }}">{{ g.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Extra Details <span class="text-muted">(optional)</span></label>
+            <input type="text" id="icp-freetext" class="form-control form-control-sm"
+                   placeholder="e.g. three masts, red sails, kraken figurehead"
+                   style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+          </div>
+        </div>
+
+        <button class="btn btn-ttrpg btn-sm w-100 mb-3" onclick="generateIconPrompt()">&#9889; Generate Prompt</button>
+
+        <div id="icp-output-section" style="display:none;">
+          <hr style="border-color:var(--sp-border);">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="small text-muted">Paste into your image tool, then upload/paste the result as this entry's Picture.</span>
+            <button class="btn btn-sm ms-auto"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="copyIconPrompt()">&#128203; Copy</button>
+          </div>
+          <textarea id="icp-text" class="form-control" readonly
+                    style="font-family:monospace;font-size:.78rem;min-height:260px;
+                           background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                           border-color:var(--sp-border);resize:vertical;"></textarea>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="border-color:var(--ttrpg-accent);">
+        <span id="icp-copy-fb" style="font-size:.8rem;color:var(--ttrpg-accent);display:none;">Copied!</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// {key: {label, topdown: [...], portrait: [...]}} — art direction per genre
+const _ICON_GENRES = {{ icon_genres | tojson }};
+const _SIZE_SQUARES = {tiny: 1, small: 1, medium: 1, large: 2, huge: 3, gargantuan: 4};
+
+let _iconView = 'topdown';
+
+// ── Kind selector (Monster / Ship & Vehicle / Other Asset) ────────────────────
+// Writes to the Type field (unless the user typed their own), swaps the
+// hint placeholders, and picks the matching Icon Prompt framing.
+
+const _HB_KINDS = {
+  monster: { autoType: '',        typePh: 'beast, undead…',
+             notesPh: 'Describe traits, actions, reactions…', icon: 'portrait' },
+  vehicle: { autoType: 'vehicle', typePh: 'vehicle — sailing ship, war rig…',
+             notesPh: 'Describe weapons, crew, speed, cargo…', icon: 'topdown' },
+  asset:   { autoType: 'object',  typePh: 'object — siege engine, caravan, artifact…',
+             notesPh: 'Describe what it does and how it can be interacted with…', icon: 'topdown' },
+};
+let _hbKind = 'monster';
+
+function setHbKind(kind) {
+  const prev = _HB_KINDS[_hbKind], next = _HB_KINDS[kind];
+  _hbKind = kind;
+  ['monster', 'vehicle', 'asset'].forEach(k => {
+    const b = document.getElementById('hb-kind-' + k);
+    if (k === kind) { b.style.background = 'var(--ttrpg-accent)'; b.style.color = 'var(--sp-on-accent)'; b.style.border = 'none'; }
+    else { b.style.background = 'var(--ttrpg-surface)'; b.style.color = 'var(--ttrpg-text)'; b.style.border = '1px solid var(--sp-border)'; }
+  });
+  const typeEl  = document.querySelector('[name="monster_type"]');
+  const notesEl = document.querySelector('[name="notes"]');
+  // only overwrite Type when it's empty or still holds a previous auto value
+  if (!typeEl.value.trim() || typeEl.value.trim() === prev.autoType) {
+    typeEl.value = next.autoType;
+  }
+  typeEl.placeholder  = next.typePh;
+  notesEl.placeholder = next.notesPh;
+  setIconView(next.icon);
+}
+
+// Edit mode: infer the kind from the stored type
+document.addEventListener('DOMContentLoaded', () => {
+  const t = (document.querySelector('[name="monster_type"]').value || '').toLowerCase();
+  if (/vehicle|ship|boat|rig|craft|shuttle/.test(t)) setHbKind('vehicle');
+  else if (/object|asset|structure|item/.test(t))    setHbKind('asset');
+  else setHbKind('monster');
+});
+
+// ── Randomize: server rolls a full entry for the current kind/genre/tier ──────
+async function randomizeHomebrew() {
+  const btn = document.getElementById('hb-random-btn');
+  btn.disabled = true;
+  const genre = document.getElementById('hb-genre').value;
+  try {
+    const r = await fetch(`{{ url_for('monsters_bp.homebrew_random') }}?kind=${_hbKind}` +
+                          `&genre=${encodeURIComponent(genre)}` +
+                          `&tier=${document.getElementById('hb-tier').value}`);
+    const d = await r.json();
+    const set = (name, v) => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && v !== undefined && v !== null) el.value = v;
+    };
+    ['name', 'monster_type', 'size', 'alignment', 'speed', 'cr', 'xp',
+     'hp_max', 'ac', 'languages', 'notes',
+     'str_val', 'dex_val', 'con_val', 'int_val', 'wis_val', 'cha_val']
+      .forEach(f => set(f, d[f]));
+    // keep the icon-prompt genre in step so the token art matches
+    const icpGenre = document.getElementById('icp-genre');
+    if (icpGenre) icpGenre.value = genre;
+  } catch (err) {
+    console.error('Randomize failed:', err);
+  }
+  btn.disabled = false;
+}
+
+function setIconView(view) {
+  _iconView = view;
+  const td = document.getElementById('icp-topdown-btn');
+  const pt = document.getElementById('icp-portrait-btn');
+  const accent = 'var(--ttrpg-accent)', surface = 'var(--ttrpg-surface)', text = 'var(--ttrpg-text)';
+  const on  = b => { b.style.background = accent;  b.style.color = 'var(--sp-on-accent)'; b.style.border = 'none'; };
+  const off = b => { b.style.background = surface; b.style.color = text; b.style.border = '1px solid var(--sp-border)'; };
+  if (view === 'topdown') { on(td); off(pt); } else { on(pt); off(td); }
+}
+
+function openIconPrompt() {
+  document.getElementById('icp-output-section').style.display = 'none';
+  new bootstrap.Modal(document.getElementById('iconPromptModal')).show();
+}
+
+function _fv(name) {
+  const el = document.querySelector('[name="' + name + '"]');
+  return el ? el.value.trim() : '';
+}
+
+function generateIconPrompt() {
+  const name     = _fv('name') || 'the subject';
+  const type     = _fv('monster_type');
+  const size     = _fv('size') || 'Medium';
+  const notes    = _fv('notes');
+  const freetext = document.getElementById('icp-freetext').value.trim();
+  const genreKey = document.getElementById('icp-genre').value;
+  const genre    = _ICON_GENRES[genreKey] || _ICON_GENRES.fantasy;
+  const squares  = _SIZE_SQUARES[size.toLowerCase()] || 1;
+  const topdown  = _iconView === 'topdown';
+
+  const lines = [];
+  if (topdown) {
+    lines.push('Please generate a TOP-DOWN game token image for use on a TTRPG map.\n');
+  } else {
+    lines.push('Please generate a creature token portrait for use on a TTRPG map.\n');
+  }
+
+  lines.push('## SUBJECT');
+  lines.push('Name: ' + name);
+  if (type) lines.push('Type: ' + type);
+  lines.push('Size: ' + size + ' — occupies ' + squares + '×' + squares + ' grid square' + (squares > 1 ? 's' : '') + ' on the map');
+  if (genreKey !== 'fantasy') lines.push('Setting: ' + genre.label + ' — not medieval fantasy.');
+  if (notes)    lines.push('Description: ' + notes);
+  if (freetext) lines.push('Details: ' + freetext);
+  lines.push('');
+
+  lines.push('## TOKEN REQUIREMENTS (CRITICAL)');
+  if (topdown) {
+    lines.push('- Viewed from DIRECTLY ABOVE (plan view), as if seen from the sky or orbit — no isometric or side angle.');
+    lines.push('- Front / bow pointing straight toward the TOP of the image, so rotation reads naturally on a grid.');
+    lines.push('- One single subject, centered, filling about 90% of the frame.');
+    lines.push('- Plain solid dark background (or transparent if supported) — NO scenery, water, or ground texture; the map underneath provides the terrain.');
+    lines.push('- Lighting from directly overhead; at most a soft shadow directly beneath the subject.');
+  } else {
+    lines.push('- A single creature, centered, filling most of the frame — head and upper body prominent.');
+    lines.push('- Plain, softly darkened background — no scenery that will clash with the map or clutter a small token.');
+    lines.push('- Strong silhouette and clear focal face/features.');
+  }
+  lines.push('- The image must stay readable when shrunk to a small round/square token on a game grid.');
+  lines.push('- No text, numbers, labels, borders, or watermarks anywhere in the image.');
+  lines.push('');
+
+  lines.push('## ART DIRECTION');
+  (topdown ? genre.topdown : genre.portrait).forEach(f => lines.push('- ' + f));
+
+  document.getElementById('icp-text').value = lines.join('\n');
+  document.getElementById('icp-output-section').style.display = '';
+}
+
+function copyIconPrompt() {
+  const ta = document.getElementById('icp-text');
+  const fb = document.getElementById('icp-copy-fb');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => {
+      ta.removeAttribute('readonly'); ta.select();
+      try { document.execCommand('copy'); showFb(); } catch(e) {}
+      ta.setAttribute('readonly', '');
+    });
+  }
+}
+</script>
 {% endblock %}

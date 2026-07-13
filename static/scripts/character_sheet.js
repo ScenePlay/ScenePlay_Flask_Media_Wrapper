@@ -1304,7 +1304,7 @@ function _refCard(key, it) {
       const traits = (it.traits_text || '').split('\n').filter(Boolean).slice(0, 4);
       return `<div style="${base}">
         <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
-          ${it.size ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.size)} · ${it.speed} ft</span>` : ''}
+          ${it.size ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.size)} · ${it.speed}</span>` : ''}
         </div>
         ${it.ability_bonuses ? `<div style="font-size:.75rem;color:var(--ttrpg-accent);">${_escH(it.ability_bonuses)}</div>` : ''}
         ${traits.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${traits.map(t => _escH(t)).join(' · ')}</div>` : ''}

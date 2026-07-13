@@ -173,6 +173,20 @@
       </div>
       <div class="modal-body">
 
+        <!-- Battle / Travel toggle: encounter-scale grid vs large-distance travel map -->
+        <div class="d-flex gap-2 mb-2">
+          <button id="mpt-battle-btn" onclick="setMapScaleKind('battle')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
+            &#9876; Battle Map <span class="text-nowrap" style="opacity:.75;">(5-ft squares)</span>
+          </button>
+          <button id="mpt-travel-btn" onclick="setMapScaleKind('travel')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
+            &#128506; Travel Map <span class="text-nowrap" style="opacity:.75;">(world / ocean / space)</span>
+          </button>
+        </div>
+
         <!-- Static / Live toggle -->
         <div class="d-flex gap-2 mb-3">
           <button id="mpt-static-btn" onclick="setMapPromptType('static')"
@@ -190,22 +204,21 @@
         <!-- Scene options -->
         <div class="row g-2 mb-2">
           <div class="col-sm-6">
-            <label class="form-label small text-muted mb-1">Environment</label>
-            <select id="mpt-env" class="form-select form-select-sm"
+            <label class="form-label small text-muted mb-1">Genre</label>
+            <select id="mpt-genre" class="form-select form-select-sm" onchange="mapGenreChanged()"
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
-              <option value="">-- any --</option>
-              <option>Dungeon / Underground</option>
-              <option>Forest / Wilderness</option>
-              <option>Tavern / Inn</option>
-              <option>Cave / Cavern</option>
-              <option>City Street / Town</option>
-              <option>Ocean / Ship Deck</option>
-              <option>Mountain / Cliffside</option>
-              <option>Swamp / Marsh</option>
-              <option>Castle / Keep</option>
-              <option>Ancient Ruins</option>
-              <option>Hell / Abyss</option>
-              <option>Celestial / Ethereal Plane</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-muted mb-1">Environment</label>
+            <select id="mpt-env" class="form-select form-select-sm" onchange="mapEnvChanged()"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+            </select>
+          </div>
+          <div class="col-sm-6" id="mpt-scale-wrap" style="display:none;">
+            <label class="form-label small text-muted mb-1">Distance per Square</label>
+            <select id="mpt-scale" class="form-select form-select-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
             </select>
           </div>
           <div class="col-sm-6">
@@ -334,11 +347,88 @@ function toggleMapEdit(mapId) {
 
 // ── Image Prompt ──────────────────────────────────────────────────────────────
 
+// {genres: {key: {label, battle_envs, travel_envs:[{name,scale}], flavor}}, scales: [...]}
+const _MAP_GENRES = {{ map_prompt_data | tojson }};
+
 let _mapPromptType  = 'static';
+let _mapScaleKind   = 'battle';   // 'battle' (5-ft squares) | 'travel' (large distances)
 let _activeMapId    = null;
 let _activeMapName  = '';
 let _activeMapCols  = 20;
 let _activeMapRows  = 20;
+
+function _mapGenre() {
+  const sel = document.getElementById('mpt-genre');
+  return _MAP_GENRES.genres[sel && sel.value] || _MAP_GENRES.genres.fantasy;
+}
+
+function _populateMapGenres() {
+  const sel = document.getElementById('mpt-genre');
+  if (!sel || sel.options.length) return;
+  Object.entries(_MAP_GENRES.genres).forEach(([key, g]) => {
+    const o = document.createElement('option');
+    o.value = key; o.textContent = g.label;
+    sel.appendChild(o);
+  });
+}
+
+function _populateMapEnvs() {
+  const sel = document.getElementById('mpt-env');
+  const g = _mapGenre();
+  sel.innerHTML = '<option value="">-- any --</option>';
+  if (_mapScaleKind === 'travel') {
+    g.travel_envs.forEach(e => {
+      const o = document.createElement('option');
+      o.value = e.name; o.textContent = e.name; o.dataset.scale = e.scale;
+      sel.appendChild(o);
+    });
+  } else {
+    g.battle_envs.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    });
+  }
+}
+
+function _populateMapScales(preferred) {
+  const sel = document.getElementById('mpt-scale');
+  sel.innerHTML = '';
+  _MAP_GENRES.scales.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = '1 square = ' + s;
+    if (s === preferred) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function mapGenreChanged() {
+  _populateMapEnvs();
+  mapEnvChanged();
+}
+
+function mapEnvChanged() {
+  if (_mapScaleKind !== 'travel') return;
+  const sel = document.getElementById('mpt-env');
+  const opt = sel.options[sel.selectedIndex];
+  const preferred = (opt && opt.dataset.scale) ||
+                    (_mapGenre().travel_envs[0] || {}).scale || '6 miles';
+  _populateMapScales(preferred);
+}
+
+function setMapScaleKind(kind) {
+  _mapScaleKind = kind;
+  const battleBtn = document.getElementById('mpt-battle-btn');
+  const travelBtn = document.getElementById('mpt-travel-btn');
+  const scaleWrap = document.getElementById('mpt-scale-wrap');
+  const accent = 'var(--ttrpg-accent)', surface = 'var(--ttrpg-surface)', text = 'var(--ttrpg-text)';
+  const on  = b => { b.style.background = accent;  b.style.color = 'var(--sp-on-accent)'; b.style.border = 'none'; };
+  const off = b => { b.style.background = surface; b.style.color = text; b.style.border = '1px solid var(--sp-border)'; };
+  if (kind === 'travel') { on(travelBtn); off(battleBtn); scaleWrap.style.display = ''; }
+  else                   { on(battleBtn); off(travelBtn); scaleWrap.style.display = 'none'; }
+  _populateMapEnvs();
+  mapEnvChanged();
+}
 
 const _mapBgPasteUrls = {
   {% for m in maps %}
@@ -357,6 +447,11 @@ function openMapPromptModal(mapId, mapName, cols, rows) {
   _activeMapCols = parseInt(cols) || 20;
   _activeMapRows = parseInt(rows) || 20;
   _updateModalTitle();
+  _populateMapGenres();
+  if (!document.getElementById('mpt-env').options.length) {
+    _populateMapEnvs();
+    mapEnvChanged();
+  }
   document.getElementById('mpt-output-section').style.display = 'none';
   new bootstrap.Modal(document.getElementById('mapPromptModal')).show();
 }
@@ -382,14 +477,28 @@ function setMapPromptType(type) {
 function _gv(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
 function _gc(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 
+function _scaleTotal(scaleStr, squares) {
+  // '25 miles' × 20 squares → '500 miles'; '1 AU', '10,000 km' handled too.
+  const m = String(scaleStr).match(/^([\d,.]+)\s*(.+)$/);
+  if (!m) return squares + ' × (' + scaleStr + ')';
+  const n = parseFloat(m[1].replace(/,/g, ''));
+  const total = n * squares;
+  const rounded = total >= 100 ? Math.round(total) : Math.round(total * 10) / 10;
+  return rounded.toLocaleString() + ' ' + m[2];
+}
+
 function _buildMapPrompt() {
   const isLive    = _mapPromptType === 'live';
+  const isTravel  = _mapScaleKind === 'travel';
+  const genreKey  = _gv('mpt-genre') || 'fantasy';
+  const genre     = _mapGenre();
   const env       = _gv('mpt-env');
   const time      = _gv('mpt-time');
   const weather   = _gv('mpt-weather');
   const light     = _gv('mpt-light');
   const style     = _gv('mpt-style');
   const freetext  = _gv('mpt-freetext');
+  const scale     = isTravel ? (_gv('mpt-scale') || '6 miles') : '';
   const fxFire    = _gc('mpt-fx-fire');
   const fxWater   = _gc('mpt-fx-water');
   const fxFog     = _gc('mpt-fx-fog');
@@ -397,25 +506,46 @@ function _buildMapPrompt() {
 
   const lines = [];
 
-  if (isLive) {
+  if (isTravel) {
+    lines.push('Please generate a strictly TOP-DOWN ' + (isLive ? 'SEAMLESSLY LOOPING video' : 'image') +
+               ' of a large-scale TRAVEL MAP for a TTRPG — a map the party moves across over ' +
+               'days or weeks of travel, not a single encounter. Cartographic, not a floorplan.\n');
+  } else if (isLive) {
     lines.push('Please generate a SHORT, SEAMLESSLY LOOPING video clip for use as a live TTRPG battlemap background.\n');
   } else {
     lines.push('Please generate a strictly TOP-DOWN TTRPG battlemap background image. Do NOT use isometric perspective — isometric does not align with a square grid overlay.\n');
   }
 
   lines.push('## SCENE');
-  if (env)      lines.push('Environment: ' + env);
+  if (genreKey !== 'fantasy') lines.push('Setting: ' + genre.label + ' — not medieval fantasy.');
+  if (env)      lines.push((isTravel ? 'Map type: ' : 'Environment: ') + env);
   if (time)     lines.push('Time of day: ' + time);
   if (weather)  lines.push('Atmosphere: ' + weather);
   if (light)    lines.push('Lighting: ' + light);
   if (style)    lines.push('Art style: ' + style);
   if (freetext) lines.push('Additional details: ' + freetext);
-  const _widthFt  = _activeMapCols * 5;
-  const _heightFt = _activeMapRows * 5;
-  lines.push('Grid size: ' + _activeMapCols + ' squares wide × ' + _activeMapRows + ' squares tall (width × height)');
-  lines.push('Physical dimensions: ' + _widthFt + ' ft wide × ' + _heightFt + ' ft tall (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m)');
-  lines.push('Scale: 1 square = 5 ft (≈ 1.5 m) — the floor space occupied by one standing human or Medium creature');
+
+  if (isTravel) {
+    lines.push('Grid size: ' + _activeMapCols + ' squares wide × ' + _activeMapRows + ' squares tall (width × height)');
+    lines.push('Scale: 1 square = ' + scale);
+    lines.push('Total extent: about ' + _scaleTotal(scale, _activeMapCols) + ' wide × ' +
+               _scaleTotal(scale, _activeMapRows) + ' tall');
+  } else {
+    const _widthFt  = _activeMapCols * 5;
+    const _heightFt = _activeMapRows * 5;
+    lines.push('Grid size: ' + _activeMapCols + ' squares wide × ' + _activeMapRows + ' squares tall (width × height)');
+    lines.push('Physical dimensions: ' + _widthFt + ' ft wide × ' + _heightFt + ' ft tall (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m)');
+    lines.push('Scale: 1 square = 5 ft (≈ 1.5 m) — the floor space occupied by one standing human or Medium creature');
+  }
   lines.push('');
+
+  // Genre flavor lines are cartographic art direction — travel maps only
+  // (battle maps get their genre from the Setting line + environment).
+  if (isTravel && genre.flavor && genre.flavor.length) {
+    lines.push('## ART DIRECTION');
+    genre.flavor.forEach(f => lines.push('- ' + f));
+    lines.push('');
+  }
 
   if (isLive) {
     const fxList = [];
@@ -425,8 +555,13 @@ function _buildMapPrompt() {
     if (fxWeather) fxList.push('weather and magic (falling rain/snow, glowing particles, arcane effects)');
 
     lines.push('## ANIMATION RULES (CRITICAL)');
-    lines.push('- The main terrain, walls, floors, furniture, and structures must be COMPLETELY STATIC — zero movement.');
-    lines.push('- Only the following elements should animate: ' + (fxList.length ? fxList.join(', ') : 'subtle ambient motion only') + '.');
+    if (isTravel) {
+      lines.push('- The landmasses, terrain, and all cartographic linework must be COMPLETELY STATIC — zero movement.');
+      lines.push('- Only subtle ambient elements should animate: ' + (fxList.length ? fxList.join(', ') : 'drifting clouds, shimmering water, twinkling stars') + '.');
+    } else {
+      lines.push('- The main terrain, walls, floors, furniture, and structures must be COMPLETELY STATIC — zero movement.');
+      lines.push('- Only the following elements should animate: ' + (fxList.length ? fxList.join(', ') : 'subtle ambient motion only') + '.');
+    }
     lines.push('- The animated elements must look physically realistic — natural fluid motion, not cartoon.');
     lines.push('');
     lines.push('## VIDEO TECHNICAL REQUIREMENTS (CRITICAL)');
@@ -437,34 +572,63 @@ function _buildMapPrompt() {
     lines.push('');
   } else {
     lines.push('## IMAGE TECHNICAL REQUIREMENTS');
-    lines.push('- Perspective: strictly top-down (birds-eye) overhead view — NO isometric angle. The image must align correctly when a square grid is overlaid.');
-    lines.push('- The image should tile or extend naturally so it can be cropped/scaled to any grid size.');
-    lines.push('- Rich detail in textures (stone, wood, earth, water) but NOT so busy that it obscures tokens placed on top.');
-    lines.push('- No characters, creatures, or figures — empty scene only.');
+    if (isTravel) {
+      lines.push('- Perspective: strictly top-down cartographic view — the map must align correctly when a square grid is overlaid.');
+      lines.push('- Terrain and features must stay readable underneath a grid overlay and party tokens.');
+      lines.push('- No characters, creatures, vehicles, or figures on the map itself — the party\'s position is shown with a token placed on top.');
+      lines.push('- No readable place-name text: AI-generated lettering comes out as gibberish. Mark settlements, stations, and landmarks with ICONS only.');
+    } else {
+      lines.push('- Perspective: strictly top-down (birds-eye) overhead view — NO isometric angle. The image must align correctly when a square grid is overlaid.');
+      lines.push('- The image should tile or extend naturally so it can be cropped/scaled to any grid size.');
+      lines.push('- Rich detail in textures (stone, wood, earth, water) but NOT so busy that it obscures tokens placed on top.');
+      lines.push('- No characters, creatures, or figures — empty scene only.');
+    }
     lines.push('');
   }
 
-  lines.push('## SCALE CALIBRATION — assess before rendering');
-  lines.push('The total map is ' + _widthFt + ' ft × ' + _heightFt + ' ft (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m). Every element must be correctly sized against the 5-ft square:');
-  lines.push('  • 1 square (5 ft / 1.5 m) = floor space of one standing person — your primary size anchor');
-  lines.push('  • Standard door: ~3 ft wide (clearly less than 1 square)');
-  lines.push('  • Hallway or corridor: 5–10 ft wide (1–2 squares)');
-  lines.push('  • Barrel or crate: 2–3 ft across (well under half a square)');
-  lines.push('  • Dining table seating 6 people: ~3 ft × 6 ft (roughly 1 × 1 squares)');
-  lines.push('  • Large horse or wagon: ~10 ft long (2 squares)');
-  lines.push('  • A pillar or tree trunk: 1–2 ft wide (a small fraction of 1 square)');
-  lines.push('Before finalising, verify: do doorways look like a person can walk through? Do furniture pieces look human-scale? If any element is oversized or undersized relative to these anchors, correct it.');
-  lines.push('');
-  lines.push('## COMPOSITION');
-  lines.push('- No text, watermarks, or UI elements in the image — except for the scale legend described below.');
-  lines.push('- Fill the entire frame — no borders, vignettes, or letterboxing.');
-  lines.push('- Optimised for use as a game board background that players will place miniature tokens on top of.');
-  lines.push('');
-  lines.push('## SCALE LEGEND (REQUIRED)');
-  lines.push('- In the TOP-LEFT corner of the image, draw a small, unobtrusive scale bar labelled "5 ft".');
-  lines.push('- The bar should span exactly one grid square in width, representing 5 feet of in-game movement.');
-  lines.push('- Style the legend to blend with the scene (e.g. engraved stone, aged parchment, subtle glow) — do not use a plain white box.');
-  lines.push('- Keep it small enough not to obstruct gameplay but legible at normal viewing size.');
+  if (isTravel) {
+    lines.push('## SCALE CALIBRATION — assess before rendering');
+    lines.push('One grid square covers ' + scale + '. Size every feature for that scale:');
+    lines.push('  • Settlements, stations, and landmarks are ICONS at this scale — never floorplans or individual buildings.');
+    lines.push('  • Roads, rivers, currents, or travel routes should flow across many squares.');
+    lines.push('  • Terrain reads as regions (a forest, a sea, a nebula), not as individual trees, waves, or stars.');
+    lines.push('Before finalising, verify: could a party token move square by square across this map for days of travel? If any feature looks encounter-scale (a door, a table, a single room), remove it.');
+    lines.push('');
+    lines.push('## COMPOSITION');
+    lines.push('- No text, watermarks, or UI elements — except the scale legend described below. Landmarks are icons only.');
+    lines.push('- Fill the entire frame — no borders, vignettes, or letterboxing (a thin in-style map border is acceptable).');
+    lines.push('- Optimised for use as a game board the party\'s travel token moves across.');
+    lines.push('');
+    lines.push('## SCALE LEGEND (REQUIRED)');
+    lines.push('- In the TOP-LEFT corner, draw a small, unobtrusive scale bar labelled "' + scale + '".');
+    lines.push('- The bar should span exactly one grid square in width, representing ' + scale + ' of travel.');
+    lines.push('- Style the legend to match the map (aged parchment cartouche, holographic chart element, etc.) — not a plain white box.');
+    lines.push('- Keep it small enough not to obstruct play but legible at normal viewing size.');
+  } else {
+    const _widthFt  = _activeMapCols * 5;
+    const _heightFt = _activeMapRows * 5;
+    lines.push('## SCALE CALIBRATION — assess before rendering');
+    lines.push('The total map is ' + _widthFt + ' ft × ' + _heightFt + ' ft (' + Math.round(_widthFt / 3.281) + ' m × ' + Math.round(_heightFt / 3.281) + ' m). Every element must be correctly sized against the 5-ft square:');
+    lines.push('  • 1 square (5 ft / 1.5 m) = floor space of one standing person — your primary size anchor');
+    lines.push('  • Standard door: ~3 ft wide (clearly less than 1 square)');
+    lines.push('  • Hallway or corridor: 5–10 ft wide (1–2 squares)');
+    lines.push('  • Barrel or crate: 2–3 ft across (well under half a square)');
+    lines.push('  • Dining table seating 6 people: ~3 ft × 6 ft (roughly 1 × 1 squares)');
+    lines.push('  • Large horse or wagon: ~10 ft long (2 squares)');
+    lines.push('  • A pillar or tree trunk: 1–2 ft wide (a small fraction of 1 square)');
+    lines.push('Before finalising, verify: do doorways look like a person can walk through? Do furniture pieces look human-scale? If any element is oversized or undersized relative to these anchors, correct it.');
+    lines.push('');
+    lines.push('## COMPOSITION');
+    lines.push('- No text, watermarks, or UI elements in the image — except for the scale legend described below.');
+    lines.push('- Fill the entire frame — no borders, vignettes, or letterboxing.');
+    lines.push('- Optimised for use as a game board background that players will place miniature tokens on top of.');
+    lines.push('');
+    lines.push('## SCALE LEGEND (REQUIRED)');
+    lines.push('- In the TOP-LEFT corner of the image, draw a small, unobtrusive scale bar labelled "5 ft".');
+    lines.push('- The bar should span exactly one grid square in width, representing 5 feet of in-game movement.');
+    lines.push('- Style the legend to blend with the scene (e.g. engraved stone, aged parchment, subtle glow) — do not use a plain white box.');
+    lines.push('- Keep it small enough not to obstruct gameplay but legible at normal viewing size.');
+  }
 
   return lines.join('\n');
 }

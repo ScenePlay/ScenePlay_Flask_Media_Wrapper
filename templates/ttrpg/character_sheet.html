@@ -220,7 +220,7 @@
           {% if race_info %}
           <span data-bs-toggle="tooltip" data-bs-placement="bottom"
                 data-bs-custom-class="feat-tooltip"
-                title="{% if race_info.ability_bonuses %}{{ race_info.ability_bonuses }}{% endif %}{% if race_info.traits_text %} &#10; Traits: {{ race_info.traits_text.replace('\n', ', ') }}{% endif %}{% if race_info.speed %} &#10; Speed: {{ race_info.speed }} ft{% endif %}"
+                title="{% if race_info.ability_bonuses %}{{ race_info.ability_bonuses }}{% endif %}{% if race_info.traits_text %} &#10; Traits: {{ race_info.traits_text.replace('\n', ', ') }}{% endif %}{% if race_info.speed %} &#10; Speed: {{ race_info.speed }}{% endif %}"
                 style="cursor:help;color:var(--ttrpg-accent);margin-left:3px;">&#9432;</span>
           {% endif %}
           {% endif %}
@@ -255,7 +255,7 @@
         <!-- Quick stats row -->
         <div class="d-flex gap-3 mt-2 flex-wrap small">
           <span>AC <strong>{{ char.ac }}</strong></span>
-          <span>Speed <strong>{{ char.speed }}</strong> ft</span>
+          <span>Speed <strong>{{ char.speed }}</strong></span>
           <span>Init <strong>{{ '%+d' % char.initiative_bonus }}</strong></span>
           <span>Pass. Perc. <strong>{{ char.passive_perception }}</strong></span>
         </div>
