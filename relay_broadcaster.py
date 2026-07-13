@@ -453,6 +453,12 @@ def broadcast_wled(wled_rows):
             patterns.append({
                 'effect':     name,
                 'palette':    pallette.palletteName if pallette else None,
+                # Firmware indices too (ef_ID/pa_ID are 1-based over the DM
+                # device's 0-based arrays): the relay's MQTT bridge needs
+                # numeric IDs — WLED's JSON API can't resolve names, and the
+                # relay can't reach a player's device to build a catalog.
+                'effect_id':  effect.ef_ID - 1,
+                'palette_id': (pallette.pa_ID - 1) if pallette else None,
                 'colors':     [_color(row.color1), _color(row.color2), _color(row.color3)],
                 'speed':      row.speed,
                 'brightness': row.brightness,
