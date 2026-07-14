@@ -133,19 +133,19 @@
     background: var(--ttrpg-primary);
     border: 1px solid var(--ttrpg-accent);
     border-radius: 8px;
-    padding: 10px 12px;
-    min-width: 200px;
-    max-width: 300px;
+    padding: 12px 14px;
+    min-width: 250px;
+    max-width: 360px;
     pointer-events: none;
-    font-size: .8rem;
+    font-size: .9rem;
     color: var(--ttrpg-text);
     box-shadow: 0 4px 20px rgba(0,0,0,.7);
   }
   #tt-layout      { display: flex; gap: 10px; align-items: flex-start; }
-  #tt-portrait    { width: 114px; height: 114px; object-fit: cover; border-radius: 6px;
+  #tt-portrait    { width: 132px; height: 132px; object-fit: cover; border-radius: 6px;
                     border: 2px solid var(--ttrpg-accent); flex-shrink: 0; display: none; }
   #tt-body        { flex: 1; min-width: 0; }
-  #tt-hp-bar-wrap { height: 5px; background: rgba(0,0,0,0.25); border-radius: 3px; margin-bottom: 6px; }
+  #tt-hp-bar-wrap { height: 7px; background: rgba(0,0,0,0.25); border-radius: 3px; margin-bottom: 7px; }
   #tt-hp-bar      { height: 100%; border-radius: 3px; transition: width .3s; }
 
   .token-dead {
@@ -824,15 +824,15 @@
   <div id="tt-layout">
     <img id="tt-portrait" alt="">
     <div id="tt-body">
-      <div id="tt-name" style="font-weight:bold;color:var(--ttrpg-accent);margin-bottom:4px;font-size:.85rem;"></div>
-      <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:3px;">
-        <span id="tt-hp"></span>
-        <span id="tt-hp-pct" style="color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);"></span>
+      <div id="tt-name" style="font-weight:bold;color:var(--ttrpg-accent);margin-bottom:5px;font-size:1rem;"></div>
+      <div style="display:flex;justify-content:space-between;gap:16px;font-size:.88rem;margin-bottom:4px;">
+        <span id="tt-hp" style="font-weight:600;"></span>
+        <span id="tt-hp-pct" style="padding:1px 7px;border-radius:9px;font-size:.72rem;align-self:center;border:1px solid color-mix(in srgb,var(--ttrpg-text) 30%,transparent);color:color-mix(in srgb,var(--ttrpg-text) 75%,transparent);"></span>
       </div>
       <div id="tt-hp-bar-wrap"><div id="tt-hp-bar"></div></div>
-      <div id="tt-speed" style="font-size:.73rem;color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);margin-bottom:3px;"></div>
+      <div id="tt-speed" style="font-size:.82rem;color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);margin-bottom:4px;"></div>
       <div id="tt-conditions" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;"></div>
-      <div id="tt-skills" style="color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);font-size:.73rem;line-height:1.7;"></div>
+      <div id="tt-skills" style="color:color-mix(in srgb,var(--ttrpg-text) 65%,transparent);font-size:.8rem;line-height:1.7;"></div>
     </div>
   </div>
 </div>
