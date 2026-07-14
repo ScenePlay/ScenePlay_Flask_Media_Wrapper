@@ -80,6 +80,16 @@ def main():
             flash(f"Nightly backup {'enabled' if enable else 'disabled'}.")
             return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
+            # Rebooting the box is DM-only: anyone on the LAN can reach this
+            # page, and a mid-session reboot kills music, maps, and the relay.
+            from flask_login import current_user
+            from models.user import tblUsers
+            if not (current_user.is_authenticated and current_user.is_dm()):
+                if tblUsers.query.first() is None:
+                    flash('Restarting the computer requires a DM account — create one first.')
+                    return redirect(url_for('auth.setup'))
+                flash('Restarting the computer requires a DM login.')
+                return redirect(url_for('auth.login', next=url_for('ut.main')))
             # Show the wait-for-reboot page FIRST, then reboot: the response
             # (and the page itself, fully self-contained) must reach the
             # browser before the network drops. It polls /api/server-info and

@@ -128,7 +128,9 @@
                 <form method="post" action="{{ url_for('ut.main') }}">
                     <div style="border: 3px solid black;">
                     <h3>This Server</h3>
-                    <input type="submit" name="submit" value="Restart Computer" onclick="return confirm('Are you sure you want to restart the computer?');"/>
+                    <input type="submit" name="submit" value="Restart Computer"
+                           title="Requires a DM login"
+                           onclick="return confirm('Are you sure you want to restart the computer? (Requires a DM login.)');"/>
                     <br />
                     <br />
                     </div>
