@@ -135,6 +135,8 @@
           <input type="file" name="image_file" accept="image/*"
                  class="form-control form-control-sm" style="max-width:260px;"
                  onchange="previewImg(this, 'add-armor-preview')">
+          <button type="button" class="btn btn-sm btn-outline-secondary"
+                  onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
           <span class="small text-muted">or URL:</span>
           <input type="text" name="image_url" class="form-control form-control-sm"
                  placeholder="https://…" style="max-width:260px;">
@@ -366,6 +368,8 @@
                   <input type="file" name="image_file" accept="image/*"
                          class="form-control form-control-sm" style="max-width:260px;"
                          onchange="previewImg(this, 'edit-armor-preview-{{ a.armor_lib_id }}')">
+                  <button type="button" class="btn btn-sm btn-outline-secondary"
+                          onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
                   <span class="small text-muted">or URL:</span>
                   <input type="text" name="image_url" value="{{ a.image_url }}"
                          class="form-control form-control-sm"
@@ -415,6 +419,7 @@
 </div>
 
 {% block scripts %}
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
 <script>
 function toggleAddForm() {
   const f = document.getElementById('add-armor-form');

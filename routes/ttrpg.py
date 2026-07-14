@@ -103,10 +103,24 @@ def dashboard():
     sessions  = tblSessions.query.order_by(tblSessions.created_at.desc()).all()
     characters = tblCharacters.query.filter_by(active=1).order_by(tblCharacters.name).all()
     active_session = tblSessions.query.filter_by(status='active').first()
+
+    # Campaign -> every character who has been in any of its sessions' parties
+    # (comma-wrapped id strings for the dashboard's client-side filtering).
+    camp_chars = {}
+    for cid, chid in (db.session.query(tblSessions.campaign_id, tblSessionParty.character_id)
+                      .join(tblSessionParty,
+                            tblSessionParty.session_id == tblSessions.session_id)
+                      .filter(tblSessions.campaign_id.isnot(None))
+                      .distinct().all()):
+        camp_chars.setdefault(cid, set()).add(chid)
+    campaign_char_ids = {cid: ',' + ','.join(str(i) for i in sorted(ids)) + ','
+                         for cid, ids in camp_chars.items()}
+
     return render_template('ttrpg/dashboard.html',
                            campaigns=campaigns,
                            sessions=sessions,
                            characters=characters,
+                           campaign_char_ids=campaign_char_ids,
                            active_session=active_session)
 
 
@@ -198,6 +212,19 @@ def character_new():
             db.session.add(char)
             db.session.flush()  # get character_id before portrait save
 
+            # Optional: drop the new character straight into a session's party.
+            # DM only — party management is a DM concern everywhere else.
+            added_to_session = None
+            add_sid = request.form.get('add_session_id', '').strip()
+            if add_sid.isdigit() and current_user.is_dm():
+                sess = db.session.get(tblSessions, int(add_sid))
+                if sess and sess.status in ('planning', 'active'):
+                    db.session.add(tblSessionParty(
+                        session_id=sess.session_id,
+                        character_id=char.character_id,
+                        joined_at=_now()))
+                    added_to_session = sess
+
             # Personality/ideal/bond/flaw from the randomizer -> first note
             traits_note = request.form.get('traits_note', '').strip()
             if traits_note:
@@ -216,12 +243,23 @@ def character_new():
                 char.portrait_path = filename
 
             db.session.commit()
+            if added_to_session:
+                # Party changed — mirror it to the relay (no-op unless the
+                # active session is the one that gained the character).
+                relay_broadcaster.push_all_characters()
+                flash(f'"{char.name}" added to session '
+                      f'#{added_to_session.session_number} {added_to_session.title}.')
             return redirect(url_for('ttrpg.character_sheet', character_id=char.character_id))
 
     from genre_packs import genre_labels, client_data
+    open_sessions = (tblSessions.query
+                     .filter(tblSessions.status.in_(['planning', 'active']))
+                     .order_by(tblSessions.created_at.desc())
+                     .all()) if current_user.is_dm() else []
     return render_template('ttrpg/character_new.html', error=error,
                            genre_options=genre_labels(),
-                           genre_client_data=client_data())
+                           genre_client_data=client_data(),
+                           open_sessions=open_sessions)
 
 
 # ── Class progression (synced from the D&D API's class level tables) ──────────

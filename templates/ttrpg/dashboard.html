@@ -30,7 +30,8 @@
                 <tbody>
                     {% for c in campaigns %}
                     <tr class="campaign-row" data-campaign-id="{{ c.campaign_id }}"
-                        style="cursor:pointer;" title="Click to filter sessions">
+                        data-char-ids="{{ campaign_char_ids.get(c.campaign_id, ',') }}"
+                        style="cursor:pointer;" title="Click to see this campaign's sessions and characters">
                         <td>{{ c.campaign_name }}</td>
                         <td>
                             {% if c.active %}
@@ -60,36 +61,43 @@
             <div class="row g-2">
                 {% for char in characters %}
                 <div class="col-sm-6 col-lg-4">
-                    <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
-                       class="text-decoration-none">
-                        <div class="ttrpg-card p-2 d-flex align-items-center gap-2" style="border-color: var(--sp-border);">
-                            {% if char.portrait_path %}
-                            <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
-                                 style="width:40px;height:40px;object-fit:cover;border-radius:50%;" alt="">
-                            {% else %}
-                            <div style="width:40px;height:40px;border-radius:50%;background:var(--ttrpg-primary);
-                                        display:flex;align-items:center;justify-content:center;
-                                        font-size:1.2rem;color:var(--ttrpg-accent);">
-                                &#9876;
-                            </div>
-                            {% endif %}
-                            <div style="min-width:0;">
-                                <div class="fw-bold text-truncate" style="color:var(--ttrpg-accent);">{{ char.name }}</div>
-                                <div class="small text-muted text-truncate">
-                                    Lv{{ char.level }} {{ char.char_class or '—' }}
-                                    &bull; {{ char.user.display_name }}
-                                </div>
-                                <!-- HP bar -->
-                                <div class="progress mt-1" style="height:6px;background:var(--sp-border);">
-                                    <div class="progress-bar"
-                                         style="width:{{ char.hp_pct() }}%;
-                                                background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
-                                    </div>
-                                </div>
-                                <div class="small text-muted">HP {{ char.hp_current }}/{{ char.hp_max }}</div>
-                            </div>
+                    <!-- Card click filters the sessions list to this character
+                         (same pattern as clicking a campaign); the NAME is the
+                         link to the sheet. -->
+                    <div class="ttrpg-card p-2 d-flex align-items-center gap-2 char-card"
+                         data-character-id="{{ char.character_id }}"
+                         style="border-color: var(--sp-border); cursor:pointer;"
+                         title="Click to show this character's sessions">
+                        {% if char.portrait_path %}
+                        <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
+                             style="width:40px;height:40px;object-fit:cover;border-radius:50%;" alt="">
+                        {% else %}
+                        <div style="width:40px;height:40px;border-radius:50%;background:var(--ttrpg-primary);
+                                    display:flex;align-items:center;justify-content:center;
+                                    font-size:1.2rem;color:var(--ttrpg-accent);">
+                            &#9876;
                         </div>
-                    </a>
+                        {% endif %}
+                        <div style="min-width:0;">
+                            <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
+                               class="fw-bold text-truncate d-block text-decoration-none"
+                               style="color:var(--ttrpg-accent);"
+                               title="Open character sheet"
+                               onclick="event.stopPropagation();">{{ char.name }}</a>
+                            <div class="small text-muted text-truncate">
+                                Lv{{ char.level }} {{ char.char_class or '—' }}
+                                &bull; {{ char.user.display_name }}
+                            </div>
+                            <!-- HP bar -->
+                            <div class="progress mt-1" style="height:6px;background:var(--sp-border);">
+                                <div class="progress-bar"
+                                     style="width:{{ char.hp_pct() }}%;
+                                            background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};">
+                                </div>
+                            </div>
+                            <div class="small text-muted">HP {{ char.hp_current }}/{{ char.hp_max }}</div>
+                        </div>
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -124,7 +132,10 @@
                 </thead>
                 <tbody>
                     {% for s in sessions %}
-                    <tr class="session-row" data-campaign-id="{{ s.campaign_id or '' }}">
+                    <tr class="session-row" data-campaign-id="{{ s.campaign_id or '' }}"
+                        data-char-ids=",{{ s.party | map(attribute='character_id') | join(',') }},"
+                        data-session-title="#{{ s.session_number }} {{ s.title }}"
+                        style="cursor:pointer;" title="Click to see this session's characters">
                         <td>{{ s.session_number }}</td>
                         <td>{{ s.title }}</td>
                         <td>{{ s.campaign.campaign_name if s.campaign else '—' }}</td>
@@ -140,7 +151,8 @@
                         </td>
                         <td>
                             <a href="{{ url_for('ttrpg.session_detail', session_id=s.session_id) }}"
-                               class="btn btn-sm btn-outline-secondary">Open</a>
+                               class="btn btn-sm btn-outline-secondary"
+                               onclick="event.stopPropagation();">Open</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -156,56 +168,84 @@
 {% block scripts %}
 <script>
 (function() {
-  let activeCampaignId = null;
+  // ONE selection at a time — clicking a campaign, session, or character
+  // replaces the previous selection; clicking the active one clears it.
+  //   campaign  -> sessions table filters to it, non-cast characters dim
+  //   session   -> its row highlights, non-party characters dim
+  //   character -> sessions table filters to their sessions
+  let activeKind = null;   // 'campaign' | 'session' | 'character'
+  let activeId   = null;
 
-  document.querySelectorAll('.campaign-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const cid = row.dataset.campaignId;
+  function highlight(el, on) {
+    el.style.background = on ? 'color-mix(in srgb, var(--sp-accent) 18%, transparent)' : '';
+    el.style.outline    = on ? '1px solid var(--ttrpg-accent)' : '';
+  }
 
-      if (activeCampaignId === cid) {
-        clearFilter();
-        return;
-      }
-
-      activeCampaignId = cid;
-      const name = row.querySelector('td').textContent.trim();
-
-      // Highlight selected campaign row
-      document.querySelectorAll('.campaign-row').forEach(r => {
-        r.style.background = '';
-        r.style.outline = '';
-      });
-      row.style.background = 'color-mix(in srgb, var(--sp-accent) 18%, transparent)';
-      row.style.outline = '1px solid var(--ttrpg-accent)';
-
-      // Filter sessions
-      document.querySelectorAll('.session-row').forEach(sr => {
-        sr.style.display = sr.dataset.campaignId === cid ? '' : 'none';
-      });
-
-      // Show filter label (click × to clear)
-      const lbl = document.getElementById('campaignFilterLabel');
-      lbl.textContent = name + '  ×';
-      lbl.style.display = '';
-      lbl.style.cursor = 'pointer';
-      lbl.title = 'Click to clear filter';
-      lbl.onclick = clearFilter;
+  // Dim character cards NOT in the comma-wrapped id list (null = undim all).
+  function dimChars(matchIds) {
+    document.querySelectorAll('.char-card').forEach(c => {
+      const hit = !matchIds || matchIds.includes(',' + c.dataset.characterId + ',');
+      c.style.opacity = hit ? '' : '0.3';
     });
-  });
+  }
 
   function clearFilter() {
-    activeCampaignId = null;
-    document.querySelectorAll('.campaign-row').forEach(r => {
-      r.style.background = '';
-      r.style.outline = '';
-    });
-    document.querySelectorAll('.session-row').forEach(sr => {
-      sr.style.display = '';
-    });
+    activeKind = activeId = null;
+    document.querySelectorAll('.campaign-row, .session-row, .char-card')
+      .forEach(el => highlight(el, false));
+    document.querySelectorAll('.session-row').forEach(sr => { sr.style.display = ''; });
+    dimChars(null);
     const lbl = document.getElementById('campaignFilterLabel');
     lbl.style.display = 'none';
     lbl.onclick = null;
   }
+
+  function select(kind, id, name, el, sessionMatchFn, charIds) {
+    if (activeKind === kind && activeId === id) { clearFilter(); return; }
+    clearFilter();
+    activeKind = kind; activeId = id;
+    highlight(el, true);
+    if (sessionMatchFn) {
+      document.querySelectorAll('.session-row').forEach(sr => {
+        sr.style.display = sessionMatchFn(sr) ? '' : 'none';
+      });
+    }
+    dimChars(charIds || null);
+    const lbl = document.getElementById('campaignFilterLabel');
+    lbl.textContent = name + '  ×';
+    lbl.style.display = '';
+    lbl.style.cursor = 'pointer';
+    lbl.title = 'Click to clear filter';
+    lbl.onclick = clearFilter;
+  }
+
+  document.querySelectorAll('.campaign-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const cid = row.dataset.campaignId;
+      select('campaign', cid, row.querySelector('td').textContent.trim(), row,
+             sr => sr.dataset.campaignId === cid,
+             row.dataset.charIds);
+    });
+  });
+
+  document.querySelectorAll('.session-row').forEach(row => {
+    row.addEventListener('click', () => {
+      select('session', row.dataset.sessionTitle, row.dataset.sessionTitle, row,
+             null,                       // session list stays fully visible
+             row.dataset.charIds);
+    });
+  });
+
+  document.querySelectorAll('.char-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const chid = card.dataset.characterId;
+      const name = card.querySelector('a').textContent.trim();
+      // data-char-ids is comma-wrapped (",3,7,") so ",3," can't match id 13
+      select('character', chid, name, card,
+             sr => (sr.dataset.charIds || '').includes(',' + chid + ','),
+             null);
+    });
+  });
 })();
 </script>
 {% endblock %}

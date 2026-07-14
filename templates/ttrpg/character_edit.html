@@ -71,6 +71,8 @@
             <input type="file" name="portrait"
                    class="form-control"
                    accept="image/png,image/jpeg,image/gif,image/webp">
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                    onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
             {% if char.portrait_path %}
             <div class="mt-1">
               <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"
@@ -162,6 +164,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
 <script>
 const _editLibUrls = {
   'class': "{{ url_for('reference_bp.classes_search') }}",

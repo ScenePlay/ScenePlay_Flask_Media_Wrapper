@@ -105,6 +105,20 @@
               &#127748; Image Prompt
             </button>
           </div>
+          {% if open_sessions %}
+          <div class="col-sm-3">
+            <label class="form-label">Add to Session</label>
+            <select name="add_session_id" class="form-select bg-dark text-light border-secondary">
+              <option value="">&mdash; none &mdash;</option>
+              {% for s in open_sessions %}
+              <option value="{{ s.session_id }}">
+                {{ s.title }}{% if s.status == 'active' %} (active){% endif %}
+              </option>
+              {% endfor %}
+            </select>
+            <div class="form-text text-muted">Joins the party on create.</div>
+          </div>
+          {% endif %}
         </div>
 
         <!-- Combat stats -->

@@ -160,6 +160,8 @@
         <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
           <input type="file" id="hb-img-file" accept="image/png,image/jpeg,image/gif,image/webp"
                  class="form-control form-control-sm bg-dark text-light border-secondary" style="max-width:240px;">
+          <button type="button" class="btn btn-outline-secondary btn-sm"
+                  onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadMonsterImage()">Set Picture</button>
           <a id="homebrew-edit-link" href="#" class="btn btn-outline-secondary btn-sm">&#9998; Edit</a>
           <span id="hb-img-msg" class="small text-muted"></span>
@@ -179,6 +181,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
 <script>
 let selectedTemplateId = null;
 let searchTimer = null;

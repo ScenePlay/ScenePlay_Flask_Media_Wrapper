@@ -4,6 +4,12 @@ server {
 	listen [::]:80 default_server;
 
 	server_name _;
+
+	# No upload size cap (nginx defaults to 1m -> "413 Request Entity Too
+	# Large"): battlemap videos, AI-generated art, and backup-restore zips
+	# all exceed 1m routinely. LAN-only app, so unlimited is fine here.
+	client_max_body_size 0;
+
 	location / {
              proxy_pass http://127.0.0.1:8086;
              proxy_set_header Host $host;

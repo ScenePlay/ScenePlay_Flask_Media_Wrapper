@@ -89,6 +89,8 @@
               <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
                      class="form-control bg-dark text-light border-secondary">
               <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
+                      onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
                       onclick="openIconPrompt()" title="Generate an AI image prompt for this token">
                 &#127748; Icon Prompt
               </button>
@@ -266,6 +268,7 @@
   </div>
 </div>
 
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
 <script>
 // {key: {label, topdown: [...], portrait: [...]}} — art direction per genre
 const _ICON_GENRES = {{ icon_genres | tojson }};
