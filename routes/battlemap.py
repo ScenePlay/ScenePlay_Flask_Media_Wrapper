@@ -94,10 +94,19 @@ def _monster_stats(sm):
             walk = int(walk)
         except ValueError:
             walk = walk or 0    # keep the descriptive string; '' -> 0 (hidden)
+    # SRD stats_json stores armor_class as a list of dicts; homebrew stores a
+    # plain int. Normalize, falling back to the template's ac column.
+    ac = raw.get('armor_class', 0)
+    if isinstance(ac, list):
+        ac = ac[0].get('value', 0) if ac and isinstance(ac[0], dict) else 0
+    if not isinstance(ac, int):
+        ac = 0
+    if not ac and sm.template:
+        ac = sm.template.ac or 0
     return {
         'speed': walk,
         'type':  raw.get('type', ''),
-        'ac':    raw.get('armor_class', 0),
+        'ac':    ac,
         'image': raw.get('image') or '',
     }
 
@@ -611,6 +620,7 @@ def map_state(map_id):
                 'conditions':  json.loads(sm.conditions or '[]'),
                 'skills':      [],
                 'speed':       stats['speed'],
+                'ac':          stats['ac'],
             })
         elif t.entity_type == 'player':
             char = chars.get(t.entity_id)
@@ -636,6 +646,7 @@ def map_state(map_id):
                 'skills':      [{'name': s.skill_name, 'bonus': s.bonus, 'proficient': bool(s.proficient)}
                                 for s in sorted(char.skills, key=lambda x: x.order_by)],
                 'speed':       char.speed,
+                'ac':          char.ac,
                 'user_id':     char.user_id,
             })
 

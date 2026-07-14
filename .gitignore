@@ -168,9 +168,11 @@ static/uploads/armor/
 static/uploads/portraits/
 static/uploads/battlemaps/
 static/uploads/weapons/
+static/uploads/monsters/
 yt-dlp/
 fileHold/
 #Files
 ScenePlay.db
+app.db
 backups/
 password_recovery/

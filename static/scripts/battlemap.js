@@ -50,8 +50,10 @@ function showTooltip(e, tok) {
   bar.style.width      = tok.hp_pct + '%';
   bar.style.background = tok.hp_pct > 50 ? '#28a745' : tok.hp_pct > 20 ? '#ffc107' : '#dc3545';
 
-  document.getElementById('tt-speed').textContent =
-    tok.speed ? `Speed: ${tok.speed}` : '';
+  const statBits = [];
+  if (tok.ac)    statBits.push(`AC ${tok.ac}`);
+  if (tok.speed) statBits.push(`Speed: ${tok.speed}`);
+  document.getElementById('tt-speed').textContent = statBits.join('  ·  ');
 
   const condEl = document.getElementById('tt-conditions');
   condEl.innerHTML = '';
