@@ -420,10 +420,15 @@ def map_bg(map_id):
     if f and f.filename and _allowed(f.filename):
         _delete_bg_file(bm.bg_image)
         ext = f.filename.rsplit('.', 1)[1].lower()
-        filename = f'{uuid.uuid4().hex}.{ext}'
         folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
         os.makedirs(folder, exist_ok=True)
-        f.save(os.path.join(folder, filename))
+        if ext in VIDEO_EXT:
+            filename = f'{uuid.uuid4().hex}.{ext}'
+            f.save(os.path.join(folder, filename))
+        else:
+            # Backgrounds render full-screen — keep more pixels than token art
+            from routes._util import save_upload_downscaled
+            filename = save_upload_downscaled(f, folder, max_dim=2048)
         bm.bg_image = filename
         db.session.commit()
         _push_map_state(bm)
@@ -445,11 +450,16 @@ def map_bg_paste(map_id):
     _delete_bg_file(bm.bg_image)
     folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
     os.makedirs(folder, exist_ok=True)
-    filename = f'{uuid.uuid4().hex}.{ext}'
-    f.save(os.path.join(folder, filename))
+    is_video = ext in VIDEO_EXT
+    if is_video:
+        filename = f'{uuid.uuid4().hex}.{ext}'
+        f.save(os.path.join(folder, filename))
+    else:
+        # Backgrounds render full-screen — keep more pixels than token art
+        from routes._util import save_upload_downscaled
+        filename = save_upload_downscaled(f, folder, max_dim=2048)
     bm.bg_image = filename
     db.session.commit()
-    is_video = ext in VIDEO_EXT
     url = url_for('static', filename='uploads/battlemaps/' + filename)
     _push_map_state(bm)
     return jsonify({'ok': True, 'url': url, 'is_video': is_video, 'filename': filename})

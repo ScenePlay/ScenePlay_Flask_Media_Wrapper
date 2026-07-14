@@ -20,17 +20,17 @@ MONSTER_IMG_EXTS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
 def _save_monster_image(file_storage):
-    """Save an uploaded monster image and return its root-relative /static URL,
-    or None if there's no valid file. Caller decides what to do with it."""
+    """Save an uploaded monster image (downscaled to token resolution) and
+    return its root-relative /static URL, or None if there's no valid file.
+    Caller decides what to do with it."""
     if not file_storage or not file_storage.filename:
         return None
     ext = file_storage.filename.rsplit('.', 1)[-1].lower() if '.' in file_storage.filename else ''
     if ext not in MONSTER_IMG_EXTS:
         return None
-    fname = f"{uuid.uuid4().hex}.{ext}"
-    dest = os.path.join(current_app.root_path, MONSTER_IMG_DIR, fname)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    file_storage.save(dest)
+    from routes._util import save_upload_downscaled
+    fname = save_upload_downscaled(
+        file_storage, os.path.join(current_app.root_path, MONSTER_IMG_DIR))
     return '/static/uploads/monsters/' + fname
 import relay_broadcaster
 _sync_states = {}

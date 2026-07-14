@@ -210,10 +210,9 @@ def character_new():
             # Portrait upload
             portrait = request.files.get('portrait')
             if portrait and portrait.filename and _allowed_file(portrait.filename):
-                ext = portrait.filename.rsplit('.', 1)[1].lower()
-                filename = f"{uuid.uuid4().hex}.{ext}"
-                save_path = os.path.join(current_app.root_path, PORTRAIT_FOLDER, filename)
-                portrait.save(save_path)
+                from routes._util import save_upload_downscaled
+                filename = save_upload_downscaled(
+                    portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
                 char.portrait_path = filename
 
             db.session.commit()
@@ -533,9 +532,9 @@ def character_edit(character_id):
                     old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
                     if os.path.exists(old):
                         os.remove(old)
-                ext = portrait.filename.rsplit('.', 1)[1].lower()
-                filename = f"{uuid.uuid4().hex}.{ext}"
-                portrait.save(os.path.join(current_app.root_path, PORTRAIT_FOLDER, filename))
+                from routes._util import save_upload_downscaled
+                filename = save_upload_downscaled(
+                    portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
                 char.portrait_path = filename
 
             db.session.commit()
@@ -583,9 +582,9 @@ def upload_portrait(character_id):
             old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
             if os.path.exists(old):
                 os.remove(old)
-        ext = portrait.filename.rsplit('.', 1)[1].lower()
-        filename = f"{uuid.uuid4().hex}.{ext}"
-        portrait.save(os.path.join(current_app.root_path, PORTRAIT_FOLDER, filename))
+        from routes._util import save_upload_downscaled
+        filename = save_upload_downscaled(
+            portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
         char.portrait_path = filename
         db.session.commit()
     return redirect(url_for('ttrpg.character_sheet', character_id=character_id))
