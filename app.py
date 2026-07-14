@@ -132,6 +132,31 @@ def inject_keep_music():
     return {'keep_music': appsettingGetKeepMusicPlaying()}
 
 
+@app.context_processor
+def inject_relay_status():
+    """Navbar 'Relay ON' badge: when the box is used purely as a media player,
+    make an enabled (and possibly forgotten) relay visible at a glance.
+    relay_stale = enabled but the receiver hasn't synced in >90s (same
+    threshold as the relay health check)."""
+    try:
+        from sql import appsettingGet
+        from datetime import datetime, timezone
+        if appsettingGet('relay_enabled', '0') != '1':
+            return {'relay_on': False, 'relay_stale': False}
+        stale = True
+        last = appsettingGet('relay_last_sync', '')
+        if last and last != '—':
+            try:
+                ts = datetime.strptime(last, '%Y-%m-%d %H:%M:%S')
+                age = (datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds()
+                stale = age > 90
+            except ValueError:
+                pass
+        return {'relay_on': True, 'relay_stale': stale}
+    except Exception:
+        return {'relay_on': False, 'relay_stale': False}
+
+
 
 app.register_blueprint(main)
 app.register_blueprint(sp)

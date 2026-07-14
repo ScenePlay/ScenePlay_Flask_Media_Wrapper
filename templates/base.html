@@ -55,6 +55,21 @@
                 </ul>
               </div>
 
+              {% if relay_on %}
+              <!-- Relay indicator: visible on every media page so an enabled
+                   relay isn't left running when the box is just a player.
+                   Green = syncing; amber = enabled but receiver stalled. -->
+              <a href="{{ url_for('relay_admin_bp.status') }}"
+                 class="nav-link d-flex align-items-center gap-1 flex-shrink-0"
+                 style="font-size:.8rem;{% if relay_stale %}color:#e0a800;{% else %}color:#28a745;{% endif %}"
+                 title="{% if relay_stale %}Relay is enabled but not syncing — click to manage{% else %}Remote-play relay is running — click to manage{% endif %}">
+                <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;
+                             background:{% if relay_stale %}#e0a800{% else %}#28a745{% endif %};
+                             box-shadow:0 0 5px {% if relay_stale %}#e0a800{% else %}#28a745{% endif %};"></span>
+                Relay&nbsp;ON
+              </a>
+              {% endif %}
+
               <!-- Theme picker — after collapse so it sits at far right and is never clipped -->
               <div class="sp-theme-wrap">
                 <button id="sp-theme-btn" class="btn nav-link" title="Color theme">&#9670;</button>
