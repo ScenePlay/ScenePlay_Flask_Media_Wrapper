@@ -373,8 +373,8 @@
       {% endif %}
       <button id="fx-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleFxPanel()" title="Map effects">&#10022; FX</button>
-      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
-         class="btn btn-sm btn-outline-secondary">Maps</a>
+      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}#edit-{{ bm.map_id }}"
+         class="btn btn-sm btn-outline-secondary" title="Manage maps (opens this map's edit panel)">Maps</a>
       {% endif %}
       <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleMapDicePanel()" title="Dice Roller"><span class="dice-ico">&#127922;</span> Dice</button>

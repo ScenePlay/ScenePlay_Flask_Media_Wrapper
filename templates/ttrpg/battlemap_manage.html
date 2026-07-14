@@ -41,7 +41,7 @@
 {% if maps %}
 <div class="row g-3">
   {% for m in maps %}
-  <div class="col-md-6">
+  <div class="col-md-6" id="map-card-{{ m.map_id }}">
     <div class="ttrpg-card p-3" style="border-color:{% if m.is_active %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
       <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
         <div>
@@ -147,6 +147,11 @@
                  class="form-control form-control-sm bg-dark text-light border-secondary"
                  style="font-size:.75rem;">
           <button class="btn btn-outline-secondary btn-sm flex-shrink-0">Upload BG</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
+                  onclick="pasteMapBackground({{ m.map_id }}, this)"
+                  title="Paste an image or video from the clipboard as this map's background">
+            &#128203; Paste BG
+          </button>
         </form>
       </div>
 
@@ -321,6 +326,10 @@
             <button class="btn btn-sm ms-auto"
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
                     onclick="copyMapPrompt()">&#128203; Copy Prompt</button>
+            <button id="map-paste-bg-btn" class="btn btn-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="pasteMapBackground()"
+                    title="Made the image? Copy it, then paste it straight in as this map's background">&#128203; Paste as Background</button>
           </div>
           <textarea id="map-prompt-text" class="form-control" readonly
                     style="font-family:monospace;font-size:.78rem;min-height:280px;
@@ -659,10 +668,23 @@ function _mapFallbackCopy(ta, onDone) {
   window.getSelection().removeAllRanges();
 }
 
+// Deep link: /session/<id>#edit-<map_id> (from All Maps / the map view)
+// scrolls to that map's card and opens its edit panel.
+(function () {
+  const m = location.hash.match(/^#edit-(\d+)$/);
+  if (!m) return;
+  const card = document.getElementById('map-card-' + m[1]);
+  if (!card) return;
+  toggleMapEdit(parseInt(m[1]));
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+})();
+
 // ── Paste background ──────────────────────────────────────────────────────────
 
-async function pasteMapBackground() {
-  const btn = document.getElementById('map-paste-bg-btn');
+async function pasteMapBackground(mapId, btnEl) {
+  if (mapId) _activeMapId = parseInt(mapId);
+  const btn = btnEl || document.getElementById('map-paste-bg-btn');
+  if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;   // restore label later
   btn.disabled = true;
   btn.textContent = 'Reading clipboard…';
 
@@ -673,18 +695,18 @@ async function pasteMapBackground() {
         const imageType = item.types.find(t => t.startsWith('image/'));
         if (imageType) {
           const blob = await item.getType(imageType);
-          _uploadMapBg(blob, imageType.split('/')[1] || 'png');
+          _uploadMapBg(blob, imageType.split('/')[1] || 'png', btn);
           return;
         }
         const videoType = item.types.find(t => t.startsWith('video/'));
         if (videoType) {
           const blob = await item.getType(videoType);
-          _uploadMapBg(blob, videoType.split('/')[1] || 'mp4');
+          _uploadMapBg(blob, videoType.split('/')[1] || 'mp4', btn);
           return;
         }
       }
       btn.textContent = 'No image in clipboard';
-      setTimeout(() => { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }, 2000);
+      setTimeout(() => { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }, 2000);
       return;
     } catch(err) { /* fall through to keyboard paste */ }
   }
@@ -694,7 +716,7 @@ async function pasteMapBackground() {
   btn.style.color = 'var(--ttrpg-accent)';
   btn.style.borderColor = 'var(--ttrpg-accent)';
   const reset = () => {
-    btn.innerHTML = '&#128203; Paste as Background';
+    btn.innerHTML = btn.dataset.orig;
     btn.style.color = '';
     btn.style.borderColor = '';
   };
@@ -705,19 +727,22 @@ async function pasteMapBackground() {
     reset();
     const item = Array.from(e.clipboardData.items)
       .find(i => i.type.startsWith('image/') || i.type.startsWith('video/'));
-    if (item) { e.preventDefault(); _uploadMapBg(item.getAsFile(), item.type.split('/')[1] || 'png'); }
+    if (item) { e.preventDefault(); _uploadMapBg(item.getAsFile(), item.type.split('/')[1] || 'png', btn); }
   }, { once: true });
 }
 
-function _uploadMapBg(blob, ext) {
+function _uploadMapBg(blob, ext, btnEl) {
   if (ext === 'jpeg') ext = 'jpg';
-  const btn = document.getElementById('map-paste-bg-btn');
+  const btn = btnEl || document.getElementById('map-paste-bg-btn');
+  if (btn && !btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
   if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
   const pasteUrl = _mapBgPasteUrls[_activeMapId];
   if (!pasteUrl) {
     if (btn) { btn.textContent = 'Error: no map selected'; btn.disabled = false; }
     return;
   }
+  // note: pasted uploads hit map_bg_paste, which downscales images (2048px)
+  // and passes videos through, same as the Upload BG form
   const fd = new FormData();
   fd.append('bg_image', blob, 'bg.' + ext);
   fd.append('ext', ext);
@@ -752,10 +777,10 @@ function _uploadMapBg(blob, ext) {
           preview.appendChild(wrap);
         }
       }
-      if (btn) { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }
+      if (btn) { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }
     })
     .catch(() => {
-      if (btn) { btn.innerHTML = '&#128203; Paste as Background'; btn.disabled = false; }
+      if (btn) { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }
     });
 }
 </script>
