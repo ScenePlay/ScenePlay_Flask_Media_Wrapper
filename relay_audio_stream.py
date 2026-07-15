@@ -33,6 +33,8 @@ _IS_WIN = os.name == "nt"
 SINK_NAME = "sceneplay_music"
 
 _CHUNK = 1024          # ~64 ms of audio at 128 kbps — small packets, smooth cadence
+_POST_BATCH = 4096     # assemble small reads into ~4 KB POST writes: the relay's
+                       # tiny CPU share (Render free tier) fans out 4x fewer chunks
 _BACKLOG_MAX = 384 * 1024   # ~24 s at 128 kbps the backlog can bridge (see _StreamBuffer)
 _ROTATE_S = 300        # end + reopen the ingest POST this often
 _IDLE_STOP_S = 20      # capture/push stops this long after the last track
@@ -373,6 +375,10 @@ class _StreamBuffer:
             self._closed = True
             self._cond.notify_all()
 
+    def size(self):
+        with self._cond:
+            return self._bytes
+
     def done(self):
         with self._cond:
             return self._closed and not self._dq
@@ -393,15 +399,27 @@ def _reader(proc, buf):
 
 
 def _chunks(buf, deadline):
-    """Yield buffered chunks until POST rotation, encoder death, stop, or
-    idle. Waits at most ~250 ms per pop, so the exit checks stay timely."""
+    """Yield ~_POST_BATCH-byte writes assembled from the small capture reads:
+    locally we read every ~64 ms for smooth cadence, but the relay receives
+    ~4 KB every ~250 ms. Flushes whatever is pending at least every ~250 ms,
+    and drains until rotation, encoder death, stop, or idle."""
+    pending, pending_bytes = [], 0
+    last_flush = time.monotonic()
     while not _stop.is_set() and not _idle_expired() \
             and time.monotonic() < deadline:
         chunk = buf.pop(timeout=0.25)
         if chunk is not None:
-            yield chunk
-        elif buf.done():
-            return
+            pending.append(chunk)
+            pending_bytes += len(chunk)
+        now = time.monotonic()
+        if pending and (pending_bytes >= _POST_BATCH or now - last_flush >= 0.25):
+            yield b"".join(pending)
+            pending, pending_bytes = [], 0
+            last_flush = now
+        if chunk is None and buf.done():
+            break
+    if pending:
+        yield b"".join(pending)
 
 
 def _spawn_capture():
@@ -444,6 +462,9 @@ def _run(cfg):
                     log.warning("relay refused audio ingest (%s) — streaming "
                                 "off until next playback", resp.status_code)
                     break
+                # Rotation boundary telemetry: a healthy stream shows ~0 KB
+                # backlog here; growth means the network can't keep up.
+                log.info("audio ingest rotated; backlog %.1f KB", buf.size() / 1024)
                 first = False
                 backoff = 2
             except Exception as e:

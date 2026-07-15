@@ -76,3 +76,29 @@ def test_producer_consumer_threads():
         if c is not None:
             got.append(c)
     assert got == chunks
+
+
+def test_size_tracks_bytes():
+    buf = _StreamBuffer(max_bytes=1000)
+    assert buf.size() == 0
+    buf.push(b'12345')
+    buf.push(b'678')
+    assert buf.size() == 8
+    buf.pop(0.01)
+    assert buf.size() == 3
+
+
+def test_chunks_batches_small_reads(monkeypatch):
+    import time as _time
+    import relay_audio_stream as ras
+    # keep the worker's idle check from tripping during the test
+    monkeypatch.setattr(ras, '_playing', True)
+    buf = ras._StreamBuffer(max_bytes=1_000_000)
+    pieces = [b'x' * 1024 for _ in range(12)]     # 12 KB of 1 KB reads
+    for p in pieces:
+        buf.push(p)
+    buf.close()
+    out = list(ras._chunks(buf, deadline=_time.monotonic() + 5))
+    assert b''.join(out) == b''.join(pieces)      # nothing lost or reordered
+    assert len(out) < len(pieces)                 # actually batched
+    assert all(len(c) >= ras._POST_BATCH for c in out[:-1])  # full batches first
