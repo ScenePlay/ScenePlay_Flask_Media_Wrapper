@@ -207,11 +207,32 @@ def sink_name():
 
 # ── capture processes ─────────────────────────────────────────────────────────
 
+def _bitrate():
+    """Stream bitrate in kbps — the relay_audio_bitrate app setting. 128 is
+    full quality; 96/64 cut listeners' (mobile) data use. Read at capture
+    spawn, so it applies from the next track / rotation like the other
+    audio toggles."""
+    try:
+        from sql import appsettingGet
+        b = str(appsettingGet("relay_audio_bitrate", "128") or "128").strip()
+    except Exception:
+        b = "128"
+    return b if b in ("64", "96", "128") else "128"
+
+
+# Live-stream encoder flags: flush every packet (don't buffer frames),
+# no Xing/VBR header (wrong for live; confuses some decoders on join),
+# no bit reservoir (each frame self-contained -> cleaner resync when a
+# slow listener drops a chunk).
+_STREAM_FLAGS = ["-reservoir", "0", "-write_xing", "0", "-flush_packets", "1"]
+
+
 def _spawn_ffmpeg_linux():
     return subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-f", "pulse", "-i", f"{SINK_NAME}.monitor",
-         "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+         "-c:a", "libmp3lame", "-b:a", _bitrate() + "k", "-ar", "44100", "-ac", "2",
+         *_STREAM_FLAGS,
          "-f", "mp3", "pipe:1"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
@@ -221,7 +242,8 @@ def _spawn_ffmpeg_windows():
     return subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0",
-         "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+         "-c:a", "libmp3lame", "-b:a", _bitrate() + "k", "-ar", "44100", "-ac", "2",
+         *_STREAM_FLAGS,
          "-f", "mp3", "pipe:1"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,

@@ -153,6 +153,17 @@
             use the &#128266; control in the portal to listen)</span>
           </label>
         </div>
+        <div class="mb-3 ms-4" style="max-width:280px;">
+          <label class="form-label small">Stream quality</label>
+          <select name="relay_audio_bitrate" class="form-select form-select-sm">
+            {% for b, lbl in [('128', '128 kbps — full quality'),
+                              ('96',  '96 kbps — saves listeners\' mobile data'),
+                              ('64',  '64 kbps — minimum data')] %}
+            <option value="{{ b }}"{% if cfg.audio_bitrate == b %} selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Applies from the next track or stream restart.</div>
+        </div>
         <button type="submit" class="btn btn-sm btn-ttrpg">Save</button>
       </form>
     </div>
