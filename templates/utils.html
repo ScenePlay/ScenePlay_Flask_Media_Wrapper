@@ -128,6 +128,16 @@
                 <form method="post" action="{{ url_for('ut.main') }}">
                     <div style="border: 3px solid black;">
                     <h3>This Server</h3>
+                    <!-- Deletes the yt-dlp git checkout and re-clones it — fixes a
+                         stale or corrupted downloader without touching anything else. -->
+                    <input type="submit" name="submit" value="Reset yt-dlp"
+                           title="Delete the yt-dlp checkout and re-clone it fresh from GitHub"
+                           onclick="return confirm('Delete the yt-dlp checkout and re-clone it fresh from GitHub? Use this when downloads misbehave and a normal update has not helped. May take a minute.');"/>
+                    <span style="font-size:.85em;color:var(--sp-muted);">
+                      Re-downloads the yt-dlp source used for YouTube imports.
+                    </span>
+                    <br />
+                    <br />
                     <input type="submit" name="submit" value="Restart Computer"
                            title="Requires a DM login"
                            onclick="return confirm('Are you sure you want to restart the computer? (Requires a DM login.)');"/>

@@ -87,7 +87,7 @@
         <div id="container">
           <div id="content" class="sp-player-bar">
 
-            <div class="sp-player-section">
+            <div class="sp-player-section sp-player-volume">
               <h2 id="volume">Master Volume: {{ volume }}</h2>
               <input type="range" min="0" max="100" id="volume_slider"
                      value="{{ volume }}" class="sp-volume-slider">
@@ -97,7 +97,7 @@
                  persist at play start, resolved to display names). Thumb hidden
                  until metadata supplies one; hover = metadata popover, click =
                  full Info modal (same card as the tables). -->
-            <div class="sp-player-section">
+            <div class="sp-player-section sp-player-np">
               <div id="npScene" class="sp-np-scene"></div>
               <div id="npSong" class="sp-np-row">
                 <img id="npSongThumb" class="sp-np-thumb" data-mtype="music" alt="">
@@ -140,7 +140,8 @@
             <div class="sp-player-section">
               <div><button type="button" id="killQueueBtn" class="btn btn-danger">All Stop</button></div>
               <div>
-                <label class="sp-keep-label" for="keepMusicBtn">Music Ignore Stop</label><br>
+                <label class="sp-keep-label" for="keepMusicBtn"
+                       title="When ON, songs stay in the queue after playing and music keeps going through All Stop">Infinite Play</label><br>
                 <button id="keepMusicBtn" type="button"
                     class="btn {{ 'btn-success' if keep_music else 'btn-secondary' }}">
                     {{ 'ON' if keep_music else 'OFF' }}

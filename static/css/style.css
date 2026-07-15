@@ -367,6 +367,10 @@ button.gridjs-sort-desc {
 .sp-player-bar {
     display: flex;
     align-items: center;
+    /* Sections that don't fit drop to the next row — without this the stop
+       buttons get pushed past the container edge on narrow windows. */
+    flex-wrap: wrap;
+    row-gap: 14px;
 }
 .sp-player-section {
     display: flex;
@@ -379,14 +383,26 @@ button.gridjs-sort-desc {
 .sp-player-section + .sp-player-section {
     border-left: 1px solid var(--sp-border);
 }
+/* Volume gives up width first (down to its basis) before anything wraps;
+   the slider follows the section instead of dictating a fixed 500px. */
+.sp-player-volume {
+    flex: 1 1 100px;
+    max-width: 190px;
+}
+/* Now-playing shrinks by ellipsizing titles rather than forcing the row wide. */
+.sp-player-np {
+    flex: 0 1 auto;
+    min-width: 0;
+}
 
 #volume {
     font-size: 1rem;
     line-height: 1.5;
 }
 .sp-volume-slider {
-    width: 500px;
-    max-width: 100%;
+    width: 100%;
+    min-width: 80px;
+    max-width: 150px;
     accent-color: var(--sp-accent);
 }
 
@@ -410,6 +426,7 @@ button.gridjs-sort-desc {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;   /* flex item: allow shrinking so the ellipsis actually engages */
 }
 .sp-np-muted { color: var(--sp-muted); }
 

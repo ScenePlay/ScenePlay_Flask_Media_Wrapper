@@ -79,6 +79,18 @@ def main():
             appsettingSet('backup_auto', 1 if enable else 0, 'int')
             flash(f"Nightly backup {'enabled' if enable else 'disabled'}.")
             return redirect(url_for('ut.main'))
+        elif request.form['submit'] == 'Reset yt-dlp':
+            # Escape hatch for a stale/corrupted checkout: delete the yt-dlp
+            # git clone and pull it fresh. Runs inline (clone is --depth 1)
+            # so the flash message reports the real outcome.
+            import ytdlp_source
+            if ytdlp_source.reset():
+                flash('yt-dlp reset: checkout deleted and re-cloned fresh from GitHub.')
+            else:
+                flash('yt-dlp reset: checkout deleted, but the re-clone failed '
+                      '(network/git problem?) — downloads fall back to the '
+                      'pip-installed copy until the next successful refresh.')
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
             # Rebooting the box is DM-only: anyone on the LAN can reach this
             # page, and a mid-session reboot kills music, maps, and the relay.

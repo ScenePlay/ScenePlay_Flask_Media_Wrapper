@@ -8,6 +8,8 @@ put it. When git or the network is unavailable the pip-installed yt_dlp is
 the fallback, so downloads degrade instead of breaking.
 """
 import os
+import shutil
+import stat
 import subprocess
 
 _BASE = os.path.dirname(os.path.realpath(__file__))
@@ -49,6 +51,30 @@ def refresh():
         print(f'ytdlp_source: warning: git refresh failed ({e}); '
               'using existing/pip copy')
     return _checkout_usable()
+
+
+def _rm_readonly(func, path, _exc_info):
+    # Git object files are read-only (always on Windows); make them writable
+    # so rmtree can finish instead of dying halfway through .git/objects.
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def reset():
+    """Delete the checkout and re-clone it fresh from GitHub.
+
+    Operator escape hatch for a stale or corrupted checkout (bad merge state,
+    broken .git, an upstream bug fixed only on a fresh master). A download
+    running at this exact moment may fail once — the next queue run calls
+    refresh() and recovers. Returns True when the fresh clone is usable;
+    False means no checkout (pip fallback) until a later refresh succeeds.
+    """
+    try:
+        if os.path.isdir(REPO_DIR):
+            shutil.rmtree(REPO_DIR, onerror=_rm_readonly)
+    except Exception as e:
+        print(f'ytdlp_source: warning: could not fully delete yt-dlp checkout ({e})')
+    return refresh()
 
 
 def popen_env():
