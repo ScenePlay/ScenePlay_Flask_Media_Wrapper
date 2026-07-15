@@ -24,6 +24,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import deque
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ _IS_WIN = os.name == "nt"
 
 SINK_NAME = "sceneplay_music"
 
-_CHUNK = 4096          # ~250 ms of audio at 128 kbps
+_CHUNK = 1024          # ~64 ms of audio at 128 kbps — small packets, smooth cadence
+_BACKLOG_MAX = 384 * 1024   # ~24 s at 128 kbps the backlog can bridge (see _StreamBuffer)
 _ROTATE_S = 300        # end + reopen the ingest POST this often
 _IDLE_STOP_S = 20      # capture/push stops this long after the last track
 _ATTACH_WAIT_S = 10    # Windows: max wait for the new mpv PID to appear
@@ -329,16 +331,77 @@ def _idle_expired():
     return not _playing and (time.monotonic() - _last_end) > _IDLE_STOP_S
 
 
-def _chunks(proc, deadline):
-    """Yield encoded chunks until POST rotation, ffmpeg death, stop, or idle.
-    The read blocks at most ~250 ms (capture is realtime), so the exit checks
-    stay timely."""
+class _StreamBuffer:
+    """Bounded FIFO decoupling capture from the network.
+
+    A reader thread drains ffmpeg into this buffer continuously, so the
+    encoder can never block on a slow/broken network path — which also means
+    capture KEEPS ROLLING through a relay outage. Listeners sit ~12 s behind
+    live (the relay preroll), so when the push reconnects and the backlog
+    drains fast, a short blip is bridged with zero audible gap instead of
+    losing that stretch of audio. Overflow (outage longer than ~24 s) drops
+    the oldest audio; listeners hear one jump instead of permanent lag."""
+
+    def __init__(self, max_bytes=_BACKLOG_MAX):
+        self._dq = deque()
+        self._bytes = 0
+        self._max = max_bytes
+        self._cond = threading.Condition()
+        self._closed = False
+
+    def push(self, chunk):
+        with self._cond:
+            self._dq.append(chunk)
+            self._bytes += len(chunk)
+            while self._bytes > self._max and len(self._dq) > 1:
+                self._bytes -= len(self._dq.popleft())
+            self._cond.notify_all()
+
+    def pop(self, timeout):
+        """Next chunk, or None on timeout / closed-and-drained."""
+        with self._cond:
+            if not self._dq and not self._closed:
+                self._cond.wait(timeout)
+            if self._dq:
+                chunk = self._dq.popleft()
+                self._bytes -= len(chunk)
+                return chunk
+            return None
+
+    def close(self):
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+
+    def done(self):
+        with self._cond:
+            return self._closed and not self._dq
+
+
+def _reader(proc, buf):
+    """Drain ffmpeg stdout into the buffer until the encoder exits."""
+    try:
+        while True:
+            chunk = proc.stdout.read(_CHUNK)
+            if not chunk:
+                break
+            buf.push(chunk)
+    except Exception:
+        pass
+    finally:
+        buf.close()
+
+
+def _chunks(buf, deadline):
+    """Yield buffered chunks until POST rotation, encoder death, stop, or
+    idle. Waits at most ~250 ms per pop, so the exit checks stay timely."""
     while not _stop.is_set() and not _idle_expired() \
             and time.monotonic() < deadline:
-        chunk = proc.stdout.read(_CHUNK)
-        if not chunk:
+        chunk = buf.pop(timeout=0.25)
+        if chunk is not None:
+            yield chunk
+        elif buf.done():
             return
-        yield chunk
 
 
 def _spawn_capture():
@@ -357,6 +420,7 @@ def _run(cfg):
            + f"/api/v1/session/{cfg['session_id']}/audio-ingest")
     headers = {"X-Relay-Secret": cfg["secret"], "Content-Type": "audio/mpeg"}
     proc = None
+    buf = None
     first = True     # first POST of the period clears the relay preroll
     backoff = 2
     try:
@@ -367,11 +431,14 @@ def _run(cfg):
             if proc is None or proc.poll() is not None:
                 _kill(proc)
                 proc = _spawn_capture()
+                buf = _StreamBuffer()
+                threading.Thread(target=_reader, args=(proc, buf),
+                                 daemon=True, name="relay-audio-reader").start()
             deadline = time.monotonic() + _ROTATE_S
             try:
                 resp = requests.post(
                     url + ("" if first else "?continuation=1"),
-                    data=_chunks(proc, deadline),
+                    data=_chunks(buf, deadline),
                     headers=headers, timeout=(5, 30))
                 if 400 <= resp.status_code < 500:
                     log.warning("relay refused audio ingest (%s) — streaming "
@@ -380,12 +447,13 @@ def _run(cfg):
                 first = False
                 backoff = 2
             except Exception as e:
-                # Relay unreachable mid-track: drop the capture (a blocked
-                # pipe would stall the audio server), back off, respawn at
-                # the live edge. Local playback never notices.
-                _kill(proc)
-                proc = None
-                log.info("audio push interrupted (%s); retrying in %ss",
+                # Relay unreachable mid-track: capture KEEPS running — the
+                # dedicated reader thread means the encoder pipe can't block,
+                # and the backlog holds the audio. On reconnect it drains
+                # fast, so blips shorter than the listeners' cushion are
+                # bridged seamlessly instead of leaving a hole.
+                log.info("audio push interrupted (%s); retrying in %ss "
+                         "(backlog bridging the gap)",
                          e.__class__.__name__, backoff)
                 if _stop.wait(backoff):
                     break
