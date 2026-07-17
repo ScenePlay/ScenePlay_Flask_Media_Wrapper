@@ -1,9 +1,10 @@
 """Metadata-extraction worker.
 
 Independent of the download worker: it polls rows with metaStatus=1, runs
-`yt-dlp --dump-single-json --skip-download` for the URL, and stores the full
-JSON + promoted columns in tblMediaMetadata, filling the media row's
-displayName (only when blank) and duration.
+`yt-dlp --dump-single-json --skip-download` for the URL, and stores the
+promoted columns plus a slim whitelist of the JSON (RAW_JSON_KEYS — the full
+dump is ~175 KB/row of format tables nothing reads) in tblMediaMetadata,
+filling the media row's displayName (only when blank) and duration.
 
 IMPORTANT: the app installs a process-wide SIGCHLD reaper (app.py) that steals
 child exit statuses, so subprocess return codes are unreliable here. We classify
@@ -12,14 +13,17 @@ purely on stdout (does it parse as JSON with an `id`?) and stderr text.
 
 import os
 import json
+import sqlite3
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
 
+import sql
 from sql import (select_Meta_Que_Next, set_meta_status, upsert_media_metadata,
                  fill_display_name_if_empty, appsettingFlagGet, appsettingFlagUpdate,
                  meta_pending_any)
+from thumbs import store as thumb_store
 
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
 # pip-installed yt-dlp run as a module — no bash / no repo checkout, works on
@@ -94,6 +98,27 @@ def _promoted_fields(info):
     }
 
 
+# Info-dict keys worth persisting in raw_json beyond the promoted columns:
+# identity/provenance, attribution, playability flags, music tagging, chapter
+# marks. The full dump averaged ~175 KB per row — mostly `formats` with per-
+# variant fragment URLs and HTTP headers — and nothing ever read it back.
+# Migration 0002 slims pre-existing rows to this same shape; keep the two
+# lists in sync if this ever grows.
+RAW_JSON_KEYS = (
+    'id', 'webpage_url', 'extractor',
+    'channel', 'channel_id', 'uploader_id',
+    'tags', 'like_count', 'comment_count', 'average_rating',
+    'age_limit', 'availability', 'live_status',
+    'album', 'artist', 'track', 'release_year',
+    'chapters',
+)
+
+
+def slim_raw_json(info):
+    """The whitelisted subset of a yt-dlp info dict, as JSON (a few KB)."""
+    return json.dumps({k: info[k] for k in RAW_JSON_KEYS if info.get(k) is not None})
+
+
 def _handle_job(pkey, url, media_type, retry_count):
     set_meta_status(media_type, pkey, 2)   # Processing
     try:
@@ -114,13 +139,14 @@ def _run_job(pkey, url, media_type, retry_count):
     if status == 'ok':
         info = payload
         fields = _promoted_fields(info)
-        fields['raw_json'] = json.dumps(info)[:2_000_000]   # guard against absurd blobs
+        fields['raw_json'] = slim_raw_json(info)[:2_000_000]   # guard against absurd blobs
         fields['retry_count'] = retry_count
         fields['last_error'] = ''
         fields['extracted_at'] = now
         upsert_media_metadata(media_type, pkey, fields)
         if info.get('title'):
             fill_display_name_if_empty(media_type, pkey, info['title'])
+        thumb_store.cache(media_type, pkey, info.get('thumbnail'))   # best-effort
         set_meta_status(media_type, pkey, 3)   # Finished
         return
 
@@ -138,12 +164,47 @@ def _run_job(pkey, url, media_type, retry_count):
         set_meta_status(media_type, pkey, 4)   # Failed (retries exhausted)
 
 
+# --- thumbnail backfill -----------------------------------------------------
+# Rows extracted before local caching existed have a remote URL but no file in
+# static/thumbs. The threader fills them in gently: ONE download per poll tick
+# (2s), independent of the extraction switch. URLs that fail stay skipped for
+# the life of the process; once a full scan finds nothing missing, the next
+# scan waits THUMB_RESCAN_SECONDS.
+THUMB_RESCAN_SECONDS = 600
+_thumb_next_scan = 0.0
+_thumb_failed = set()
+
+
+def backfill_one_thumbnail():
+    """Cache at most one missing local thumbnail. Returns True if it did."""
+    global _thumb_next_scan
+    if time.time() < _thumb_next_scan:
+        return False
+    conn = sqlite3.connect(sql.database)
+    try:
+        rows = conn.execute(
+            "SELECT media_type, media_id, thumbnail FROM tblMediaMetadata "
+            "WHERE thumbnail IS NOT NULL AND thumbnail <> ''").fetchall()
+    finally:
+        conn.close()
+    for media_type, media_id, remote_url in rows:
+        key = (media_type, media_id)
+        if key in _thumb_failed or thumb_store.exists(media_type, media_id):
+            continue
+        if not thumb_store.cache(media_type, media_id, remote_url):
+            _thumb_failed.add(key)
+        return True
+    _thumb_next_scan = time.time() + THUMB_RESCAN_SECONDS
+    return False
+
+
 def MetaQue_threader():
     while True:
         time.sleep(POLL_SECONDS)
         if os.getppid() == 1:      # parent died → don't linger as an orphan
             break
         try:
+            backfill_one_thumbnail()
             if str(appsettingFlagGet('meta_que_switch') or '0') != '1':
                 continue
             jobs = select_Meta_Que_Next()

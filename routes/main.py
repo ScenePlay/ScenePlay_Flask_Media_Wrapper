@@ -84,7 +84,13 @@ def mediameta(media_type, media_id):
     if media_type not in ('music', 'video'):
         abort(400)
     m = tblmediametadata.query.filter_by(media_type=media_type, media_id=media_id).first()
-    return jsonify(m.to_dict() if m else None)
+    if not m:
+        return jsonify(None)
+    d = m.to_dict()
+    # local cached copy first (works offline), remote URL as fallback
+    from thumbs import store as thumb_store
+    d['thumbnail'] = thumb_store.url(media_type, media_id) or d.get('thumbnail')
+    return jsonify(d)
 
 
 def is_raspberry_pi() -> bool:

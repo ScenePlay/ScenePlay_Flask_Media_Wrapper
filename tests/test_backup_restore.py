@@ -197,6 +197,154 @@ class TestMerge:
         assert (s2['campaigns'], s2['scenes'], s2['music'], s2['video'], s2['links']) == (0, 0, 0, 0, 0)
 
 
+class TestMergeSceneScoping:
+    """Scene identity is (campaign, name) — the name-only matching used to
+    funnel an archive's links into a same-named scene of a DIFFERENT campaign,
+    scrambling it (the 'overwritten scene' bug)."""
+
+    def _archive(self, env, build):
+        src = str(env['tmp'] / 'scoped.db')
+        make_db(src)
+        build(src)
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='scoped')
+        finally:
+            sql.database = old
+
+    def test_same_name_in_other_campaign_is_a_new_scene(self, env):
+        # local: 'Tavern' in campaign 'Home Game', with its own song + link
+        x(env['live'], "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Home Game', 1, '1')")
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES ('Tavern', 1, 0, 1)")
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/tgt/', 'local0000001.mp3', 'https://l', 3, 'local0000001', 'Local Song')")
+        x(env['live'], "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 1, 70)")
+
+        def build(src):
+            x(src, "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Curse of Strahd', 1, '1')")
+            x(src, "INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES ('Tavern', 1, 0, 1)")
+            x(src, "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                   "VALUES ('/src/', 'strahd000001.mp3', 'https://s', 3, 'strahd000001', 'Strahd Song')")
+            x(src, "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 1, 80)")
+
+        s = br.restore_merge(self._archive(env, build))
+        assert s['scenes'] == 1                    # created, NOT matched cross-campaign
+        scenes = q(env['live'],
+                   "SELECT scene_ID, campaign_id FROM tblScenes WHERE sceneName='Tavern' ORDER BY scene_ID")
+        assert len(scenes) == 2
+        # the local scene's playlist is untouched — exactly its one local link
+        local_links = q(env['live'], "SELECT song_ID FROM tblMusicScene WHERE scene_ID = 1")
+        assert local_links == [(1,)]
+        # the archive's link went to the NEW scene
+        strahd_pk = q(env['live'], "SELECT song_id FROM tblMusic WHERE videoId='strahd000001'")[0][0]
+        assert q(env['live'], "SELECT song_ID FROM tblMusicScene WHERE scene_ID = ?",
+                 (scenes[1][0],)) == [(strahd_pk,)]
+
+    def test_same_scene_same_campaign_appends_after_local_order(self, env):
+        # local: campaign + scene already exist; playlist occupies orderBy 1..5
+        x(env['live'], "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Shared', 1, '1')")
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES ('Castle Fight', 1, 0, 1)")
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/tgt/', 'local0000001.mp3', 'https://l', 3, 'local0000001', 'Local Song')")
+        x(env['live'], "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 5, 70)")
+
+        def build(src):
+            x(src, "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Shared', 1, '1')")
+            x(src, "INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES ('Castle Fight', 1, 0, 1)")
+            for i, vid in enumerate(('incoming00001', 'incoming00002'), start=1):
+                x(src, "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       f"VALUES ('/src/', '{vid}.mp3', 'https://u{i}', 3, '{vid}', 'Song {i}')")
+                x(src, "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, ?, ?, 80)",
+                  (i, i))
+
+        s = br.restore_merge(self._archive(env, build))
+        assert s['scenes'] == 0                    # matched, not duplicated
+        # incoming links appended AFTER the local ceiling (5), source order kept
+        rows = q(env['live'],
+                 "SELECT m.videoId, ms.orderBy FROM tblMusicScene ms "
+                 "JOIN tblMusic m ON m.song_id = ms.song_ID "
+                 "WHERE ms.scene_ID = 1 ORDER BY ms.orderBy")
+        assert rows == [('local0000001', 5), ('incoming00001', 6), ('incoming00002', 7)]
+
+    def test_duplicate_local_names_match_deterministically(self, env):
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('Tavern', 1, 0)")
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('tavern', 1, 1)")
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/tgt/', 'song00000001.mp3', 'https://l', 3, 'song00000001', 'Song')")
+
+        def build(src):
+            x(src, "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('TAVERN', 1, 0)")
+            x(src, "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                   "VALUES ('/src/', 'song00000001.mp3', 'https://l', 3, 'song00000001', 'Song')")
+            x(src, "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 1, 80)")
+
+        s = br.restore_merge(self._archive(env, build))
+        assert s['scenes'] == 0
+        # lowest scene_ID wins, every time
+        assert q(env['live'], "SELECT scene_ID FROM tblMusicScene") == [(1,)]
+
+
+class TestOldArchiveCompat:
+    def _old_archive(self, env):
+        """Archive from a pre-videoId app version: media tables lack the
+        videoId/displayName/metaStatus columns and tblMediaMetadata is absent."""
+        src = str(env['tmp'] / 'ancient.db')
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if 'tblMediaMetadata' in stmt:
+                continue
+            if 'tblMusic (' in stmt or 'tblVideoMedia (' in stmt:
+                stmt = stmt.split(', videoId')[0] + ')'
+            conn.execute(stmt)
+        conn.execute("INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus) "
+                     "VALUES ('/src/', 'legacy.mp3', 'https://u', 3)")
+        conn.execute("INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('Old Scene', 1, 0)")
+        conn.commit()
+        conn.close()
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='ancient')
+        finally:
+            sql.database = old
+
+    def test_merge_from_pre_videoid_archive_completes(self, env):
+        s = br.restore_merge(self._old_archive(env))
+        assert s['scenes'] == 1                    # scenes still travel
+        assert s['skipped_legacy'] == 1            # media has no dedup identity
+        assert s['music'] == 0
+        assert q(env['live'], "SELECT COUNT(*) FROM tblScenes WHERE sceneName='Old Scene'")[0][0] == 1
+
+    def test_replace_upgrades_restored_schema(self, env):
+        """restore_replace inside the app context (as the routes run it) must
+        bring a restored old-version database up to the current schema."""
+        import os as _os
+        from flask import Flask
+        from flask_migrate import Migrate
+        from extensions import db
+        archive = self._old_archive(env)
+        app = Flask(__name__)
+        app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{env['live']}"
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        Migrate(app, db, directory=_os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'migrations'))
+        with app.app_context():
+            summary = br.restore_replace(archive)
+        assert summary['schema_upgraded'] is True
+        cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblMusic)")]
+        assert 'videoId' in cols and 'metaStatus' in cols
+        stamped = q(env['live'], "SELECT version_num FROM alembic_version")
+        assert len(stamped) == 1 and stamped[0][0]   # stamped at the current head
+
+    def test_replace_without_app_context_still_restores(self, env):
+        archive = self._old_archive(env)
+        summary = br.restore_replace(archive)
+        assert summary['schema_upgraded'] is False   # upgrade deferred to next boot
+        assert q(env['live'], "SELECT COUNT(*) FROM tblScenes WHERE sceneName='Old Scene'")[0][0] == 1
+
+
 class TestMergeHomebrew:
     def _archive_with_homebrew(self, env):
         """Source server: a homebrew subclass + its feature + a homebrew

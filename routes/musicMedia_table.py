@@ -7,6 +7,7 @@ from models.musicScene import tblmusicscene as sceneLinkTbl
 from models.scenes import tblscenes as sc
 
 from sql import *
+from thumbs import store as thumb_store
 
 mu = Blueprint('mu', __name__)
 
@@ -95,7 +96,8 @@ def data():
         m = meta.get(r.song_id)
         d['duration']  = m.duration  if m else None
         d['uploader']  = m.uploader  if m else None
-        d['thumbnail'] = m.thumbnail if m else None
+        # local cached copy first (works offline), remote URL as fallback
+        d['thumbnail'] = thumb_store.url('music', r.song_id) or (m.thumbnail if m else None)
         data.append(d)
     return {
         'data': data,

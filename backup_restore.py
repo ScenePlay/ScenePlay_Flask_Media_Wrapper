@@ -210,9 +210,32 @@ def requeue_missing_media():
 # Replace mode
 # ---------------------------------------------------------------------------
 
+def _upgrade_restored_db():
+    """Bring a just-restored database up to the current schema — recreate any
+    missing tables, then apply pending Alembic revisions — so restoring a
+    backup taken on an OLDER app version works immediately. Needs the Flask
+    app context the restore routes run in; returns False when unavailable
+    (unit tests, CLI use) and leaves the upgrade to the next app start."""
+    try:
+        from flask import current_app
+        from flask_migrate import upgrade as fm_upgrade
+        from extensions import db
+        if 'migrate' not in current_app.extensions:
+            return False
+        db.engine.dispose()      # pooled connections still point at the old file
+        sql.create_table()
+        db.create_all()
+        fm_upgrade()
+        return True
+    except Exception as e:
+        print('post-restore schema upgrade skipped (next app start will retry):', e)
+        return False
+
+
 def restore_replace(zip_path):
     """Whole-database restore. Safety snapshot first; atomic file swap; WAL
-    sidecars cleared; uploads overwritten; missing media re-queued.
+    sidecars cleared; schema brought current; uploads overwritten; missing
+    media re-queued.
 
     The workers open a fresh sqlite connection per operation, so they pick up
     the new file immediately; the web app should still be restarted so its
@@ -229,12 +252,14 @@ def restore_replace(zip_path):
             os.remove(sql.database + sidecar)
         except OSError:
             pass
+    upgraded = _upgrade_restored_db()
     uploads = _extract_uploads(zip_path, overwrite=True)
     requeue = requeue_missing_media()
     return {
         'mode': 'replace',
         'from': manifest.get('server_name') or '?',
         'created_at': manifest.get('created_at'),
+        'schema_upgraded': upgraded,
         'uploads_restored': uploads,
         'requeued_downloads': requeue['requeued'],
         'safety_backup': os.path.basename(safety),
@@ -347,10 +372,21 @@ def restore_merge(zip_path):
                 genre_map[gid] = row[0] if row else 0
 
         # media by videoId (metadata copied for NEW rows; downloads re-queued)
+        src_has_meta = c.execute(
+            "SELECT 1 FROM src.sqlite_master WHERE type='table' AND name='tblMediaMetadata'"
+        ).fetchone()
         media_map = {'music': {}, 'video': {}}
         for kind, tbl, pkcol, namecol, local in (
                 ('music', 'tblMusic', 'song_id', 'song', music_path),
                 ('video', 'tblVideoMedia', 'video_id', 'title', video_path)):
+            # Archives from pre-videoId app versions lack the dedup columns
+            # entirely — every row there is legacy, and SELECTing the missing
+            # columns would abort the whole merge.
+            src_cols = {r[1] for r in c.execute(f"PRAGMA src.table_info({tbl})")}
+            if not {'videoId', 'displayName'} <= src_cols:
+                s['skipped_legacy'] += c.execute(
+                    f"SELECT COUNT(*) FROM src.{tbl}").fetchone()[0]
+                continue
             rows = c.execute(
                 f"SELECT {pkcol}, {namecol}, genre, urlSource, videoId, displayName "
                 f"FROM src.{tbl}").fetchall()
@@ -374,7 +410,7 @@ def restore_merge(zip_path):
                     "SELECT title, duration, uploader, upload_date, thumbnail, view_count, "
                     "description, categories, raw_json, extracted_at "
                     "FROM src.tblMediaMetadata WHERE media_type = ? AND media_id = ?",
-                    (kind, pk)).fetchone()
+                    (kind, pk)).fetchone() if src_has_meta else None
                 if meta:
                     c.execute(
                         "INSERT INTO tblMediaMetadata(media_type, media_id, title, duration, uploader, "
@@ -400,23 +436,50 @@ def restore_merge(zip_path):
                 campaign_map[cid] = c.lastrowid
                 s['campaigns'] += 1
 
-        # scenes by name
+        # scenes by (campaign, name) — name alone is not identity: two campaigns
+        # can each have a "Tavern", and matching across campaigns merged the
+        # archive's links into the wrong local scene. campaign_id IS ? is the
+        # NULL-safe match (uncategorized scenes only pair with uncategorized).
+        # ORDER BY makes the pick deterministic if local names are duplicated.
         scene_map = {}
+        new_scenes = set()
         for sid, sname, active, order_by, camp in c.execute(
                 "SELECT scene_ID, sceneName, active, orderBy, campaign_id FROM src.tblScenes").fetchall():
-            row = c.execute("SELECT scene_ID FROM tblScenes WHERE lower(sceneName) = lower(?)",
-                            (sname or '',)).fetchone()
+            tgt_camp = campaign_map.get(camp)
+            row = c.execute(
+                "SELECT scene_ID FROM tblScenes WHERE lower(sceneName) = lower(?) "
+                "AND campaign_id IS ? ORDER BY scene_ID LIMIT 1",
+                (sname or '', tgt_camp)).fetchone()
             if row:
                 scene_map[sid] = row[0]
             else:
                 c.execute("INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES (?, ?, ?, ?)",
-                          (sname, active, order_by, campaign_map.get(camp)))
+                          (sname, active, order_by, tgt_camp))
                 scene_map[sid] = c.lastrowid
+                new_scenes.add(c.lastrowid)
                 s['scenes'] += 1
 
-        # scene-media links (skip duplicates; LED links are box-specific — not merged)
+        # scene-media links (skip duplicates; LED links are box-specific — not
+        # merged). New scenes keep the archive's orderBy. Links landing in a
+        # PRE-EXISTING scene are appended after its current orderBy ceiling —
+        # source values would collide with local ones and interleave the
+        # playlist. Source order is preserved by the ORDER BY on the reads.
+        next_order = {}   # (link_table, tgt_scene) -> last orderBy handed out
+
+        def link_order(tbl, tgt_scene, src_order):
+            if tgt_scene in new_scenes:
+                return src_order
+            key = (tbl, tgt_scene)
+            if key not in next_order:
+                next_order[key] = c.execute(
+                    f"SELECT COALESCE(MAX(orderBy), 0) FROM {tbl} WHERE scene_ID = ?",
+                    (tgt_scene,)).fetchone()[0]
+            next_order[key] += 1
+            return next_order[key]
+
         for scene_src, song_src, order_by, volume in c.execute(
-                "SELECT scene_ID, song_ID, orderBy, volume FROM src.tblMusicScene").fetchall():
+                "SELECT scene_ID, song_ID, orderBy, volume FROM src.tblMusicScene "
+                "ORDER BY scene_ID, orderBy").fetchall():
             tgt_scene = scene_map.get(scene_src)
             tgt_song = media_map['music'].get(song_src)
             if not tgt_scene or not tgt_song:
@@ -425,11 +488,11 @@ def restore_merge(zip_path):
                          (tgt_scene, tgt_song)).fetchone():
                 continue
             c.execute("INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (?, ?, ?, ?)",
-                      (tgt_scene, tgt_song, order_by, volume))
+                      (tgt_scene, tgt_song, link_order('tblMusicScene', tgt_scene, order_by), volume))
             s['links'] += 1
         for scene_src, video_src, screen, order_by, volume, loops in c.execute(
                 "SELECT scene_ID, video_ID, DisplayScreen_ID, orderBy, volume, loops "
-                "FROM src.tblVideoScene").fetchall():
+                "FROM src.tblVideoScene ORDER BY scene_ID, orderBy").fetchall():
             tgt_scene = scene_map.get(scene_src)
             tgt_video = media_map['video'].get(video_src)
             if not tgt_scene or not tgt_video:
@@ -439,7 +502,8 @@ def restore_merge(zip_path):
                 continue
             c.execute("INSERT INTO tblVideoScene(scene_ID, video_ID, DisplayScreen_ID, orderBy, volume, loops) "
                       "VALUES (?, ?, ?, ?, ?, ?)",
-                      (tgt_scene, tgt_video, screen, order_by, volume, loops))
+                      (tgt_scene, tgt_video, screen,
+                       link_order('tblVideoScene', tgt_scene, order_by), volume, loops))
             s['links'] += 1
 
         # homebrew reference libraries (custom feats/weapons/spells/subclasses/

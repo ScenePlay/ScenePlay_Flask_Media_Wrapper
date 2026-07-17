@@ -108,7 +108,11 @@ def static_v(filename):
         v = 0
     return url_for('static', filename=filename, v=v)
 db.init_app(app)
-migrate.init_app(app, db)
+# Absolute directory so programmatic upgrade() works no matter the cwd the
+# app was launched from (startApp.sh, systemd, IDE...).
+migrate.init_app(app, db,
+                 directory=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'migrations'))
 bcrypt.init_app(app)
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
@@ -182,146 +186,26 @@ app.register_blueprint(battlemap_bp)
 app.register_blueprint(reference_bp)
 app.register_blueprint(relay_admin_bp)
 
-# Ensure new tables exist (idempotent; does not drop existing tables)
+# Startup schema sync. create_table()/db.create_all() only CREATE missing
+# tables — they never alter existing ones. Column adds, indexes and seed fixes
+# live in migrations/versions/ (see migrations/README) and are applied by
+# flask_migrate.upgrade(), which records each revision in alembic_version.
+# Unlike the ad-hoc ALTER blocks that used to live here, a failed migration
+# RAISES: refusing to start beats running on a half-upgraded database.
 with app.app_context():
     import models.tblTokenPositions  # noqa: F401
     import models.tblRollLog         # noqa: F401
     import models.mediaMetadata      # noqa: F401
+    create_table()
     db.create_all()
-
-    # Lightweight migration: add tblBattleMaps.sort_order to older DBs (create_all
-    # never alters existing tables), then seed it from map_id so current maps keep
-    # their order. Idempotent — skipped once the column exists.
-    from sqlalchemy import text as _sa_text
+    from flask_migrate import upgrade as _fm_upgrade
     try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblBattleMaps)"))]
-        if 'sort_order' not in _cols:
-            db.session.execute(_sa_text(
-                "ALTER TABLE tblBattleMaps ADD COLUMN sort_order INTEGER DEFAULT 0"))
-            db.session.execute(_sa_text(
-                "UPDATE tblBattleMaps SET sort_order = map_id"))
-            db.session.commit()
-    except Exception as _e:  # never block startup on a migration hiccup
-        db.session.rollback()
-        print('tblBattleMaps.sort_order migration skipped:', _e)
-
-    # Lightweight migration: add relay_roll_id to the roll tables so relay rolls can
-    # be de-duplicated by the relay's unique id (fixes fast/identical rolls being
-    # dropped). Idempotent — skipped once the columns exist.
-    for _tbl in ('tblRollLog', 'tblDiceRolls'):
-        try:
-            _cols = [r[1] for r in db.session.execute(_sa_text(f"PRAGMA table_info({_tbl})"))]
-            if _cols and 'relay_roll_id' not in _cols:
-                db.session.execute(_sa_text(
-                    f"ALTER TABLE {_tbl} ADD COLUMN relay_roll_id INTEGER"))
-                db.session.commit()
-        except Exception as _e:
-            db.session.rollback()
-            print(f'{_tbl}.relay_roll_id migration skipped:', _e)
-
-    # Lightweight migration: add tblTokenPositions.relay_seq — the last relay
-    # write-sequence processed per token, used for clock-skew-free reconciliation
-    # of relay token moves. Idempotent — skipped once the column exists.
-    try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblTokenPositions)"))]
-        if _cols and 'relay_seq' not in _cols:
-            db.session.execute(_sa_text(
-                "ALTER TABLE tblTokenPositions ADD COLUMN relay_seq INTEGER DEFAULT 0"))
-            db.session.commit()
+        _fm_upgrade()
     except Exception as _e:
-        db.session.rollback()
-        print('tblTokenPositions.relay_seq migration skipped:', _e)
-
-    # Lightweight migration: add tblCharacters.subclass — the archetype picked
-    # from the synced subclasses library (Champion, Evoker…); drives subclass
-    # features on the sheet. Idempotent — skipped once the column exists.
-    try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblCharacters)"))]
-        if _cols and 'subclass' not in _cols:
-            db.session.execute(_sa_text(
-                "ALTER TABLE tblCharacters ADD COLUMN subclass TEXT DEFAULT ''"))
-            db.session.commit()
-    except Exception as _e:
-        db.session.rollback()
-        print('tblCharacters.subclass migration skipped:', _e)
-
-    # Lightweight migration: add tblCharacters.genre — which genre pack skins
-    # the character's flavor and AI-portrait art direction (genre_packs.py);
-    # 'fantasy' is plain D&D. Idempotent.
-    try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblCharacters)"))]
-        if _cols and 'genre' not in _cols:
-            db.session.execute(_sa_text(
-                "ALTER TABLE tblCharacters ADD COLUMN genre TEXT DEFAULT 'fantasy'"))
-            db.session.commit()
-    except Exception as _e:
-        db.session.rollback()
-        print('tblCharacters.genre migration skipped:', _e)
-
-    # Lightweight migration: add tblServersIP.version — the app/firmware version a
-    # discovered device reports via /api/server-info (ScenePlay) or /json/info
-    # (WLED), shown next to its name in the server table. Idempotent.
-    try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblServersIP)"))]
-        if _cols and 'version' not in _cols:
-            db.session.execute(_sa_text(
-                "ALTER TABLE tblServersIP ADD COLUMN version TEXT"))
-            db.session.commit()
-    except Exception as _e:
-        db.session.rollback()
-        print('tblServersIP.version migration skipped:', _e)
-
-    # Lightweight migration: video-id identity + metadata-queue columns on the two
-    # media tables (create_all never alters existing tables). videoId = canonical
-    # YouTube id (dedup key), displayName = human name from metadata, metaStatus =
-    # metadata-queue lifecycle (lutStatus lexicon + 5=Unavailable), metaNextRetry =
-    # backoff gate. Idempotent — each column added only if absent.
-    for _mtbl in ('tblMusic', 'tblVideoMedia'):
-        try:
-            _cols = [r[1] for r in db.session.execute(_sa_text(f"PRAGMA table_info({_mtbl})"))]
-            for _col, _decl in (('videoId', 'TEXT'), ('displayName', 'TEXT'),
-                                ('metaStatus', 'INTEGER DEFAULT 0'), ('metaNextRetry', 'TEXT')):
-                if _cols and _col not in _cols:
-                    db.session.execute(_sa_text(f"ALTER TABLE {_mtbl} ADD COLUMN {_col} {_decl}"))
-            db.session.commit()
-        except Exception as _e:
-            db.session.rollback()
-            print(f'{_mtbl} metadata-column migration skipped:', _e)
-
-    # Lightweight migration: retry backoff gate on the playlist queue (fresh DBs
-    # get it in create_table()). Idempotent — added only if absent.
-    try:
-        _cols = [r[1] for r in db.session.execute(_sa_text("PRAGMA table_info(tblPlaylistQueue)"))]
-        if _cols and 'next_retry' not in _cols:
-            db.session.execute(_sa_text("ALTER TABLE tblPlaylistQueue ADD COLUMN next_retry TEXT"))
-        db.session.commit()
-    except Exception as _e:
-        db.session.rollback()
-        print('tblPlaylistQueue.next_retry migration skipped:', _e)
-
-    # The partial UNIQUE index on videoId must exist AFTER the ALTERs above (a
-    # fresh DB gets it in create_table(); an upgraded DB needs it here).
-    for _mtbl, _idx in (('tblMusic', 'idx_tblMusic_videoId'),
-                        ('tblVideoMedia', 'idx_tblVideoMedia_videoId')):
-        try:
-            db.session.execute(_sa_text(
-                f"CREATE UNIQUE INDEX IF NOT EXISTS {_idx} ON {_mtbl}(videoId) WHERE videoId IS NOT NULL"))
-            db.session.commit()
-        except Exception as _e:
-            db.session.rollback()
-            print(f'{_idx} creation skipped:', _e)
-
-    # Seed lutStatus row 5 "Unavailable" (permanent metadata failure). The JSON
-    # loader only seeds when lutStatus is empty, so upgraded DBs need this insert.
-    try:
-        _has5 = db.session.execute(_sa_text("SELECT 1 FROM lutStatus WHERE status_ID = 5")).fetchone()
-        if not _has5:
-            db.session.execute(_sa_text(
-                "INSERT INTO lutStatus(status_ID, status) VALUES (5, 'Unavailable')"))
-            db.session.commit()
-    except Exception as _e:
-        db.session.rollback()
-        print('lutStatus status-5 seed skipped:', _e)
+        raise RuntimeError(
+            'Database schema migration failed — ScenePlay will not start on an '
+            'inconsistent database. A pre-upgrade ScenePlay.db can be restored '
+            'from backups/ if needed.') from _e
 
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters'):

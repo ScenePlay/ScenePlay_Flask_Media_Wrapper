@@ -176,3 +176,4 @@ ScenePlay.db
 app.db
 backups/
 password_recovery/
+static/thumbs/

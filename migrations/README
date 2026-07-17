@@ -1,0 +1,33 @@
+ScenePlay schema migrations (Flask-Migrate / Alembic)
+=====================================================
+
+How migrations run here
+-----------------------
+Boxes are appliances — nobody runs `flask db upgrade` on them. Instead app.py
+applies pending revisions programmatically at startup:
+
+    sql.create_table()   # raw-SQL tables (CREATE IF NOT EXISTS)
+    db.create_all()      # SQLAlchemy-model tables
+    flask_migrate.upgrade()   # versioned patches: columns, indexes, seeds, data
+
+A failed migration RAISES and stops the app — by design. A box that won't
+start with a clear error beats one silently running on a half-upgraded schema.
+
+restore_replace() also runs this sequence after swapping the database file, so
+restoring an old backup brings it current immediately.
+
+Adding a schema change
+----------------------
+1. New TABLE: add it to sql.create_table() (raw SQL) or as a model (create_all
+   picks it up). No revision needed — both creators are idempotent.
+2. New COLUMN / index / seed row / data fix on an EXISTING table: write a new
+   revision in versions/ (copy the style of 0001_baseline.py):
+     - chain it: down_revision = '<current head>'
+     - guard each step (check PRAGMA table_info first) so databases that are
+       already current pass through cleanly
+     - let real failures raise; never swallow them
+3. Do NOT use `flask db migrate` (autogenerate). Most tables are raw SQL with
+   no SQLAlchemy model, so autogenerate would propose dropping them.
+
+Fresh installs get the full current schema from step 1 creators; upgrade()
+then just stamps the revisions as applied.

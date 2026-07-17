@@ -6,6 +6,7 @@ from models.mediaMetadata import tblmediametadata as metaTbl
 from models.videoScene import tblvideoscene as sceneLinkTbl
 from models.scenes import tblscenes as sc
 from sql import *
+from thumbs import store as thumb_store
 
     #   // cid  name          type     notnull  dflt_value  pk
     #   // ---  ------------  -------  -------  ----------  --
@@ -106,7 +107,8 @@ def data():
         m = meta.get(r.video_id)
         d['duration']  = m.duration  if m else None
         d['uploader']  = m.uploader  if m else None
-        d['thumbnail'] = m.thumbnail if m else None
+        # local cached copy first (works offline), remote URL as fallback
+        d['thumbnail'] = thumb_store.url('video', r.video_id) or (m.thumbnail if m else None)
         data.append(d)
     return {
         'data': data,
