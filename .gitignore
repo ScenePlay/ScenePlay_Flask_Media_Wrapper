@@ -177,3 +177,6 @@ app.db
 backups/
 password_recovery/
 static/thumbs/
+ScenePlay.db-wal
+ScenePlay.db-shm
+ScenePlay.db-journal
