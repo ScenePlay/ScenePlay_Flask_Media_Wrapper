@@ -297,6 +297,82 @@ def generate_code():
     return redirect(url_for('relay_admin_bp.status'))
 
 
+@relay_admin_bp.route('/reuse-code', methods=['POST'])
+@login_required
+@dm_required
+def reuse_code():
+    """Keep the current join code, whatever state the relay is in.
+
+    Mid-campaign, a new session means a new join code and re-sending it to
+    every player. If the stored session still exists on the relay, just
+    re-push the party to it. If the relay LOST it (Render free-tier restart
+    wipes its disk), recreate the session under the same session_id + code —
+    players keep the code they already have, and still-open portals stay
+    logged in because their tokens name the same session_id.
+    """
+    cfg = _relay_cfg()
+    if not cfg['url'] or not cfg['secret']:
+        flash('Set relay URL and secret before reconnecting.')
+        return redirect(url_for('relay_admin_bp.status'))
+    if not cfg['session_id'] or not cfg['code']:
+        flash('No previous session to reuse — generate a code first.')
+        return redirect(url_for('relay_admin_bp.status'))
+
+    try:
+        resp = requests.get(
+            cfg['url'].rstrip('/') + f"/api/v1/session/{cfg['session_id']}/presence",
+            headers={'X-Relay-Secret': cfg['secret']},
+            timeout=8,
+        )
+        recreated = False
+        if resp.status_code == 404:
+            # Session gone server-side: recreate it under the SAME identity.
+            resp = requests.post(
+                cfg['url'].rstrip('/') + '/api/v1/session/create',
+                headers={'X-Relay-Secret': cfg['secret'],
+                         'Content-Type': 'application/json'},
+                json={'session_id': cfg['session_id'], 'code': cfg['code']},
+                timeout=8,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # An older relay ignores the requested identity and mints a fresh
+            # one — store whatever actually came back so we never drift.
+            appsettingSet('relay_session_code', data.get('code', cfg['code']))
+            appsettingSet('relay_session_id',   data.get('session_id', cfg['session_id']))
+            # The recreated session is empty: relay token rows are gone, so
+            # the local relay-seq mirror is stale (same reset as New Session).
+            from extensions import db
+            from models.tblTokenPositions import tblTokenPositions
+            tblTokenPositions.query.delete(synchronize_session=False)
+            db.session.commit()
+            appsettingSet('relay_push_last_drop', '')
+            recreated = True
+        else:
+            resp.raise_for_status()
+
+        import relay_broadcaster
+        relay_broadcaster.push_all_characters()
+        relay_broadcaster.push_session_users()
+        relay_broadcaster.push_library()
+
+        new_code = appsettingGet('relay_session_code', cfg['code'])
+        if recreated and new_code != cfg['code']:
+            flash(f'Relay is an older version and issued a NEW code: {new_code}. '
+                  'Party pushed — players will need the new code.')
+        elif recreated:
+            flash(f'Session restored on the relay — join code {new_code} still '
+                  'works for everyone. Party pushed.')
+        else:
+            flash(f"Reconnected to existing session — join code {cfg['code']} still "
+                  'works for everyone. Party re-pushed to relay.')
+    except Exception as e:
+        log.warning('reuse_code relay error: %s', e)
+        flash(f'Could not reach relay: {e}')
+
+    return redirect(url_for('relay_admin_bp.status'))
+
+
 @relay_admin_bp.route('/sync-characters', methods=['POST'])
 @login_required
 @dm_required

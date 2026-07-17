@@ -223,6 +223,7 @@ def _upgrade_restored_db():
         if 'migrate' not in current_app.extensions:
             return False
         db.engine.dispose()      # pooled connections still point at the old file
+        sql.sqlite_tune()        # restored file carries its own (old) journal mode
         sql.create_table()
         db.create_all()
         fm_upgrade()

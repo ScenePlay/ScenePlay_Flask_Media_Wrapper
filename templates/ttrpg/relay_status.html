@@ -53,17 +53,28 @@
             <span class="text-muted ms-2">No active session</span>
           {% endif %}
         </div>
-        <form method="post" action="{{ url_for('relay_admin_bp.generate_code') }}">
-          <button class="btn btn-sm btn-outline-secondary">
-            &#8635; New Session
-          </button>
-        </form>
+        <div class="d-flex gap-2">
+          {% if cfg.code %}
+          <form method="post" action="{{ url_for('relay_admin_bp.reuse_code') }}">
+            <button class="btn btn-sm btn-ttrpg" title="Reconnect using the same join code — players don't need a new one">
+              &#8634; Reuse Code
+            </button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('relay_admin_bp.generate_code') }}">
+            <button class="btn btn-sm btn-outline-secondary">
+              &#8635; New Session
+            </button>
+          </form>
+        </div>
       </div>
       {% if cfg.code %}
       <div class="small text-muted mt-1">Session ID: {{ cfg.session_id }}</div>
       <div class="small text-muted">
         Players log in at the relay portal with their ScenePlay username, password, and this code.
-        <strong>Clicking "New Session" clears all existing relay data and pushes fresh characters.</strong>
+        <strong>&#8634; Reuse Code</strong> reconnects mid-campaign with the code everyone already has;
+        <strong>&#8635; New Session</strong> clears all relay data, pushes fresh characters, and
+        mints a new code you'll need to re-send.
       </div>
       {% endif %}
     </div>

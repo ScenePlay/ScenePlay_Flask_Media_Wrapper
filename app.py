@@ -196,6 +196,7 @@ with app.app_context():
     import models.tblTokenPositions  # noqa: F401
     import models.tblRollLog         # noqa: F401
     import models.mediaMetadata      # noqa: F401
+    sqlite_tune()          # WAL mode — readers never block (see sql.sqlite_tune)
     create_table()
     db.create_all()
     from flask_migrate import upgrade as _fm_upgrade

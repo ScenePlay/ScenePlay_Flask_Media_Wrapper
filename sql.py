@@ -16,6 +16,23 @@ from collections import defaultdict
 
 database = databaseDir
 
+
+def sqlite_tune():
+    """Put the database in WAL journal mode (idempotent; the mode persists in
+    the file itself). In the default delete-journal mode every commit takes an
+    exclusive lock and costs several fsyncs — on this project's typical
+    storage (SD cards, NTFS/FUSE mounts) that serialized every reader behind
+    every writer, and with six polling workers it escalated into lock storms:
+    'database is locked' errors and a stalled relay receiver. In WAL, readers
+    never block and a commit is a single append. Called at app startup and
+    after a replace-restore (a restored backup carries its own old mode)."""
+    conn = sqlite3.connect(database, timeout=30)
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+    finally:
+        conn.close()
+
+
 def create_table():
     conn = sqlite3.connect(database)
     conn.text_factory = lambda x: unicodedata(x, 'utf-8', 'ignore')
