@@ -224,6 +224,19 @@ def _bitrate():
     return b if b in ("64", "96", "128") else "128"
 
 
+def _profile():
+    """Latency profile forwarded to the relay (X-Audio-Profile header).
+    'low' keeps portal listeners ~3-4 s behind live; 'smooth' trades ~10-12 s
+    of delay for more armor against wifi blips (the original behavior). Read
+    at stream start, so it applies from the next capture like _bitrate()."""
+    try:
+        from sql import appsettingGet
+        p = str(appsettingGet("relay_audio_profile", "low") or "low").strip()
+    except Exception:
+        p = "low"
+    return p if p in ("low", "smooth") else "low"
+
+
 # Live-stream encoder flags: flush every packet (don't buffer frames),
 # no Xing/VBR header (wrong for live; confuses some decoders on join),
 # no bit reservoir (each frame self-contained -> cleaner resync when a
@@ -436,7 +449,8 @@ def _run(cfg):
     import requests
     url = (cfg["url"].rstrip("/")
            + f"/api/v1/session/{cfg['session_id']}/audio-ingest")
-    headers = {"X-Relay-Secret": cfg["secret"], "Content-Type": "audio/mpeg"}
+    headers = {"X-Relay-Secret": cfg["secret"], "Content-Type": "audio/mpeg",
+               "X-Audio-Profile": _profile()}
     proc = None
     buf = None
     first = True     # first POST of the period clears the relay preroll

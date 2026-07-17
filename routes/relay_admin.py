@@ -25,6 +25,7 @@ def _relay_cfg():
         'roll_cleared_at':  appsettingGet('relay_roll_cleared_at', ''),
         'audio_enabled':    appsettingGet('relay_audio_enabled',   '1'),
         'audio_bitrate':    appsettingGet('relay_audio_bitrate',   '128'),
+        'audio_profile':    appsettingGet('relay_audio_profile',   'low'),
     }
 
 
@@ -236,6 +237,9 @@ def save_config():
     bitrate = request.form.get('relay_audio_bitrate', '128')
     appsettingSet('relay_audio_bitrate',
                   bitrate if bitrate in ('64', '96', '128') else '128')
+    profile = request.form.get('relay_audio_profile', 'low')
+    appsettingSet('relay_audio_profile',
+                  profile if profile in ('low', 'smooth') else 'low')
     flash('Relay configuration saved.')
     return redirect(url_for('relay_admin_bp.status'))
 

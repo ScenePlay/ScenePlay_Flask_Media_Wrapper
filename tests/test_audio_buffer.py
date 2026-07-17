@@ -102,3 +102,18 @@ def test_chunks_batches_small_reads(monkeypatch):
     assert b''.join(out) == b''.join(pieces)      # nothing lost or reordered
     assert len(out) < len(pieces)                 # actually batched
     assert all(len(c) >= ras._POST_BATCH for c in out[:-1])  # full batches first
+
+
+def test_profile_setting_validated(monkeypatch):
+    """relay_audio_profile: only 'low'/'smooth' reach the relay; anything
+    else (typo, old DB value) falls back to 'low'."""
+    import sql
+    import relay_audio_stream as ras
+    values = {}
+    monkeypatch.setattr(sql, 'appsettingGet',
+                        lambda name, default='': values.get(name, default))
+    assert ras._profile() == 'low'                 # unset -> default low
+    values['relay_audio_profile'] = 'smooth'
+    assert ras._profile() == 'smooth'
+    values['relay_audio_profile'] = 'bogus'
+    assert ras._profile() == 'low'
