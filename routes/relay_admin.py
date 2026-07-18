@@ -26,6 +26,7 @@ def _relay_cfg():
         'audio_enabled':    appsettingGet('relay_audio_enabled',   '1'),
         'audio_bitrate':    appsettingGet('relay_audio_bitrate',   '128'),
         'audio_profile':    appsettingGet('relay_audio_profile',   'low'),
+        'audio_gain':       appsettingGet('relay_audio_gain',      '50'),
     }
 
 
@@ -240,6 +241,9 @@ def save_config():
     profile = request.form.get('relay_audio_profile', 'low')
     appsettingSet('relay_audio_profile',
                   profile if profile in ('low', 'smooth') else 'low')
+    gain = request.form.get('relay_audio_gain', '50')
+    appsettingSet('relay_audio_gain',
+                  gain if gain in ('25', '50', '75', '100', '150') else '50')
     flash('Relay configuration saved.')
     return redirect(url_for('relay_admin_bp.status'))
 

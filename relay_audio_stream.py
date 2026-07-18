@@ -36,7 +36,13 @@ _CHUNK = 1024          # ~64 ms of audio at 128 kbps — small packets, smooth c
 _POST_BATCH = 4096     # assemble small reads into ~4 KB POST writes: the relay's
                        # tiny CPU share (Render free tier) fans out 4x fewer chunks
 _BACKLOG_MAX = 384 * 1024   # ~24 s at 128 kbps the backlog can bridge (see _StreamBuffer)
-_ROTATE_S = 300        # end + reopen the ingest POST this often
+# End + reopen the ingest POST this often. Every rotation is a brief hole in
+# the stream, so fewer is better; 15 min stays comfortably inside proxy
+# request-duration limits on the paid relay tier. The kept-alive Session in
+# _run() makes the reopen itself a ~1-RTT blip instead of a fresh TCP+TLS
+# handshake (rotations at 300s with cold connections were an audible drop
+# every 5 minutes for low-lag listeners).
+_ROTATE_S = 900
 _IDLE_STOP_S = 20      # capture/push stops this long after the last track
 _ATTACH_WAIT_S = 10    # Windows: max wait for the new mpv PID to appear
 
@@ -224,9 +230,23 @@ def _bitrate():
     return b if b in ("64", "96", "128") else "128"
 
 
+def _gain():
+    """Stream loudness percent (relay_audio_gain, default 50). The capture
+    sink receives mpv's output at source level, so the relayed stream was
+    much hotter than what the GM hears locally — this scales the encoder
+    input (ffmpeg volume filter), independent of any local volume. Read at
+    capture spawn like _bitrate()."""
+    try:
+        from sql import appsettingGet
+        g = int(str(appsettingGet("relay_audio_gain", "50") or "50").strip())
+    except Exception:
+        g = 50
+    return g if 10 <= g <= 200 else 50
+
+
 def _profile():
     """Latency profile forwarded to the relay (X-Audio-Profile header).
-    'low' keeps portal listeners ~3-4 s behind live; 'smooth' trades ~10-12 s
+    'low' keeps portal listeners ~4-5 s behind live; 'smooth' trades ~10-12 s
     of delay for more armor against wifi blips (the original behavior). Read
     at stream start, so it applies from the next capture like _bitrate()."""
     try:
@@ -244,12 +264,17 @@ def _profile():
 _STREAM_FLAGS = ["-reservoir", "0", "-write_xing", "0", "-flush_packets", "1"]
 
 
+def _gain_args():
+    g = _gain()
+    return [] if g == 100 else ["-af", f"volume={g / 100:.2f}"]
+
+
 def _spawn_ffmpeg_linux():
     return subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-f", "pulse", "-i", f"{SINK_NAME}.monitor",
          "-c:a", "libmp3lame", "-b:a", _bitrate() + "k", "-ar", "44100", "-ac", "2",
-         *_STREAM_FLAGS,
+         *_gain_args(), *_STREAM_FLAGS,
          "-f", "mp3", "pipe:1"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
@@ -260,7 +285,7 @@ def _spawn_ffmpeg_windows():
         ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0",
          "-c:a", "libmp3lame", "-b:a", _bitrate() + "k", "-ar", "44100", "-ac", "2",
-         *_STREAM_FLAGS,
+         *_gain_args(), *_STREAM_FLAGS,
          "-f", "mp3", "pipe:1"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -444,6 +469,61 @@ def _spawn_capture():
     return _spawn_ffmpeg_linux()
 
 
+def _ws_drain(ws):
+    """Reader thread: consume (and discard) inbound frames so the client
+    library answers the server's keepalive pings — a send-only socket would
+    never process them and the server would drop us on ping timeout."""
+    try:
+        while True:
+            ws.recv()
+    except Exception:
+        pass
+
+
+def _push_ws(cfg, buf, first):
+    """Push the stream over ONE persistent WebSocket until stop/idle/error —
+    the preferred transport: no POST rotation, so no periodic stream gap.
+    Returns (outcome, connected, seconds): outcome 'unsupported' = relay has
+    no WS route (fall back to POST for this capture), 'done' = clean stop,
+    'error' = retryable blip (backlog bridges it, reconnect with backoff)."""
+    try:
+        import websocket
+    except ImportError:
+        return "unsupported", False, 0.0
+    ws_url = (cfg["url"].rstrip("/")
+              .replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+              + f"/api/v1/session/{cfg['session_id']}/audio-ingest-ws"
+              + ("" if first else "?continuation=1"))
+    started = time.monotonic()
+    try:
+        ws = websocket.create_connection(
+            ws_url, timeout=10,
+            header={"X-Relay-Secret": cfg["secret"],
+                    "X-Audio-Profile": _profile()})
+    except websocket.WebSocketBadStatusException as e:
+        # 403/404/405 = relay predates the WS route. (A bad secret surfaces
+        # the same way; the POST fallback then reports it properly as a 4xx.)
+        if getattr(e, "status_code", 0) in (403, 404, 405):
+            return "unsupported", False, 0.0
+        return "error", False, time.monotonic() - started
+    except Exception:
+        return "error", False, time.monotonic() - started
+    threading.Thread(target=_ws_drain, args=(ws,), daemon=True,
+                     name="relay-audio-ws-drain").start()
+    try:
+        ws.settimeout(10)
+        for batch in _chunks(buf, deadline=float("inf")):
+            ws.send_binary(batch)
+        return "done", True, time.monotonic() - started
+    except Exception:
+        return "error", True, time.monotonic() - started
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+
 def _run(cfg):
     """Worker thread: capture → encode → push until playback goes idle."""
     import requests
@@ -451,10 +531,14 @@ def _run(cfg):
            + f"/api/v1/session/{cfg['session_id']}/audio-ingest")
     headers = {"X-Relay-Secret": cfg["secret"], "Content-Type": "audio/mpeg",
                "X-Audio-Profile": _profile()}
+    # One Session for the worker's lifetime: rotations reuse the pooled
+    # TCP+TLS connection, shrinking the between-POST stream gap to ~1 RTT.
+    http = requests.Session()
     proc = None
     buf = None
-    first = True     # first POST of the period clears the relay preroll
+    first = True     # first push of the period clears the relay preroll
     backoff = 2
+    use_ws = True    # WebSocket first; permanent POST fallback per capture
     try:
         while not _stop.is_set() and not _idle_expired():
             # Rotation boundary: honor relay/audio toggles flipped mid-playback
@@ -466,9 +550,29 @@ def _run(cfg):
                 buf = _StreamBuffer()
                 threading.Thread(target=_reader, args=(proc, buf),
                                  daemon=True, name="relay-audio-reader").start()
+
+            if use_ws:
+                outcome, connected, dur = _push_ws(cfg, buf, first)
+                if outcome == "unsupported":
+                    use_ws = False
+                    log.info("relay has no WebSocket ingest — using chunked POST")
+                    continue
+                if connected:
+                    first = False
+                if outcome == "done":
+                    break
+                if dur > 30:      # a long healthy run earns a fast reconnect
+                    backoff = 2
+                log.info("audio ws push interrupted after %.0fs; retrying in "
+                         "%ss (backlog bridging the gap)", dur, backoff)
+                if _stop.wait(backoff):
+                    break
+                backoff = min(10, backoff * 2)
+                continue
+
             deadline = time.monotonic() + _ROTATE_S
             try:
-                resp = requests.post(
+                resp = http.post(
                     url + ("" if first else "?continuation=1"),
                     data=_chunks(buf, deadline),
                     headers=headers, timeout=(5, 30))
@@ -496,6 +600,7 @@ def _run(cfg):
                 first = False   # keep listeners attached across the blip
     finally:
         _kill(proc)
+        http.close()
         # Definitive "music stopped" for the portal widget (idempotent —
         # the queue-drain path may already have sent it).
         _broadcast_now_playing(None, False)

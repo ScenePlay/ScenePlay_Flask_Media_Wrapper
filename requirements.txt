@@ -8,6 +8,9 @@ Flask-Login~=0.6.3
 Flask-Bcrypt~=1.0.1
 waitress~=3.0.2
 requests~=2.34.2
+# Relay audio ingest over a persistent WebSocket (relay_audio_stream._push_ws);
+# absent -> the streamer falls back to rotating chunked POSTs automatically.
+websocket-client~=1.8
 SQLAlchemy~=2.0.50
 Pillow~=12.2.0
 python-crontab~=3.3.0; sys_platform == "linux"

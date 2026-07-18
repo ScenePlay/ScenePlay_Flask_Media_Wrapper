@@ -178,13 +178,27 @@
         <div class="mb-3 ms-4" style="max-width:280px;">
           <label class="form-label small">Stream latency</label>
           <select name="relay_audio_profile" class="form-select form-select-sm">
-            {% for p, lbl in [('low',    'Low lag — ~3-4 s behind live'),
+            {% for p, lbl in [('low',    'Low lag — ~4-5 s behind live'),
                               ('smooth', 'Smooth — ~10-12 s buffer for shaky networks')] %}
             <option value="{{ p }}"{% if cfg.audio_profile == p %} selected{% endif %}>{{ lbl }}</option>
             {% endfor %}
           </select>
           <div class="form-text">Low lag keeps players near-live; pick Smooth if
           listeners hear dropouts.</div>
+        </div>
+        <div class="mb-3 ms-4" style="max-width:280px;">
+          <label class="form-label small">Stream volume</label>
+          <select name="relay_audio_gain" class="form-select form-select-sm">
+            {% for g, lbl in [('25',  '25% — quiet'),
+                              ('50',  '50% — recommended'),
+                              ('75',  '75%'),
+                              ('100', '100% — source level'),
+                              ('150', '150% — boost quiet sources')] %}
+            <option value="{{ g }}"{% if cfg.audio_gain == g %} selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Loudness of the music sent to portal players —
+          independent of your local speakers. Applies from the next track.</div>
         </div>
         <button type="submit" class="btn btn-sm btn-ttrpg">Save</button>
       </form>
