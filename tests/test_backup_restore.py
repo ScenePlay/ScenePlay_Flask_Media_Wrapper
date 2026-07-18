@@ -129,6 +129,23 @@ class TestReplace:
         br.restore_replace(snap)
         assert (env['uploads'] / 'portraits' / 'hero.png').read_bytes() == b'PNGDATA'
 
+    def test_database_only_skips_uploads(self, env):
+        """include_uploads=False: DB restores, images are NOT extracted (the
+        Pi-Zero path — unzipping a big media tree crashes the box)."""
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('Keep Me', 1, 0)")
+        snap = br.create_backup(label='manual')
+        x(env['live'], "DELETE FROM tblScenes")
+        os.remove(env['uploads'] / 'portraits' / 'hero.png')
+
+        summary = br.restore_replace(snap, include_uploads=False)
+        assert q(env['live'], "SELECT COUNT(*) FROM tblScenes WHERE sceneName='Keep Me'")[0][0] == 1
+        assert summary['uploads_restored'] == 0
+        assert not (env['uploads'] / 'portraits' / 'hero.png').exists()
+
+        s = br.restore_merge(snap, include_uploads=False)
+        assert s['uploads_added'] == 0
+        assert not (env['uploads'] / 'portraits' / 'hero.png').exists()
+
 
 class TestMerge:
     def _source_archive(self, env):

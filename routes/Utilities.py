@@ -155,6 +155,9 @@ def backup_import():
     with dedup. Either way missing media re-queues for download."""
     f = request.files.get('backupFile')
     mode = request.form.get('mode', 'merge')
+    # Database only: skip extracting uploads/ (battlemap images/videos) —
+    # unzipping a big media tree crashes low-memory boxes (Pi Zero).
+    include_uploads = not request.form.get('db_only')
     if not f or not f.filename:
         flash('Import: no file selected.')
         return redirect(url_for('ut.main'))
@@ -162,18 +165,19 @@ def backup_import():
     staged = os.path.join(backup_restore.BACKUP_DIR, '.upload.zip')
     f.save(staged)
     try:
+        img_note = '' if include_uploads else ' (database only — images skipped)'
         if mode == 'replace':
-            summary = backup_restore.restore_replace(staged)
+            summary = backup_restore.restore_replace(staged, include_uploads=include_uploads)
             db.engine.dispose()   # drop pooled connections to the swapped-out file
             flash(f"Restored from {summary['from']} (backup of {summary['created_at']}): "
                   f"{summary['uploads_restored']} images, {summary['requeued_downloads']} downloads "
-                  f"re-queued. Safety copy: {summary['safety_backup']}. RESTART the app now.")
+                  f"re-queued{img_note}. Safety copy: {summary['safety_backup']}. RESTART the app now.")
         else:
-            summary = backup_restore.restore_merge(staged)
+            summary = backup_restore.restore_merge(staged, include_uploads=include_uploads)
             flash(f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
                   f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
                   f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
-                  f"{summary['uploads_added']} images "
+                  f"{summary['uploads_added']} images{img_note} "
                   f"({summary['skipped_legacy']} legacy rows skipped). New media is downloading.")
     except ValueError as e:
         flash(f'Import failed: {e}')

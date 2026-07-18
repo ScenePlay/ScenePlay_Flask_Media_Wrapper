@@ -233,10 +233,15 @@ def _upgrade_restored_db():
         return False
 
 
-def restore_replace(zip_path):
+def restore_replace(zip_path, include_uploads=True):
     """Whole-database restore. Safety snapshot first; atomic file swap; WAL
     sidecars cleared; schema brought current; uploads overwritten; missing
     media re-queued.
+
+    include_uploads=False restores the DATABASE ONLY: extracting a big
+    uploads/ tree (battlemap images/videos) crashes low-memory boxes like a
+    Pi Zero — images can be moved separately (rsync/USB into static/uploads)
+    or simply left to the box they live on.
 
     The workers open a fresh sqlite connection per operation, so they pick up
     the new file immediately; the web app should still be restarted so its
@@ -254,7 +259,7 @@ def restore_replace(zip_path):
         except OSError:
             pass
     upgraded = _upgrade_restored_db()
-    uploads = _extract_uploads(zip_path, overwrite=True)
+    uploads = _extract_uploads(zip_path, overwrite=True) if include_uploads else 0
     requeue = requeue_missing_media()
     return {
         'mode': 'replace',
@@ -340,7 +345,7 @@ def _merge_homebrew_libraries(c):
     return copied
 
 
-def restore_merge(zip_path):
+def restore_merge(zip_path, include_uploads=True):
     """Dedup-aware import of the archive's campaigns, scenes, media and
     scene-links into the live database. Media rows match by videoId, genres/
     campaigns/scenes by name (case-insensitive); metadata rides along for new
@@ -521,7 +526,8 @@ def restore_merge(zip_path):
         except OSError:
             pass
 
-    uploads = _extract_uploads(zip_path, overwrite=False)   # never clobber local images
+    uploads = (_extract_uploads(zip_path, overwrite=False)  # never clobber local images
+               if include_uploads else 0)
     if s['music'] or s['video']:
         sql.appsettingYT_QuePlayFlagUpdate(1)               # download the new rows
         sql.appsettingFlagUpdate('meta_que_switch', 1)      # fetch metadata where missing

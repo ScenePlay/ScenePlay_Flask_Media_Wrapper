@@ -116,6 +116,13 @@
                       Replace — restore the ENTIRE database from this backup (current data snapshotted first)
                     </label>
                     <br />
+                    <label style="display:inline-block;margin:0 12px 6px 0;">
+                      <input type="checkbox" name="db_only" value="1">
+                      Database only — skip images/uploads (use on low-memory boxes
+                      like a Pi Zero, where extracting a big media tree crashes the
+                      restore; copy <code>static/uploads</code> separately if needed)
+                    </label>
+                    <br />
                     <input type="submit" value="Import"
                            onclick="return (document.querySelector('input[name=mode]:checked').value !== 'replace')
                                     || confirm('Replace ALL data on this server with the backup? A safety snapshot of the current state is taken first, and the app must be restarted afterwards.');">
