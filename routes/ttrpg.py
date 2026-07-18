@@ -641,8 +641,12 @@ def portrait_paste(character_id):
         old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
         if os.path.exists(old):
             os.remove(old)
-    filename = f"{uuid.uuid4().hex}.png"
-    portrait.save(os.path.join(current_app.root_path, PORTRAIT_FOLDER, filename))
+    # Through the shared Pillow pipeline like every other upload: downscale,
+    # opaque->JPEG. (This endpoint used to save raw bytes as .png — the
+    # source of multi-MB portraits.)
+    from routes._util import save_upload_downscaled
+    filename = save_upload_downscaled(
+        portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
     char.portrait_path = filename
     db.session.commit()
     return jsonify({'ok': True, 'url': url_for('static', filename='uploads/portraits/' + filename)})

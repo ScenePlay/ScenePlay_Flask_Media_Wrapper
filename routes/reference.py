@@ -31,10 +31,10 @@ def _save_upload(file_field, subfolder):
     ext = f.filename.rsplit('.', 1)[-1].lower()
     if ext not in ALLOWED_IMG_EXTS:
         return None
-    filename = f'{uuid.uuid4().hex}.{ext}'
+    # Shared Pillow pipeline: downscale to token-art size, opaque->JPEG.
+    from routes._util import save_upload_downscaled
     folder = os.path.join(current_app.root_path, 'static', 'uploads', subfolder)
-    os.makedirs(folder, exist_ok=True)
-    f.save(os.path.join(folder, filename))
+    filename = save_upload_downscaled(f, folder)
     return url_for('static', filename=f'uploads/{subfolder}/{filename}')
 
 
