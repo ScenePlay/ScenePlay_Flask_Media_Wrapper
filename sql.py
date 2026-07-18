@@ -29,6 +29,13 @@ def sqlite_tune():
     conn = sqlite3.connect(database, timeout=30)
     try:
         conn.execute('PRAGMA journal_mode=WAL')
+        # Fold the WAL into the main file and truncate it. In WAL mode recent
+        # writes live in ScenePlay.db-wal, so a bare file copy of ScenePlay.db
+        # (USB/scp between boxes) silently loses the tail — this makes the
+        # main file complete as of every app start. (The ONLY fully-safe way
+        # to move a live database remains the app's Backup feature, which
+        # snapshots via sqlite's backup API.)
+        conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     finally:
         conn.close()
 
