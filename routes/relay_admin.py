@@ -286,6 +286,23 @@ def _start_session(requested_id=None, requested_code=None):
         from extensions import db
         from models.tblTokenPositions import tblTokenPositions
         tblTokenPositions.query.delete(synchronize_session=False)
+
+        # Same restart hazard for ROLL ids and MUTATION ids: the relay purges
+        # its roll_log/mutations with the session, and on a redeployed relay
+        # (fresh DB) the AUTOINCREMENT counters start over at 1 — so relay ids
+        # recorded locally are from a dead lifetime and collide with the new
+        # session's ids, making the receiver's dedup swallow every fresh roll
+        # and HP/sheet mutation. Strip the markers: tblRollLog keeps its rows
+        # (full history) minus the ids; the 50-roll display feed drops its
+        # relay-origin rows outright (NULLing them would let the echo-claim
+        # dedup swallow new rolls that match a stale row's signature).
+        from models.tblRollLog import tblRollLog
+        from models.ttrpg import tblDiceRolls
+        tblRollLog.query.filter(tblRollLog.relay_roll_id.isnot(None)) \
+            .update({'relay_roll_id': None}, synchronize_session=False)
+        tblDiceRolls.query.filter(tblDiceRolls.relay_roll_id.isnot(None)) \
+            .delete(synchronize_session=False)
+        appsettingSet('relay_applied_mutation_ids', '[]')
         db.session.commit()
 
         # Push drops recorded against the PREVIOUS session are moot now —
