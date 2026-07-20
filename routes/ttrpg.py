@@ -134,7 +134,25 @@ def characters():
                  .filter_by(active=1)
                  .order_by(tblCharacters.name)
                  .all())
-    return render_template('ttrpg/characters.html', characters=all_chars)
+
+    sessions = tblSessions.query.order_by(tblSessions.created_at.desc()).all()
+    active_session = tblSessions.query.filter_by(status='active').first()
+
+    # Session -> its party's character ids (comma-wrapped id strings for the
+    # client-side filter dropdown, same shape as the dashboard's campaign filter).
+    sess_chars = {}
+    for sid, chid in (db.session.query(tblSessionParty.session_id,
+                                       tblSessionParty.character_id)
+                      .distinct().all()):
+        sess_chars.setdefault(sid, set()).add(chid)
+    session_char_ids = {sid: ',' + ','.join(str(i) for i in sorted(ids)) + ','
+                        for sid, ids in sess_chars.items()}
+
+    return render_template('ttrpg/characters.html',
+                           characters=all_chars,
+                           sessions=sessions,
+                           session_char_ids=session_char_ids,
+                           active_session=active_session)
 
 
 # ── My Character — player landing ──────────────────────────────────────────────

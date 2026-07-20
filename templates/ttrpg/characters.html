@@ -3,7 +3,20 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 style="color:var(--ttrpg-accent);">All Characters</h3>
-  <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg btn-sm">+ New Character</a>
+  <div class="d-flex align-items-center gap-2">
+    {% if sessions %}
+    <select id="session-filter" class="form-select form-select-sm" style="width:auto;">
+      <option value="all">All Sessions</option>
+      {% for sess in sessions %}
+      <option value="{{ sess.session_id }}"
+              {% if active_session and sess.session_id == active_session.session_id %}selected{% endif %}>
+        #{{ sess.session_number }} — {{ sess.title }}{% if sess.status == 'active' %} (active){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <a href="{{ url_for('ttrpg.character_new') }}" class="btn btn-ttrpg btn-sm">+ New Character</a>
+  </div>
 </div>
 
 {% if characters %}
@@ -17,7 +30,7 @@
     </thead>
     <tbody>
       {% for char in characters %}
-      <tr>
+      <tr data-char-id="{{ char.character_id }}">
         <td>
           <div class="d-flex align-items-center gap-2">
             {% if char.portrait_path %}
@@ -52,9 +65,37 @@
         </td>
       </tr>
       {% endfor %}
+      <tr id="no-session-chars" class="d-none">
+        <td colspan="8" class="text-center text-muted py-3">No characters in this session's party.</td>
+      </tr>
     </tbody>
   </table>
 </div>
+
+<script>
+(function () {
+  const filter = document.getElementById('session-filter');
+  if (!filter) return;
+  const sessionChars = {{ session_char_ids | tojson }};
+  const rows = document.querySelectorAll('tr[data-char-id]');
+  const emptyRow = document.getElementById('no-session-chars');
+
+  function applyFilter() {
+    const val = filter.value;
+    let visible = 0;
+    rows.forEach(row => {
+      const show = val === 'all' ||
+        (sessionChars[val] || '').includes(',' + row.dataset.charId + ',');
+      row.classList.toggle('d-none', !show);
+      if (show) visible++;
+    });
+    emptyRow.classList.toggle('d-none', visible > 0);
+  }
+
+  filter.addEventListener('change', applyFilter);
+  applyFilter();
+})();
+</script>
 {% else %}
 <div class="ttrpg-card p-4 text-center">
   <p class="text-muted">No characters yet.</p>
