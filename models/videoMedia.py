@@ -28,6 +28,7 @@ class tblvideomedia(db.Model):
     displayName = db.Column(db.Text)
     metaStatus = db.Column(db.Integer)
     metaNextRetry = db.Column(db.Text)
+    dnLastError = db.Column(db.Text)
 
     def to_dict(self):
         return {
@@ -43,6 +44,7 @@ class tblvideomedia(db.Model):
             'dnLoadStatus': self.dnLoadStatus,
             'videoId': self.videoId,
             'displayName': self.displayName,
-            'metaStatus': self.metaStatus
+            'metaStatus': self.metaStatus,
+            'dnLastError': self.dnLastError
         }
         

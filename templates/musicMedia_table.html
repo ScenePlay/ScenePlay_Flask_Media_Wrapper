@@ -222,7 +222,19 @@
                     node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
                   }
                 });
-                return gridjs.html(statusDD.outerHTML)
+                // Hidden dnLastError feed sits second-from-last (displayName
+                // stays last). Non-empty only after a failed download.
+                const errCell = row.cells[row.cells.length - 2];
+                const err = (errCell && errCell.data) ? errCell.data : '';
+                if (!err) { return gridjs.html(statusDD.outerHTML) }
+                const wrap = document.createElement('div');
+                wrap.appendChild(statusDD);
+                const warn = document.createElement('span');
+                warn.textContent = ' ⚠';
+                warn.title = err;
+                warn.style = 'cursor:help;color:#dc3545;font-size:1.1em;';
+                wrap.appendChild(warn);
+                return gridjs.html(wrap.innerHTML)
               }
           },
           { id: tblColumns[10], name: 'Length', sort: true,
@@ -249,6 +261,8 @@
               return gridjs.html(spCheckHtml(row.cells[0].data));
               }
           },
+          // Hidden feed for the Download Status formatter's error tooltip.
+          { id: 'dnLastError', name: 'dnLastError', hidden: true },
           // Hidden feed for the Name column's formatter (human title from metadata).
           // Must stay LAST — the formatter reads row.cells[row.cells.length - 1].
           { id: 'displayName', name: 'displayName', hidden: true },

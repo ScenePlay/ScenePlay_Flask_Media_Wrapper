@@ -9,6 +9,21 @@ import ytdlp_source
 
 from multiprocessing import Process, Value, Array
 
+
+def extract_ytdlp_error(log_text):
+    """The diagnosable core of a yt-dlp log: every ERROR line, plus WARNING
+    lines when there are no errors (e.g. the missing-JS-runtime deprecation —
+    often the real cause behind a bogus 'not available'). '' if neither."""
+    errors, warnings = [], []
+    for line in (log_text or '').splitlines():
+        line = line.strip()
+        if line.startswith('ERROR'):
+            errors.append(line)
+        elif line.startswith('WARNING'):
+            warnings.append(line)
+    return ' | '.join(errors or warnings)[:1000]
+
+
 def YT_Exec(fi):
    """Download one queued row — shared Python pipeline for BOTH OSes.
 
@@ -88,6 +103,20 @@ def YT_Exec(fi):
       CRUD_tblMusic(row, 'dnUpdate')
    else:
       CRUD_tblvideomedia(row, 'dnUpdate')
+   # Per-row diagnostics: ytdlp_last.log only holds the LAST run, so a failed
+   # row's error is gone after the next download unless captured here.
+   try:
+      err = ''
+      if not ok:
+         try:
+            with open(log_path, encoding='utf-8', errors='replace') as f:
+               err = extract_ytdlp_error(f.read())
+         except OSError:
+            pass
+         err = err or 'download failed (no yt-dlp error output captured)'
+      update_dn_last_error(tbl, pkey, err)
+   except Exception:
+      pass                        # diagnostics must never fail the download
    try:
       play_mp3(os.path.join(start_dir, 'effects',
                             'finished.mp3' if ok else 'failed.mp3'))

@@ -65,13 +65,13 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblLED (  led_ID INTEGER PRIMARY KEY AUTOINCREMENT,  ledJSON TEXT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT, brightness Real,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDTypeModel (  ledTypeModel_ID INTEGER PRIMARY KEY AUTOINCREMENT,  modelName TEXT,  ledJSON TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT,  dnLastError TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  version TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblVideoMedia (  video_ID INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  title TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblVideoMedia (  video_ID INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  title TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT,  dnLastError TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblVideoScene (  videoScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  video_ID INT,  DisplayScreen_ID INT,  orderBy INT,  volume INT, loops INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblwledPattern (  wledPattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT, server_ID INT,  effect INT,  pallette INT,  color1 TEXT,  color2 TEXT,  color3 TEXT,  speed INT,  brightness INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tbleffect (  effect_ID INTEGER PRIMARY KEY AUTOINCREMENT,  effectName TEXT, ef_ID INT)")
@@ -310,6 +310,12 @@ def _enqueue_legacy(url, mediaType, scene_ID, flname):
         if scene_ID > 0:
             CRUD_tblVideoScene([scene_ID, pk, 0, 1, 100, 0], "C")
     appsettingYT_QuePlayFlagUpdate(1)
+    # Metadata rides along with the download here too: yt-dlp extraction works
+    # for any supported site, not just YouTube (the id-based path sets
+    # metaStatus=1 in its INSERT). The CRUD insert leaves it at the default 0.
+    if url:
+        set_meta_status('music' if mediaType == 'mp3' else 'video', pk, 1)
+        appsettingFlagUpdate('meta_que_switch', 1)
     return pk
 
 
@@ -318,6 +324,20 @@ def _set_dnload_status(media_type, pk, status):
         CRUD_tblMusic([pk, status], "dnUpdate")
     else:
         CRUD_tblvideomedia([pk, status], "dnUpdate")
+
+
+def update_dn_last_error(tbl, pk, err):
+    """Store (or clear with '') the last download error on a media row.
+    `tbl` is the raw table name the download queue carries ('tblMusic' /
+    'tblVideoMedia') — same identifier YT_Exec already switches on."""
+    pkcol = 'song_id' if tbl == 'tblMusic' else 'video_ID'
+    table = 'tblMusic' if tbl == 'tblMusic' else 'tblVideoMedia'
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(f"UPDATE {table} SET dnLastError = ? WHERE {pkcol} = ?", (err, pk))
+    conn.commit()
+    c.close()
+    conn.close()
 
 
 def set_meta_status(media_type, pk, status, next_retry=None):

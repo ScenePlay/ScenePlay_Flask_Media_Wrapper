@@ -247,7 +247,19 @@
                     node.outerHTML = node.outerHTML.toString().replace("<option","<option selected")
                   }
                 });
-                return gridjs.html(statusDD.outerHTML)
+                // Hidden dnLastError feed sits second-from-last (displayName
+                // stays last). Non-empty only after a failed download.
+                const errCell = row.cells[row.cells.length - 2];
+                const err = (errCell && errCell.data) ? errCell.data : '';
+                if (!err) { return gridjs.html(statusDD.outerHTML) }
+                const wrap = document.createElement('div');
+                wrap.appendChild(statusDD);
+                const warn = document.createElement('span');
+                warn.textContent = ' ⚠';
+                warn.title = err;
+                warn.style = 'cursor:help;color:#dc3545;font-size:1.1em;';
+                wrap.appendChild(warn);
+                return gridjs.html(wrap.innerHTML)
               }
           },
           { id: tblColumns[10], name: 'Length', sort: true,
@@ -267,6 +279,18 @@
                 return gridjs.html(img.outerHTML);
               }
           },
+          {id: 'mapbg', name: 'Map', sort: false,
+          formatter: function (cellData, row) {
+              // Server-side copy into the battle-map backgrounds — works from
+              // any browser, no access to the server's filesystem needed.
+              const btn = document.createElement('button');
+              btn.textContent = '\u{1F5FA}';
+              btn.className = 'btn btn-sm btn-outline-secondary';
+              btn.title = 'Use this video as a battle map background';
+              btn.setAttribute('onclick', 'setAsMapBg(' + row.cells[0].data + ')');
+              return gridjs.html(btn.outerHTML);
+              }
+          },
           {id: 'dlete', name: 'Del', sort: false,
           formatter: function (cellData, row) {
               // Multi-select delete: checkbox feeds the shared Set in site.js;
@@ -274,6 +298,8 @@
               return gridjs.html(spCheckHtml(row.cells[0].data));
               }
           },
+          // Hidden feed for the Download Status formatter's error tooltip.
+          { id: 'dnLastError', name: 'dnLastError', hidden: true },
           // Hidden feed for the Name column's formatter (human title from metadata).
           // Must stay LAST — the formatter reads row.cells[row.cells.length - 1].
           { id: 'displayName', name: 'displayName', hidden: true },
@@ -383,6 +409,75 @@
           saveChange(JSON.stringify(jsn))
           //console.log("Selected " + ev.value);
         }
+      }
+
+      // "Use as battle map background": pick a map, then the server copies the
+      // library file into the battlemaps folder itself — needed because the
+      // library lives on the SERVER's disk, which remote browsers can't reach.
+      // Both endpoints are DM-only; a login redirect comes back as HTML.
+      function setAsMapBg(videoId){
+        fetch('/ttrpg/battlemap/api/maps')
+          .then(res => {
+            if (res.redirected || !(res.headers.get('content-type') || '').includes('json')) {
+              alert('Log in as the DM first (TTRPG login), then try again.');
+              return null;
+            }
+            return res.json();
+          })
+          .then(maps => {
+            if (!maps) return;
+            if (!maps.length) {
+              alert('No battle maps yet — create one in the TTRPG map manager first.');
+              return;
+            }
+            const old = document.getElementById('mapPickOverlay');
+            if (old) old.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'mapPickOverlay';
+            overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1050;display:flex;align-items:center;justify-content:center;';
+            overlay.onclick = ev => { if (ev.target === overlay) overlay.remove(); };
+            const card = document.createElement('div');
+            card.style = 'background:var(--sp-bg, #222);color:var(--sp-text, #eee);max-width:420px;width:90%;border-radius:8px;padding:20px;';
+            const h = document.createElement('h5');
+            h.textContent = 'Use video as background for which map?';
+            card.appendChild(h);
+            const sel = document.createElement('select');
+            sel.className = 'form-select my-2';
+            maps.forEach(m => {
+              const o = document.createElement('option');
+              o.value = m.map_id;
+              o.textContent = m.session + ' / ' + m.name;
+              sel.appendChild(o);
+            });
+            card.appendChild(sel);
+            const go = document.createElement('button');
+            go.textContent = 'Set Background';
+            go.className = 'btn btn-primary me-2';
+            go.onclick = () => {
+              go.disabled = true;
+              fetch('/ttrpg/battlemap/' + sel.value + '/bg-from-library', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({video_ID: videoId}),
+              })
+              .then(res => res.json().catch(() => ({ok: false, error: 'unexpected response — are you logged in as DM?'})))
+              .then(out => {
+                overlay.remove();
+                alert(out.ok ? 'Background set on "' + out.map + '".'
+                             : 'Failed: ' + (out.error || 'unknown error'));
+              })
+              .catch(err => { overlay.remove(); alert('Failed: ' + err); });
+            };
+            const cancel = document.createElement('button');
+            cancel.textContent = 'Cancel';
+            cancel.className = 'btn btn-secondary';
+            cancel.onclick = () => overlay.remove();
+            card.appendChild(go);
+            card.appendChild(cancel);
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+          })
+          .catch(err => alert('Could not load map list: ' + err));
       }
 
       tableDiv.addEventListener('keydown', ev => {

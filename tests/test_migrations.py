@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0002_slim_raw_json'
+HEAD = '0003_dn_last_error'
 
 
 def columns(path, table):
@@ -77,7 +77,8 @@ def run_upgrade(db_path):
 class TestBaselineUpgrade:
     def test_old_db_gains_all_columns(self, old_db):
         run_upgrade(old_db)
-        for col in ('videoId', 'displayName', 'metaStatus', 'metaNextRetry'):
+        for col in ('videoId', 'displayName', 'metaStatus', 'metaNextRetry',
+                    'dnLastError'):
             assert col in columns(old_db, 'tblMusic')
             assert col in columns(old_db, 'tblVideoMedia')
         assert 'sort_order' in columns(old_db, 'tblBattleMaps')

@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import uuid
 import base64
 from datetime import datetime, timezone
@@ -463,6 +464,56 @@ def map_bg_paste(map_id):
     url = url_for('static', filename='uploads/battlemaps/' + filename)
     _push_map_state(bm)
     return jsonify({'ok': True, 'url': url, 'is_video': is_video, 'filename': filename})
+
+
+@battlemap_bp.route('/api/maps')
+@login_required
+@dm_required
+def api_maps_list():
+    """Flat map list for pickers (e.g. the video table's 'use as map bg')."""
+    rows = (db.session.query(tblBattleMaps, tblSessions)
+            .join(tblSessions, tblBattleMaps.session_id == tblSessions.session_id)
+            .order_by(tblSessions.created_at.desc(),
+                      tblBattleMaps.sort_order, tblBattleMaps.map_id)
+            .all())
+    return jsonify([{'map_id': bm.map_id, 'name': bm.name,
+                     'session': f'#{s.session_number} — {s.title}'}
+                    for bm, s in rows])
+
+
+@battlemap_bp.route('/<int:map_id>/bg-from-library', methods=['POST'])
+@login_required
+@dm_required
+def map_bg_from_library(map_id):
+    """Set a map's background from a video-library row (server-side copy).
+
+    The library file lives at <row.path><row.title> on the SERVER's disk, so
+    browsers on other machines can't re-upload it — this copies it directly
+    into the battlemaps folder instead. The library copy is never touched."""
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    from models.videoMedia import tblvideomedia
+    data = request.get_json() or {}
+    row = db.session.get(tblvideomedia, data.get('video_ID'))
+    if row is None:
+        return jsonify({'ok': False, 'error': 'video row not found'}), 404
+    fname = row.title or ''
+    ext = fname.rsplit('.', 1)[-1].lower() if '.' in fname else ''
+    if ext not in ALLOWED_EXT:
+        return jsonify({'ok': False, 'error': f'unsupported file type "{ext}"'}), 400
+    src = (row.path or '') + fname
+    if not os.path.isfile(src):
+        return jsonify({'ok': False,
+                        'error': 'file not on disk yet — has the download finished?'}), 404
+    folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
+    os.makedirs(folder, exist_ok=True)
+    filename = f'{uuid.uuid4().hex}.{ext}'
+    shutil.copyfile(src, os.path.join(folder, filename))
+    _delete_bg_file(bm.bg_image)
+    bm.bg_image = filename
+    db.session.commit()
+    _push_map_state(bm)
+    return jsonify({'ok': True, 'map': bm.name, 'is_video': ext in VIDEO_EXT,
+                    'url': url_for('static', filename='uploads/battlemaps/' + filename)})
 
 
 @battlemap_bp.route('/<int:map_id>/bg/clear', methods=['POST'])
