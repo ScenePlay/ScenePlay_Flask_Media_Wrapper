@@ -58,15 +58,45 @@
               {% if relay_on %}
               <!-- Relay indicator: visible on every media page so an enabled
                    relay isn't left running when the box is just a player.
-                   Green = syncing; amber = enabled but receiver stalled. -->
+                   Green = syncing; amber = receiver stalled; RED = pushes to
+                   the relay are FAILING right now (also makes scene switches
+                   wait on network timeouts — disable the relay if not in use). -->
+              {% set _rcolor = '#dc3545' if relay_failing else ('#e0a800' if relay_stale else '#28a745') %}
               <a href="{{ url_for('relay_admin_bp.status') }}"
                  class="nav-link d-flex align-items-center gap-1 flex-shrink-0"
-                 style="font-size:.8rem;{% if relay_stale %}color:#e0a800;{% else %}color:#28a745;{% endif %}"
-                 title="{% if relay_stale %}Relay is enabled but not syncing — click to manage{% else %}Remote-play relay is running — click to manage{% endif %}">
+                 style="font-size:.8rem;color:{{ _rcolor }};"
+                 title="{% if relay_failing %}Relay UNREACHABLE — API pushes are failing ({{ relay_fail_msg }}). Scene switches will lag; disable the relay if you're not using it.{% elif relay_stale %}Relay is enabled but not syncing — click to manage{% else %}Remote-play relay is running — click to manage{% endif %}">
                 <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;
-                             background:{% if relay_stale %}#e0a800{% else %}#28a745{% endif %};
-                             box-shadow:0 0 5px {% if relay_stale %}#e0a800{% else %}#28a745{% endif %};"></span>
-                Relay&nbsp;ON
+                             background:{{ _rcolor }};box-shadow:0 0 5px {{ _rcolor }};"></span>
+                {% if relay_failing %}<span data-sp-alert="1">Relay&nbsp;FAILING</span>{% else %}Relay&nbsp;ON{% endif %}
+              </a>
+              {% endif %}
+
+              {% if led_remote_failing %}
+              <!-- LAN LED-remote transfer failing: each dead Remote box costs
+                   a 4 s timeout on EVERY scene switch. Click through to the
+                   Servers page and deactivate the dead row to clear it. -->
+              <a href="{{ url_for('ip.edittbl') }}"
+                 class="nav-link d-flex align-items-center gap-1 flex-shrink-0"
+                 style="font-size:.8rem;color:#dc3545;"
+                 data-sp-alert="1" title="LED transfer to a Remote ScenePlay box is failing ({{ led_remote_msg }}). Every scene switch waits on its timeout — deactivate the dead server row to clear this.">
+                <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;
+                             background:#dc3545;box-shadow:0 0 5px #dc3545;"></span>
+                LED&nbsp;Remote&nbsp;FAILING
+              </a>
+              {% endif %}
+
+              {% if wled_failing %}
+              <!-- WLED board unreachable: scene lighting commands are failing.
+                   Click through to the Servers page and deactivate the dead
+                   board's row to clear it. -->
+              <a href="{{ url_for('ip.edittbl') }}"
+                 class="nav-link d-flex align-items-center gap-1 flex-shrink-0"
+                 style="font-size:.8rem;color:#dc3545;"
+                 data-sp-alert="1" title="WLED lighting commands are failing ({{ wled_msg }}). Scene switches wait on its timeout — deactivate the dead board's server row to clear this.">
+                <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;
+                             background:#dc3545;box-shadow:0 0 5px #dc3545;"></span>
+                WLED&nbsp;FAILING
               </a>
               {% endif %}
 

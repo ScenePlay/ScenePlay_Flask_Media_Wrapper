@@ -98,6 +98,24 @@ def campaigndelrow():
 def updateCampaignSelect():
     data = request.get_json()
     appsettingSetCampaignSelected(int(data['campaign_id']))
+    # Fresh campaign = fresh slate: clear the failure alerts (LED-remote /
+    # WLED / relay navbar badges). A NEW failure after this re-raises its
+    # badge — that's the architecture working, not staleness.
+    appsettingSet('remote_send_last_fail', '')
+    appsettingSet('relay_push_last_drop', '')
+    appsettingSet('wled_send_last_fail', '')
+    return '', 204
+
+
+@cp.route('/api/alertsClear', methods=['POST'])
+def alerts_clear():
+    """Instant alert dismissal — fired by ANY click on a campaign dropdown,
+    including re-selecting the CURRENT campaign (which emits no change event,
+    so /api/campaignSelect never runs — the gap that made badges look
+    unclearable). The client hides the badges in the DOM at the same time."""
+    appsettingSet('remote_send_last_fail', '')
+    appsettingSet('relay_push_last_drop', '')
+    appsettingSet('wled_send_last_fail', '')
     return '', 204
 
 

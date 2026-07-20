@@ -10,6 +10,7 @@ import unicodedata
 from unittest import case
 from extensions import *
 from collections import defaultdict
+import mpv_ipc
 
 #logging.basicConfig(filename='myapp.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 #logger=logging.getLogger(__name__)
@@ -1847,6 +1848,10 @@ def queue_kill():
         c.execute("UPDATE tblVideoMedia SET  que = 0 where que = 1")
         conn.commit()
     conn.commit()
+    # Taper the music to silence before its kill so the cut isn't audible
+    # mid-waveform (locally and on the relay stream alike).
+    if not keep_music:
+        mpv_ipc.music_fade_out()
     if os.name == "nt":
        _nt_kill_by_cmdline("mpvsocket-video")
        if not keep_music:
@@ -1880,6 +1885,8 @@ def _nt_kill_by_cmdline(substr):
 
 
 def queue_next():
+    # Skips and restarts taper out instead of cutting — see mpv_ipc.
+    mpv_ipc.music_fade_out()
     if os.name == "nt":
        _nt_kill_by_cmdline("mpvsocket-music")
     else:

@@ -472,12 +472,21 @@ def _spawn_capture():
 def _ws_drain(ws):
     """Reader thread: consume (and discard) inbound frames so the client
     library answers the server's keepalive pings — a send-only socket would
-    never process them and the server would drop us on ping timeout."""
-    try:
-        while True:
+    never process them and the server would drop us on ping timeout.
+
+    recv() inherits the socket's 10 s timeout, and the server normally sends
+    NOTHING but a ping every ~20 s — so idle timeouts here are routine and
+    must keep the loop alive. Treating them as fatal silently killed this
+    thread, pong replies stopped, and the server cut the ingest off dead on
+    its ping-timeout clock (the every-50-seconds stream drop)."""
+    import websocket as _wslib
+    while True:
+        try:
             ws.recv()
-    except Exception:
-        pass
+        except _wslib.WebSocketTimeoutException:
+            continue
+        except Exception:
+            break
 
 
 def _push_ws(cfg, buf, first):

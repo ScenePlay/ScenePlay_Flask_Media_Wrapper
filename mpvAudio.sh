@@ -11,8 +11,12 @@ sink=$3
 # mpv itself, and pkill -f patterns can't hit a lingering wrapper.
 # Optional $3: PulseAudio sink to play into — the relay stream's capture sink
 # (a loopback mirrors it to the speakers); empty means the default output.
+# afade: every track rises from silence to the --volume setting over 2 s, the
+# other half of the taper (mpv_ipc.music_fade_out ramps down before kills) —
+# together they soften every song transition, locally and on the relay.
+fade="--af=lavfi=[afade=type=in:duration=2]"
 if [ -n "$sink" ]; then
-   exec mpv "$fi" --no-terminal --no-video --input-ipc-server=/tmp/mpvsocket-music --volume="$vol" --audio-device="pulse/$sink"
+   exec mpv "$fi" --no-terminal --no-video --input-ipc-server=/tmp/mpvsocket-music --volume="$vol" "$fade" --audio-device="pulse/$sink"
 else
-   exec mpv "$fi" --no-terminal --no-video --input-ipc-server=/tmp/mpvsocket-music --volume="$vol"
+   exec mpv "$fi" --no-terminal --no-video --input-ipc-server=/tmp/mpvsocket-music --volume="$vol" "$fade"
 fi

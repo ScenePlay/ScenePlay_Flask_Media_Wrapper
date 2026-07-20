@@ -128,6 +128,14 @@ def _worker_run():
             with _queue_lock:
                 if _queue.get(key) is entry:   # not replaced by a newer payload
                     del _queue[key]
+            # The relay answered — it has RECOVERED: clear the failure flag
+            # immediately instead of letting the navbar badge age out.
+            try:
+                from sql import appsettingGet, appsettingSet
+                if appsettingGet('relay_push_last_drop', ''):
+                    appsettingSet('relay_push_last_drop', '')
+            except Exception:
+                pass
         except Exception as e:
             attempts += 1
             if _is_permanent(e) or attempts >= _MAX_ATTEMPTS:

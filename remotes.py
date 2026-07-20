@@ -20,6 +20,18 @@ REMOTE_PORT = 8086
 REMOTE_TIMEOUT = 4
 
 
+def _record_remote_fail(ip_address, err):
+    """Persist the most recent failed LED transfer so the navbar can flag it
+    DURING play — each dead Remote costs a REMOTE_TIMEOUT stall on every
+    scene switch, and the console warning is invisible at the table."""
+    try:
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        appsettingSet('remote_send_last_fail', f'{ts}|{ip_address}|{str(err)[:120]}')
+    except Exception:
+        pass   # never let telemetry break the push loop
+
+
 def remoteSend(LEDPattern):
     # Parse once up front; a malformed pattern should fail here, not per device.
     try:
@@ -39,9 +51,19 @@ def remoteSend(LEDPattern):
         api_url = f"http://{ip_address}:{REMOTE_PORT}/receive_led_patterns"
         try:
             requests.post(api_url, json=payload, timeout=REMOTE_TIMEOUT)
+            # This device answered — if IT was the one flagged, it recovered:
+            # clear immediately. Success on one box never clears another
+            # box's failure.
+            try:
+                rec = appsettingGet('remote_send_last_fail', '')
+                if rec and f'|{ip_address}|' in rec:
+                    appsettingSet('remote_send_last_fail', '')
+            except Exception:
+                pass
         except requests.RequestException as err:
             # One unreachable Remote must not stop the others.
             log.warning("remoteSend to %s failed: %s", ip_address, err)
+            _record_remote_fail(ip_address, err)
         
 def prepJsonRemote(ledMdl, scnPat, isLocal=False) -> str:
     i=0

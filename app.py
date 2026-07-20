@@ -37,22 +37,21 @@ import time
 
 
 
-reaped_processes = []
 def reap_child(signum, frame):
+    """Reap exited children so they never linger as zombies — and do NOTHING
+    else. A pid is free for kernel REUSE the instant waitpid returns, so
+    signaling reaped pids afterward can only ever hit an unrelated new
+    process. The old version kept an ever-growing kill list and re-SIGKILLed
+    it on every child exit: once pids started recycling, it murdered fresh
+    mpv/ffmpeg spawns at random — audible as playback dying on scene
+    switches and the relay feed stopping ('late-running killall')."""
     while True:
         try:
-            pid, status = os.waitpid(-1, os.WNOHANG)
+            pid, _status = os.waitpid(-1, os.WNOHANG)
             if pid == 0:
                 break
-            #print(f"Reaped child process {pid} with exit status {status}")
-            reaped_processes.append(pid)
         except ChildProcessError:
             break
-    for pid in reaped_processes:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
             
 # Set up the SIGCHLD signal handler. Windows has no SIGCHLD (and no zombie
 # processes to reap) — the workers there run as threads, so skip it entirely.
@@ -140,13 +139,21 @@ def inject_keep_music():
 def inject_relay_status():
     """Navbar 'Relay ON' badge: when the box is used purely as a media player,
     make an enabled (and possibly forgotten) relay visible at a glance.
-    relay_stale = enabled but the receiver hasn't synced in >90s (same
-    threshold as the relay health check)."""
+    relay_stale   = enabled but the receiver hasn't synced in >90s (same
+                    threshold as the relay health check).
+    relay_failing = a push to the relay DROPPED within the last 2 minutes —
+                    the relay is enabled but API hits are failing, which also
+                    slows actions that push (scene switches wait on timeouts).
+                    Surfaced here so the DM sees it during play, not later on
+                    the admin page."""
+    out = {'relay_on': False, 'relay_stale': False,
+           'relay_failing': False, 'relay_fail_msg': ''}
     try:
         from sql import appsettingGet
         from datetime import datetime, timezone
         if appsettingGet('relay_enabled', '0') != '1':
-            return {'relay_on': False, 'relay_stale': False}
+            return out
+        out['relay_on'] = True
         stale = True
         last = appsettingGet('relay_last_sync', '')
         if last and last != '—':
@@ -156,10 +163,61 @@ def inject_relay_status():
                 stale = age > 90
             except ValueError:
                 pass
-        return {'relay_on': True, 'relay_stale': stale}
+        out['relay_stale'] = stale
+        drop = appsettingGet('relay_push_last_drop', '')
+        if drop and '|' in drop:
+            d_ts, _key, err = (drop.split('|', 2) + ['', ''])[:3]
+            try:
+                ts = datetime.strptime(d_ts, '%Y-%m-%d %H:%M:%S')
+                age = (datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds()
+                if age < 120:
+                    out['relay_failing'] = True
+                    out['relay_fail_msg'] = err
+            except ValueError:
+                pass
+        return out
     except Exception:
-        return {'relay_on': False, 'relay_stale': False}
+        return out
 
+
+
+@app.context_processor
+def inject_remote_led_status():
+    """Navbar red 'LED Remote FAILING' badge: an LED transfer to another
+    ScenePlay box failed within the last 2 minutes. Each dead Remote stalls
+    every scene switch by its 4 s push timeout, so the DM needs to see it
+    during play — the badge links to the Servers page, where deactivating
+    the dead row clears both the failure and the stall."""
+    out = {'led_remote_failing': False, 'led_remote_msg': '',
+           'wled_failing': False, 'wled_msg': ''}
+    try:
+        from sql import appsettingGet
+        from datetime import datetime, timezone
+
+        def _recent(setting):
+            rec = appsettingGet(setting, '')
+            if rec and '|' in rec:
+                ts_s, ip_addr, err = (rec.split('|', 2) + ['', ''])[:3]
+                try:
+                    ts = datetime.strptime(ts_s, '%Y-%m-%d %H:%M:%S')
+                    age = (datetime.now(timezone.utc).replace(tzinfo=None) - ts).total_seconds()
+                    if age < 120:
+                        return f'{ip_addr}: {err}'
+                except ValueError:
+                    pass
+            return ''
+
+        msg = _recent('remote_send_last_fail')
+        if msg:
+            out['led_remote_failing'] = True
+            out['led_remote_msg'] = msg
+        msg = _recent('wled_send_last_fail')
+        if msg:
+            out['wled_failing'] = True
+            out['wled_msg'] = msg
+    except Exception:
+        pass
+    return out
 
 
 app.register_blueprint(main)
@@ -279,12 +337,29 @@ def startTheadPlayer():
     # module-level side effects (db.create_all, seeding, worker autostart)
     # into every child and lose the shared Value/Array state.
     def start_worker(target, args=()):
+        # Crash forensics: a worker that dies takes its subsystem (music,
+        # video, downloads...) silently with it — write the traceback where
+        # it can be read after the fact, alongside the spawn/kill event log.
+        def _guarded(*a):
+            try:
+                target(*a)
+            except Exception:
+                import traceback
+                try:
+                    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           'player_debug.log'), 'a') as fh:
+                        fh.write(f'\n=== WORKER {target.__name__} CRASHED (pid {os.getpid()}) ===\n')
+                        traceback.print_exc(file=fh)
+                except Exception:
+                    pass
+                raise
+        _guarded.__name__ = f'guarded_{target.__name__}'
         if os.name == 'nt':
             import threading
-            threading.Thread(target=target, args=args, daemon=True,
+            threading.Thread(target=_guarded, args=args, daemon=True,
                              name=f'worker-{target.__name__}').start()
         else:
-            Process(target=target, args=args).start()
+            Process(target=_guarded, args=args).start()
 
     start_worker(threaderVideo)
     start_worker(threader, (num, arr))

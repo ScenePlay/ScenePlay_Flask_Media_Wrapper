@@ -180,3 +180,4 @@ static/thumbs/
 ScenePlay.db-wal
 ScenePlay.db-shm
 ScenePlay.db-journal
+player_debug.log

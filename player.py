@@ -29,14 +29,16 @@ def play_mp3_local(fi,vol, a):
       p = subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
                             '--force-window=no',
                             '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
-                            '--volume=' + str(vol)], shell=False,
+                            '--volume=' + str(vol),
+                            '--af=lavfi=[afade=type=in:duration=2]'], shell=False,
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
       # When the relay stream's capture sink is up, mpv plays into it (the
       # loopback module mirrors it to the real speakers, so the GM hears the
       # same thing). Empty sink -> mpvAudio.sh omits --audio-device.
       sink = _relay_audio.sink_name() or ''
-      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink])
+      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    appsettingAudioPlayFlagUpdatePID(p.pid)
    time.sleep(1)
    while p.poll() is None:

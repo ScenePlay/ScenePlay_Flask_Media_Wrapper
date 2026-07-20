@@ -33,14 +33,42 @@ def wled_devices():
         yield server, Wled(server.ipAddress)
 
 
+def _record_wled_fail(ip_address, err):
+    """Persist the most recent failed WLED command so the navbar can flag it
+    DURING play (same treatment as the LED-remote / relay alerts) — a dead
+    board otherwise fails silently in the console while scene switches wait
+    on its timeout."""
+    try:
+        from datetime import datetime, timezone
+        from sql import appsettingSet
+        ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        appsettingSet('wled_send_last_fail', f'{ts}|{ip_address}|{str(err)[:120]}')
+    except Exception:
+        pass   # never let telemetry break the command loop
+
+
+def _clear_wled_fail(ip_address):
+    """A successful command to the SAME board means it recovered — drop the
+    flag immediately. Success on one board never clears another's failure."""
+    try:
+        from sql import appsettingGet, appsettingSet
+        rec = appsettingGet('wled_send_last_fail', '')
+        if rec and f'|{ip_address}|' in rec:
+            appsettingSet('wled_send_last_fail', '')
+    except Exception:
+        pass
+
+
 def wled_Off():
     # Per-device try so one unreachable board doesn't stop the rest from turning
     # off (the old whole-loop try aborted at the first failure).
     for server, led_strip in wled_devices():
         try:
             led_strip.turn_off()
+            _clear_wled_fail(server.ipAddress)
         except Exception as e:
             log.warning("WLED turn_off failed for %s: %s", server.ipAddress, e)
+            _record_wled_fail(server.ipAddress, e)
 
 
 def wledRandom():
@@ -103,8 +131,10 @@ def setWledEffect(_effect,_pallette,_color, _color2, _color3, _speed, _brightnes
         else:
             led_strip.set_pallette_by_ID(0)
             led_strip.set_effect_by_name(effect.effectName)
+        _clear_wled_fail(server.ipAddress)
     except Exception as e:
         log.warning("WLED setWledEffect failed for %s: %s", server.ipAddress, e)
+        _record_wled_fail(server.ipAddress, e)
         
 
 def addEffectsPallettes(ServerIP_ID):

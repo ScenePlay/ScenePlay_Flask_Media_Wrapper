@@ -23,6 +23,25 @@ function saveCampaignChange(json) {
   });
 }
 
+// ANY click on a campaign dropdown dismisses the failure badges instantly —
+// including re-selecting the CURRENT campaign, which fires no change event
+// (that gap made the badges look unclearable). The server clears the flags;
+// the DOM hides the badges without waiting for a reload. A NEW failure after
+// this re-raises its badge — that's the recording architecture, not staleness.
+document.addEventListener('click', function (e) {
+  var t = e.target;
+  if (!t || !t.closest) return;
+  var sel = t.closest('select');
+  if (!sel) return;
+  var oc = sel.getAttribute('onchange') || '';
+  if (sel.id === 'campaignDropdown' || oc.indexOf('campaignChange') !== -1) {
+    try { fetch('/api/alertsClear', { method: 'POST' }); } catch (err) {}
+    document.querySelectorAll('[data-sp-alert]').forEach(function (el) {
+      (el.closest('a') || el).style.display = 'none';
+    });
+  }
+});
+
 function sceneFilterChange(){
   var ev = event.target;
   jsn = {scene_id:ev.value}
