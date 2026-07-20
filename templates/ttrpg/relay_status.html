@@ -118,6 +118,11 @@
                 </td>
                 <td>{{ p.username }}</td>
                 <td class="fw-bold" style="color:var(--ttrpg-accent);">{{ p.player_name }}</td>
+                {% if p.no_character %}
+                <td class="small text-muted fst-italic" colspan="2">
+                  Logged in — no character assigned yet
+                </td>
+                {% else %}
                 <td class="small">{{ p.char_class }} Lv{{ p.level }}</td>
                 <td>
                   <div class="d-flex align-items-center gap-1">
@@ -128,6 +133,7 @@
                     <span class="small">{{ p.hp_current }}/{{ p.hp_max }}</span>
                   </div>
                 </td>
+                {% endif %}
                 <td class="small text-muted">{{ p.joined_at }}</td>
               </tr>
               {% endfor %}

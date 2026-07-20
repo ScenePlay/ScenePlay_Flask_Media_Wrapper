@@ -106,6 +106,31 @@ def status():
                 age = presence.get(p['username'])
             p['online'] = age is not None and age < 90
 
+        # Spectator logins — an account the GM synced but NO character assigned
+        # yet — have no row in the sync payload's characters list, so they'd be
+        # invisible here. Presence still tracks them by display name (the relay
+        # falls back to the login's name when there's no character), so surface
+        # any presence entry that didn't match a character row.
+        known = set()
+        for p in logged_in:
+            known.update((p['player_name'], p['username'], p['display_name']))
+        for name, age in presence.items():
+            if name in known:
+                continue
+            logged_in.append({
+                'player_name':  name,
+                'username':     '',
+                'display_name': name,
+                'char_class':   '—',
+                'level':        '—',
+                'hp_current':   0,
+                'hp_max':       0,
+                'hp_pct':       0,
+                'joined_at':    '',
+                'online':       age is not None and age < 90,
+                'no_character': True,
+            })
+
     return render_template('ttrpg/relay_status.html', cfg=cfg, logged_in=logged_in,
                            sync_age=sync_age)
 
