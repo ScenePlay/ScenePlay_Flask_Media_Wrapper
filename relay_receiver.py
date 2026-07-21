@@ -77,6 +77,97 @@ def _relay_map_matches(relay_ids, local_ids):
     return relay_ids <= local_ids
 
 
+# ── Map auto-repush ──────────────────────────────────────────────────────────
+# The relay's stored map can silently go stale: a push dropped after retries,
+# or a relay restart wiping its ephemeral disk. Players who log in then get an
+# old/blank map until the DM happens to edit something. The receiver already
+# sees the relay's map_json every poll, so when it stays out of sync with the
+# local live map for several consecutive polls (a single mismatch usually just
+# means a push is still in flight/debounced), re-push it — bypassing the
+# broadcaster's content-hash dedup. The cooldown doubles while the mismatch
+# persists so an unfixable relay (e.g. disk full) isn't re-sent a video-sized
+# payload every minute.
+_MAP_RESYNC_POLLS    = 3
+_MAP_RESYNC_COOLDOWN = 60.0
+_map_resync = {'streak': 0, 'last': 0.0, 'cooldown': _MAP_RESYNC_COOLDOWN}
+
+
+def _map_out_of_sync(raw_map, local_ids, bg_expected):
+    """Pure decision: does the relay's stored map_json describe the local live
+    map? Out of sync when it's missing/unparseable, carries alien token ids,
+    or serves a different background file. `bg_expected` is the relay-side
+    filename the local background resolves to ('<sha32>.<ext>'), or None to
+    skip the background check. Token ids use the same subset rule as
+    _relay_map_matches; background URLs that aren't relay-hosted files
+    (co-located http, data:) can't be compared and are trusted."""
+    import json
+    if not raw_map:
+        return True
+    try:
+        mp = json.loads(raw_map)
+        relay_ids = {int(t['token_id']) for t in (mp.get('tokens') or [])
+                     if t.get('token_id') is not None}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return True
+    if not relay_ids <= local_ids:
+        return True
+    if bg_expected:
+        url = mp.get('url') or ''
+        if url.startswith('/battlemaps/'):
+            return url.rsplit('/', 1)[-1] != bg_expected
+        if not url:
+            return True
+    return False
+
+
+def _maybe_repush_map(active_bm, raw_map):
+    """Track out-of-sync streak for the live map and re-push when it persists."""
+    import time as _time
+    bg_expected = None
+    try:
+        import relay_broadcaster
+        if active_bm.bg_image:
+            _data, _ext, _sha = relay_broadcaster._battlemap_data(active_bm.bg_image)
+            if _sha:
+                bg_expected = f'{_sha}.{_ext}'
+    except Exception:
+        pass
+
+    if not _map_out_of_sync(raw_map, {t.token_id for t in active_bm.tokens},
+                            bg_expected):
+        _map_resync['streak'] = 0
+        _map_resync['cooldown'] = _MAP_RESYNC_COOLDOWN
+        return
+
+    _map_resync['streak'] += 1
+    if _map_resync['streak'] < _MAP_RESYNC_POLLS:
+        return
+    now = _time.monotonic()
+    if now - _map_resync['last'] < _map_resync['cooldown']:
+        return
+    _map_resync['last'] = now
+    _map_resync['cooldown'] = min(_map_resync['cooldown'] * 2, 900.0)
+    _do_repush(active_bm)
+
+
+def _do_repush(active_bm):
+    try:
+        import relay_broadcaster
+        from flask import current_app
+        from routes.battlemap import _push_map_state
+        relay_broadcaster.reset_map_push_cache()
+        # test_request_context: _push_map_state builds url_for(..., _external)
+        # links, which need a request context this background thread lacks. The
+        # localhost URLs it yields are only the last-resort fallback — the push
+        # carries the background via the sha/image_data handshake.
+        with current_app.test_request_context():
+            _push_map_state(active_bm)
+        log.info('Auto-repushed battle map %s — relay map state was stale or missing',
+                 active_bm.map_id)
+    except Exception as exc:
+        log.warning('Battle map auto-repush failed: %s', exc)
+
+
 def _should_apply_relay_pos(tok_seq, last_seq, tok_ts, bm_ts):
     """Decide whether a relay token position should overwrite the local one.
 
@@ -191,6 +282,12 @@ def _poll():
                     relay_map_ok = _relay_map_matches(relay_ids, local_ids)
                 except (ValueError, TypeError, KeyError):
                     pass
+            # Auto-repush: if the relay's stored map stays stale/missing across
+            # several polls, re-send the live map (self-heals dropped pushes
+            # and relay restarts — late joiners then get the current map).
+            _maybe_repush_map(active_bm, raw_map)
+        else:
+            _map_resync['streak'] = 0
 
         # While the relay lags (map push in flight), skip its token rows ENTIRELY —
         # recording old-map seqs into the mirror would poison the reset the map

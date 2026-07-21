@@ -281,6 +281,14 @@ def _battlemap_data(filename):
 #               collapses into one push (coalescing in the queue handles the rest).
 _MAP_DEBOUNCE_S    = 0.25
 _last_map_hash     = {'v': None}
+
+
+def reset_map_push_cache():
+    """Forget the last successfully pushed map state so the NEXT
+    broadcast_map_update sends unconditionally — used by the receiver's
+    auto-repush when the relay's stored map went stale (dropped push,
+    relay restart) with no local change to break the hash."""
+    _last_map_hash['v'] = None
 _map_debounce      = {'timer': None}
 _map_debounce_lock = threading.Lock()
 
