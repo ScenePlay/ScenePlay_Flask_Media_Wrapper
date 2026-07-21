@@ -1935,6 +1935,31 @@ function setCellPx(val) {
   try { localStorage.setItem('bm_cell_px_' + MAP_ID, val); } catch(e) {}
 }
 
+// ── Fullscreen toggle (iPad-friendly: webkit prefix on older iPadOS) ─────────
+function toggleFullscreen() {
+  const doc = document, el = doc.documentElement;
+  if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+    (doc.exitFullscreen || doc.webkitExitFullscreen).call(doc);
+  } else {
+    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  }
+}
+(function () {
+  const btn = document.getElementById('fullscreen-btn');
+  if (!btn) return;
+  const el = document.documentElement;
+  if (!el.requestFullscreen && !el.webkitRequestFullscreen) {
+    btn.style.display = 'none';               // iPhone: element fullscreen unsupported
+    return;
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev =>
+    document.addEventListener(ev, () => {
+      const fs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      btn.title = fs ? 'Exit full screen' : 'Full screen';
+      btn.style.color = fs ? '#7bc77b' : '';
+    }));
+})();
+
 function adjustCellPx(delta) {
   // Anchor button zoom on the viewport center (same drift fix as pinch).
   const vp = document.getElementById('map-viewport');

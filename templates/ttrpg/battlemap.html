@@ -559,6 +559,12 @@
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">&minus;</button>
+        <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
+        <!-- Hidden by battlemap.js where the Fullscreen API is unsupported (iPhone) -->
+        <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Full screen"
+                style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:1.3rem;line-height:1;cursor:pointer;">&#9974;</button>
         {% if current_user.is_dm() %}
         <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
         <button id="fog-peek-btn" onclick="toggleFogPeek()"
