@@ -151,8 +151,12 @@ for you, then the Python packages.
   finishes the setup. (New tools only become visible to new windows.)
 - At the end it offers a **desktop shortcut** and **start automatically at
   login** — say Yes to both if you want the one-click experience.
-- If it says winget is missing: install **"App Installer"** from the
-  Microsoft Store first, then re-run.
+- The installer uses **winget** (built into Windows 10/11) or **Chocolatey**
+  — whichever your PC has. If it says neither is available: install
+  **"App Installer"** from the Microsoft Store (easiest), or Chocolatey from
+  <https://chocolatey.org/install>, then re-run. (With Chocolatey, run
+  `install.bat` by right-click → **Run as administrator** — Chocolatey
+  requires it.)
 
 **Step 3 — start it.** Double-click **`startApp.bat`** (or the desktop
 shortcut). Keep the black window open — that IS the server. The first time,
@@ -169,6 +173,7 @@ line).
 1. Install **Python 3.12** (check "Add to PATH").
 2. Install the players/tools (must end up on PATH):
    `winget install mpv` and `winget install Gyan.FFmpeg`
+   — or with Chocolatey (admin prompt): `choco install -y python312 mpv ffmpeg`
 3. From the repo folder — note the venv MUST be named `.venv-win`
    (`startApp.bat` looks for it there; plain `.venv` is reserved for the
    Linux venv when the folder lives on a shared drive):
