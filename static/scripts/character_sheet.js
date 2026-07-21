@@ -1609,3 +1609,14 @@ async function activatePastePortrait() {
     if (item) { e.preventDefault(); _uploadPortraitBlob(item.getAsFile()); }
   }, { once: true });
 }
+
+// ── Arriving from the battle map (?dice=1): open the dice roller ─────────────
+// Mid-game sheet visits want the roller immediately — the map's token
+// double-click adds the flag so nobody has to find the 🎲 button first.
+(function () {
+  if (new URLSearchParams(location.search).get('dice') !== '1') return;
+  const p = document.getElementById('dice-panel');
+  if (!p || p.style.display !== 'none') return;
+  toggleDicePanel();
+  p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+})();

@@ -946,4 +946,7 @@ def effect_clear(map_id):
 @dm_required
 def monster_redirect(monster_id):
     sm = tblSessionMonsters.query.get_or_404(monster_id)
-    return redirect(url_for('monsters_bp.view', template_id=sm.template_id))
+    # instance= keeps hold of WHICH enemy was clicked, so the monster card can
+    # show that instance's live HP (damage/heal) and roll under its name.
+    return redirect(url_for('monsters_bp.view', template_id=sm.template_id,
+                            instance=sm.monster_id))

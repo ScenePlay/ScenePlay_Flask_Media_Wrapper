@@ -52,6 +52,102 @@
         </div>
       </div>
 
+      {% if sm %}
+      <!-- In Combat: THIS session instance's live HP (arrived here from a
+           battle-map token double-click — see battlemap.monster_redirect) -->
+      <div class="p-3 mb-3" style="border:1px solid var(--ttrpg-accent);border-radius:8px;">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <b style="color:var(--ttrpg-accent);">&#9876; In combat: {{ sm.display_name }}</b>
+          <span id="mc-hp-num" class="small ms-auto">HP {{ sm.hp_current }} / {{ sm.hp_max }}</span>
+        </div>
+        <div class="mb-2" style="background:var(--sp-surface);border-radius:4px;height:10px;overflow:hidden;">
+          <div id="mc-hp-fill"
+               style="height:10px;width:{{ sm.hp_pct() }}%;
+                      background:{% if sm.hp_pct() > 50 %}#28a745{% elif sm.hp_pct() > 25 %}#ffc107{% else %}#dc3545{% endif %};"></div>
+        </div>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <input id="mc-amt" type="number" value="5" min="1"
+                 class="form-control form-control-sm" style="width:80px;text-align:center;">
+          <button class="btn btn-sm btn-outline-danger" onclick="mcAdjust(-1)">&#128165; Damage</button>
+          <button class="btn btn-sm btn-outline-success" onclick="mcAdjust(1)">&#10010; Heal</button>
+          <span id="mc-note" class="small text-muted"></span>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Dice roller: same controls as the main (sheet/map) rollers; rolls
+           land in the shared roll feed (and the relay) under this monster's
+           name -->
+      <div class="p-3 mb-3" style="border:1px solid var(--sp-border);border-radius:8px;">
+        <b class="d-block mb-2" style="color:var(--ttrpg-accent);">&#127922; Roll as {{ sm.display_name if sm else m.name }}</b>
+
+        <!-- Count + die buttons -->
+        <div class="d-flex align-items-center gap-1 mb-2 flex-wrap">
+          <label class="small text-muted mb-0">Dice</label>
+          <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+                  onclick="mdStepCount(-1)" style="line-height:1.6;">&#8722;</button>
+          <input type="number" id="md-count" value="1" min="1" max="20"
+                 class="form-control form-control-sm text-center" style="width:52px;">
+          <button class="btn btn-sm btn-outline-secondary px-2 py-0"
+                  onclick="mdStepCount(1)" style="line-height:1.6;">&#43;</button>
+          <label class="small text-muted mb-0 ms-1">Die</label>
+          {% for s in [4,6,8,10,12,20,100,2] %}
+          <button class="btn btn-sm btn-outline-secondary md-die-btn" data-sides="{{ s }}"
+                  onclick="mdSelectDie({{ s }})" style="min-width:38px;">d{{ s }}</button>
+          {% endfor %}
+        </div>
+
+        <!-- Advantage toggle (d20 only) -->
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label class="small text-muted mb-0">Mode</label>
+          <div class="btn-group btn-group-sm" role="group">
+            <button id="md-adv-normal" class="btn btn-sm btn-outline-secondary"
+                    onclick="mdSetAdvMode('normal')">Normal</button>
+            <button id="md-adv-adv" class="btn btn-sm btn-outline-secondary"
+                    onclick="mdSetAdvMode('advantage')">Adv</button>
+            <button id="md-adv-dis" class="btn btn-sm btn-outline-secondary"
+                    onclick="mdSetAdvMode('disadvantage')">Disadv</button>
+          </div>
+        </div>
+
+        <!-- Modifier + the monster's ability mods (from its stat block) -->
+        <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+          <label class="small text-muted mb-0">Mod</label>
+          <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+                  onclick="var i=document.getElementById('md-mod');i.value=(parseInt(i.value)||0)-1">&#8722;</button>
+          <input type="number" id="md-mod" value="0"
+                 class="form-control form-control-sm text-center" style="width:58px;">
+          <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
+                  onclick="var i=document.getElementById('md-mod');i.value=(parseInt(i.value)||0)+1">+</button>
+          {% if s.get('strength') is not none %}
+          {% for label, key in [('STR','strength'),('DEX','dexterity'),('CON','constitution'),
+                                ('INT','intelligence'),('WIS','wisdom'),('CHA','charisma')] %}
+          {% set v = ((s.get(key, 10) or 10) - 10) // 2 %}
+          <button class="btn btn-sm btn-outline-secondary stat-mod-btn"
+                  onclick="mdSetMod({{ v }})" title="{{ label }}: {{ '%+d' % v }}">{{ label }}<br>
+            <span style="font-size:.65rem;">{{ '%+d' % v }}</span>
+          </button>
+          {% endfor %}
+          {% endif %}
+          <button class="btn btn-sm btn-outline-secondary stat-mod-btn"
+                  onclick="mdSetMod({{ prof }})" title="Proficiency (from CR {{ m.cr }}): +{{ prof }}">PROF<br>
+            <span style="font-size:.65rem;">+{{ prof }}</span>
+          </button>
+        </div>
+
+        <!-- Label + Roll -->
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <input id="md-label" type="text" placeholder="Label (optional)&hellip;"
+                 class="form-control form-control-sm" style="max-width:180px;">
+          <button class="btn btn-ttrpg btn-sm" onclick="mdRoll()">&#127922; Roll</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="mdReset()"
+                  title="Reset to 1d20 +0">&#8635;</button>
+        </div>
+        <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
+        <div id="md-quicklabels" class="d-flex gap-1 mt-2 flex-wrap"></div>
+        <div id="md-result" class="mt-2" style="display:none;font-weight:600;"></div>
+      </div>
+
       <!-- Ability scores -->
       {% set ab_pairs = [('STR','strength'),('DEX','dexterity'),('CON','constitution'),
                          ('INT','intelligence'),('WIS','wisdom'),('CHA','charisma')] %}
@@ -147,6 +243,16 @@
       </div>
       {% endif %}
 
+      <!-- Homebrew notes: for custom monsters this free-text field IS the
+           stat block's traits/actions/attack information (the builder has no
+           structured action editor), so the card must show it. -->
+      {% if s.get('notes') %}
+      <div class="mb-3">
+        <h6 style="color:var(--ttrpg-accent);border-bottom:1px solid var(--sp-border);padding-bottom:4px;">Notes &amp; Actions</h6>
+        <div class="small" style="white-space:pre-wrap;">{{ s.notes }}</div>
+      </div>
+      {% endif %}
+
       <!-- Back -->
       <div class="mt-3">
         <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">
@@ -157,4 +263,131 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_v('scripts/dice.js') }}"></script>
+<script>
+const MD_NAME     = {{ (sm.display_name if sm else m.name) | tojson }};
+const MD_INSTANCE = {{ sm.monster_id if sm else 'null' }};
+const MD_HP_MAX   = {{ sm.hp_max if sm else 0 }};
+
+DiceCore.renderQuickLabels(document.getElementById('md-quicklabels'),
+                           document.getElementById('md-label'),
+                           'btn btn-sm btn-outline-secondary');
+
+// ── Die / mode selection (same behavior as the sheet & map rollers) ─────────
+let _mdSides = 20;
+let _mdAdv   = 'normal';
+
+function mdSelectDie(s) {
+  _mdSides = s;
+  document.querySelectorAll('.md-die-btn').forEach(b => {
+    const on = parseInt(b.dataset.sides) === s;
+    b.classList.toggle('active', on);
+    if (on) {
+      b.style.setProperty('background',   'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('border-color', 'var(--ttrpg-accent)', 'important');
+      b.style.setProperty('color',        'var(--sp-on-accent)', 'important');
+    } else {
+      b.style.removeProperty('background');
+      b.style.removeProperty('border-color');
+      b.style.removeProperty('color');
+    }
+  });
+  mdSetAdvMode(_mdAdv);   // re-evaluate: adv/dis only applies to d20
+}
+
+function mdStepCount(delta) {
+  const el = document.getElementById('md-count');
+  el.value = Math.min(20, Math.max(1, (parseInt(el.value) || 1) + delta));
+}
+
+function mdSetMod(v) {
+  document.getElementById('md-mod').value = v;
+}
+
+function mdSetAdvMode(mode) {
+  if (_mdSides !== 20) mode = 'normal';   // adv/dis is a d20 concept
+  _mdAdv = mode;
+  const cfg = {
+    'md-adv-normal': { mode: 'normal',       bg: 'var(--ttrpg-accent)', fg: 'var(--sp-on-accent)' },
+    'md-adv-adv':    { mode: 'advantage',    bg: '#28a745',             fg: '#ffffff' },
+    'md-adv-dis':    { mode: 'disadvantage', bg: '#dc3545',             fg: '#ffffff' },
+  };
+  Object.entries(cfg).forEach(([id, c]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = _mdAdv === c.mode;
+    el.classList.toggle('active', on);
+    if (on) {
+      el.style.setProperty('background',   c.bg, 'important');
+      el.style.setProperty('border-color', c.bg, 'important');
+      el.style.setProperty('color',        c.fg, 'important');
+    } else {
+      el.style.removeProperty('background');
+      el.style.removeProperty('border-color');
+      el.style.removeProperty('color');
+    }
+  });
+}
+
+function mdReset() {
+  document.getElementById('md-count').value = 1;
+  document.getElementById('md-mod').value = 0;
+  document.getElementById('md-label').value = '';
+  document.getElementById('md-result').style.display = 'none';
+  mdSelectDie(20);
+  mdSetAdvMode('normal');
+}
+
+mdSelectDie(20);
+mdSetAdvMode('normal');
+
+function mcAdjust(sign) {
+  if (MD_INSTANCE === null) return;
+  const amt = Math.max(1, parseInt(document.getElementById('mc-amt').value) || 1);
+  fetch(`/ttrpg/monsters/instance/${MD_INSTANCE}/hp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delta: sign * amt }),
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    document.getElementById('mc-hp-num').textContent =
+      `HP ${d.hp_current} / ${MD_HP_MAX}`;
+    const fill = document.getElementById('mc-hp-fill');
+    fill.style.width = d.hp_pct + '%';
+    fill.style.background = d.hp_pct > 50 ? '#28a745'
+                          : d.hp_pct > 25 ? '#ffc107' : '#dc3545';
+    document.getElementById('mc-note').textContent =
+      d.hp_current <= 0 ? '☠ down' : '';
+  });
+}
+
+function mdRoll() {
+  const btn = event.target;
+  btn.disabled = true;
+  fetch('/ttrpg/dice/roll', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      character_id: null,
+      char_name: MD_NAME,
+      count:    parseInt(document.getElementById('md-count').value) || 1,
+      sides:    _mdSides,
+      modifier: parseInt(document.getElementById('md-mod').value) || 0,
+      label:    document.getElementById('md-label').value.trim(),
+      adv_mode: _mdAdv,
+    }),
+  }).then(r => r.json()).then(d => {
+    btn.disabled = false;
+    if (!d.ok) return;
+    const out = document.getElementById('md-result');
+    out.style.display = '';
+    out.style.color = 'var(--ttrpg-accent)';
+    const mode = d.adv_mode !== 'normal' ? ` [${d.adv_mode}]` : '';
+    out.textContent = `${d.expression}${mode}${d.label ? ' ' + d.label : ''} → ${d.total}`;
+  }).catch(() => { btn.disabled = false; });
+}
+</script>
 {% endblock %}

@@ -96,7 +96,9 @@ function _ctrlOpenSheet(tok) {
   if (!tok) return;
   if (tok.entity_type === 'player') {
     if (IS_DM || tok.user_id === CURRENT_USER_ID) {
-      window.open(`/ttrpg/character/${tok.entity_id}`, '_blank');
+      // ?dice=1: coming from the battle map means mid-game — the sheet
+      // opens with its dice roller already enabled.
+      window.open(`/ttrpg/character/${tok.entity_id}?dice=1`, '_blank');
     }
   } else if (tok.entity_type === 'monster' && IS_DM) {
     window.open(`/ttrpg/battlemap/monster-redirect/${tok.entity_id}`, '_blank');
@@ -254,10 +256,19 @@ function attachDrag(el, tokenId) {
 
     activeDrag = null;
 
-    // Ctrl+click or double-click: open sheet in new tab (works for everyone)
+    // Ctrl+click or double-click: open sheet in new tab (works for everyone).
+    // For enemies that's the monster card, which carries the session
+    // instance's HP controls and a dice roller (monster-redirect passes the
+    // instance id through).
     if (_ctrlOnDown && col === _startCol && row === _startRow) {
       _ctrlOpenSheet(currentTokens[tokenId]);
       return;
+    }
+
+    // Plain click (no drag) on a PLAYER token: open the dice roller with that
+    // character selected as "Rolling as" (when this user may roll as them).
+    if (col === _startCol && row === _startRow) {
+      openDiceForPlayerToken(currentTokens[tokenId]);
     }
 
     if (!_canMove) return;
@@ -1530,6 +1541,30 @@ function mapRollerChanged() {
   try { sessionStorage.setItem('bm_roller', sel.value); } catch (e) {}
   mapResetDice();       // fresh character, fresh roller: 1d20 +0, no label
   mapRenderQuickRef();
+}
+
+// Clicking a player token = "I want to roll for them": open the dice panel
+// (restoring it if minimized) and switch "Rolling as" to that character —
+// but only when this user is allowed to roll as them (option exists in the
+// selector: the DM for anyone, a player for their own characters). Clicking
+// a token you can't roll as still opens the panel, selection untouched.
+function openDiceForPlayerToken(tok) {
+  if (!tok || tok.entity_type !== 'player') return;
+  _openMapDicePanel();
+  const sel = document.getElementById('map-roller-sel');
+  const want = String(tok.entity_id);
+  if (sel && _mapRollerId !== want &&
+      [...sel.options].some(o => o.value === want)) {
+    sel.value = want;
+    mapRollerChanged();
+  }
+}
+
+function _openMapDicePanel() {
+  const panel = document.getElementById('dice-map-panel');
+  if (!panel) return;
+  if (panel.style.display !== 'block') toggleMapDicePanel();
+  if (panel.classList.contains('minimized')) minimizeMapDicePanel();
 }
 
 function mapRenderQuickRef() {

@@ -250,7 +250,29 @@ def detail(template_id):
 def view(template_id):
     m = tblMonsterTemplates.query.get_or_404(template_id)
     stats = json.loads(m.stats_json or '{}')
-    return render_template('ttrpg/monster_detail.html', m=m, stats=stats)
+    # ?instance=<session monster id> (from a battle-map token double-click):
+    # surfaces THAT enemy's live HP controls + a dice roller on the card.
+    sm = None
+    instance = request.args.get('instance', type=int)
+    if instance:
+        cand = db.session.get(tblSessionMonsters, instance)
+        if cand is not None and cand.template_id == template_id:
+            sm = cand
+    # Proficiency bonus from CR (5e: +2 at CR 0-4, +1 per 4 CR after) for the
+    # roller's PROF modifier button. CR is stored as text and may be '1/4'.
+    import math
+    try:
+        cr_raw = m.cr or '0'
+        if '/' in cr_raw:
+            num, den = cr_raw.split('/', 1)
+            cr_val = float(num) / float(den)
+        else:
+            cr_val = float(cr_raw)
+    except (ValueError, ZeroDivisionError):
+        cr_val = 0
+    prof = max(2, 2 + (math.ceil(cr_val) - 1) // 4)
+    return render_template('ttrpg/monster_detail.html', m=m, stats=stats,
+                           sm=sm, prof=prof)
 
 
 # ── Add to session ────────────────────────────────────────────────────────────
