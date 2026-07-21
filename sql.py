@@ -45,6 +45,12 @@ def create_table():
     conn = sqlite3.connect(database)
     conn.text_factory = lambda x: unicodedata(x, 'utf-8', 'ignore')
     c = conn.cursor()
+    # WAL so readers and the writer don't block each other (many threads share
+    # this file: web requests, relay receiver, download/metadata workers).
+    # Persists in the db file; a no-op when already set. The current live DB
+    # is already WAL — this codifies it for fresh installs.
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
     # c.execute("drop table tblscenes")
     c.execute("CREATE TABLE IF NOT EXISTS tblUsers ( user_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, display_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'player', active INT NOT NULL DEFAULT 1, created_at TEXT NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS tblCharacters ( character_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INT NOT NULL, name TEXT NOT NULL, char_class TEXT DEFAULT '', race TEXT DEFAULT '', level INT DEFAULT 1, background TEXT DEFAULT '', portrait_path TEXT DEFAULT '', hp_current INT DEFAULT 0, hp_max INT DEFAULT 0, ac INT DEFAULT 10, str_val INT DEFAULT 10, dex_val INT DEFAULT 10, con_val INT DEFAULT 10, int_val INT DEFAULT 10, wis_val INT DEFAULT 10, cha_val INT DEFAULT 10, speed INT DEFAULT 30, initiative_bonus INT DEFAULT 0, passive_perception INT DEFAULT 10, gold INT DEFAULT 0, silver INT DEFAULT 0, copper INT DEFAULT 0, active INT DEFAULT 1, created_at TEXT NOT NULL)")

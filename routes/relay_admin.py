@@ -1,3 +1,4 @@
+import os
 import requests
 import secrets
 import logging
@@ -284,34 +285,66 @@ def _start_session(requested_id=None, requested_code=None):
         flash('Set relay URL and secret first.')
         return None, None
 
-    payload = {}
-    if requested_id and requested_code:
-        payload = {'session_id': requested_id, 'code': requested_code}
+    # ALWAYS request an identity WE chose (the relay honors requested id+code —
+    # its mid-campaign recovery feature). This makes create verifiable: if the
+    # response is lost (Render cold start, purge slower than the timeout) we
+    # can probe whether the session exists and treat it as the success it was
+    # — instead of flashing a false error, and (worse, for New Session) the
+    # relay holding a fresh session whose id nobody knows.
+    if not (requested_id and requested_code):
+        import uuid as _uuid
+        import secrets as _secrets
+        import string as _string
+        requested_id   = str(_uuid.uuid4())
+        requested_code = ''.join(_secrets.choice(_string.ascii_uppercase + _string.digits)
+                                 for _ in range(6))
+    payload = {'session_id': requested_id, 'code': requested_code}
+
+    data = None
     try:
         resp = requests.post(
             cfg['url'].rstrip('/') + '/api/v1/session/create',
             headers={'X-Relay-Secret': cfg['secret'], 'Content-Type': 'application/json'},
             json=payload,
-            timeout=8,
+            # Generous: a spun-down Render instance takes ~30s to wake, and the
+            # old 8s window reported failure for creates that then completed.
+            timeout=45,
         )
         resp.raise_for_status()
         data = resp.json()
+    except Exception as e:
+        # Did the create actually land despite the lost/failed response?
+        try:
+            chk = requests.get(
+                cfg['url'].rstrip('/') + f'/api/v1/session/{requested_id}/sync',
+                headers={'X-Relay-Secret': cfg['secret']}, timeout=8)
+            if chk.ok:
+                data = {'session_id': requested_id, 'code': requested_code}
+                log.warning('session create response lost (%s) — but the relay '
+                            'has the session; continuing as success', e)
+        except Exception:
+            pass
+        if data is None:
+            log.warning('session start relay error: %s', e)
+            flash(f'Could not reach relay: {e}')
+            return None, None
+
+    step = 'validate relay response'
+    try:
         code       = data.get('code', '')
         session_id = data.get('session_id', '')
         if not code or not session_id:
             flash('Relay returned an unexpected response — check relay logs.')
             return None, None
 
+        step = 'store session settings'
         appsettingSet('relay_session_code', code)
         appsettingSet('relay_session_id',   session_id)
 
         # Reset relay session = all relay token rows purged and seq counters
         # restarted; drop the local relay-seq mirror so no stale value can
         # collide with (and swallow) a fresh move.
-        from extensions import db
-        from models.tblTokenPositions import tblTokenPositions
-        tblTokenPositions.query.delete(synchronize_session=False)
-
+        #
         # Same restart hazard for ROLL ids and MUTATION ids: the relay purges
         # its roll_log/mutations with the session, and on a redeployed relay
         # (fresh DB) the AUTOINCREMENT counters start over at 1 — so relay ids
@@ -321,29 +354,66 @@ def _start_session(requested_id=None, requested_code=None):
         # (full history) minus the ids; the 50-roll display feed drops its
         # relay-origin rows outright (NULLing them would let the echo-claim
         # dedup swallow new rolls that match a stale row's signature).
+        step = 'reset local relay mirrors'
+        from extensions import db
+        from models.tblTokenPositions import tblTokenPositions
         from models.tblRollLog import tblRollLog
         from models.ttrpg import tblDiceRolls
-        tblRollLog.query.filter(tblRollLog.relay_roll_id.isnot(None)) \
-            .update({'relay_roll_id': None}, synchronize_session=False)
-        tblDiceRolls.query.filter(tblDiceRolls.relay_roll_id.isnot(None)) \
-            .delete(synchronize_session=False)
+        import time as _time
+        for attempt in (1, 2):
+            try:
+                # End the read transaction this request has held open since
+                # the login lookup — ACROSS the long relay HTTP call above.
+                # Its WAL snapshot is stale by now (the receiver thread
+                # commits every 2s) and writing on it fails instantly with
+                # SQLITE_BUSY_SNAPSHOT ("database is locked" — busy timeout
+                # does not apply). A fresh transaction writes cleanly.
+                db.session.rollback()
+                tblTokenPositions.query.delete(synchronize_session=False)
+                tblRollLog.query.filter(tblRollLog.relay_roll_id.isnot(None)) \
+                    .update({'relay_roll_id': None}, synchronize_session=False)
+                tblDiceRolls.query.filter(tblDiceRolls.relay_roll_id.isnot(None)) \
+                    .delete(synchronize_session=False)
+                db.session.commit()
+                break
+            except Exception as e:
+                db.session.rollback()
+                if attempt == 2 or 'locked' not in str(e).lower():
+                    raise
+                _time.sleep(1.5)   # one retry: outlast a transient writer
+        step = 'clear applied-mutation ledger'
         appsettingSet('relay_applied_mutation_ids', '[]')
-        db.session.commit()
 
         # Push drops recorded against the PREVIOUS session are moot now —
         # clear them so the health banner doesn't nag about a dead session.
+        step = 'clear push-drop flag'
         appsettingSet('relay_push_last_drop', '')
 
         # Push all current party characters and D&D library into the fresh session immediately
         import relay_broadcaster
+        step = 'queue character push'
         relay_broadcaster.push_all_characters()
+        step = 'queue user push'
         relay_broadcaster.push_session_users()
+        step = 'queue library push'
         relay_broadcaster.push_library()
         return code, session_id
     except Exception as e:
-        log.warning('session start relay error: %s', e)
-        flash(f'Could not reach relay: {e}')
-        return None, None
+        # The session EXISTS on the relay at this point — don't report it as
+        # unreachable. Local bookkeeping/push failed; characters can be re-sent.
+        log.exception('session start post-create error at step %r', step)
+        try:
+            import traceback
+            from datetime import datetime as _dt
+            with open(os.path.join(current_app.instance_path, 'relay_last_error.log'),
+                      'w', encoding='utf-8') as f:
+                f.write(f'{_dt.now():%Y-%m-%d %H:%M:%S} step={step}\n')
+                f.write(traceback.format_exc())
+        except Exception:
+            pass
+        flash(f'Session created (join code {code}), but step "{step}" failed: '
+              f'{e}. Use Sync Characters to re-push the party.')
+        return code, session_id
 
 
 @relay_admin_bp.route('/generate-code', methods=['POST'])

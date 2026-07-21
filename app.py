@@ -62,6 +62,11 @@ if hasattr(signal, 'SIGCHLD'):
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Writers wait out ordinary lock contention (background workers commit every
+# few seconds) instead of failing at sqlite's 5s default. Note: does NOT cover
+# stale-snapshot upgrades (SQLITE_BUSY_SNAPSHOT) — never hold an ORM read
+# transaction across a slow network call and then write on it.
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'timeout': 15}}
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 def _load_or_create_secret_key():
     """SECRET_KEY env var wins; otherwise generate a random key once and persist

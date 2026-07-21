@@ -123,6 +123,11 @@ def sync_monsters_from_api(state=None):
             detail = requests.get(f'{api_base}/monsters/{index}', timeout=10)
             detail.raise_for_status()
             data = detail.json()
+            # The dedup .first() above opened a read transaction whose WAL
+            # snapshot went stale during the HTTP call (background workers
+            # commit every few seconds) — writing on it fails instantly with
+            # "database is locked" (SQLITE_BUSY_SNAPSHOT). Start fresh.
+            db.session.rollback()
 
             cr_raw = data.get('challenge_rating', 0)
             cr_str = _cr_display(cr_raw)
@@ -144,6 +149,12 @@ def sync_monsters_from_api(state=None):
             added += 1
         except Exception:
             errors += 1
+            # A failed flush/commit leaves the session in a rolled-back state
+            # that would error every remaining iteration — clear it.
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
         finally:
             if state is not None:
                 state.update({'done': i + 1, 'added': added, 'skipped': skipped, 'errors': errors})
