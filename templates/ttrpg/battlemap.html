@@ -774,14 +774,8 @@
            class="form-control form-control-sm bg-dark text-light border-secondary"
            placeholder="Label…" style="flex:1;">
   </div>
-  <div class="d-flex gap-1 mb-2 flex-wrap">
-    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
-            onclick="document.getElementById('map-dice-label').value='Initiative'">Initiative</button>
-    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
-            onclick="document.getElementById('map-dice-label').value='Attack'">Attack</button>
-    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:.72rem;padding:2px 8px;"
-            onclick="document.getElementById('map-dice-label').value='Saving Throw'">Saving Throw</button>
-  </div>
+  <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
+  <div id="map-dice-quicklabels" class="d-flex gap-1 mb-2 flex-wrap"></div>
 
   <!-- Rolling-as character selector (users can play several characters; the
        DM can roll for anyone in the party). Hidden when there is no choice. -->
@@ -853,6 +847,9 @@ const CURRENT_USER_ID = {{ current_user.user_id }};
 let   MOVE_SCALE     = {{ bm.movement_scale or 1.0 }};  // feet = squares × 5 × MOVE_SCALE
 const MAP_ROLLER_NAME = '{{ roller_name | e }}';
 const ROLLER_CHARS = {{ roller_chars | tojson }};  // characters this user may roll as
+DiceCore.renderQuickLabels(document.getElementById('map-dice-quicklabels'),
+                           document.getElementById('map-dice-label'),
+                           'btn btn-sm btn-outline-secondary');
 </script>
 <script src="{{ static_v('scripts/battlemap.js') }}"></script>
 <script src="{{ static_v('scripts/sfx-control.js') }}"></script>

@@ -4,9 +4,15 @@
 
    Source of truth lives in the LOCAL repo (static/scripts/dice.js); it is
    copied into the relay portal by scripts/sync_shared_assets.sh. Pure logic
-   only — no DOM, no fetch — so each UI keeps its own rendering.
+   only — no DOM, no fetch — so each UI keeps its own rendering. ONE
+   exception: renderQuickLabels(), so the quick-label set stays identical
+   across every roller (sheet, battlemap, portal) by editing QUICK_LABELS.
 
    API:
+     DiceCore.QUICK_LABELS              -> ['Initiative', 'Attack', ...]
+     DiceCore.renderQuickLabels(container, input, btnClass)
+         -> fills `container` with one button per label; clicking puts the
+            label text into `input`. btnClass styles per-app.
      DiceCore.roll(count, sides, modifier, mode)
          -> { rolls, keptRolls, droppedRolls, total, sides, count, modifier, mode }
             mode: 'normal' | 'advantage' | 'disadvantage' (adv/dis apply to d20
@@ -83,5 +89,24 @@ window.DiceCore = (function () {
     return null;
   }
 
-  return { rand, roll, expr, breakdown, critFumble, critFumbleFromRecord };
+  // Quick-label chips shared by every roller. Highest-frequency generic roll
+  // types only — per-character skills with real modifiers live in each UI's
+  // quick-reference panel, so this list stays short enough to scan.
+  const QUICK_LABELS = ['Initiative', 'Attack', 'Damage', 'Saving Throw',
+                        'Perception', 'Stealth', 'Insight'];
+
+  function renderQuickLabels(container, input, btnClass) {
+    QUICK_LABELS.forEach(name => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = btnClass;
+      b.style.cssText = 'font-size:.72rem;padding:2px 8px;';
+      b.textContent = name;
+      b.onclick = () => { input.value = name; };
+      container.appendChild(b);
+    });
+  }
+
+  return { rand, roll, expr, breakdown, critFumble, critFumbleFromRecord,
+           QUICK_LABELS, renderQuickLabels };
 })();
