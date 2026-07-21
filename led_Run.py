@@ -51,6 +51,10 @@ def get_LEDJSON():
     conn.commit()
     c.close()
     conn.close()
+    # Latest row wins. Empty table (rapid double scene-activation: the first
+    # launch consumed the rows before this one started) = lights off, not a
+    # NameError that kills the LED process mid-show.
+    row = '{"patterns": [{"type": "solid", "color": [0, 0, 0]}]}'
     for r in data:
         row = r[0]
     return row

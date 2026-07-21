@@ -49,6 +49,32 @@ class TestSeedData:
         names = [(i['modelName'] or '').strip().lower() for i in _seed()]
         assert len(names) == len(set(names))
 
+    def test_dispatch_required_keys_covered_by_templates(self):
+        """Per pattern type: every key led_Run's branch HARD-indexes
+        (pattern["x"] — a KeyError if absent) must exist in that type's
+        default template, and no branch may read a key outside the uniform
+        field set. Guards future led_Run edits against payload drift."""
+        src = open(os.path.join(ROOT, 'led_Run.py')).read()
+        run_body = src[src.index('def run():'):]
+        branches = re.split(r'(?:el)?if str\(pattern_type\) == "(\w+)":',
+                            run_body)
+        templates = {json.loads(i['ledJSON'])['type']:
+                     set(json.loads(i['ledJSON']).keys()) - {'type'}
+                     for i in _seed()}
+        checked = 0
+        for i in range(1, len(branches) - 1, 2):
+            ptype = branches[i]
+            body = branches[i + 1].split('elif')[0].split('else:')[0]
+            hard = set(re.findall(r'pattern\["(\w+)"\]', body))
+            soft = set(re.findall(r'pattern\.get\("(\w+)"', body))
+            assert ptype in templates, f'no template for {ptype}'
+            assert hard <= templates[ptype], \
+                f'{ptype}: hard-required {hard - templates[ptype]} missing from template'
+            assert (hard | soft) <= FULL_KEYS - {'type'}, \
+                f'{ptype}: reads keys outside the uniform set: {(hard | soft) - FULL_KEYS}'
+            checked += 1
+        assert checked >= 20   # sanity: the parse actually found the branches
+
 
 def _model(mid, mtype, **kw):
     t = {'type': mtype, 'color': [0, 0, 0], 'cdiff': [0, 0, 0],

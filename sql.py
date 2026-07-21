@@ -1605,6 +1605,8 @@ def get_LEDJSON():
     conn.commit()
     c.close()
     conn.close()
+    # Latest row wins; empty table = lights off (see led_Run.get_LEDJSON).
+    row = '{"patterns": [{"type": "solid", "color": [0, 0, 0]}]}'
     for r in data:
         row = r[0]
     return row
