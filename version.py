@@ -5,4 +5,4 @@ scanner in discovery.py) can identify this device and its version. Keep this
 in step with the version in pyproject.toml.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

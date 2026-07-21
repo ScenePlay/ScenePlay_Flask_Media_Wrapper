@@ -1,5 +1,10 @@
 # Remote Lighting & the MQTT Bridge
 
+> **Status: beta.** Browser-direct WLED control is the current, supported
+> implementation (it requires an HTTP-hosted relay, or a Chrome/Edge
+> permission — see below). The MQTT bridge described here works in every
+> browser but is newer and still being proven out at real tables.
+
 How the DM's scene lighting reaches players at home, and step-by-step setup
 for the MQTT path (the one that works in **every** browser).
 

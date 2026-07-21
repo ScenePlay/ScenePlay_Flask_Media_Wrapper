@@ -12,125 +12,6 @@ is stored locally, so game night doesn't depend on anyone's streaming account.
 
 ---
 
-## Feature Tour
-
-### Scenes — the core idea
-A **Scene** bundles media and lighting into one button: any number of songs,
-videos (with per-scene volume, screen, ordering and loops), an RPiLED pattern,
-and WLED presets. Activating a scene stops what's playing, queues that scene's
-media, and applies its lighting. Scenes group into **Campaigns** so the scene
-list only shows what belongs to tonight's game.
-
-### The player bar (top of every page)
-- **Master volume** slider (system-wide, live).
-- **Now Playing** — active scene, current song and video with thumbnails.
-  Hover a thumbnail for full metadata (uploader, length, views, description);
-  click it for the detail card.
-- **Transport controls for both players** — seek back / pause / seek forward /
-  next, independently for music and video.
-- **Queue counts with total remaining time** (e.g. `Songs: 12 (1h 47m)`),
-  computed from extracted metadata.
-- **All Stop** — kills both players and clears the scene. The **Music Ignore
-  Stop** toggle lets music survive an All Stop (useful when switching maps but
-  keeping the tavern playlist going).
-
-### Media library & YouTube import
-- **Import** a video or a whole playlist by URL — from the Utilities page or
-  the browser extensions (below). Playlists expand in the background,
-  entry-by-entry, skipping private/deleted videos.
-- **Video-id dedup** — the same video imported twice (any URL form: `watch?v=`,
-  `youtu.be/`, shorts, share-links with `&list=`) resolves to ONE row and one
-  file on disk, shared across scenes. Re-adding a known video just links it to
-  the new scene.
-- **Download queue** — yt-dlp fetches audio as MP3 or video as 720p MP4 into
-  `~/Music/SP/` / `~/Videos/SP/`, one at a time, with status per row.
-- **Metadata queue** — a second worker extracts title, duration, uploader,
-  thumbnail, view count and description for every imported item (no extra
-  download). Display names fill in automatically; a typed name always wins.
-  Failures retry with exponential backoff; permanently unavailable videos are
-  marked and never retried. Re-queuing a download also retries its metadata.
-- **Media tables** — sortable/searchable tables for music and video showing
-  name, play stats, queue state, download status, length, uploader and a
-  thumbnail that opens the full metadata card.
-
-### Players
-Two independent `mpv` instances — one audio-only for music, one fullscreen for
-video — each with its own IPC socket, so music and video mix freely and
-transport commands (and kills) target exactly one player. Volume is passed
-per-item from the scene link settings.
-
-### LED lighting
-- **RPiLED** — WS281x strips driven directly from the Pi (patterns defined in
-  the LED Type Model table, assigned per scene via Scene RPiLED).
-- **WLED** — network WLED controllers: per-scene effect, palette, colors,
-  speed and brightness (Scene WLED table). Multiple controllers supported via
-  the Servers table.
-
-### TTRPG toolkit (`/ttrpg`)
-Login-based, with DM and player roles.
-- **Characters** — full sheets: HP/AC/stats, skills, inventory, notes, feats,
-  armor, weapons, spells, custom resources, conditions, portraits (upload or
-  paste). Players manage their own; the DM sees all.
-- **Battle maps** — grid maps with a background image (upload or paste),
-  drag-and-drop tokens for party and monsters, HP tracking from the sidebar,
-  map effects, movement scale, and multiple maps per session with ordering.
-  The DM sidebar includes the campaign's **Scenes** (with live now-playing
-  pills and volume) so atmosphere control never leaves the map screen.
-- **Monsters** — library plus homebrew, with per-session instances.
-- **Reference libraries** — synced from dnd5eapi.co: spells, weapons, armor,
-  equipment, feats, skills, races, classes, monsters, plus conditions (full
-  rule text), magic items, class features, per-level class tables (spell
-  slots, rages, ki…), subclasses, racial traits, weapon properties and the
-  SRD rules chapters. The **Merged** API mode reads the 2024 SRD first and
-  fills everything it doesn't have yet from 2014. Character sheets use them
-  live: condition badges show full rules, the Reference tab lists your
-  class's features for your level, and *Suggest from class* fills in spell
-  slot / class counter resources automatically.
-- **Remote play relay** (optional) — a companion portal (`ScenePlayRemote`)
-  lets remote players see maps, rolls and characters. The local server is the
-  authority; the relay only stages changes for the local box to pick up.
-
-### Multi-server & discovery
-`GET /api/server-info` fingerprints a ScenePlay box (name, version,
-capabilities). *Utilities → Ping Network* scans the LAN for other ScenePlay
-servers and WLED devices and fills the Servers table.
-
-### Backup, export & import
-Backups are light archives — database snapshot plus uploaded images (portraits,
-map backgrounds), **not** the media files: every media row keeps its YouTube
-URL, so a restore re-queues missing downloads through the normal pipeline.
-- **Create Backup** on the Utilities page (download/delete from the list
-  there), or enable the **nightly automatic snapshot** (keeps the last 7).
-- **Import → Replace** — full restore for disaster recovery or moving to a new
-  box. A safety snapshot of the current state is taken first, media paths are
-  rewritten for the new machine, and missing files re-download automatically.
-- **Import → Merge** — share content between servers: the archive's campaigns,
-  scenes, media and scene-links fold into the live library, deduped by video
-  id and by name (scenes/campaigns/genres). Metadata rides along; new media
-  queues for download. **Homebrew** reference-library entries (custom feats,
-  weapons, spells, subclasses + features, monsters…) merge too, deduped by
-  name — SRD rows don't (each box re-syncs those from the D&D API). LED
-  patterns, characters/sessions/maps and server rows are box-specific and
-  only move with Replace.
-
-### Utilities page
-YouTube import form, **Backfill Metadata** (tags legacy rows with video ids
-and queues them for metadata), **Backup &amp; Restore**, browser-extension
-downloads, and computer restart. (The network scan lives on the Servers page.)
-
-### Table management
-Every data table (Scenes, Scene Music/Video/RPiLED/WLED, Music/Video Media,
-Campaigns, LED Type Model, LED Config, Servers, Cron Schedules) is browser
--editable, with multi-select checkbox delete — select across pages, one
-confirm, done. Scene tables pick media through a searchable picker with
-thumbnails and durations.
-
-### Cron schedules
-Schedule scene activations by time (e.g. lights on at dusk) via the Cron
-Schedules table.
-
----
-
 ## Installation
 
 ### Linux / Raspberry Pi — step by step
@@ -138,6 +19,26 @@ Schedules table.
 Works on Raspberry Pi OS and Debian/Mint-family Linux. You'll need the
 computer connected to your home network and to the internet, and about 30
 minutes (most of it is the installer downloading things by itself).
+
+**Step 0 — set up the computer itself** (skip if you already have a working
+Linux desktop). For a brand-new Raspberry Pi (model 3 or newer, with a
+microSD card):
+
+1. On any other computer, install **Raspberry Pi Imager** from
+   <https://www.raspberrypi.com/software/> and put the microSD card in.
+2. In the Imager pick your Pi model, choose **Raspberry Pi OS (64-bit)** as
+   the operating system, and select the card.
+3. When it asks to **edit settings**, say yes — this is the important part:
+   set a username and password (write them down), enter your Wi-Fi name and
+   password (not needed if you'll use a network cable), and under
+   **Services** turn on **SSH**. These settings are what let you control the
+   Pi from your normal computer later.
+4. Write the card, put it in the Pi, plug in power, and give it two or three
+   minutes to start the first time.
+
+You can now either work directly on the Pi (screen + keyboard) or from
+another computer with `ssh <username>@raspberrypi.local` — either way, the
+next steps are identical.
 
 **Step 1 — open a Terminal.** On the Pi's desktop it's the black-screen icon
 in the taskbar (or Menu → Accessories → Terminal). Everything below is typed
@@ -222,8 +123,9 @@ Terminal equivalent:
 
 ### Windows — step by step (second / travel server)
 
-Everything works on Windows except LED strips wired directly to a Raspberry
-Pi (network WLED controllers still work fine).
+Any normal Windows 10 or 11 PC works — no preparation needed. Everything
+works on Windows except LED strips wired directly to a Raspberry Pi (network
+WLED controllers still work fine).
 
 **Step 1 — download ScenePlay.** Easiest: on the GitHub page press the green
 **Code** button → **Download ZIP**, then right-click the downloaded file →
@@ -272,6 +174,138 @@ line).
 Scheduled jobs on Windows install into **Task Scheduler** (the Apply button /
 wizard handle it); schedules the wizard creates map exactly, hand-written
 cron patterns that Task Scheduler can't express are skipped with a count.
+
+---
+
+## Feature Tour
+
+### Scenes — the core idea
+A **Scene** bundles media and lighting into one button: any number of songs,
+videos (with per-scene volume, screen, ordering and loops), an RPiLED pattern,
+and WLED presets. Activating a scene stops what's playing, queues that scene's
+media, and applies its lighting. Scenes group into **Campaigns** so the scene
+list only shows what belongs to tonight's game.
+
+### The player bar (top of every page)
+- **Master volume** slider (system-wide, live).
+- **Now Playing** — active scene, current song and video with thumbnails.
+  Hover a thumbnail for full metadata (uploader, length, views, description);
+  click it for the detail card.
+- **Transport controls for both players** — seek back / pause / seek forward /
+  next, independently for music and video.
+- **Queue counts with total remaining time** (e.g. `Songs: 12 (1h 47m)`),
+  computed from extracted metadata.
+- **All Stop** — kills both players and clears the scene. The **Music Ignore
+  Stop** toggle lets music survive an All Stop (useful when switching maps but
+  keeping the tavern playlist going).
+
+### Media library & YouTube import
+- **Import** a video or a whole playlist by URL — from the Utilities page or
+  the browser extensions (below). Playlists expand in the background,
+  entry-by-entry, skipping private/deleted videos.
+- **Video-id dedup** — the same video imported twice (any URL form: `watch?v=`,
+  `youtu.be/`, shorts, share-links with `&list=`) resolves to ONE row and one
+  file on disk, shared across scenes. Re-adding a known video just links it to
+  the new scene.
+- **Download queue** — yt-dlp fetches audio as MP3 or video as 720p MP4 into
+  `~/Music/SP/` / `~/Videos/SP/`, one at a time, with status per row.
+- **Metadata queue** — a second worker extracts title, duration, uploader,
+  thumbnail, view count and description for every imported item (no extra
+  download). Display names fill in automatically; a typed name always wins.
+  Failures retry with exponential backoff; permanently unavailable videos are
+  marked and never retried. Re-queuing a download also retries its metadata.
+- **Media tables** — sortable/searchable tables for music and video showing
+  name, play stats, queue state, download status, length, uploader and a
+  thumbnail that opens the full metadata card.
+
+### Players
+Two independent `mpv` instances — one audio-only for music, one fullscreen for
+video — each with its own IPC socket, so music and video mix freely and
+transport commands (and kills) target exactly one player. Volume is passed
+per-item from the scene link settings.
+
+### LED lighting
+- **RPiLED** — WS281x strips driven directly from the Pi (patterns defined in
+  the LED Type Model table, assigned per scene via Scene RPiLED).
+- **WLED** — network WLED controllers: per-scene effect, palette, colors,
+  speed and brightness (Scene WLED table). Multiple controllers supported via
+  the Servers table.
+
+### TTRPG toolkit (`/ttrpg`)
+Login-based, with DM and player roles.
+- **Characters** — full sheets: HP/AC/stats, skills, inventory, notes, feats,
+  armor, weapons, spells, custom resources, conditions, portraits (upload or
+  paste). Players manage their own; the DM sees all.
+- **Battle maps** — grid maps with a background image (upload or paste),
+  drag-and-drop tokens for party and monsters, HP tracking from the sidebar,
+  map effects, movement scale, and multiple maps per session with ordering.
+  The DM sidebar includes the campaign's **Scenes** (with live now-playing
+  pills and volume) so atmosphere control never leaves the map screen.
+- **Monsters** — library plus homebrew, with per-session instances.
+- **Reference libraries** — synced from dnd5eapi.co: spells, weapons, armor,
+  equipment, feats, skills, races, classes, monsters, plus conditions (full
+  rule text), magic items, class features, per-level class tables (spell
+  slots, rages, ki…), subclasses, racial traits, weapon properties and the
+  SRD rules chapters. The **Merged** API mode reads the 2024 SRD first and
+  fills everything it doesn't have yet from 2014. Character sheets use them
+  live: condition badges show full rules, the Reference tab lists your
+  class's features for your level, and *Suggest from class* fills in spell
+  slot / class counter resources automatically.
+- **Remote play relay** (optional) — a companion portal (`ScenePlayRemote`)
+  lets remote players see maps, rolls and characters. The local server is the
+  authority; the relay only stages changes for the local box to pick up.
+  **Home lighting for remote players** (their own WLED / Pi strips reacting
+  to your scenes) has a browser limitation to know about: an HTTPS-hosted
+  portal (e.g. on Render) is **blocked from talking to HTTP devices on the
+  player's LAN** — browsers treat it as mixed content (Firefox/Safari refuse
+  outright; Chrome/Edge only allow it behind a permission prompt). Two ways
+  around it: the **WLED-over-MQTT bridge** (*beta* — works in every browser;
+  setup guide in `docs/MQTT_LIGHTING.md`), or **self-hosting the relay over
+  plain HTTP** on a box you control, since an HTTP page may call HTTP
+  devices. Browser-direct WLED control is the current, supported
+  implementation — it just needs the HTTP-hosted relay (or a Chrome/Edge
+  permission) because of the mixed-content rule above. Maps, rolls,
+  characters and music are unaffected — this only concerns player-side
+  lighting.
+
+### Multi-server & discovery
+`GET /api/server-info` fingerprints a ScenePlay box (name, version,
+capabilities). *Utilities → Ping Network* scans the LAN for other ScenePlay
+servers and WLED devices and fills the Servers table.
+
+### Backup, export & import
+Backups are light archives — database snapshot plus uploaded images (portraits,
+map backgrounds), **not** the media files: every media row keeps its YouTube
+URL, so a restore re-queues missing downloads through the normal pipeline.
+- **Create Backup** on the Utilities page (download/delete from the list
+  there), or enable the **nightly automatic snapshot** (keeps the last 7).
+- **Import → Replace** — full restore for disaster recovery or moving to a new
+  box. A safety snapshot of the current state is taken first, media paths are
+  rewritten for the new machine, and missing files re-download automatically.
+- **Import → Merge** — share content between servers: the archive's campaigns,
+  scenes, media and scene-links fold into the live library, deduped by video
+  id and by name (scenes/campaigns/genres). Metadata rides along; new media
+  queues for download. **Homebrew** reference-library entries (custom feats,
+  weapons, spells, subclasses + features, monsters…) merge too, deduped by
+  name — SRD rows don't (each box re-syncs those from the D&D API). LED
+  patterns, characters/sessions/maps and server rows are box-specific and
+  only move with Replace.
+
+### Utilities page
+YouTube import form, **Backfill Metadata** (tags legacy rows with video ids
+and queues them for metadata), **Backup &amp; Restore**, browser-extension
+downloads, and computer restart. (The network scan lives on the Servers page.)
+
+### Table management
+Every data table (Scenes, Scene Music/Video/RPiLED/WLED, Music/Video Media,
+Campaigns, LED Type Model, LED Config, Servers, Cron Schedules) is browser
+-editable, with multi-select checkbox delete — select across pages, one
+confirm, done. Scene tables pick media through a searchable picker with
+thumbnails and durations.
+
+### Cron schedules
+Schedule scene activations by time (e.g. lights on at dusk) via the Cron
+Schedules table.
 
 ---
 
@@ -336,5 +370,10 @@ Layout, briefly:
   backup zip) on an older install — the nginx upload cap needs lifting once:
   `sudo bash ~/ScenePlay/supportFiles/fixNginxUploadSize.sh`. New installs
   already have it.
+- **A remote player's home WLED/Pi lights don't react** — expected on an
+  HTTPS-hosted relay: browsers block HTTPS pages from calling HTTP LAN
+  devices (mixed content). Self-host the relay over plain HTTP (the current,
+  supported path for browser-direct WLED), or try the MQTT bridge
+  (`docs/MQTT_LIGHTING.md` — beta).
 
 Have fun. Don't Panic!!
