@@ -1,11 +1,19 @@
 # ScenePlay
 
 ScenePlay is a self-hosted atmosphere controller for tabletop gaming. One box
-(a Raspberry Pi or any Linux machine) plays music, shows video on a screen,
-drives LED lighting, and runs a full TTRPG toolkit — characters, battle maps,
-monsters — all controlled from any browser on your network (phone, tablet,
-laptop). A Dungeon Master presses one Scene button and the room changes:
-tavern music starts, a fireplace video plays, the LEDs go warm orange.
+— a Raspberry Pi, any Linux machine, **or a Windows PC** — plays music, shows
+video on a screen, drives LED lighting, and runs a full TTRPG toolkit —
+characters, battle maps, monsters — all controlled from any browser on your
+network (phone, tablet, laptop). A Dungeon Master presses one Scene button
+and the room changes: tavern music starts, a fireplace video plays, the LEDs
+go warm orange.
+
+**Runs where you already are:** the Raspberry Pi is the classic always-on
+game-room box, but the same one-click installer experience exists for
+**Windows** — double-click `install.bat` on any Windows 10/11 PC and your
+gaming laptop becomes the server, perfect as a second box or for game night
+at someone else's house. The only difference: Pi-wired LED strips need a Pi
+(network WLED controllers work everywhere).
 
 Flask + SQLite, no cloud dependencies. Media comes from YouTube via yt-dlp and
 is stored locally, so game night doesn't depend on anyone's streaming account.
