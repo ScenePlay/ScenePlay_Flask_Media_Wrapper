@@ -66,34 +66,72 @@ def remoteSend(LEDPattern):
             _record_remote_fail(ip_address, err)
         
 def prepJsonRemote(ledMdl, scnPat, isLocal=False) -> str:
-    i=0
-    ledPattern = f'{{"patterns\": '
-    tester = ""
-    for row in ledMdl:
-        #print(row[2])
-        tester = str(row[2])
-        t = json.loads(row[2])
-        ledPattern = ledPattern + f'[{{\"type\": \"{t["type"]}\"'
-        if tester.find("color")>0:
-            ledPattern += ', \"color\": ' + str(scnPat[i][3]) 
-        if tester.find("wait_ms")>0:
-            ledPattern += ', \"wait_ms\": ' + str(scnPat[i][4])
-        if tester.find("iterations")>0:
-            ledPattern += ', \"iterations\": ' + str(scnPat[i][5])
-        if tester.find("direction")>0:
-            ledPattern += ', \"direction\": ' + str(scnPat[i][6])
-        if tester.find("cdiff")>0:
-            ledPattern += ', \"cdiff\": ' + str(scnPat[i][7])
-        #allow local settings to activate
+    """Build the ONE RPiLED payload used everywhere: local pickup via
+    tblLED -> led_Run.py, other ScenePlay boxes via remoteSend, and remote
+    players' home Pis via the relay.
+
+    Every pattern carries the FULL field set (type, color, cdiff, wait_ms,
+    iterations, direction — plus outPinID/brightness locally) regardless of
+    pattern type; each receiver simply uses what it needs. The old builder
+    included a field only if the model's TEMPLATE happened to mention it,
+    which made every pattern type a different shape (and broke led_Run's
+    branches that hard-index missing keys), emitted invalid JSON for
+    multi-pattern scenes, and paired scene values with the wrong template
+    when models arrived out of order (IN-query order != OrderBy order).
+
+    Scene values win; the model template supplies the default for anything
+    the scene row left NULL. scnPat row shape (tblScenePattern):
+      [0] scenePattern_ID  [1] scene_ID  [2] ledTypeModel_ID  [3] color
+      [4] wait_ms  [5] iterations  [6] direction  [7] cdiff
+      [8] orderBy  [9] outPin  [10] brightness
+    """
+    models = {}                        # ledTypeModel_ID -> template dict
+    for m in ledMdl:                   # (id, modelName, ledJSON)
+        try:
+            models[m[0]] = json.loads(m[2])
+        except (ValueError, TypeError):
+            models[m[0]] = {}
+
+    def _num(v, dflt):
+        if v is None or v == '':
+            return dflt
+        try:
+            f = float(v)
+            return int(f) if f.is_integer() else f
+        except (TypeError, ValueError):
+            return dflt
+
+    def _rgb(v, dflt):
+        if isinstance(v, list):
+            return v
+        try:
+            out = json.loads(str(v))
+            return out if isinstance(out, list) else dflt
+        except (TypeError, ValueError):
+            return dflt
+
+    patterns = []
+    for sp in scnPat:                  # authoritative: scene order (OrderBy)
+        t = models.get(sp[2])
+        if not t or 'type' not in t:
+            continue                   # model row deleted — skip this pattern
+        p = {
+            'type':       t['type'],
+            'color':      _rgb(sp[3], t.get('color', [0, 0, 0])),
+            'cdiff':      _rgb(sp[7], t.get('cdiff', [0, 0, 0])),
+            'wait_ms':    _num(sp[4], t.get('wait_ms', 30)),
+            'iterations': _num(sp[5], t.get('iterations', 9999999)),
+            'direction':  _num(sp[6], t.get('direction', 1)),
+        }
         if isLocal:
-            ledPattern += ', \"outPinID\": ' + str(scnPat[i][9])
-            ledPattern += ', \"brightness\": ' + str(scnPat[i][10])
-        i+=1
-        if i < len(ledMdl):
-            ledPattern += ","
-        if tester.find("solid")>0:
-            ledPattern += '}]}'
-        else:
-            ledPattern += '},{"type": "solid", "color": [0,0,0]}]}'
-    
-    return ledPattern
+            p['outPinID']   = _num(sp[9], 0)
+            p['brightness'] = _num(sp[10], 1.0)
+        patterns.append(p)
+
+    # After a FINITE pattern finishes, fall to lights-off (preserves the old
+    # builder's trailing solid; a no-op for the usual infinite patterns).
+    if patterns and patterns[-1]['type'] != 'solid':
+        patterns.append({'type': 'solid', 'color': [0, 0, 0],
+                         'cdiff': [0, 0, 0], 'wait_ms': 30,
+                         'iterations': 9999999, 'direction': 1})
+    return json.dumps({'patterns': patterns})

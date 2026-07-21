@@ -97,20 +97,29 @@ def loadLedConfig():
 
 
 def loadLedTypeModel():
-# Read the JSON file
+    """Top-up sync for the RPiLED pattern models: insert any DEFAULT model
+    missing from the live table (matched by modelName, case-insensitive).
+    Runs EVERY boot — pattern types added in updates reach existing installs
+    instead of only fresh databases; rows the user has edited or added are
+    never touched. The seed file's entries all carry the FULL field set
+    (type, color, cdiff, wait_ms, iterations, direction) so every pattern
+    passes the same information to led_Run / remotes / the relay."""
     with open(baseDir + '/defaultData/tblLEDTypeModel.json') as file:
         data = json.load(file)
-        
-    # Iterate over the JSON data and insert it into the database
+
+    existing = {(m.modelName or '').strip().lower()
+                for m in session.query(tblledtypemodel).all()}
+    added = 0
     for item in data:
-        ledTypeModel = tblledtypemodel(
+        if (item['modelName'] or '').strip().lower() in existing:
+            continue
+        session.add(tblledtypemodel(
             modelName=item['modelName'],
             ledJSON=item['ledJSON']
-        )
-        session.add(ledTypeModel)
-
-    # Commit the changes
-    session.commit()
+        ))
+        added += 1
+    if added:
+        session.commit()
 
 def loadServerRole():
 # Read the JSON file
@@ -156,9 +165,9 @@ def defaultData():
     if query.count() == 0:
         loadLedConfig()
         
-    query = session.query(tblledtypemodel)
-    if query.count() == 0:
-        loadLedTypeModel()
+    # No empty-table gate: loadLedTypeModel is a top-up (inserts only models
+    # missing by name), so updates deliver new pattern types to old installs.
+    loadLedTypeModel()
         
     query = session.query(tblserverrole)    
     if query.count() == 0:
