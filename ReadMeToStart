@@ -42,4 +42,8 @@ extensions" in README.md): chrome://extensions → Developer mode →
 Load unpacked → select the ChromeExt folder. The extension works on YouTube
 pages and sends the video straight to your server.
 
+Note: downloading and self-hosting is meant for YOUR OWN content — media you
+created, own, or have permission to store. Downloading other people's
+content may violate YouTube's Terms of Service and copyright law.
+
 Have fun. Don't Panic!!

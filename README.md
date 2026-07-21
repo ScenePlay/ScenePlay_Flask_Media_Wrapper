@@ -10,6 +10,13 @@ tavern music starts, a fireplace video plays, the LEDs go warm orange.
 Flask + SQLite, no cloud dependencies. Media comes from YouTube via yt-dlp and
 is stored locally, so game night doesn't depend on anyone's streaming account.
 
+> **About the content you import:** downloading and self-hosting media is
+> meant for **your own content** — videos and music you created, own the
+> rights to, or otherwise have permission to store (e.g. your own uploads or
+> appropriately licensed material). Downloading other people's content may
+> violate YouTube's Terms of Service and copyright law; that responsibility
+> sits with you, the user.
+
 ---
 
 ## Installation
@@ -200,6 +207,7 @@ list only shows what belongs to tonight's game.
   keeping the tavern playlist going).
 
 ### Media library & YouTube import
+*Import your own content — see the note at the top of this file.*
 - **Import** a video or a whole playlist by URL — from the Utilities page or
   the browser extensions (below). Playlists expand in the background,
   entry-by-entry, skipping private/deleted videos.
