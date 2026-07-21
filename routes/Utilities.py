@@ -123,6 +123,47 @@ def main():
                            keep_music=keep_music, backups=backups, backup_auto=backup_auto)
 
     
+def _dm_required_json():
+    """DM gate for the update APIs (same policy as Restart Computer: anyone
+    on the LAN reaches this page, but changing the box is DM-only)."""
+    from flask_login import current_user
+    if not (current_user.is_authenticated and current_user.is_dm()):
+        return jsonify({'error': 'DM login required — log in on the TTRPG '
+                        'pages first, then retry.'}), 403
+    return None
+
+
+@ut.route('/api/update/check')
+def update_check():
+    """Read-only: how far behind upstream is this install? Safe for the page
+    to call on load (git fetch only updates remote-tracking refs)."""
+    import app_update
+    return jsonify(app_update.check_updates())
+
+
+@ut.route('/api/update/run', methods=['POST'])
+def update_run():
+    gate = _dm_required_json()
+    if gate:
+        return gate
+    import app_update
+    return jsonify(app_update.run_update())
+
+
+@ut.route('/utilities/restart-app')
+def utilities_restart_app():
+    """Post-update restart: render the wait page FIRST (self-contained; polls
+    /api/server-info), then exit — the watchdog (Linux) or the detached
+    helper (Windows) brings the app back with the new code."""
+    from flask_login import current_user
+    if not (current_user.is_authenticated and current_user.is_dm()):
+        flash('Restarting ScenePlay requires a DM login.')
+        return redirect(url_for('auth.login', next=url_for('ut.main')))
+    import app_update
+    app_update.restart_app(3.0)
+    return render_template('restarting.html')
+
+
 def _safe_backup_name(name):
     """Backup filenames only — no separators, must match what we generate."""
     return ('/' not in name and '\\' not in name

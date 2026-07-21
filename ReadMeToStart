@@ -1,53 +1,45 @@
-ScenePlay is a WebServer to be hosted on Mint OS and/or Raspberry Pi OS (Flask Application With Sqlite3 Database).
-Control your Music, Video and WLED or RPiLED through any Web Browser (phone, tablet, computer)
+ScenePlay — quick start
+=======================
 
-Ideal usage for ScenePlay is to set the atmosphere for board games and/or dungeon masters to play music, video and control WLED or RPiLED.. 
-Having access to youtube.com is a must for this application. Access your content using the chrome extension located in the /ChromeExt folder.
-Goto chrome://extensions/ and set your browerser in Developer Mode. Then click on "Load Unpacked" and select the /ChromeExt folder.
-The extension only will work on YouTube pages.
+ScenePlay turns one computer (a Raspberry Pi or any Linux box — Windows works
+too) into an atmosphere controller for tabletop gaming: music, video, LED
+lighting and a full TTRPG toolkit, all controlled from any browser on your
+network (phone, tablet, laptop).
 
+Full, beginner-friendly install instructions live in README.md — read that
+first. The short version:
 
-Setup   
-    Clone Repository
-    open ssh Terminal 
-    Step 1 
-        #make sure you are in /home/<username>. ScenePlay will create a directory in this user space.
-        #this will check your directory. If you are logged in as sammy it will say /home/sammy
-            pwd  
-        #upgrade 
-            sudo apt-get update && sudo apt-get -y upgrade
-        #clone
-            git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
-    Step 2
-    open ssh Terminal
-        #Enter 
-            sudo visudo
-        #After root user entry paste ex. sammy   ALL=(ALL) NOPASSWD:ALL
-            <username>  ALL=(ALL) NOPASSWD:ALL
-        #Save and exit 
+Linux / Raspberry Pi
+--------------------
+1. Open a Terminal.
+2. sudo visudo   → add at the bottom (your username instead of sammy):
+       sammy  ALL=(ALL) NOPASSWD:ALL
+   save with Ctrl+X, Y, Enter.
+3. cd ~
+   git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
+4. cd ~/ScenePlay
+   chmod +x requirements.sh
+   ./requirements.sh        (takes a while; sets up auto-start on boot)
+   sudo reboot
+5. From any device on the same network open:
+       http://<server-ip>             (find the ip with: hostname -I)
+   No port needed — the installer sets up nginx on the normal web port.
+   Fallback if that doesn't respond: http://<server-ip>:8086
 
-    Step 3  (** Info Creates a Virtual Environment venv)
-    Open ssh Terminal
-        #From the /ScenePlay directory
-        #Enter
-            cd ~/ScenePlay
-            sudo chmod +x requirements.sh
-            ./requirements.sh
-        #Reboot if needed
-            sudo reboot
-    Step 4
-        In Browser Type
-            http://<serverIP>
-            or
-            http://<serverIP>:8086
-    Step 5 Optional 
-        Install vnc using the 
-                sudo raspi-config
-            #toggle down to 
-                Interface Options
-            #toggle down to 
-                VNC 
-                #enable then exit
-    Step 6 Optional
-        https://www.realvnc.com/en/connect/download/viewer
-        download your OS's version of the viewer
+Windows
+-------
+1. Download the project (green Code button → Download ZIP → Extract All),
+   put the folder somewhere permanent.
+2. Double-click install.bat and follow the prompts (if it asks you to re-run
+   it, close the window and double-click it again).
+3. Double-click startApp.bat, allow it through the firewall if asked, then
+   open http://localhost:8086
+
+Importing music/video from YouTube
+----------------------------------
+Use the Utilities page, or install the browser extension (see "Browser
+extensions" in README.md): chrome://extensions → Developer mode →
+Load unpacked → select the ChromeExt folder. The extension works on YouTube
+pages and sends the video straight to your server.
+
+Have fun. Don't Panic!!

@@ -133,60 +133,137 @@ Schedules table.
 
 ## Installation
 
-Target: Raspberry Pi OS or a Debian/Mint-family Linux box, cloned into your
-home directory.
+### Linux / Raspberry Pi — step by step
+
+Works on Raspberry Pi OS and Debian/Mint-family Linux. You'll need the
+computer connected to your home network and to the internet, and about 30
+minutes (most of it is the installer downloading things by itself).
+
+**Step 1 — open a Terminal.** On the Pi's desktop it's the black-screen icon
+in the taskbar (or Menu → Accessories → Terminal). Everything below is typed
+(or better: copy-pasted) into that window, one block at a time, pressing
+Enter after each. If a command asks for your password, type it — nothing
+appears while you type; that's normal — and press Enter.
+
+**Step 2 — one-time permission setup.** The media players and LED support
+need to run small system commands without stopping to ask for a password
+every time. Type:
 
 ```bash
-# 1. prep (once): allow passwordless sudo for your user
-sudo visudo        # add:  <username>  ALL=(ALL) NOPASSWD:ALL
-sudo apt-get update && sudo apt-get -y upgrade
+sudo visudo
+```
 
-# 2. clone INTO ~/ScenePlay (paths assume this location)
+A text editor opens. Use the arrow keys to go to the bottom and add this line,
+replacing `sammy` with your username (it's shown in the prompt, e.g.
+`sammy@raspberrypi`):
+
+```
+sammy  ALL=(ALL) NOPASSWD:ALL
+```
+
+Then save and exit: press **Ctrl+X**, then **Y**, then **Enter**.
+
+**Step 3 — download ScenePlay.** Copy-paste this whole block:
+
+```bash
+sudo apt-get update && sudo apt-get -y upgrade
 cd ~
 git clone https://github.com/ScenePlay/ScenePlay_Flask_Media_Wrapper ScenePlay
-
-# 3. install everything (apt packages, Python venv, LED libraries)
-cd ~/ScenePlay
-chmod +x requirements.sh
-./requirements.sh          # installs mpv, mpg123, sqlite3, socat, Flask, yt-dlp deps…
-
-# 4. auto-start on boot (usually done by requirements.sh)
-cd supportFiles && chmod +x setupAutoStart.sh && ./setupAutoStart.sh
 ```
 
-Then open `http://<server-ip>:8086` from any device on the network. The
-SQLite database (`ScenePlay.db`), tables and default data are created on
-first boot.
+(The folder must be called `ScenePlay` in your home folder — the scripts
+assume that location.)
 
-**Manual start** (production — waitress on port 8086, plus all workers):
+**Step 4 — run the installer.** Copy-paste:
 
 ```bash
-~/ScenePlay/startApp.sh          # runs ws.py from the project root
+cd ~/ScenePlay
+chmod +x requirements.sh
+./requirements.sh
 ```
 
-**Dev start** from a working copy: `./startLocal.sh` (same thing, local venv),
-or `python3 app.py -flask` for Flask's dev server.
+This installs everything (media players, Python packages, LED libraries on a
+Pi) and sets ScenePlay to **start automatically every time the computer
+boots**. It prints a lot of text and can take 10–20 minutes on a Pi — that's
+normal. When it finishes, reboot once:
 
-Updating: `git -C ~/ScenePlay stash && git -C ~/ScenePlay pull`, then restart.
+```bash
+sudo reboot
+```
 
-### Windows (second / travel server)
+**Step 5 — open ScenePlay.** Find the server's address by typing
+`hostname -I` in the Terminal — the first number (like `192.168.1.50`) is it.
+On any phone, tablet or computer **on the same network**, open a browser and
+go to:
 
-Everything works except the Pi-wired RPiLED strips (WLED controllers still
-work — they're network devices).
+```
+http://192.168.1.50           ← your number instead
+```
 
-**Easy way:** clone the repo and double-click **`install.bat`** — it installs
-Python/mpv/ffmpeg via winget as needed, builds the venv, installs the Python
-packages, and offers a desktop shortcut + start-at-logon. (If it installs new
-tools it will ask you to re-run it once from a fresh window so PATH updates.)
-Then run `startApp.bat` → open `http://localhost:8086`.
+No port number needed: the installer sets up nginx to serve ScenePlay on the
+normal web port. (If the plain address doesn't respond, try
+`http://192.168.1.50:8086` — the app itself always listens there, with or
+without nginx.)
 
-**Manual checklist** (what install.bat automates):
+That's it. The database and default data create themselves on first start.
 
-1. Install **Python 3.11+** (check "Add to PATH").
+**Everyday facts:** it starts itself on every boot — you never need to
+"launch" it. To start it by hand after stopping it: `~/ScenePlay/startApp.sh`.
+**Updating:** the Utilities page has a **Software Update** card — it tells
+you when a new version is available and updates with one click (safety
+backup first, then restart; DM login required). Before any update, create a
+backup and **download it to another computer** (Utilities → Backup &
+Restore) — the automatic safety backup stays on the box itself, and a copy
+elsewhere protects your characters, scenes and maps against anything.
+Terminal equivalent:
+`git -C ~/ScenePlay stash && git -C ~/ScenePlay pull`, then reboot.
+(Developers: `./startLocal.sh` runs from a working copy, or
+`python3 app.py -flask` for Flask's dev server.)
+
+### Windows — step by step (second / travel server)
+
+Everything works on Windows except LED strips wired directly to a Raspberry
+Pi (network WLED controllers still work fine).
+
+**Step 1 — download ScenePlay.** Easiest: on the GitHub page press the green
+**Code** button → **Download ZIP**, then right-click the downloaded file →
+**Extract All…** and put the folder somewhere permanent (e.g. `C:\ScenePlay`
+or your Documents — not the Downloads folder). If you know git, a
+`git clone` works too and makes updating easier.
+
+**Step 2 — run the installer.** Open the ScenePlay folder and double-click
+**`install.bat`**. A black window opens and installs Python, mpv and ffmpeg
+for you, then the Python packages.
+
+- If Windows shows a blue "Windows protected your PC" box, click
+  **More info → Run anyway**.
+- If the window says it installed new tools and asks you to **run it again**:
+  close the window and double-click `install.bat` once more — the second run
+  finishes the setup. (New tools only become visible to new windows.)
+- At the end it offers a **desktop shortcut** and **start automatically at
+  login** — say Yes to both if you want the one-click experience.
+- If it says winget is missing: install **"App Installer"** from the
+  Microsoft Store first, then re-run.
+
+**Step 3 — start it.** Double-click **`startApp.bat`** (or the desktop
+shortcut). Keep the black window open — that IS the server. The first time,
+Windows Firewall may ask about Python: click **Allow access**, otherwise
+phones and tablets won't be able to reach it.
+
+**Step 4 — open ScenePlay.** On the same computer: `http://localhost:8086`.
+From a phone or tablet on the same network: `http://<the PC's address>:8086`
+(find the address with `ipconfig` in a command window — the "IPv4 Address"
+line).
+
+**Manual checklist** (what install.bat automates, for the curious):
+
+1. Install **Python 3.12** (check "Add to PATH").
 2. Install the players/tools (must end up on PATH):
    `winget install mpv` and `winget install Gyan.FFmpeg`
-3. Clone the repo, then from its folder:
-   `python -m venv .venv && .venv\Scripts\pip install -r requirements.txt`
+3. From the repo folder — note the venv MUST be named `.venv-win`
+   (`startApp.bat` looks for it there; plain `.venv` is reserved for the
+   Linux venv when the folder lives on a shared drive):
+   `python -m venv .venv-win && .venv-win\Scripts\pip install -r requirements.txt`
    (the requirements file picks the right per-OS packages automatically).
 4. Run `startApp.bat` → open `http://localhost:8086`.
 5. Optional autostart:
@@ -255,5 +332,9 @@ Layout, briefly:
   `/tmp/mpvsocket-music` / `/tmp/mpvsocket-video`; `socat` must be installed.
 - **Wrong/old UI after update** — hard-refresh (Ctrl+Shift+R); static JS/CSS
   is cached by the browser.
+- **Upload fails with "413 Request Entity Too Large"** (big battlemap video,
+  backup zip) on an older install — the nginx upload cap needs lifting once:
+  `sudo bash ~/ScenePlay/supportFiles/fixNginxUploadSize.sh`. New installs
+  already have it.
 
 Have fun. Don't Panic!!

@@ -95,6 +95,19 @@
                      <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">No backups yet.</p>
                      {% endif %}
                      </div>
+                     <br />
+                     <div style="border: 3px solid black;">
+                     <h3>Software Update</h3>
+                     <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">
+                       Before updating: create a backup (Backup &amp; Restore above) and
+                       <b>download it to another computer</b>. The updater also takes its own
+                       safety backup, but that copy lives on this machine.
+                     </p>
+                     <p id="update-status" style="font-size:.9em;margin:6px 0;">Checking for updates&hellip;</p>
+                     <ul id="update-list" style="font-size:.85em;margin:4px 0 8px 18px;display:none;"></ul>
+                     <input type="button" id="update-btn" class="btn btn-primary" value="Update Now" style="display:none;">
+                     <pre id="update-log" style="display:none;font-size:.78em;white-space:pre-wrap;background:#111;color:#ddd;padding:8px;max-height:260px;overflow:auto;margin-top:8px;"></pre>
+                     </div>
                 </form>
 
                 <!-- Import: its own form (multipart upload can't nest in the
@@ -153,6 +166,75 @@
                     </div>
                 </form>
                 <script>
+                  // ── Software Update card ─────────────────────────────────
+                  (function () {
+                    const status = document.getElementById('update-status');
+                    const list   = document.getElementById('update-list');
+                    const btn    = document.getElementById('update-btn');
+                    const logEl  = document.getElementById('update-log');
+                    if (!status) return;
+
+                    fetch('/api/update/check').then(r => r.json()).then(d => {
+                      if (!d.git) {
+                        status.textContent = 'This copy was installed from a ZIP — to update, '
+                          + 'download the new ZIP from GitHub and re-run the installer.';
+                        return;
+                      }
+                      if (d.error) { status.textContent = d.error; return; }
+                      if (!d.behind) {
+                        status.textContent = 'ScenePlay is up to date'
+                          + (d.current ? ' (' + d.current + ')' : '') + '.';
+                        return;
+                      }
+                      status.textContent = 'Update available — ' + d.behind
+                        + ' change' + (d.behind === 1 ? '' : 's') + ':';
+                      d.commits.forEach(c => {
+                        const li = document.createElement('li');
+                        li.textContent = c;
+                        list.appendChild(li);
+                      });
+                      list.style.display = '';
+                      btn.style.display = '';
+                    }).catch(() => {
+                      status.textContent = 'Could not check for updates (no internet?).';
+                    });
+
+                    btn.addEventListener('click', () => {
+                      if (!confirm('Update ScenePlay now?\n\n'
+                                   + 'Recommended first: create a backup and download it to '
+                                   + 'another computer (Backup & Restore section).\n\n'
+                                   + 'A safety backup is also taken automatically, then the app '
+                                   + 'restarts. Takes a few minutes.')) return;
+                      btn.disabled = true;
+                      status.textContent = 'Updating — this can take a few minutes. '
+                        + 'Leave this page open…';
+                      fetch('/api/update/run', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(d => {
+                          if (d.log) {
+                            logEl.textContent = d.log.join('\n');
+                            logEl.style.display = '';
+                          }
+                          if (d.error) {          // DM gate
+                            status.textContent = d.error;
+                            btn.disabled = false;
+                            return;
+                          }
+                          if (d.ok) {
+                            status.textContent = 'Update complete — restarting…';
+                            setTimeout(() => { window.location = '/utilities/restart-app'; }, 1500);
+                          } else {
+                            status.textContent = 'Update failed — nothing was restarted. Details below.';
+                            btn.disabled = false;
+                          }
+                        })
+                        .catch(e => {
+                          status.textContent = 'Update request failed: ' + e;
+                          btn.disabled = false;
+                        });
+                    });
+                  })();
+
                   function deleteBackup(name) {
                     if (!confirm('Delete backup ' + name + '?')) return;
                     fetch('/api/backupdelete', {

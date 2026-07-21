@@ -421,3 +421,68 @@ class TestMergeHomebrew:
         finally:
             sql.database = old
         assert br.restore_merge(old_archive)['homebrew'] == 0
+
+
+class TestMergePkeyCollisions:
+    """The scenario that motivates the pk-remapping design: the archive's
+    campaign/scene/media pkeys COLLIDE with local pkeys that hold entirely
+    different content. The merge must never write source pkeys — local rows
+    stay byte-identical, archive rows land under NEW pkeys, and every link
+    follows the remap. (A naive pk-preserving import would overwrite
+    'Waterdeep' with 'Curse of Strahd' here.)"""
+
+    def _colliding_archive(self, env):
+        src = str(env['tmp'] / 'colliding.db')
+        make_db(src)
+        # source pks all = 1, exactly like the local rows below
+        x(src, "INSERT INTO tblCampaigns(campaign_id, campaign_name, active, order_by) "
+               "VALUES (1, 'Curse of Strahd', 1, '1')")
+        x(src, "INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy, campaign_id) "
+               "VALUES (1, 'Castle Fight', 1, 0, 1)")
+        x(src, "INSERT INTO tblMusic(song_id, path, song, genre, urlSource, dnLoadStatus, "
+               "videoId, displayName, metaStatus) "
+               "VALUES (1, '/src/', 'strahdsong01.mp3', 0, 'https://s1', 3, "
+               "'strahdsong01', 'Strahd Theme', 3)")
+        x(src, "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 1, 80)")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='collide')
+        finally:
+            sql.database = old
+
+    def test_local_rows_untouched_archive_gets_new_pks(self, env):
+        # LOCAL: different content occupying the SAME pkeys (all = 1)
+        x(env['live'], "INSERT INTO tblCampaigns(campaign_id, campaign_name, active, order_by) "
+                       "VALUES (1, 'Waterdeep', 1, '9')")
+        x(env['live'], "INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy, campaign_id) "
+                       "VALUES (1, 'Harbor', 1, 5, 1)")
+        x(env['live'], "INSERT INTO tblMusic(song_id, path, song, genre, urlSource, dnLoadStatus, "
+                       "videoId, displayName, metaStatus) "
+                       "VALUES (1, '/tgt/', 'harborsong01.mp3', 0, 'https://h1', 3, "
+                       "'harborsong01', 'Harbor Song', 3)")
+        x(env['live'], "INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (1, 1, 3, 55)")
+        before_campaign = q(env['live'], "SELECT * FROM tblCampaigns WHERE campaign_id=1")
+        before_scene    = q(env['live'], "SELECT * FROM tblScenes WHERE scene_ID=1")
+        before_song     = q(env['live'], "SELECT * FROM tblMusic WHERE song_id=1")
+        before_links    = q(env['live'], "SELECT * FROM tblMusicScene WHERE scene_ID=1")
+
+        s = br.restore_merge(self._colliding_archive(env))
+        assert (s['campaigns'], s['scenes'], s['music']) == (1, 1, 1)
+
+        # local rows: byte-identical after the merge — nothing overwritten
+        assert q(env['live'], "SELECT * FROM tblCampaigns WHERE campaign_id=1") == before_campaign
+        assert q(env['live'], "SELECT * FROM tblScenes WHERE scene_ID=1") == before_scene
+        assert q(env['live'], "SELECT * FROM tblMusic WHERE song_id=1") == before_song
+        assert q(env['live'], "SELECT * FROM tblMusicScene WHERE scene_ID=1") == before_links
+
+        # archive rows landed under NEW pkeys with the remap intact end-to-end
+        new_camp = q(env['live'], "SELECT campaign_id FROM tblCampaigns "
+                                  "WHERE campaign_name='Curse of Strahd'")[0][0]
+        new_scene, scene_camp = q(env['live'], "SELECT scene_ID, campaign_id FROM tblScenes "
+                                               "WHERE sceneName='Castle Fight'")[0]
+        new_song = q(env['live'], "SELECT song_id FROM tblMusic WHERE videoId='strahdsong01'")[0][0]
+        assert new_camp != 1 and new_scene != 1 and new_song != 1
+        assert scene_camp == new_camp
+        assert q(env['live'], "SELECT song_ID FROM tblMusicScene WHERE scene_ID=?",
+                 (new_scene,)) == [(new_song,)]
