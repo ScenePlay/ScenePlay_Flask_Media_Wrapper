@@ -254,6 +254,19 @@ Login-based, with DM and player roles.
   map effects, movement scale, and multiple maps per session with ordering.
   The DM sidebar includes the campaign's **Scenes** (with live now-playing
   pills and volume) so atmosphere control never leaves the map screen.
+- **AI map & asset maker (built-in LLM prompt writer)** — making new map
+  images and assets is a copy-paste job: the map manager has a prompt
+  builder where you pick the genre, environment, time of day, weather,
+  lighting, art style and effects (fire, water, fog, magic), add free-text
+  details, and hit **Generate Prompt**. Copy the result into your favorite
+  AI image or video generator (ChatGPT, Midjourney, Sora, whatever you
+  use), then copy the generated picture and hit **Paste as Background** —
+  it lands straight on the map, no files to save or upload. The prompts are
+  engineered for TTRPG use: strictly top-down (so the square grid lines
+  up), **travel-map mode** with a real distance scale for overland journeys,
+  and **live-map mode** that writes a seamlessly-looping *video* prompt for
+  animated backgrounds. Matching prompt writers exist for **homebrew
+  monster / vehicle token art** and character portraits.
 - **Monsters** — library plus homebrew, with per-session instances.
 - **Custom content (homebrew)** — every reference library page has a
   **“+ Custom …”** button (DM login required): open *Reference → Weapons /
