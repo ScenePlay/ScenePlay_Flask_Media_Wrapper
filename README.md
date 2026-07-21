@@ -255,6 +255,17 @@ Login-based, with DM and player roles.
   The DM sidebar includes the campaign's **Scenes** (with live now-playing
   pills and volume) so atmosphere control never leaves the map screen.
 - **Monsters** — library plus homebrew, with per-session instances.
+- **Custom content (homebrew)** — every reference library page has a
+  **“+ Custom …”** button (DM login required): open *Reference → Weapons /
+  Spells / Classes / Subclasses / Armor / Feats / Skills / Races /
+  Equipment*, click it, fill the form, and the entry joins the library
+  marked **Custom** — immediately usable on character sheets, pickers and
+  monster stat blocks alongside the official SRD entries. Custom rows are
+  first-class citizens: they survive library clears and re-syncs (only
+  API-synced rows are replaced), they travel in backups, and they **merge
+  between servers** (Import → Merge folds a friend's custom classes,
+  weapons, subclass features and monsters into your library, deduped by
+  name).
 - **Reference libraries** — synced from dnd5eapi.co: spells, weapons, armor,
   equipment, feats, skills, races, classes, monsters, plus conditions (full
   rule text), magic items, class features, per-level class tables (spell
@@ -290,6 +301,12 @@ servers and WLED devices and fills the Servers table.
 Backups are light archives — database snapshot plus uploaded images (portraits,
 map backgrounds), **not** the media files: every media row keeps its YouTube
 URL, so a restore re-queues missing downloads through the normal pipeline.
+The D&D reference content is fully covered the same way: your **custom
+(homebrew) entries are in the backup**, while the official SRD entries are
+deliberately left out — every box re-downloads those from the D&D API
+(*Reference → Sync All*) — so a restore on a fresh machine rebuilds the
+complete library: SRD from the API, homebrew from the archive, media from
+YouTube.
 - **Create Backup** on the Utilities page (download/delete from the list
   there), or enable the **nightly automatic snapshot** (keeps the last 7).
 - **Import → Replace** — full restore for disaster recovery or moving to a new
