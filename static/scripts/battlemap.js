@@ -291,6 +291,37 @@ function attachDrag(el, tokenId) {
   el.addEventListener('pointercancel', endDrag);
 }
 
+// ── Buried-token rescue (players) ─────────────────────────────────────────────
+// A player's token can end up visually under a fog cloud (z:12) or another
+// creature, whose element swallows the pointerdown — leaving the player unable
+// to grab their own character without DM help. Rather than lift the token's
+// z-index (visual depth must hold), hit-test the whole element stack under the
+// pointer in capture phase and reroute the press to the topmost token this
+// player may move. Fog keeps blocking everything else (hidden enemies stay
+// unclickable), and the DM is exempt: rerouting would hijack cloud
+// selection/dragging, and the DM already has fog peek.
+if (!IS_DM) {
+  const _rescueGrid = document.getElementById('map-grid');
+  const _isMyTokenEl = el => {
+    const t = el && currentTokens[el.dataset.tokenId];
+    return !!(t && t.entity_type === 'player' && t.user_id === CURRENT_USER_ID);
+  };
+  if (_rescueGrid) _rescueGrid.addEventListener('pointerdown', e => {
+    const hit = e.target.closest ? e.target.closest('.map-token') : null;
+    if (_isMyTokenEl(hit)) return;   // press already lands on my token
+    const mine = document.elementsFromPoint(e.clientX, e.clientY)
+      .map(n => (n.closest ? n.closest('.map-token') : null))
+      .find(_isMyTokenEl);
+    if (!mine) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Re-dispatch on my token: its own pointerdown handler takes explicit
+    // pointer capture, so the rest of the drag flows to it natively. The
+    // synthetic event re-enters this listener with hit === mine → returns.
+    mine.dispatchEvent(new PointerEvent(e.type, e));
+  }, true);
+}
+
 // ── Token DOM ─────────────────────────────────────────────────────────────────
 
 function createTokenEl(tok) {
