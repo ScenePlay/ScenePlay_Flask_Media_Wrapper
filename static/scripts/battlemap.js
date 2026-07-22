@@ -682,7 +682,7 @@ const fogSvg      = document.getElementById('fog-layer');
 // per-rect fades would leave lighter seams where two boxes share an edge.
 // The per-effect <g>s keep an invisible rect for hit-testing plus the DM-only
 // outline and ✕ button, which must stay crisp, so they are NOT blurred.
-const FOG_FADE_PX = 50;   // width of the fade-to-black at each fog edge
+const FOG_FADE_PX = 80;   // width of the fade-to-black at each fog edge
 let fogShapesG = null;
 if (fogSvg) {
   fogShapesG = svgEl('g');
