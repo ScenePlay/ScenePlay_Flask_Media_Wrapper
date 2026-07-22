@@ -29,7 +29,8 @@ from sql import *
 from player import *
 from mpvPlayer import *
 from yt_que import *
-from multiprocessing import Process, Value, Array
+import multiprocessing
+from multiprocessing import Value, Array
 import os
 import signal
 import sys
@@ -364,7 +365,12 @@ def startTheadPlayer():
             threading.Thread(target=_guarded, args=args, daemon=True,
                              name=f'worker-{target.__name__}').start()
         else:
-            Process(target=_guarded, args=args).start()
+            # Python 3.14 switched Linux's default start method from fork to
+            # forkserver, which pickles the target — impossible for this local
+            # closure, and a forkserver child wouldn't inherit the shared
+            # Value/Array state anyway. Request fork explicitly.
+            multiprocessing.get_context('fork').Process(
+                target=_guarded, args=args).start()
 
     start_worker(threaderVideo)
     start_worker(threader, (num, arr))
