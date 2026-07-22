@@ -676,6 +676,26 @@ if (IS_DM) {   // presence display exists only in the DM sidebar
 
 const effectsSvg  = document.getElementById('effects-layer');
 const fogSvg      = document.getElementById('fog-layer');
+
+// Soft fog edges: the visible black of every cloud is mirrored into this one
+// blurred sub-group, so adjacent/overlapping boxes blend as a single union —
+// per-rect fades would leave lighter seams where two boxes share an edge.
+// The per-effect <g>s keep an invisible rect for hit-testing plus the DM-only
+// outline and ✕ button, which must stay crisp, so they are NOT blurred.
+const FOG_FADE_PX = 50;   // width of the fade-to-black at each fog edge
+let fogShapesG = null;
+if (fogSvg) {
+  fogShapesG = svgEl('g');
+  fogShapesG.id = 'fog-shapes';
+  fogShapesG.style.pointerEvents = 'none';
+  // A gaussian blur's visible transition spans ~3σ, so σ = fade/3 reads as a
+  // FOG_FADE_PX-wide falloff centered on the box edge.
+  fogShapesG.style.filter = `blur(${(FOG_FADE_PX / 3).toFixed(1)}px)`;
+  fogSvg.appendChild(fogShapesG);
+}
+function _removeFogMirror(effectId) {
+  document.getElementById(`fxm-${effectId}`)?.remove();
+}
 let cloudDrawMode  = false;
 let cloudEraseMode = false;
 let cloudPlacing   = null;   // { startX, startY, previewG, _minX, _minY, _wCells, _hCells }
@@ -783,11 +803,22 @@ function applyEffectGeometry(g, eff) {
   } else if (eff.shape === 'cloud') {
     const wCells = eff.size_ft / 5;
     const hCells = eff.angle > 0 ? eff.angle : wCells;
-    shape = svgEl('rect', {
-      x: px, y: py,
-      width:  wCells * CELL_PX,
-      height: hCells * CELL_PX,
-    });
+    const w = wCells * CELL_PX, h = hCells * CELL_PX;
+    shape = svgEl('rect', { x: px, y: py, width: w, height: h });
+    if (fogShapesG && eff.effect_id != null) {
+      let m = document.getElementById(`fxm-${eff.effect_id}`);
+      if (!m) {
+        m = svgEl('rect');
+        m.id = `fxm-${eff.effect_id}`;
+        fogShapesG.appendChild(m);
+      }
+      m.setAttribute('x', px);
+      m.setAttribute('y', py);
+      m.setAttribute('width',  w);
+      m.setAttribute('height', h);
+      m.setAttribute('fill',         eff.fill_color || '#000000');
+      m.setAttribute('fill-opacity', eff.fill_opacity != null ? eff.fill_opacity : 1);
+    }
   }
 
   if (!shape) return;
@@ -796,6 +827,17 @@ function applyEffectGeometry(g, eff) {
   if (eff.shape !== 'cloud') {
     shape.setAttribute('stroke',       eff.border_color);
     shape.setAttribute('stroke-width', '2');
+  } else if (fogShapesG && eff.effect_id != null) {
+    // The visible black comes from this cloud's blurred mirror rect; a solid
+    // fill here would paint the hard edge right back on top of the fade. This
+    // rect survives only as the hit-target (blocks player clicks on hidden
+    // tokens) and, for the DM, a faint dashed outline to grab/select.
+    shape.setAttribute('fill-opacity', '0');
+    if (IS_DM) {
+      shape.setAttribute('stroke',           '#c0c0c0');
+      shape.setAttribute('stroke-width',     '1.5');
+      shape.setAttribute('stroke-dasharray', '4 3');
+    }
   } else {
     shape.setAttribute('stroke',       '#c0c0c0');
     shape.setAttribute('stroke-width', '1.5');
@@ -825,6 +867,7 @@ function applyEffectGeometry(g, eff) {
       el.addEventListener('pointerup', e => {
         e.stopPropagation();
         g.remove();
+        _removeFogMirror(eff.effect_id);
         delete currentEffects[eff.effect_id];
         fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${eff.effect_id}/delete`, { method: 'POST' });
       });
@@ -973,6 +1016,7 @@ function renderEffects(effects) {
   for (const eid of Object.keys(currentEffects)) {
     if (!seen.has(parseInt(eid))) {
       document.getElementById(`fx-${eid}`)?.remove();
+      _removeFogMirror(eid);
       delete currentEffects[eid];
     }
   }
@@ -1125,6 +1169,7 @@ function _eraseCloudCells(col, row) {
     cloudErasing.erased.add(`id:${eff.effect_id}`);
     // Optimistically remove from DOM so it feels instant
     document.getElementById(`fx-${eff.effect_id}`)?.remove();
+    _removeFogMirror(eff.effect_id);
     delete currentEffects[eff.effect_id];
     fetch(`/ttrpg/battlemap/${MAP_ID}/effect/${eff.effect_id}/delete`, { method: 'POST' });
   });
