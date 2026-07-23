@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0004_map_note_sort'
+HEAD = '0005_music_scene_loops'
 
 
 def columns(path, table):

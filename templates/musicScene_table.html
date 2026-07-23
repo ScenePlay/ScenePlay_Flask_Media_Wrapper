@@ -198,8 +198,9 @@ let sceneCache = null;
       // 1    scene_ID       INT      0                    0 
       // 2    song_ID        INT      0                    0 
       // 3    orderBy        INT      0                    0 
-      // 4    volume         INTEGER  0                    0 
-      const tblColumns = ['musicScene_ID','scene_ID', 'song_ID','orderBy','volume']
+      // 4    volume         INTEGER  0                    0
+      // 5    loops          INT      0                    0
+      const tblColumns = ['musicScene_ID','scene_ID', 'song_ID','orderBy','volume','loops']
       primeKey = tblColumns[0]
       const grid = new gridjs.Grid({
         columns: [
@@ -249,6 +250,7 @@ let sceneCache = null;
           },
           { id: tblColumns[3], name: 'orderBy','attributes': editableCellAttributes},
           { id: tblColumns[4], name: 'Volume 0-100', sort: false,'attributes': editableCellAttributes},
+          { id: tblColumns[5], name: 'Loops 0-9999', sort: false,'attributes': editableCellAttributes},
           {id: 'dlete', name: 'Del', sort: false,
           formatter: function (cellData, row) {
               // Multi-select delete: checkbox feeds the shared Set in site.js;

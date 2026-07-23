@@ -22,7 +22,7 @@ SCHEMA = [
     "CREATE TABLE tblScenes (scene_ID INTEGER PRIMARY KEY, sceneName TEXT, active INT, orderBy INT, campaign_id INT)",
     "CREATE TABLE tblCampaigns (campaign_id INTEGER PRIMARY KEY, campaign_name TEXT, active INT, order_by TEXT)",
     "CREATE TABLE lutGenre (genre_id INTEGER PRIMARY KEY, genre TEXT, directory TEXT, active INT, orderBy INT)",
-    "CREATE TABLE tblMusicScene (musicScene_ID INTEGER PRIMARY KEY, scene_ID INT, song_ID INT, orderBy INT, volume INT)",
+    "CREATE TABLE tblMusicScene (musicScene_ID INTEGER PRIMARY KEY, scene_ID INT, song_ID INT, orderBy INT, volume INT, loops INT)",
     "CREATE TABLE tblVideoScene (videoScene_ID INTEGER PRIMARY KEY, scene_ID INT, video_ID INT, DisplayScreen_ID INT, orderBy INT, volume INT, loops INT)",
     "CREATE TABLE tblAppSettings (name TEXT, value TEXT, typevalue TEXT)",
     "CREATE TABLE tblSubclassesLibrary (subclass_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, class_name TEXT, flavor TEXT, description TEXT, source TEXT, created_at TEXT)",

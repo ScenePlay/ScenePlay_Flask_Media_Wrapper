@@ -483,8 +483,13 @@ def restore_merge(zip_path, include_uploads=True):
             next_order[key] += 1
             return next_order[key]
 
-        for scene_src, song_src, order_by, volume in c.execute(
-                "SELECT scene_ID, song_ID, orderBy, volume FROM src.tblMusicScene "
+        # Backups from before tblMusicScene.loops existed lack the column —
+        # select a literal 0 for those instead of failing the whole restore.
+        _src_ms_cols = [r[1] for r in c.execute(
+            "PRAGMA src.table_info('tblMusicScene')").fetchall()]
+        _ms_loops = "loops" if 'loops' in _src_ms_cols else "0"
+        for scene_src, song_src, order_by, volume, loops in c.execute(
+                f"SELECT scene_ID, song_ID, orderBy, volume, {_ms_loops} FROM src.tblMusicScene "
                 "ORDER BY scene_ID, orderBy").fetchall():
             tgt_scene = scene_map.get(scene_src)
             tgt_song = media_map['music'].get(song_src)
@@ -493,8 +498,8 @@ def restore_merge(zip_path, include_uploads=True):
             if c.execute("SELECT 1 FROM tblMusicScene WHERE scene_ID = ? AND song_ID = ?",
                          (tgt_scene, tgt_song)).fetchone():
                 continue
-            c.execute("INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume) VALUES (?, ?, ?, ?)",
-                      (tgt_scene, tgt_song, link_order('tblMusicScene', tgt_scene, order_by), volume))
+            c.execute("INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume, loops) VALUES (?, ?, ?, ?, ?)",
+                      (tgt_scene, tgt_song, link_order('tblMusicScene', tgt_scene, order_by), volume, loops))
             s['links'] += 1
         for scene_src, video_src, screen, order_by, volume, loops in c.execute(
                 "SELECT scene_ID, video_ID, DisplayScreen_ID, orderBy, volume, loops "

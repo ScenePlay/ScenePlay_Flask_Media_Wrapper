@@ -8,15 +8,16 @@ from sql import *
 
 # cid  name           type     notnull  dflt_value  pk
 # ---  -------------  -------  -------  ----------  --
-# 0    musicScene_ID  INTEGER  0                    1 
-# 1    scene_ID       INT      0                    0 
-# 2    song_ID        INT      0                    0 
-# 3    orderBy        INT      0                    0 
-# 4    volume         INTEGER  0                    0 
+# 0    musicScene_ID  INTEGER  0                    1
+# 1    scene_ID       INT      0                    0
+# 2    song_ID        INT      0                    0
+# 3    orderBy        INT      0                    0
+# 4    volume         INTEGER  0                    0
+# 5    loops          INT      0                    0
 
 
 ms = Blueprint('ms', __name__)
-tblColumns = ['musicScene_ID', 'scene_ID', 'song_ID','orderBy','volume']
+tblColumns = ['musicScene_ID', 'scene_ID', 'song_ID','orderBy','volume','loops']
 primeKey = tblColumns[0]
 
 @ms.route('/musicScene')

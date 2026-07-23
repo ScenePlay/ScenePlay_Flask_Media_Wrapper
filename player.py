@@ -15,20 +15,24 @@ except Exception:
             return lambda *a, **k: None
     _relay_audio = _RelayAudioNoop()
 
-def play_mp3_local(fi,vol, a):
+def play_mp3_local(fi,vol, a, loop=0):
    # mpv (audio-only) replaces mpg123: same one-file-per-process lifecycle,
    # but with an IPC socket for pause/seek and a direct 0-100 volume instead
    # of mpg123's 32768 sample scaling. On Windows the same mpv runs directly
    # (no bash wrapper) with the IPC socket as a named pipe.
+   # loop mirrors the video player: tblMusicScene.loops -> --loop-file=N,
+   # mpv plays the track N+1 times in one process (skip still kills it).
    vol = int(max(0, min(100, vol)))
+   loops = str(int(max(0, min(9999, loop))))
    if os.name == "nt":
       # CREATE_NO_WINDOW: mpv.exe is a console app, so without it Windows pops
       # a console window for every track (--no-terminal only mutes the output).
-      # --force-window=no: Windows mpv builds default force-window ON, which
+      # --force-window=no: Windows mpv builds force-window ON, which
       # opens a player window for audio even with --no-video.
       p = subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
                             '--force-window=no',
                             '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
+                            '--loop-file=' + loops,
                             '--volume=' + str(vol),
                             '--af=lavfi=[afade=type=in:duration=2]'], shell=False,
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -37,7 +41,7 @@ def play_mp3_local(fi,vol, a):
       # loopback module mirrors it to the real speakers, so the GM hears the
       # same thing). Empty sink -> mpvAudio.sh omits --audio-device.
       sink = _relay_audio.sink_name() or ''
-      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink],
+      p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink, loops],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    appsettingAudioPlayFlagUpdatePID(p.pid)
    time.sleep(1)
@@ -90,7 +94,8 @@ def threader(n, a):
                      # reshuffles every poll) so the dashboard can show it.
                      appsettingFlagUpdate('currentsong', fi[0])
                      _relay_audio.on_track_start(fi[0])
-                     play_mp3_local(fi[1],fi[7], a)
+                     play_mp3_local(fi[1],fi[7], a, fi[8])
+                     #              file  vol      loops
                      _relay_audio.on_track_end()
                      update_data_entry(fi)
                   songRun = True

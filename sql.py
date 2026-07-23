@@ -72,7 +72,7 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT, brightness Real,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDTypeModel (  ledTypeModel_ID INTEGER PRIMARY KEY AUTOINCREMENT,  modelName TEXT,  ledJSON TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT,  dnLastError TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT, loops INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
@@ -559,27 +559,35 @@ def get_now_playing():
             return 0
 
     out = {'song': None, 'video': None, 'scene': None}
+    scn = _as_int(vals.get('CurrentScene'))
     sid = _as_int(vals.get('currentsong'))
     if sid > 0:
         # thumbnail rides along from tblMediaMetadata (NULL until extracted) so
-        # the now-playing bar can show art + metadata hover.
-        c.execute("SELECT COALESCE(NULLIF(m.displayName,''), m.song), md.thumbnail "
+        # the now-playing bar can show art + metadata hover; loops comes from
+        # the active scene's link row (--loop-file=N → N+1 plays) so the bar
+        # can flag looped media.
+        c.execute("SELECT COALESCE(NULLIF(m.displayName,''), m.song), md.thumbnail, "
+                  "COALESCE(ms.loops, 0) "
                   "FROM tblMusic m LEFT JOIN tblMediaMetadata md "
                   "ON md.media_type='music' AND md.media_id=m.song_ID "
-                  "WHERE m.song_ID = ?", (sid,))
+                  "LEFT JOIN tblMusicScene ms "
+                  "ON ms.song_ID = m.song_ID AND ms.scene_ID = ? "
+                  "WHERE m.song_ID = ?", (scn, sid))
         row = c.fetchone()
         if row:
-            out['song'] = {'id': sid, 'name': row[0], 'thumbnail': row[1]}
+            out['song'] = {'id': sid, 'name': row[0], 'thumbnail': row[1], 'loops': row[2]}
     vid = _as_int(vals.get('currentvideo'))
     if vid > 0:
-        c.execute("SELECT COALESCE(NULLIF(v.displayName,''), v.title), md.thumbnail "
+        c.execute("SELECT COALESCE(NULLIF(v.displayName,''), v.title), md.thumbnail, "
+                  "COALESCE(vs.loops, 0) "
                   "FROM tblVideoMedia v LEFT JOIN tblMediaMetadata md "
                   "ON md.media_type='video' AND md.media_id=v.video_ID "
-                  "WHERE v.video_ID = ?", (vid,))
+                  "LEFT JOIN tblVideoScene vs "
+                  "ON vs.video_ID = v.video_ID AND vs.scene_ID = ? "
+                  "WHERE v.video_ID = ?", (scn, vid))
         row = c.fetchone()
         if row:
-            out['video'] = {'id': vid, 'name': row[0], 'thumbnail': row[1]}
-    scn = _as_int(vals.get('CurrentScene'))
+            out['video'] = {'id': vid, 'name': row[0], 'thumbnail': row[1], 'loops': row[2]}
     if scn > 0:
         c.execute("SELECT sceneName FROM tblScenes WHERE scene_ID = ?", (scn,))
         row = c.fetchone()
@@ -1436,11 +1444,12 @@ def CRUD_tblMusicScene(row,CRUD):
     c = conn.cursor()
     unix = time.time()
     if CRUD == "C":
-        _scene_ID = row[0] 
+        _scene_ID = row[0]
         _song_ID = row[1]
         _orderBy = row[2]
         _volume = row[3]
-        c.execute("Insert INTO tblMusicScene(scene_ID, song_ID, orderBy,volume) VALUES (?, ?, ?, ?)",(_scene_ID, _song_ID, _orderBy, _volume))
+        _loops = row[4] if len(row) > 4 else 0   # optional: existing callers pass 4 fields
+        c.execute("Insert INTO tblMusicScene(scene_ID, song_ID, orderBy,volume, loops) VALUES (?, ?, ?, ?, ?)",(_scene_ID, _song_ID, _orderBy, _volume, _loops))
         conn.commit()
         return c.lastrowid
     elif CRUD == "R":
@@ -1821,7 +1830,7 @@ def select_play_threadQ():
     scene = appsettingGetCurrentScene()
     conn = sqlite3.connect(database)
     c = conn.cursor()
-    c.execute("SELECT m.song_ID, (m.path || m.song),m.path,m.song,m.pTimes,m.active,m.que, COALESCE(ms.volume, 100) "
+    c.execute("SELECT m.song_ID, (m.path || m.song),m.path,m.song,m.pTimes,m.active,m.que, COALESCE(ms.volume, 100), COALESCE(ms.loops, 0) "
               "FROM tblMusic m LEFT JOIN tblMusicScene ms ON m.song_ID = ms.song_ID AND ms.scene_ID = ? "
               "WHERE m.que <> 0 and m.dnLoadStatus = 3 "
               "ORDER BY (ms.orderBy IS NULL), ms.orderBy, RANDOM(), m.ROWID ASC LIMIT 1", (scene,))
@@ -2089,18 +2098,28 @@ def select_data_stats():#a):
              # + "UNION SELECT 'Song Last' as T, song as c FROM tblMusic where song_id = " + str(a[3]) + " "
              # + "UNION SELECT 'Song Volume' as T, " + str(a[1]) + " as c"
             #  )
-    # Third column: total queued seconds. Duration lives only in tblMediaMetadata,
-    # so queued rows whose metadata hasn't been extracted yet contribute 0 — the
-    # total is a floor until the queue catches up. ORDER BY T pins song before
-    # video (base.html / site.js read these rows by index).
+    # Third column: total queued PLAY seconds — metadata duration × the active
+    # scene's loop count (--loop-file=N repeats N times, so N+1 plays; same
+    # active-scene join rules as select_play_threadQ, out-of-scene rows fall
+    # back to 1 play). Duration lives only in tblMediaMetadata, so queued rows
+    # whose metadata hasn't been extracted yet contribute 0 — the total is a
+    # floor until the queue catches up. ORDER BY T pins song before video
+    # (base.html / site.js read these rows by index).
+    scene = appsettingGetCurrentScene()
     c.execute(
-              "SELECT 'songQCnt' as T, Count(*) as C, IFNULL(SUM(md.duration),0) as D "
-              + "FROM tblMusic m LEFT JOIN tblMediaMetadata md ON md.media_type='music' AND md.media_id=m.song_id "
+              "SELECT 'songQCnt' as T, Count(*) as C, "
+              + "IFNULL(SUM(md.duration * (COALESCE(ms.loops, 0) + 1)),0) as D "
+              + "FROM tblMusic m "
+              + "LEFT JOIN tblMusicScene ms ON ms.song_ID = m.song_ID AND ms.scene_ID = ? "
+              + "LEFT JOIN tblMediaMetadata md ON md.media_type='music' AND md.media_id=m.song_id "
               + "WHERE m.que <> 0 "
-              + "UNION SELECT 'videoQCnt' as T, Count(*) as C, IFNULL(SUM(md.duration),0) as D "
-              + "FROM tblvideoMedia v LEFT JOIN tblMediaMetadata md ON md.media_type='video' AND md.media_id=v.video_id "
+              + "UNION SELECT 'videoQCnt' as T, Count(*) as C, "
+              + "IFNULL(SUM(md.duration * (COALESCE(vs.loops, 0) + 1)),0) as D "
+              + "FROM tblvideoMedia v "
+              + "LEFT JOIN tblVideoScene vs ON vs.video_ID = v.video_id AND vs.scene_ID = ? "
+              + "LEFT JOIN tblMediaMetadata md ON md.media_type='video' AND md.media_id=v.video_id "
               + "WHERE v.que <> 0 "
-              + "ORDER BY T"
+              + "ORDER BY T", (scene, scene)
              )
     data = c.fetchall()
     c.close()

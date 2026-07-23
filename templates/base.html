@@ -158,8 +158,10 @@
               </div>
             </div>
 
-            <!-- (Nh NNm) suffix = summed metadata durations of queued rows;
-                 format must match site.js fmtQueueDur (poll overwrites this). -->
+            <!-- (Nh NNm) suffix = summed metadata durations of queued rows,
+                 each × its active-scene loop count (real play time, not file
+                 time); format must match site.js fmtQueueDur (poll overwrites
+                 this). -->
             {% set sQD = (items[0][2] or 0) | int %}
             {% set vQD = (items[1][2] or 0) | int %}
             <div class="sp-player-section">
@@ -194,7 +196,10 @@
             const txt = document.getElementById(prefix + 'Text');
             const img = document.getElementById(prefix + 'Thumb');
             // textContent everywhere — titles come from YouTube metadata.
-            txt.textContent = icon + ' ' + (item ? item.name : 'nothing playing');
+            // ×N = total plays for media the active scene loops (mpv
+            // --loop-file=N → N+1 plays); omitted for the normal play-once case.
+            const xTimes = (item && item.loops > 0) ? ' ×' + (item.loops + 1) : '';
+            txt.textContent = icon + ' ' + (item ? item.name + xTimes : 'nothing playing');
             txt.classList.toggle('sp-np-muted', !item);
             if (item && item.thumbnail && img.dataset.err !== item.thumbnail) {
                 if (img.getAttribute('src') !== item.thumbnail) img.src = item.thumbnail;
