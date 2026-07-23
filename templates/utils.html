@@ -55,17 +55,25 @@
                      <br />
                      <div style="border: 3px solid black;">
                      <h3>Browser Extensions</h3>
-                     <!-- Artifacts built by `make ext` (scripts/build_extensions.sh). -->
-                     <a href="{{ url_for('static', filename='ext/ScenePlay-firefox.xpi') }}">ScenePlay-firefox.xpi</a>
+                     <!-- Signed .xpi: Mozilla-signed AMO build committed to the repo
+                          (static/ext/ScenePlay-firefox-signed.xpi) — installs permanently
+                          on REGULAR Firefox. The unsigned .xpi + chrome .zip are rebuilt
+                          from source by `make ext` (scripts/build_extensions.sh). -->
+                     <a href="{{ url_for('static', filename='ext/ScenePlay-firefox-signed.xpi') }}">
+                       <b>ScenePlay for Firefox (signed)</b></a>
                      &nbsp;|&nbsp;
                      <a href="{{ url_for('static', filename='ext/ScenePlay-chrome.zip') }}">ScenePlay-chrome.zip</a>
+                     &nbsp;|&nbsp;
+                     <a href="{{ url_for('static', filename='ext/ScenePlay-firefox.xpi') }}">firefox .xpi (unsigned, dev)</a>
                      <p style="font-size:.85em;margin:6px 0;">
-                       <b>Firefox, local (unsigned):</b> stays installed only on ESR / Developer Edition / Nightly —
-                       set <code>xpinstall.signatures.required</code> to <code>false</code> in <code>about:config</code>,
-                       then open the .xpi (Ctrl+O). Release Firefox keeps only AMO-signed builds; a temporary
-                       add-on via <code>about:debugging</code> is removed at every restart. Saved settings
-                       (server URL, scene) survive reinstalls either way — the extension has a fixed id.<br>
-                       <b>Chrome:</b> unzip, then <code>chrome://extensions</code> &rarr; Developer mode &rarr; Load unpacked.
+                       <b>Firefox:</b> click the signed link above and Firefox offers to install it —
+                       works on regular Firefox and stays installed (Mozilla-signed). If the install
+                       prompt doesn't appear, allow this site to install add-ons when asked, or drag
+                       the downloaded file onto <code>about:addons</code>.<br>
+                       <b>Chrome:</b> unzip, then <code>chrome://extensions</code> &rarr; Developer mode &rarr; Load unpacked.<br>
+                       <b>Firefox, unsigned dev build:</b> installs only on ESR / Developer Edition / Nightly with
+                       <code>xpinstall.signatures.required=false</code> in <code>about:config</code>. Saved settings
+                       (server URL, scene) survive reinstalls either way — the extension has a fixed id.
                      </p>
                      </div>
                      <br />

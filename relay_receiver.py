@@ -80,10 +80,11 @@ def _relay_map_matches(relay_ids, local_ids):
 # ── Map auto-repush ──────────────────────────────────────────────────────────
 # The relay's stored map can silently go stale: a push dropped after retries,
 # or a relay restart wiping its ephemeral disk. Players who log in then get an
-# old/blank map until the DM happens to edit something. The receiver already
-# sees the relay's map_json every poll, so when it stays out of sync with the
-# local live map for several consecutive polls (a single mismatch usually just
-# means a push is still in flight/debounced), re-push it — bypassing the
+# old/blank map until the DM happens to edit something. The receiver sees the
+# relay's stored-map identity (map_summary: token ids + bg url) every poll, so
+# when it stays out of sync with the local live map for several consecutive
+# polls (a single mismatch usually just means a push is still in
+# flight/debounced), re-push it — bypassing the
 # broadcaster's content-hash dedup. The cooldown doubles while the mismatch
 # persists so an unfixable relay (e.g. disk full) isn't re-sent a video-sized
 # payload every minute.
@@ -92,27 +93,51 @@ _MAP_RESYNC_COOLDOWN = 60.0
 _map_resync = {'streak': 0, 'last': 0.0, 'cooldown': _MAP_RESYNC_COOLDOWN}
 
 
-def _map_out_of_sync(raw_map, local_ids, bg_expected):
-    """Pure decision: does the relay's stored map_json describe the local live
+def _relay_map_state(sess):
+    """Extract the relay's stored-map identity from a /sync session payload.
+
+    Returns (present, token_ids, bg_url): present False = relay has no stored
+    map; token_ids None = stored map unparseable. Prefers the compact
+    'map_summary' field (the /sync response stopped shipping the full
+    map_json every poll — token portraits embedded in it made each poll
+    ~250 KB); falls back to parsing map_json from an older relay build."""
+    import json
+    if 'map_summary' in sess:
+        summ = sess.get('map_summary')
+        if not summ:
+            return (False, None, '')
+        ids = summ.get('token_ids')
+        try:
+            ids = {int(i) for i in ids} if ids is not None else None
+        except (TypeError, ValueError):
+            ids = None
+        return (True, ids, summ.get('url') or '')
+    raw = sess.get('map_json')
+    if not raw:
+        return (False, None, '')
+    try:
+        mp = json.loads(raw)
+        ids = {int(t['token_id']) for t in (mp.get('tokens') or [])
+               if t.get('token_id') is not None}
+        return (True, ids, mp.get('url') or '')
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return (True, None, '')
+
+
+def _map_out_of_sync(map_state, local_ids, bg_expected):
+    """Pure decision: does the relay's stored map describe the local live
     map? Out of sync when it's missing/unparseable, carries alien token ids,
     or serves a different background file. `bg_expected` is the relay-side
     filename the local background resolves to ('<sha32>.<ext>'), or None to
     skip the background check. Token ids use the same subset rule as
     _relay_map_matches; background URLs that aren't relay-hosted files
     (co-located http, data:) can't be compared and are trusted."""
-    import json
-    if not raw_map:
-        return True
-    try:
-        mp = json.loads(raw_map)
-        relay_ids = {int(t['token_id']) for t in (mp.get('tokens') or [])
-                     if t.get('token_id') is not None}
-    except (ValueError, TypeError, KeyError, AttributeError):
+    present, relay_ids, url = map_state
+    if not present or relay_ids is None:
         return True
     if not relay_ids <= local_ids:
         return True
     if bg_expected:
-        url = mp.get('url') or ''
         if url.startswith('/battlemaps/'):
             return url.rsplit('/', 1)[-1] != bg_expected
         if not url:
@@ -120,7 +145,7 @@ def _map_out_of_sync(raw_map, local_ids, bg_expected):
     return False
 
 
-def _maybe_repush_map(active_bm, raw_map):
+def _maybe_repush_map(active_bm, map_state):
     """Track out-of-sync streak for the live map and re-push when it persists."""
     import time as _time
     bg_expected = None
@@ -133,7 +158,7 @@ def _maybe_repush_map(active_bm, raw_map):
     except Exception:
         pass
 
-    if not _map_out_of_sync(raw_map, {t.token_id for t in active_bm.tokens},
+    if not _map_out_of_sync(map_state, {t.token_id for t in active_bm.tokens},
                             bg_expected):
         _map_resync['streak'] = 0
         _map_resync['cooldown'] = _MAP_RESYNC_COOLDOWN
@@ -267,25 +292,19 @@ def _poll():
         # CHARACTER LABEL, so while the relay is still showing the PREVIOUS map
         # (the map push is debounced/queued and can lag activation), its rows
         # describe old-map positions and must not move tokens on the new map.
-        # The relay's current map_json carries the pushed token_ids — only apply
-        # relay moves when they match the local active map's token ids.
+        # The relay's stored-map summary carries the pushed token_ids — only
+        # apply relay moves when they match the local active map's token ids.
         relay_map_ok = True
         if active_bm is not None:
-            raw_map = (payload.get('session') or {}).get('map_json')
-            if raw_map:
-                try:
-                    import json as _json
-                    relay_ids = {int(t['token_id'])
-                                 for t in (_json.loads(raw_map).get('tokens') or [])
-                                 if t.get('token_id') is not None}
-                    local_ids = {t.token_id for t in active_bm.tokens}
-                    relay_map_ok = _relay_map_matches(relay_ids, local_ids)
-                except (ValueError, TypeError, KeyError):
-                    pass
+            map_state = _relay_map_state(payload.get('session') or {})
+            _present, relay_ids, _bg_url = map_state
+            if relay_ids is not None:
+                local_ids = {t.token_id for t in active_bm.tokens}
+                relay_map_ok = _relay_map_matches(relay_ids, local_ids)
             # Auto-repush: if the relay's stored map stays stale/missing across
             # several polls, re-send the live map (self-heals dropped pushes
             # and relay restarts — late joiners then get the current map).
-            _maybe_repush_map(active_bm, raw_map)
+            _maybe_repush_map(active_bm, map_state)
         else:
             _map_resync['streak'] = 0
 

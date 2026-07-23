@@ -17,17 +17,25 @@ import relay_receiver as rr
 
 IDS = {1, 2, 3}
 
+# _map_out_of_sync / _maybe_repush_map now take the (present, ids, url) tuple
+# produced by _relay_map_state (the /sync payload carries a compact
+# map_summary instead of full map_json). Build states through the real
+# parser so the legacy map_json path stays covered here; the map_summary
+# path is covered in test_relay_receiver.
+NO_MAP = (False, None, '')
+
 
 def _map(tokens=None, url='/battlemaps/aaa.png'):
-    return json.dumps({'url': url,
-                       'tokens': [{'token_id': t} for t in (tokens or [])]})
+    raw = json.dumps({'url': url,
+                      'tokens': [{'token_id': t} for t in (tokens or [])]})
+    return rr._relay_map_state({'map_json': raw})
 
 
 class TestMapOutOfSync:
     def test_missing_or_unparseable(self):
-        assert rr._map_out_of_sync(None, IDS, None) is True
-        assert rr._map_out_of_sync('', IDS, None) is True
-        assert rr._map_out_of_sync('not json{', IDS, None) is True
+        assert rr._map_out_of_sync(rr._relay_map_state({'map_json': None}), IDS, None) is True
+        assert rr._map_out_of_sync(rr._relay_map_state({'map_json': ''}), IDS, None) is True
+        assert rr._map_out_of_sync(rr._relay_map_state({'map_json': 'not json{'}), IDS, None) is True
 
     def test_alien_token_ids(self):
         assert rr._map_out_of_sync(_map([1, 99]), IDS, None) is True
@@ -72,36 +80,36 @@ class TestMaybeRepushGating:
     def test_needs_persistent_mismatch(self, repush_env):
         pushes, clock, bm = repush_env
         for _ in range(rr._MAP_RESYNC_POLLS - 1):
-            rr._maybe_repush_map(bm, None)
+            rr._maybe_repush_map(bm, NO_MAP)
         assert pushes == []                       # not persistent enough yet
-        rr._maybe_repush_map(bm, None)
+        rr._maybe_repush_map(bm, NO_MAP)
         assert pushes == [bm]                     # third consecutive miss fires
 
     def test_in_sync_resets_streak_and_cooldown(self, repush_env):
         pushes, clock, bm = repush_env
-        rr._maybe_repush_map(bm, None)
-        rr._maybe_repush_map(bm, None)
+        rr._maybe_repush_map(bm, NO_MAP)
+        rr._maybe_repush_map(bm, NO_MAP)
         rr._map_resync['cooldown'] = 500.0
         rr._maybe_repush_map(bm, _map([]))        # relay in sync again
         assert rr._map_resync['streak'] == 0
         assert rr._map_resync['cooldown'] == rr._MAP_RESYNC_COOLDOWN
         for _ in range(rr._MAP_RESYNC_POLLS - 1):
-            rr._maybe_repush_map(bm, None)
+            rr._maybe_repush_map(bm, NO_MAP)
         assert pushes == []                       # streak really restarted
 
     def test_cooldown_blocks_and_doubles(self, repush_env):
         pushes, clock, bm = repush_env
         for _ in range(rr._MAP_RESYNC_POLLS):
-            rr._maybe_repush_map(bm, None)
+            rr._maybe_repush_map(bm, NO_MAP)
         assert len(pushes) == 1
         # mismatch persists: within cooldown nothing more is sent
         for _ in range(10):
-            rr._maybe_repush_map(bm, None)
+            rr._maybe_repush_map(bm, NO_MAP)
         assert len(pushes) == 1
         assert rr._map_resync['cooldown'] == rr._MAP_RESYNC_COOLDOWN * 2
         # after the (already-doubled) cooldown expires it fires again
         clock['t'] += rr._MAP_RESYNC_COOLDOWN * 2 + 1
-        rr._maybe_repush_map(bm, None)
+        rr._maybe_repush_map(bm, NO_MAP)
         assert len(pushes) == 2
         assert rr._map_resync['cooldown'] == rr._MAP_RESYNC_COOLDOWN * 4
 
@@ -109,7 +117,7 @@ class TestMaybeRepushGating:
         pushes, clock, bm = repush_env
         rr._map_resync['cooldown'] = 900.0
         for _ in range(rr._MAP_RESYNC_POLLS):
-            rr._maybe_repush_map(bm, None)
+            rr._maybe_repush_map(bm, NO_MAP)
         clock['t'] += 901
-        rr._maybe_repush_map(bm, None)
+        rr._maybe_repush_map(bm, NO_MAP)
         assert rr._map_resync['cooldown'] == 900.0

@@ -61,6 +61,10 @@ if hasattr(signal, 'SIGCHLD'):
 
 
 app = Flask(__name__)
+# Serve .xpi with the type Firefox expects for its one-click "Add to Firefox"
+# install prompt (unknown extensions default to octet-stream = plain download).
+import mimetypes
+mimetypes.add_type('application/x-xpinstall', '.xpi')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + databaseDir
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Writers wait out ordinary lock contention (background workers commit every

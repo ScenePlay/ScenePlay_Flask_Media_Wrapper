@@ -6,6 +6,11 @@
 # same file Mozilla signs if submitted to AMO. Unsigned, it installs
 # permanently only on ESR / Developer Edition / Nightly with
 # xpinstall.signatures.required=false (release Firefox requires AMO signing).
+#
+# NOTE: static/ext/ScenePlay-firefox-signed.xpi (the Mozilla-signed AMO build,
+# committed to the repo) is NOT rebuilt here and must not be deleted — after
+# extension code changes, re-sign (see README "Browser extensions") and
+# replace it by hand.
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p static/ext

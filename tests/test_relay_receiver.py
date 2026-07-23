@@ -191,3 +191,63 @@ def test_ts_conversion_handles_zulu():
 def test_ts_conversion_garbage_falls_back():
     assert rr._relay_ts_to_local('') == ''
     assert rr._relay_ts_to_local('not-a-date') == 'not-a-date'[:19]
+
+
+# ── /sync map identity (map_summary + legacy map_json fallback) ──────────────
+
+def test_map_state_prefers_summary():
+    sess = {'map_summary': {'token_ids': [1, 2], 'url': '/battlemaps/abc.png'},
+            'map_json': json.dumps({'tokens': [{'token_id': 99}]})}
+    assert rr._relay_map_state(sess) == (True, {1, 2}, '/battlemaps/abc.png')
+
+
+def test_map_state_summary_none_means_no_map():
+    assert rr._relay_map_state({'map_summary': None}) == (False, None, '')
+
+
+def test_map_state_summary_unparseable_marker():
+    # relay couldn't parse its stored map_json -> token_ids None
+    present, ids, url = rr._relay_map_state({'map_summary': {'token_ids': None, 'url': ''}})
+    assert present is True and ids is None
+
+
+def test_map_state_legacy_map_json_fallback():
+    sess = {'map_json': json.dumps({'tokens': [{'token_id': 7}], 'url': '/battlemaps/x.webp'})}
+    assert rr._relay_map_state(sess) == (True, {7}, '/battlemaps/x.webp')
+
+
+def test_map_state_legacy_absent_map():
+    assert rr._relay_map_state({}) == (False, None, '')
+
+
+def test_map_state_legacy_unparseable():
+    present, ids, _ = rr._relay_map_state({'map_json': '{broken'})
+    assert present is True and ids is None
+
+
+def test_out_of_sync_missing_or_unparseable():
+    assert rr._map_out_of_sync((False, None, ''), {1}, None) is True
+    assert rr._map_out_of_sync((True, None, ''), {1}, None) is True
+
+
+def test_out_of_sync_alien_token_ids():
+    assert rr._map_out_of_sync((True, {1, 9}, ''), {1, 2}, None) is True
+
+
+def test_in_sync_subset_ids():
+    # relay legitimately knows FEWER tokens than local (subset rule)
+    assert rr._map_out_of_sync((True, {1}, ''), {1, 2}, None) is False
+
+
+def test_out_of_sync_wrong_background():
+    st = (True, {1}, '/battlemaps/old.png')
+    assert rr._map_out_of_sync(st, {1}, 'new.png') is True
+    st = (True, {1}, '/battlemaps/new.png')
+    assert rr._map_out_of_sync(st, {1}, 'new.png') is False
+
+
+def test_background_non_relay_urls_are_trusted():
+    # co-located http / data: URLs can't be compared -> trusted
+    assert rr._map_out_of_sync((True, {1}, 'http://192.168.1.5/bg.png'), {1}, 'x.png') is False
+    # but an EMPTY url with a background expected is stale
+    assert rr._map_out_of_sync((True, {1}, ''), {1}, 'x.png') is True

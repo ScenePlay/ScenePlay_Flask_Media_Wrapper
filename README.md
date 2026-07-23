@@ -368,15 +368,21 @@ If the video is part of a playlist it asks whether you meant the single video
 or the whole playlist. The server address needs no `http://` — `192.168.1.50:8086`
 works — and Save runs a connection test.
 
+- **Firefox**: download **ScenePlay for Firefox (signed)** from Utilities —
+  a Mozilla-signed AMO build (`static/ext/ScenePlay-firefox-signed.xpi`,
+  committed to the repo) that installs permanently on regular Firefox with
+  one click. The unsigned `ScenePlay-firefox.xpi` remains for development
+  (ESR / Developer Edition / Nightly with
+  `xpinstall.signatures.required=false`).
 - **Chrome**: `chrome://extensions` → Developer mode → *Load unpacked* →
   select `ChromeExt/`. (Or download `ScenePlay-chrome.zip` from Utilities.)
-- **Firefox**: unsigned extensions persist only on ESR / Developer Edition /
-  Nightly — set `xpinstall.signatures.required=false` in `about:config`, then
-  open `ScenePlay-firefox.xpi` (downloadable from Utilities). Release Firefox
-  requires the free Mozilla signing flow: `web-ext sign --channel=unlisted`
-  with an addons.mozilla.org API key, then distribute the signed `.xpi`.
 
-Rebuild the downloadable packages after changing extension code: `make ext`.
+Rebuild the unsigned downloadable packages after changing extension code:
+`make ext`. After a code change, re-sign for release Firefox with the free
+Mozilla flow (`web-ext sign --channel=unlisted` with an addons.mozilla.org
+API key — bump `version` in `FireFoxExt/manifest.json` first; AMO rejects
+re-submitting an already-signed version number), then replace
+`static/ext/ScenePlay-firefox-signed.xpi` with the new signed build.
 
 ---
 
