@@ -272,8 +272,12 @@ def register():
 @dm_required
 def delete_user(user_id):
     user = tblUsers.query.get_or_404(user_id)
-    if user.is_dm():
-        flash('Cannot delete a DM account.')
+    # DMs may be deleted too — but never yourself. Only DMs can reach this
+    # route, so blocking self-deletion is what guarantees at least one DM
+    # account always survives (deleting the last DM would permanently lock
+    # everyone out of every dm_required page, including this one).
+    if user.user_id == current_user.user_id:
+        flash('You cannot delete your own account while logged in to it.')
         return redirect(url_for('auth.register'))
 
     # Characters outlive the account: hand them to the deleting DM (the

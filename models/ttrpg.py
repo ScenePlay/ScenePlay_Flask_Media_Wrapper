@@ -325,6 +325,8 @@ class tblBattleMaps(db.Model):
                                cascade='all, delete-orphan', lazy=True)
     effects = db.relationship('tblBattleMapEffects', backref='battle_map',
                                cascade='all, delete-orphan', lazy=True)
+    notes   = db.relationship('tblBattleMapNotes',   backref='battle_map',
+                               cascade='all, delete-orphan', lazy=True)
     session = db.relationship('tblSessions', backref='battle_maps', lazy=True)
 
 
@@ -355,6 +357,20 @@ class tblBattleMapTokens(db.Model):
     col         = db.Column(db.Integer, default=0)
     row         = db.Column(db.Integer, default=0)
     updated_at  = db.Column(db.Text, nullable=False)
+
+
+class tblBattleMapNotes(db.Model):
+    """DM prep/session notes for one battle map. Never sent to players or the
+    relay — served only through dm_required endpoints."""
+    __tablename__ = 'tblBattleMapNotes'
+
+    note_id    = db.Column(db.Integer, primary_key=True)
+    map_id     = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'), nullable=False)
+    title      = db.Column(db.Text, default='')
+    body       = db.Column(db.Text, default='')
+    sort_order = db.Column(db.Integer, default=0)  # DM-defined order in the notes list
+    created_at = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.Text, nullable=False)
 
 
 class tblSpellsLibrary(db.Model):

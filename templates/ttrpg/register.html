@@ -71,9 +71,12 @@
                                     onclick="openResetModal({{ u.user_id }}, '{{ u.display_name | replace("'", "\\'") }}')">
                                 Reset PW
                             </button>
-                            {% if u.role != 'dm' %}
+                            {# Any account except your own — you can't delete the
+                               account you're logged in with, which also keeps the
+                               last DM undeletable. #}
+                            {% if u.user_id != current_user.user_id %}
                             <form method="POST" action="{{ url_for('auth.delete_user', user_id=u.user_id) }}"
-                                  onsubmit="return confirm('Delete {{ u.display_name }}?')">
+                                  onsubmit="return confirm('Delete {{ 'DM account' if u.role == 'dm' else '' }} {{ u.display_name }}?{{ ' They will lose all DM access.' if u.role == 'dm' else '' }}')">
                                 <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                             </form>
                             {% endif %}

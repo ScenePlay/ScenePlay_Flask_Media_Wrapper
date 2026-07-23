@@ -11,7 +11,7 @@ from flask_login import login_required, current_user
 
 from extensions import db, currentvolume
 from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects,
-                           tblSessions, tblSessionParty,
+                           tblBattleMapNotes, tblSessions, tblSessionParty,
                            tblSessionMonsters, tblCharacters)
 from models.scenes import tblscenes
 from routes.auth import dm_required
@@ -938,6 +938,110 @@ def effect_clear(map_id):
     tblBattleMapEffects.query.filter_by(map_id=map_id).delete()
     db.session.commit()
     _push_map_state(tblBattleMaps.query.get(map_id))
+    return jsonify({'ok': True})
+
+
+# ── DM map notes ──────────────────────────────────────────────────────────────
+# Private prep notes per map. dm_required on every endpoint (including list):
+# these never reach players or the relay.
+
+@battlemap_bp.route('/<int:map_id>/notes/list')
+@login_required
+@dm_required
+def notes_list(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    # note_id DESC tiebreak keeps pre-ordering rows (all sort_order 0) in the
+    # newest-first order the list originally had.
+    notes = (tblBattleMapNotes.query.filter_by(map_id=map_id)
+             .order_by(tblBattleMapNotes.sort_order,
+                       tblBattleMapNotes.note_id.desc())
+             .all())
+    return jsonify({'ok': True, 'notes': [{
+        'note_id':    n.note_id,
+        'title':      n.title,
+        'body':       n.body,
+        'updated_at': n.updated_at,
+    } for n in notes]})
+
+
+@battlemap_bp.route('/<int:map_id>/notes/add', methods=['POST'])
+@login_required
+@dm_required
+def notes_add(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    data = request.get_json() or {}
+    # New notes land at the top of the list (freshest prep first); the reorder
+    # endpoint re-normalizes to 0..n-1, so drifting negative is harmless.
+    min_sort = (db.session.query(db.func.min(tblBattleMapNotes.sort_order))
+                .filter_by(map_id=map_id).scalar())
+    n = tblBattleMapNotes(
+        map_id     = map_id,
+        title      = (data.get('title') or '').strip()[:120],
+        body       = data.get('body') or '',
+        sort_order = (min_sort - 1) if min_sort is not None else 0,
+        created_at = _now(),
+        updated_at = _now(),
+    )
+    db.session.add(n)
+    db.session.commit()
+    return jsonify({'ok': True, 'note_id': n.note_id})
+
+
+@battlemap_bp.route('/<int:map_id>/notes/<int:note_id>/update', methods=['POST'])
+@login_required
+@dm_required
+def notes_update(map_id, note_id):
+    n = tblBattleMapNotes.query.get_or_404(note_id)
+    if n.map_id != map_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json() or {}
+    if 'title' in data:
+        n.title = (data.get('title') or '').strip()[:120]
+    if 'body' in data:
+        n.body = data.get('body') or ''
+    n.updated_at = _now()
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/notes/<int:note_id>/reorder', methods=['POST'])
+@login_required
+@dm_required
+def notes_reorder(map_id, note_id):
+    """Move a note one step up/down in the DM's display order (same
+    normalize-then-swap approach as map_reorder)."""
+    n = tblBattleMapNotes.query.get_or_404(note_id)
+    if n.map_id != map_id:
+        return jsonify({'ok': False}), 403
+    direction = (request.get_json() or {}).get('direction', '')
+    notes = (tblBattleMapNotes.query.filter_by(map_id=map_id)
+             .order_by(tblBattleMapNotes.sort_order,
+                       tblBattleMapNotes.note_id.desc())
+             .all())
+    # Normalize to a clean 0..n-1 sequence so a neighbour swap is always
+    # well-defined, even when rows share sort_order values (pre-ordering rows
+    # all carry 0; new notes drift negative).
+    for i, x in enumerate(notes):
+        x.sort_order = i
+    idx = next((i for i, x in enumerate(notes) if x.note_id == note_id), None)
+    if idx is not None:
+        swap = idx - 1 if direction == 'up' else idx + 1 if direction == 'down' else None
+        if swap is not None and 0 <= swap < len(notes):
+            notes[idx].sort_order, notes[swap].sort_order = \
+                notes[swap].sort_order, notes[idx].sort_order
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/notes/<int:note_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def notes_delete(map_id, note_id):
+    n = tblBattleMapNotes.query.get_or_404(note_id)
+    if n.map_id != map_id:
+        return jsonify({'ok': False}), 403
+    db.session.delete(n)
+    db.session.commit()
     return jsonify({'ok': True})
 
 

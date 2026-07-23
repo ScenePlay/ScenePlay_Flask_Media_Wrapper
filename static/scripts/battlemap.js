@@ -1890,6 +1890,168 @@ function clearMapDiceFeed() {
 startPolling();
 makeDraggable(document.getElementById('dice-map-panel'), document.getElementById('dice-drag-handle'));
 makeDraggable(document.getElementById('fx-panel'), document.getElementById('fx-drag-handle'));
+makeDraggable(document.getElementById('notes-map-panel'), document.getElementById('notes-drag-handle'));
+
+// ── DM map notes ──────────────────────────────────────────────────────────────
+// Per-map private notes. The panel exists only in the DM's DOM (Jinja-gated)
+// and every endpoint is dm_required, so players can neither see nor fetch
+// these. List view ↔ editor view inside one floating panel; Back auto-saves
+// so a DM tabbing between notes mid-session can't lose an edit.
+let _mapNotes     = [];     // last fetched list
+let _mapNoteId    = null;   // note being edited (null = new, unsaved)
+let _mapNoteClean = '';     // title\n\nbody snapshot at load, for dirty check
+let _mapNoteGen   = 0;      // bumped on every editor (re)load — a slow save
+                            // response must not touch a newer editing session
+
+function toggleMapNotesPanel() {
+  const p   = document.getElementById('notes-map-panel');
+  const btn = document.getElementById('notes-toggle-btn');
+  if (!p) return;
+  const open = p.style.display !== 'block';
+  if (open) {
+    p.style.display = 'block';
+    btn.classList.replace('btn-outline-secondary', 'btn-ttrpg');
+    mapNotesShowList();
+  } else {
+    _mapNoteSaveIfDirty();
+    p.style.display = 'none';
+    btn.classList.replace('btn-ttrpg', 'btn-outline-secondary');
+  }
+}
+
+function _mapNoteKey() {
+  return document.getElementById('map-note-title').value + '\n\n' +
+         document.getElementById('map-note-body').value;
+}
+
+function mapNotesShowList() {
+  const pendingSave = _mapNoteSaveIfDirty();
+  _mapNoteGen++;
+  _mapNoteId = null;
+  document.getElementById('map-notes-editor').style.display    = 'none';
+  document.getElementById('map-notes-list-view').style.display = 'block';
+  // Wait for the auto-save so the note we just left shows up in the list.
+  Promise.resolve(pendingSave).then(() =>
+    fetch(`/ttrpg/battlemap/${MAP_ID}/notes/list`)
+      .then(r => r.json())
+      .then(d => { if (d.ok) { _mapNotes = d.notes; _mapNotesRenderList(); } })
+  ).catch(() => {});
+}
+
+function _mapNotesRenderList() {
+  const host = document.getElementById('map-notes-list');
+  if (!_mapNotes.length) {
+    host.innerHTML = '<p class="fx-label mb-0">No notes yet for this map.</p>';
+    return;
+  }
+  host.innerHTML = _mapNotes.map((n, i) => {
+    const snip = (n.body || '').split('\n')[0].slice(0, 80);
+    return `<div class="map-note-row" data-note-id="${n.note_id}"
+                 style="display:flex;align-items:center;gap:6px;">
+      <div style="flex:1;min-width:0;">
+        <div class="mn-title">${_mEsc(n.title || 'Untitled')}</div>
+        ${snip ? `<div class="mn-snip">${_mEsc(snip)}</div>` : ''}
+        <div class="mn-when">${_mEsc(n.updated_at || '')}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">
+        <button class="fx-close-btn mn-move" data-dir="up" title="Move up"
+                style="line-height:1;${i === 0 ? 'visibility:hidden;' : ''}">&#9650;</button>
+        <button class="fx-close-btn mn-move" data-dir="down" title="Move down"
+                style="line-height:1;${i === _mapNotes.length - 1 ? 'visibility:hidden;' : ''}">&#9660;</button>
+      </div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.map-note-row').forEach(row => {
+    row.addEventListener('click', () => _mapNoteOpen(parseInt(row.dataset.noteId)));
+    row.querySelectorAll('.mn-move').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();   // arrows must not open the note
+        _mapNoteMove(parseInt(row.dataset.noteId), btn.dataset.dir);
+      }));
+  });
+}
+
+function _mapNoteMove(noteId, direction) {
+  fetch(`/ttrpg/battlemap/${MAP_ID}/notes/${noteId}/reorder`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction }),
+  }).then(r => r.json()).then(d => {
+    if (d.ok) mapNotesShowList();
+  }).catch(() => {});
+}
+
+function _mapNoteOpen(noteId) {
+  const n = _mapNotes.find(x => x.note_id === noteId);
+  if (!n) return;
+  _mapNoteGen++;
+  _mapNoteId = noteId;
+  document.getElementById('map-note-title').value = n.title || '';
+  document.getElementById('map-note-body').value  = n.body  || '';
+  _mapNoteClean = _mapNoteKey();
+  document.getElementById('map-note-status').textContent = '';
+  document.getElementById('map-notes-list-view').style.display = 'none';
+  document.getElementById('map-notes-editor').style.display    = 'block';
+  document.getElementById('map-note-body').focus();
+}
+
+function mapNoteNew() {
+  _mapNoteGen++;
+  _mapNoteId = null;
+  document.getElementById('map-note-title').value = '';
+  document.getElementById('map-note-body').value  = '';
+  _mapNoteClean = _mapNoteKey();
+  document.getElementById('map-note-status').textContent = '';
+  document.getElementById('map-notes-list-view').style.display = 'none';
+  document.getElementById('map-notes-editor').style.display    = 'block';
+  document.getElementById('map-note-title').focus();
+}
+
+function mapNoteSave() {
+  const title = document.getElementById('map-note-title').value;
+  const body  = document.getElementById('map-note-body').value;
+  const status = document.getElementById('map-note-status');
+  // A completely empty new note is a misclick, not a note.
+  if (_mapNoteId == null && !title.trim() && !body.trim()) return;
+  const url = _mapNoteId == null
+    ? `/ttrpg/battlemap/${MAP_ID}/notes/add`
+    : `/ttrpg/battlemap/${MAP_ID}/notes/${_mapNoteId}/update`;
+  const gen = _mapNoteGen;
+  // keepalive: lets a beforeunload-triggered save finish after the tab closes
+  return fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, body }), keepalive: true,
+  }).then(r => r.json()).then(d => {
+    if (gen !== _mapNoteGen) return;   // editor moved on — don't touch its state
+    if (!d.ok) { status.textContent = 'Save failed'; return; }
+    if (_mapNoteId == null && d.note_id) _mapNoteId = d.note_id;
+    _mapNoteClean = _mapNoteKey();
+    status.textContent = 'Saved ✓';
+    setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 2000);
+  }).catch(() => { if (gen === _mapNoteGen) status.textContent = 'Save failed'; });
+}
+
+function _mapNoteSaveIfDirty() {
+  const ed = document.getElementById('map-notes-editor');
+  if (!ed || ed.style.display === 'none') return null;
+  return _mapNoteKey() !== _mapNoteClean ? mapNoteSave() : null;
+}
+
+function mapNoteDelete() {
+  if (_mapNoteId == null) {   // never saved — just discard
+    _mapNoteClean = _mapNoteKey();
+    mapNotesShowList();
+    return;
+  }
+  if (!confirm('Delete this note?')) return;
+  const id = _mapNoteId;
+  _mapNoteId = null;
+  _mapNoteClean = _mapNoteKey();   // discard edits so Back doesn't resave
+  fetch(`/ttrpg/battlemap/${MAP_ID}/notes/${id}/delete`, { method: 'POST' })
+    .then(() => mapNotesShowList());
+}
+
+// A mid-session tab close shouldn't lose the note being typed.
+window.addEventListener('beforeunload', _mapNoteSaveIfDirty);
 
 // ── Volume ────────────────────────────────────────────────────────────────────
 let _mapVolTimer = null;

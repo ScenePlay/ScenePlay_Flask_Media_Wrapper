@@ -256,6 +256,41 @@
   .qref-click:hover { border-color: var(--ttrpg-accent); color: var(--ttrpg-accent); }
   .qref-click:hover .qref-sub { color: var(--ttrpg-accent); }
   #dice-map-panel.minimized { overflow-y: hidden; }
+
+  /* DM map-notes panel — same floating card as the dice panel, but text must
+     stay selectable/editable, so no user-select:none here. */
+  #notes-map-panel {
+    display: none;
+    position: fixed;
+    top: 96px;
+    right: 32px;
+    z-index: 401;
+    width: 300px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--ttrpg-primary) 75%, white);
+    border: 1px solid var(--ttrpg-accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: .82rem;
+    color: var(--ttrpg-text);
+    box-shadow: 0 4px 24px rgba(0,0,0,.7);
+  }
+  #notes-drag-handle       { cursor: grab; }
+  #notes-drag-handle:active{ cursor: grabbing; }
+  .map-note-row {
+    background: var(--ttrpg-surface);
+    border: 1px solid var(--sp-border);
+    border-radius: 6px;
+    padding: 6px 9px;
+    cursor: pointer;
+  }
+  .map-note-row:hover { border-color: var(--ttrpg-accent); }
+  .map-note-row .mn-title { font-weight: 600; color: var(--ttrpg-accent);
+                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map-note-row .mn-snip  { color: var(--sp-muted); font-size: .72rem;
+                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map-note-row .mn-when  { color: var(--sp-muted); font-size: .64rem; }
   .map-dice-btn        { min-width: 36px; padding: 6px 4px; font-size: .78rem; }
   .sidebar-btn         { min-height: 36px; min-width: 36px; }
   .map-dice-btn.active { background: var(--ttrpg-accent) !important;
@@ -373,6 +408,8 @@
       {% endif %}
       <button id="fx-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleFxPanel()" title="Map effects">&#10022; FX</button>
+      <button id="notes-toggle-btn" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleMapNotesPanel()" title="DM notes for this map (players never see these)">&#128221; Notes</button>
       <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
          class="btn btn-sm btn-outline-secondary" title="All maps in this session — view, activate, edit">Maps</a>
       {% endif %}
@@ -818,6 +855,40 @@
     <p class="fx-label">No rolls yet.</p>
   </div>
 </div>
+
+{% if current_user.is_dm() %}
+<!-- ── DM Map Notes Panel (never rendered for players) ────────────────────── -->
+<div id="notes-map-panel">
+  <div id="notes-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span style="font-weight:bold;color:var(--ttrpg-accent);">&#128221; DM Notes <span class="small text-muted">&mdash; {{ bm.name }}</span></span>
+    <button class="fx-close-btn" onclick="toggleMapNotesPanel()" style="cursor:pointer;" title="Close">&#10005;</button>
+  </div>
+
+  <!-- List view -->
+  <div id="map-notes-list-view">
+    <button class="btn btn-sm btn-outline-secondary w-100 mb-2" onclick="mapNoteNew()">&#43; New Note</button>
+    <div id="map-notes-list" class="d-flex flex-column gap-1">
+      <p class="fx-label mb-0">Loading&#8230;</p>
+    </div>
+  </div>
+
+  <!-- Editor view -->
+  <div id="map-notes-editor" style="display:none;">
+    <input id="map-note-title" maxlength="120" placeholder="Title"
+           class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
+    <textarea id="map-note-body" rows="10" placeholder="Write your note&#8230;"
+              class="form-control form-control-sm bg-dark text-light border-secondary mb-2"
+              style="resize:vertical;"></textarea>
+    <div class="d-flex gap-2 align-items-center">
+      <button class="btn btn-sm btn-ttrpg" onclick="mapNoteSave()">Save</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="mapNotesShowList()"
+              title="Back to the list (saves any changes)">&#8592; Back</button>
+      <span id="map-note-status" class="small text-muted ms-auto"></span>
+      <button class="btn btn-sm btn-outline-danger" onclick="mapNoteDelete()" title="Delete this note">&#128465;</button>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <!-- Token hover tooltip -->
 <div id="tok-tooltip">
