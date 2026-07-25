@@ -779,3 +779,89 @@ class TestFullMergeOwnerFallback:
         # 3rd run: fully idempotent now
         s3 = br.restore_merge(snap, include_uploads=False, full=True)
         assert (s3['characters'], s3['party_links'], s3['tokens']) == (0, 0, 0)
+
+
+class TestCrossMachinePaths:
+    """Paths from a different user or a different OS rebuild automatically:
+    the foreign path simply fails the isfile probe and the row falls through
+    to this machine's standard path / filename search / download queue."""
+
+    def _home(self, env, monkeypatch):
+        home = env['tmp'] / 'home'
+        (home / 'Music' / 'SP').mkdir(parents=True)
+        (home / 'Videos' / 'SP').mkdir(parents=True)
+        monkeypatch.setattr(br, '_home', lambda: str(home))
+        return home
+
+    def test_windows_path_on_linux_with_file_present(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        (home / 'Music' / 'SP' / 'abc12345678.mp3').write_bytes(b'mp3')
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       r"VALUES ('C:\Users\bob/Music/SP/', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'S')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}
+        path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblMusic")[0]
+        assert path == str(home) + '/Music/SP/' and status == 3
+
+    def test_windows_path_on_linux_file_absent_requeues(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       r"VALUES ('C:\Users\bob\Music\SP\\', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'S')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 1, 'found_local': 0}
+        path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblMusic")[0]
+        assert path == str(home) + '/Music/SP/' and status == 1
+
+    def test_other_linux_user_path_found_via_index(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        (home / 'Videos' / 'Archive2019').mkdir()
+        (home / 'Videos' / 'Archive2019' / 'vid000000001.mp4').write_bytes(b'mp4')
+        x(env['live'], "INSERT INTO tblVideoMedia(path, title, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/home/otherguy/Videos/SP/', 'vid000000001.mp4', 'https://u', 3, 'vid000000001', 'V')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}
+        path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblVideoMedia")[0]
+        assert path.endswith('Archive2019' + os.sep) and status == 3
+
+    def test_standard_paths_use_app_convention(self, env, monkeypatch):
+        # requeued rows must get the same '<home>/Music/SP/' string the intake
+        # code writes, so string comparisons across the app keep matching
+        home = self._home(env, monkeypatch)
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/gone/', 'zzz.mp3', 'https://u', 3, 'zzz', 'S')")
+        br.requeue_missing_media()
+        assert q(env['live'], "SELECT path FROM tblMusic")[0][0] == f'{home}/Music/SP/'
+
+
+class TestExtraSearchRoots:
+    def _home(self, env, monkeypatch):
+        home = env['tmp'] / 'home'
+        (home / 'Music' / 'SP').mkdir(parents=True)
+        (home / 'Videos' / 'SP').mkdir(parents=True)
+        monkeypatch.setattr(br, '_home', lambda: str(home))
+        return home
+
+    def test_file_on_mounted_drive_found(self, env, monkeypatch):
+        self._home(env, monkeypatch)
+        drive = env['tmp'] / 'mnt' / 'media' / 'Music'
+        drive.mkdir(parents=True)
+        (drive / 'abc12345678.mp3').write_bytes(b'mp3')
+        x(env['live'], "INSERT INTO tblAppSettings(name, value, typevalue) "
+                       f"VALUES ('media_search_roots', '{drive}', 'text')")
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/home/otherguy/Music/SP/', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'S')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}
+        assert q(env['live'], "SELECT path FROM tblMusic")[0][0] == str(drive) + os.sep
+
+    def test_multiple_roots_and_missing_root_tolerated(self, env, monkeypatch):
+        self._home(env, monkeypatch)
+        d2 = env['tmp'] / 'archive'
+        d2.mkdir()
+        (d2 / 'vid000000001.mp4').write_bytes(b'mp4')
+        x(env['live'], "INSERT INTO tblAppSettings(name, value, typevalue) "
+                       f"VALUES ('media_search_roots', '/does/not/exist;{d2}', 'text')")
+        x(env['live'], "INSERT INTO tblVideoMedia(path, title, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/gone/', 'vid000000001.mp4', 'https://u', 3, 'vid000000001', 'V')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}

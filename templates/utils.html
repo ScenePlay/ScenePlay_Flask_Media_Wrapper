@@ -102,6 +102,16 @@
                      {% else %}
                      <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">No backups yet.</p>
                      {% endif %}
+                     <hr style="margin:8px 0;">
+                     <label style="display:block;font-size:.9em;margin-bottom:2px;">
+                       <b>Extra media folders</b> — searched on restore/merge before
+                       downloading from YouTube (besides <code>~/Music</code> and
+                       <code>~/Videos</code>). Separate with <code>;</code> and point at
+                       media folders, not whole drives — they are scanned recursively.
+                     </label>
+                     <input type="text" name="media_search_roots" value="{{ media_roots }}"
+                            placeholder="/mnt/media/Music;/mnt/media/Videos" style="width:70%;">
+                     <input type="submit" name="submit" value="Save Media Folders"/>
                      </div>
                      <br />
                      <div style="border: 3px solid black;">

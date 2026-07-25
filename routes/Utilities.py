@@ -74,6 +74,19 @@ def main():
             path = backup_restore.create_backup(label='manual')
             flash(f"Backup created: {os.path.basename(path)}")
             return redirect(url_for('ut.main'))
+        elif request.form['submit'] == 'Save Media Folders':
+            # Extra roots for the restore/merge file locator — point these at
+            # actual media folders (e.g. /mnt/media/Music), not a whole drive:
+            # every restore walks them recursively.
+            roots = request.form.get('media_search_roots', '').strip()
+            appsettingSet('media_search_roots', roots)
+            missing = [p.strip() for p in roots.split(';')
+                       if p.strip() and not os.path.isdir(p.strip())]
+            msg = 'Media search folders saved.'
+            if missing:
+                msg += f" Warning — not found on this machine: {', '.join(missing)}"
+            flash(msg)
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] in ('Enable Nightly Backup', 'Disable Nightly Backup'):
             enable = request.form['submit'].startswith('Enable')
             appsettingSet('backup_auto', 1 if enable else 0, 'int')
@@ -119,8 +132,10 @@ def main():
     keep_music = appsettingGetKeepMusicPlaying()
     backups = backup_restore.list_backups()
     backup_auto = str(appsettingGet('backup_auto', '0') or '0') == '1'
+    media_roots = appsettingGet('media_search_roots', '') or ''
     return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
-                           keep_music=keep_music, backups=backups, backup_auto=backup_auto)
+                           keep_music=keep_music, backups=backups, backup_auto=backup_auto,
+                           media_roots=media_roots)
 
     
 def _dm_required_json():

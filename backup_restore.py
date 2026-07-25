@@ -185,12 +185,26 @@ def _home():
     return str(Path.home())
 
 
+def _extra_search_roots():
+    """Additional directories to search for media files: the
+    media_search_roots app setting, ';'-separated (Utilities page) — for
+    libraries living outside home, e.g. a mounted media drive."""
+    try:
+        raw = sql.appsettingGet('media_search_roots', '') or ''
+    except Exception:
+        raw = ''
+    return [p.strip() for p in raw.split(';') if p.strip()]
+
+
 def _local_media_index():
-    """filename -> directory for every file under ~/Music and ~/Videos
-    (recursive). Media filenames are videoId-based, so a name match IS the
-    file — wherever it lives (moved library, second copy, subfolder)."""
+    """filename -> directory for every file under ~/Music, ~/Videos and the
+    configured extra media folders (recursive). Media filenames are
+    videoId-based, so a name match IS the file — wherever it lives (moved
+    library, second copy, subfolder, mounted drive)."""
     index = {}
-    for root_dir in (os.path.join(_home(), 'Music'), os.path.join(_home(), 'Videos')):
+    roots = [os.path.join(_home(), 'Music'), os.path.join(_home(), 'Videos')]
+    roots += _extra_search_roots()
+    for root_dir in roots:
         if not os.path.isdir(root_dir):
             continue
         for dirpath, _dirs, files in os.walk(root_dir):
@@ -217,8 +231,11 @@ def requeue_missing_media(only=None):
     specific rows — merge mode uses it so PRE-EXISTING local rows are never
     touched by a merge (that contract is pinned by tests).
     Returns {'requeued': n, 'found_local': m}."""
-    music_path = os.path.join(_home(), 'Music', 'SP') + os.sep
-    video_path = os.path.join(_home(), 'Videos', 'SP') + os.sep
+    # Forward slashes on BOTH OSes — the app-wide convention (sql.py's intake
+    # writes '<home>/Music/SP/'); Windows file APIs accept them, and string
+    # comparisons against intake-written rows must match exactly.
+    music_path = _home() + '/Music/SP/'
+    video_path = _home() + '/Videos/SP/'
     index = _local_media_index()
     conn = sqlite3.connect(sql.database)
     c = conn.cursor()
@@ -775,8 +792,11 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
     os.makedirs(BACKUP_DIR, exist_ok=True)
     manifest = _extract_db(zip_path, tmp_db)
 
-    music_path = os.path.join(_home(), 'Music', 'SP') + os.sep
-    video_path = os.path.join(_home(), 'Videos', 'SP') + os.sep
+    # Forward slashes on BOTH OSes — the app-wide convention (sql.py's intake
+    # writes '<home>/Music/SP/'); Windows file APIs accept them, and string
+    # comparisons against intake-written rows must match exactly.
+    music_path = _home() + '/Music/SP/'
+    video_path = _home() + '/Videos/SP/'
     s = {'campaigns': 0, 'scenes': 0, 'music': 0, 'video': 0,
          'links': 0, 'skipped_legacy': 0, 'homebrew': 0, 'found_local': 0}
 
