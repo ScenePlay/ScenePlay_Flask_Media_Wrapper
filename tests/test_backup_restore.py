@@ -638,3 +638,73 @@ class TestFullMerge:
         assert 'sessions' not in s
         assert q(env['live'], "SELECT COUNT(*) FROM tblSessions")[0][0] == 0
         assert q(env['live'], "SELECT COUNT(*) FROM tblCharacters")[0][0] == 1  # just local Zdravko
+
+
+class TestLocalMediaLocate:
+    """requeue_missing_media finds files already on this machine (row path,
+    standard path, or anywhere under ~/Music|~/Videos by videoId filename)
+    before queueing YouTube downloads."""
+
+    def _home(self, env, monkeypatch):
+        home = env['tmp'] / 'home'
+        (home / 'Music' / 'SP').mkdir(parents=True)
+        (home / 'Videos' / 'SP').mkdir(parents=True)
+        monkeypatch.setattr(br, '_home', lambda: str(home))
+        return home
+
+    def test_found_in_alternate_folder_repoints_row(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        (home / 'Music' / 'OldLibrary').mkdir()
+        (home / 'Music' / 'OldLibrary' / 'abc12345678.mp3').write_bytes(b'mp3')
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/gone/', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'Song')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}
+        path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblMusic")[0]
+        assert path.endswith('OldLibrary' + os.sep) and status == 3
+
+    def test_row_own_path_kept_when_valid(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        keep = home / 'elsewhere'
+        keep.mkdir()
+        (keep / 'abc12345678.mp3').write_bytes(b'mp3')
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       f"VALUES ('{keep}{os.sep}', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'Song')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 0}       # nothing to fix
+        assert q(env['live'], "SELECT path FROM tblMusic")[0][0] == f'{keep}{os.sep}'
+
+    def test_queued_row_with_local_file_skips_download(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        (home / 'Music' / 'SP' / 'abc12345678.mp3').write_bytes(b'mp3')
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/wrong/', 'abc12345678.mp3', 'https://u', 1, 'abc12345678', 'Song')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 0, 'found_local': 1}
+        assert q(env['live'], "SELECT dnLoadStatus FROM tblMusic")[0][0] == 3
+
+    def test_truly_absent_requeues_to_standard_path(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        x(env['live'], "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+                       "VALUES ('/old/', 'abc12345678.mp3', 'https://u', 3, 'abc12345678', 'Song')")
+        out = br.requeue_missing_media()
+        assert out == {'requeued': 1, 'found_local': 0}
+        path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblMusic")[0]
+        assert path == str(home / 'Music' / 'SP') + os.sep and status == 1
+
+    def test_merge_marks_already_local_files_downloaded(self, env, monkeypatch):
+        home = self._home(env, monkeypatch)
+        (home / 'Music' / 'SP' / 'newsong00001.mp3').write_bytes(b'mp3')
+        src = str(env['tmp'] / 'srcloc.db')
+        make_db(src)
+        x(src, "INSERT INTO tblMusic(path, song, genre, urlSource, dnLoadStatus, videoId, displayName, metaStatus) "
+               "VALUES ('/src/', 'newsong00001.mp3', 0, 'https://u2', 3, 'newsong00001', 'New Song', 3)")
+        old = sql.database
+        sql.database = src
+        try:
+            snap = br.create_backup(label='loc')
+        finally:
+            sql.database = old
+        s = br.restore_merge(snap, include_uploads=False)
+        assert s['music'] == 1 and s['found_local'] == 1
+        assert q(env['live'], "SELECT dnLoadStatus FROM tblMusic WHERE videoId='newsong00001'")[0][0] == 3

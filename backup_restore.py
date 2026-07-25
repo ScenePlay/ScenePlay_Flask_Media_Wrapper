@@ -180,30 +180,88 @@ def _extract_uploads(zip_path, overwrite):
 # Post-restore: point media rows at THIS machine and re-download what's missing
 # ---------------------------------------------------------------------------
 
-def requeue_missing_media():
-    """Rewrite media paths to this machine's convention and queue downloads
-    for id-based rows whose file is absent. Legacy rows (no urlSource) can't
-    be re-downloaded and are left alone. Returns {'requeued': n}."""
-    music_path = str(Path.home()) + '/Music/SP/'
-    video_path = str(Path.home()) + '/Videos/SP/'
+def _home():
+    """Test seam: monkeypatched to a scratch dir in the test suite."""
+    return str(Path.home())
+
+
+def _local_media_index():
+    """filename -> directory for every file under ~/Music and ~/Videos
+    (recursive). Media filenames are videoId-based, so a name match IS the
+    file — wherever it lives (moved library, second copy, subfolder)."""
+    index = {}
+    for root_dir in (os.path.join(_home(), 'Music'), os.path.join(_home(), 'Videos')):
+        if not os.path.isdir(root_dir):
+            continue
+        for dirpath, _dirs, files in os.walk(root_dir):
+            for f in files:
+                index.setdefault(f, dirpath + os.sep)
+    return index
+
+
+def requeue_missing_media(only=None):
+    """Point media rows at files that already exist on THIS machine, and queue
+    downloads only for what is truly absent. Legacy rows (no urlSource) can't
+    be re-downloaded and are left alone.
+
+    Resolution order per row:
+      1. the row's own path        (restoring on the same box/layout)
+      2. the standard library path (~/Music/SP, ~/Videos/SP)
+      3. filename search across ~/Music and ~/Videos — videoId filenames are
+         unique, so the row is re-pointed at whichever folder has the file
+      4. nothing found -> standard path + dnLoadStatus 1 (download queue)
+    A found file also repairs a non-downloaded status (1/2/4 -> 3):
+    re-downloading what's already on disk is the failure this prevents.
+
+    only: optional {'music': {pks}, 'video': {pks}} to restrict the pass to
+    specific rows — merge mode uses it so PRE-EXISTING local rows are never
+    touched by a merge (that contract is pinned by tests).
+    Returns {'requeued': n, 'found_local': m}."""
+    music_path = os.path.join(_home(), 'Music', 'SP') + os.sep
+    video_path = os.path.join(_home(), 'Videos', 'SP') + os.sep
+    index = _local_media_index()
     conn = sqlite3.connect(sql.database)
     c = conn.cursor()
-    requeued = 0
-    for tbl, pkcol, namecol, local in (('tblMusic', 'song_id', 'song', music_path),
-                                       ('tblVideoMedia', 'video_id', 'title', video_path)):
-        c.execute(f"UPDATE {tbl} SET path = ? WHERE urlSource IS NOT NULL AND urlSource <> ''", (local,))
-        c.execute(f"SELECT {pkcol}, path || {namecol} FROM {tbl} "
-                  f"WHERE urlSource IS NOT NULL AND urlSource <> '' AND dnLoadStatus = 3")
-        for pk, full in c.fetchall():
-            if full and not os.path.exists(full):
-                c.execute(f"UPDATE {tbl} SET dnLoadStatus = 1 WHERE {pkcol} = ?", (pk,))
-                requeued += 1
+    requeued = found = 0
+    for kind, tbl, pkcol, namecol, local in (
+            ('music', 'tblMusic', 'song_id', 'song', music_path),
+            ('video', 'tblVideoMedia', 'video_id', 'title', video_path)):
+        rows = c.execute(
+            f"SELECT {pkcol}, path, {namecol}, dnLoadStatus FROM {tbl} "
+            f"WHERE urlSource IS NOT NULL AND urlSource <> ''").fetchall()
+        for pk, path, name, status in rows:
+            if only is not None and pk not in only.get(kind, ()):
+                continue
+            if not name:
+                continue
+            new_path = None
+            if path and os.path.isfile(path + name):
+                new_path = path
+            elif os.path.isfile(local + name):
+                new_path = local
+            elif name in index:
+                new_path = index[name]
+            if new_path is not None:
+                if new_path != path or status != 3:
+                    c.execute(f"UPDATE {tbl} SET path = ?, dnLoadStatus = 3 WHERE {pkcol} = ?",
+                              (new_path, pk))
+                    found += 1
+            else:
+                # truly absent — standard path so the download lands right;
+                # only downloaded rows flip to queued (failed rows keep their
+                # status for the failed-retry flow)
+                if status == 3:
+                    c.execute(f"UPDATE {tbl} SET path = ?, dnLoadStatus = 1 WHERE {pkcol} = ?",
+                              (local, pk))
+                    requeued += 1
+                elif path != local:
+                    c.execute(f"UPDATE {tbl} SET path = ? WHERE {pkcol} = ?", (local, pk))
     conn.commit()
     c.close()
     conn.close()
     if requeued:
         sql.appsettingYT_QuePlayFlagUpdate(1)
-    return {'requeued': requeued}
+    return {'requeued': requeued, 'found_local': found}
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +326,7 @@ def restore_replace(zip_path, include_uploads=True):
         'schema_upgraded': upgraded,
         'uploads_restored': uploads,
         'requeued_downloads': requeue['requeued'],
+        'found_local': requeue['found_local'],
         'safety_backup': os.path.basename(safety),
     }
 
@@ -698,10 +757,10 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
     os.makedirs(BACKUP_DIR, exist_ok=True)
     manifest = _extract_db(zip_path, tmp_db)
 
-    music_path = str(Path.home()) + '/Music/SP/'
-    video_path = str(Path.home()) + '/Videos/SP/'
+    music_path = os.path.join(_home(), 'Music', 'SP') + os.sep
+    video_path = os.path.join(_home(), 'Videos', 'SP') + os.sep
     s = {'campaigns': 0, 'scenes': 0, 'music': 0, 'video': 0,
-         'links': 0, 'skipped_legacy': 0, 'homebrew': 0}
+         'links': 0, 'skipped_legacy': 0, 'homebrew': 0, 'found_local': 0}
 
     conn = sqlite3.connect(sql.database)
     c = conn.cursor()
@@ -725,6 +784,7 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
             "SELECT 1 FROM src.sqlite_master WHERE type='table' AND name='tblMediaMetadata'"
         ).fetchone()
         media_map = {'music': {}, 'video': {}}
+        new_media = {'music': set(), 'video': set()}   # rows INSERTED by this merge
         for kind, tbl, pkcol, namecol, local in (
                 ('music', 'tblMusic', 'song_id', 'song', music_path),
                 ('video', 'tblVideoMedia', 'video_id', 'title', video_path)):
@@ -754,6 +814,7 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
                     (local, name, genre_map.get(genre, 0), urlSource, videoId, displayName or ''))
                 new_pk = c.lastrowid
                 media_map[kind][pk] = new_pk
+                new_media[kind].add(new_pk)
                 s[kind] += 1
                 meta = c.execute(
                     "SELECT title, duration, uploader, upload_date, thumbnail, view_count, "
@@ -883,6 +944,11 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
     uploads = (_extract_uploads(zip_path, overwrite=False)  # never clobber local images
                if include_uploads else 0)
     if s['music'] or s['video']:
+        # Files may already be on this box (consolidating boxes that shared a
+        # media folder) — locate them first so only true gaps hit YouTube.
+        # Scoped to the rows THIS merge inserted: pre-existing local rows are
+        # never modified by a merge.
+        s['found_local'] = requeue_missing_media(only=new_media)['found_local']
         sql.appsettingYT_QuePlayFlagUpdate(1)               # download the new rows
         sql.appsettingFlagUpdate('meta_que_switch', 1)      # fetch metadata where missing
     s.update({'mode': 'merge', 'from': manifest.get('server_name') or '?',

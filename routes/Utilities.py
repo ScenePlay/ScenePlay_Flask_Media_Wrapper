@@ -211,7 +211,8 @@ def backup_import():
             summary = backup_restore.restore_replace(staged, include_uploads=include_uploads)
             db.engine.dispose()   # drop pooled connections to the swapped-out file
             flash(f"Restored from {summary['from']} (backup of {summary['created_at']}): "
-                  f"{summary['uploads_restored']} images, {summary['requeued_downloads']} downloads "
+                  f"{summary['uploads_restored']} images, {summary.get('found_local', 0)} media files "
+                  f"found already on this machine, {summary['requeued_downloads']} downloads "
                   f"re-queued{img_note}. Safety copy: {summary['safety_backup']}. RESTART the app now.")
         else:
             # Full merge also brings the TTRPG tree; imported characters whose
@@ -226,7 +227,8 @@ def backup_import():
                    f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
                    f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
                    f"{summary['uploads_added']} images{img_note} "
-                   f"({summary['skipped_legacy']} legacy rows skipped).")
+                   f"({summary['skipped_legacy']} legacy rows skipped, "
+                   f"{summary.get('found_local', 0)} media files found already local).")
             if full:
                 msg += (f" TTRPG: {summary['characters']} characters "
                         f"({summary['characters_skipped']} kept local), "
