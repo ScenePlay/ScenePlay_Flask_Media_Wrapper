@@ -132,6 +132,16 @@
                       Merge — add its campaigns/scenes/media and homebrew library entries to this server (dedup by video id / name)
                     </label>
                     <br />
+                    <label style="display:inline-block;margin:0 12px 6px 24px;">
+                      <input type="checkbox" name="full_merge" value="1">
+                      Full merge — ALSO bring the TTRPG world: characters, sessions,
+                      battle maps, monsters, tokens, all notes and scene lighting.
+                      Same-named sessions/maps combine; a character that already
+                      exists here (same owner + name) is kept as-is; imported
+                      characters without a matching player account land under you.
+                      Play history (dice rolls, played counts) never merges.
+                    </label>
+                    <br />
                     <label style="display:inline-block;margin:0 12px 6px 0;">
                       <input type="radio" name="mode" value="replace">
                       Replace — restore the ENTIRE database from this backup (current data snapshotted first)

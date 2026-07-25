@@ -273,6 +273,344 @@ def restore_replace(zip_path, include_uploads=True):
 
 
 # ---------------------------------------------------------------------------
+# Full-tree merge helpers (restore_merge(..., full=True))
+# ---------------------------------------------------------------------------
+# Identity & policy decisions (one-time box consolidation):
+#   users        never copied; matched by lower(username), else fallback DM
+#   characters   (owner, lower(name)) — LOCAL WINS, archive copy skipped;
+#                sub-tables ride only with NEW characters, library ids
+#                re-matched by item NAME (stats are denormalized, so a missing
+#                library row degrades gracefully to a NULL lib id)
+#   sessions     (campaign, lower(title), session_number); imported 'active'
+#                status downgrades to 'planning' — a merge must never hijack
+#                the live session
+#   maps         (session, lower(name)); imported maps arrive is_active=0
+#   tokens/fx    copied for NEW maps only — an existing map's live battle
+#                state (positions, fog) is never touched
+#   notes        (parent, title, body) dedup; sort_order appended past ceiling
+#   lighting     copied only into scenes with NO local lighting of that type;
+#                LED models matched by modelName (copied if missing), WLED
+#                servers by serverName (copied if missing), effect/palette
+#                catalog ids re-matched by name (kept verbatim on any miss)
+#   excluded     dice rolls / roll log / token-position mirror / play counters
+#                (logs, not world state) and user accounts / app settings
+
+
+def _src_has(c, table):
+    return bool(c.execute(
+        "SELECT 1 FROM src.sqlite_master WHERE type='table' AND lower(name)=lower(?)",
+        (table,)).fetchone())
+
+
+def _common_cols(c, table, exclude=()):
+    """Column-name intersection between src and live schemas (minus exclude) —
+    lets archives from older/newer app versions merge cleanly."""
+    src  = [r[1] for r in c.execute(f"PRAGMA src.table_info({table})")]
+    live = [r[1] for r in c.execute(f"PRAGMA table_info({table})")]
+    return [col for col in src if col in live and col not in exclude]
+
+
+def _copy_row(c, table, data):
+    cols = ', '.join(data)
+    ph   = ', '.join('?' for _ in data)
+    c.execute(f"INSERT INTO {table}({cols}) VALUES ({ph})", tuple(data.values()))
+    return c.lastrowid
+
+
+def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_id):
+    """Merge the TTRPG tree + scene lighting from the attached src database.
+    Runs inside restore_merge's transaction; every step guards on the src
+    table existing so pre-ttrpg archives pass through untouched."""
+    s = {'characters': 0, 'characters_skipped': 0, 'sessions': 0, 'maps': 0,
+         'session_monsters': 0, 'party_links': 0, 'tokens': 0, 'map_effects': 0,
+         'notes': 0, 'lighting': 0}
+
+    # -- users: match only, never copy ---------------------------------------
+    user_map = {}
+    if _src_has(c, 'tblUsers'):
+        for uid, uname in c.execute("SELECT user_id, username FROM src.tblUsers").fetchall():
+            row = c.execute("SELECT user_id FROM tblUsers WHERE lower(username)=lower(?)",
+                            (uname or '',)).fetchone()
+            user_map[uid] = row[0] if row else fallback_user_id
+    if fallback_user_id is None:
+        row = (c.execute("SELECT user_id FROM tblUsers WHERE role='dm' AND active=1 "
+                         "ORDER BY user_id LIMIT 1").fetchone()
+               or c.execute("SELECT user_id FROM tblUsers ORDER BY user_id LIMIT 1").fetchone())
+        fallback_user_id = row[0] if row else None
+
+    # -- characters (+ sub-tables), local wins on (owner, name) --------------
+    char_map = {}
+    CHAR_SUBS = [
+        ('tblCharacterWeapons',    'char_weapon_id', 'weapon_lib_id', 'weapon_name', 'tblWeaponsLibrary', 'weapon_lib_id'),
+        ('tblCharacterArmor',      'char_armor_id',  'armor_lib_id',  'armor_name',  'tblArmorLibrary',   'armor_lib_id'),
+        ('tblCharacterSpells',     'char_spell_id',  'spell_lib_id',  'spell_name',  'tblSpellsLibrary',  'spell_lib_id'),
+        ('tblCharacterFeats',      'feat_id',      None, None, None, None),
+        ('tblCharacterInventory',  'item_id',      None, None, None, None),
+        ('tblCharacterSkills',     'skill_id',     None, None, None, None),
+        ('tblCharacterResources',  'resource_id',  None, None, None, None),
+        ('tblCharacterConditions', 'condition_id', None, None, None, None),
+        ('tblCharacterNotes',      'note_id',      None, None, None, None),
+    ]
+    if _src_has(c, 'tblCharacters') and fallback_user_id is not None:
+        cols = _common_cols(c, 'tblCharacters', exclude=('character_id',))
+        for row in c.execute(f"SELECT character_id, {', '.join(cols)} FROM src.tblCharacters").fetchall():
+            src_id, data = row[0], dict(zip(cols, row[1:]))
+            data['user_id'] = user_map.get(data.get('user_id'), fallback_user_id)
+            local = c.execute(
+                "SELECT character_id FROM tblCharacters WHERE user_id=? AND lower(name)=lower(?)",
+                (data['user_id'], data.get('name') or '')).fetchone()
+            if local:
+                char_map[src_id] = local[0]      # local wins; rewire refs to it
+                s['characters_skipped'] += 1
+                continue
+            char_map[src_id] = _copy_row(c, 'tblCharacters', data)
+            s['characters'] += 1
+            for sub, pk, lib_col, name_col, lib_tbl, lib_pk in CHAR_SUBS:
+                if not _src_has(c, sub):
+                    continue
+                sub_cols = _common_cols(c, sub, exclude=(pk,))
+                for srow in c.execute(
+                        f"SELECT {', '.join(sub_cols)} FROM src.{sub} WHERE character_id=?",
+                        (src_id,)).fetchall():
+                    sdata = dict(zip(sub_cols, srow))
+                    sdata['character_id'] = char_map[src_id]
+                    if lib_col and lib_col in sdata:
+                        hit = c.execute(
+                            f"SELECT {lib_pk} FROM {lib_tbl} WHERE lower(name)=lower(?)",
+                            (sdata.get(name_col) or '',)).fetchone()
+                        sdata[lib_col] = hit[0] if hit else None
+                    _copy_row(c, sub, sdata)
+
+    # -- monster templates: by name, copied when missing (SRD included, so
+    #    session monsters always resolve) --------------------------------------
+    template_map = {}
+    if _src_has(c, 'tblMonsterTemplates'):
+        tcols = _common_cols(c, 'tblMonsterTemplates', exclude=('template_id',))
+        for row in c.execute(
+                f"SELECT template_id, {', '.join(tcols)} FROM src.tblMonsterTemplates").fetchall():
+            src_id, data = row[0], dict(zip(tcols, row[1:]))
+            hit = c.execute("SELECT template_id FROM tblMonsterTemplates WHERE lower(name)=lower(?)",
+                            (data.get('name') or '',)).fetchone()
+            template_map[src_id] = hit[0] if hit else _copy_row(c, 'tblMonsterTemplates', data)
+
+    # -- sessions ---------------------------------------------------------------
+    session_map, new_sessions = {}, set()
+    if _src_has(c, 'tblSessions'):
+        scols = _common_cols(c, 'tblSessions', exclude=('session_id',))
+        for row in c.execute(
+                f"SELECT session_id, {', '.join(scols)} FROM src.tblSessions").fetchall():
+            src_id, data = row[0], dict(zip(scols, row[1:]))
+            if 'campaign_id' in data:
+                data['campaign_id'] = campaign_map.get(data['campaign_id'])
+            hit = c.execute(
+                "SELECT session_id FROM tblSessions WHERE campaign_id IS ? "
+                "AND lower(title)=lower(?) AND coalesce(session_number,1)=coalesce(?,1) "
+                "ORDER BY session_id LIMIT 1",
+                (data.get('campaign_id'), data.get('title') or '',
+                 data.get('session_number'))).fetchone()
+            if hit:
+                session_map[src_id] = hit[0]
+                continue
+            if data.get('status') == 'active':
+                data['status'] = 'planning'      # never hijack the live session
+            session_map[src_id] = _copy_row(c, 'tblSessions', data)
+            new_sessions.add(session_map[src_id])
+            s['sessions'] += 1
+
+    # -- party links -------------------------------------------------------------
+    if _src_has(c, 'tblSessionParty') and session_map:
+        pcols = _common_cols(c, 'tblSessionParty', exclude=('sp_id',))
+        for row in c.execute(f"SELECT {', '.join(pcols)} FROM src.tblSessionParty").fetchall():
+            data = dict(zip(pcols, row))
+            sid = session_map.get(data.get('session_id'))
+            cid = char_map.get(data.get('character_id'))
+            if not sid or not cid:
+                continue
+            if c.execute("SELECT 1 FROM tblSessionParty WHERE session_id=? AND character_id=?",
+                         (sid, cid)).fetchone():
+                continue
+            data.update(session_id=sid, character_id=cid)
+            _copy_row(c, 'tblSessionParty', data)
+            s['party_links'] += 1
+
+    # -- session monsters: (session, display_name), local wins --------------------
+    sm_map = {}
+    if _src_has(c, 'tblSessionMonsters') and session_map:
+        mcols = _common_cols(c, 'tblSessionMonsters', exclude=('monster_id',))
+        for row in c.execute(
+                f"SELECT monster_id, {', '.join(mcols)} FROM src.tblSessionMonsters").fetchall():
+            src_id, data = row[0], dict(zip(mcols, row[1:]))
+            sid = session_map.get(data.get('session_id'))
+            if not sid:
+                continue
+            hit = c.execute(
+                "SELECT monster_id FROM tblSessionMonsters WHERE session_id=? "
+                "AND lower(display_name)=lower(?) LIMIT 1",
+                (sid, data.get('display_name') or '')).fetchone()
+            if hit:
+                sm_map[src_id] = hit[0]
+                continue
+            data.update(session_id=sid,
+                        template_id=template_map.get(data.get('template_id')))
+            if data.get('template_id') is None:
+                continue                          # template unresolvable — skip
+            sm_map[src_id] = _copy_row(c, 'tblSessionMonsters', data)
+            s['session_monsters'] += 1
+
+    # -- battle maps ---------------------------------------------------------------
+    map_map, new_maps = {}, set()
+    if _src_has(c, 'tblBattleMaps') and session_map:
+        bcols = _common_cols(c, 'tblBattleMaps', exclude=('map_id',))
+        for row in c.execute(
+                f"SELECT map_id, {', '.join(bcols)} FROM src.tblBattleMaps "
+                "ORDER BY sort_order, map_id").fetchall():
+            src_id, data = row[0], dict(zip(bcols, row[1:]))
+            sid = session_map.get(data.get('session_id'))
+            if not sid:
+                continue
+            hit = c.execute("SELECT map_id FROM tblBattleMaps WHERE session_id=? "
+                            "AND lower(name)=lower(?) LIMIT 1",
+                            (sid, data.get('name') or '')).fetchone()
+            if hit:
+                map_map[src_id] = hit[0]
+                continue
+            ceiling = c.execute("SELECT COALESCE(MAX(sort_order), 0) FROM tblBattleMaps "
+                                "WHERE session_id=?", (sid,)).fetchone()[0]
+            data.update(session_id=sid, is_active=0, sort_order=ceiling + 1)
+            map_map[src_id] = _copy_row(c, 'tblBattleMaps', data)
+            new_maps.add(map_map[src_id])
+            s['maps'] += 1
+
+        # tokens + effects ride only with NEW maps — an existing map's live
+        # battle state (positions, fog) must never be disturbed by a merge
+        if _src_has(c, 'tblBattleMapTokens'):
+            kcols = _common_cols(c, 'tblBattleMapTokens', exclude=('token_id',))
+            for row in c.execute(f"SELECT {', '.join(kcols)} FROM src.tblBattleMapTokens").fetchall():
+                data = dict(zip(kcols, row))
+                mid = map_map.get(data.get('map_id'))
+                if not mid or mid not in new_maps:
+                    continue
+                ent_map = char_map if data.get('entity_type') == 'player' else sm_map
+                ent = ent_map.get(data.get('entity_id'))
+                if ent is None:
+                    continue                      # entity didn't survive the merge
+                data.update(map_id=mid, entity_id=ent)
+                _copy_row(c, 'tblBattleMapTokens', data)
+                s['tokens'] += 1
+        if _src_has(c, 'tblBattleMapEffects'):
+            ecols = _common_cols(c, 'tblBattleMapEffects', exclude=('effect_id',))
+            for row in c.execute(f"SELECT {', '.join(ecols)} FROM src.tblBattleMapEffects").fetchall():
+                data = dict(zip(ecols, row))
+                mid = map_map.get(data.get('map_id'))
+                if not mid or mid not in new_maps:
+                    continue
+                data['map_id'] = mid
+                _copy_row(c, 'tblBattleMapEffects', data)
+                s['map_effects'] += 1
+
+    # -- notes (session + map): dedup by (parent, title, body) ---------------------
+    for tbl, pk, parent_col, parent_map in (
+            ('tblSessionNotes',  'note_id', 'session_id', session_map),
+            ('tblBattleMapNotes', 'note_id', 'map_id',    map_map)):
+        if not _src_has(c, tbl) or not parent_map:
+            continue
+        ncols = _common_cols(c, tbl, exclude=(pk,))
+        for row in c.execute(
+                f"SELECT {', '.join(ncols)} FROM src.{tbl} "
+                f"ORDER BY {parent_col}, sort_order").fetchall():
+            data = dict(zip(ncols, row))
+            parent = parent_map.get(data.get(parent_col))
+            if not parent:
+                continue
+            if c.execute(f"SELECT 1 FROM {tbl} WHERE {parent_col}=? AND title=? AND body=?",
+                         (parent, data.get('title') or '', data.get('body') or '')).fetchone():
+                continue
+            ceiling = c.execute(
+                f"SELECT COALESCE(MAX(sort_order), 0) FROM {tbl} WHERE {parent_col}=?",
+                (parent,)).fetchone()[0]
+            data.update({parent_col: parent, 'sort_order': ceiling + 1})
+            _copy_row(c, tbl, data)
+            s['notes'] += 1
+
+    # -- scene lighting: only into scenes with NO local lighting of that type ------
+    if _src_has(c, 'tblScenePattern'):
+        model_map = {}
+        if _src_has(c, 'tblLedTypeModel'):
+            for mid, mname in c.execute(
+                    "SELECT ledTypeModel_ID, modelName FROM src.tblLedTypeModel").fetchall():
+                hit = c.execute("SELECT ledTypeModel_ID FROM tblLedTypeModel "
+                                "WHERE lower(modelName)=lower(?)", (mname or '',)).fetchone()
+                if hit:
+                    model_map[mid] = hit[0]
+                else:
+                    mcols = _common_cols(c, 'tblLedTypeModel', exclude=('ledTypeModel_ID',))
+                    row = c.execute(f"SELECT {', '.join(mcols)} FROM src.tblLedTypeModel "
+                                    "WHERE ledTypeModel_ID=?", (mid,)).fetchone()
+                    model_map[mid] = _copy_row(c, 'tblLedTypeModel', dict(zip(mcols, row)))
+        pcols = _common_cols(c, 'tblScenePattern', exclude=('scenePattern_ID',))
+        for row in c.execute(f"SELECT {', '.join(pcols)} FROM src.tblScenePattern").fetchall():
+            data = dict(zip(pcols, row))
+            scene = scene_map.get(data.get('scene_ID'))
+            if not scene:
+                continue
+            if c.execute("SELECT 1 FROM tblScenePattern WHERE scene_ID=?", (scene,)).fetchone():
+                continue                          # scene already has local LED lighting
+            data['scene_ID'] = scene
+            if 'ledTypeModel_ID' in data:
+                data['ledTypeModel_ID'] = model_map.get(data['ledTypeModel_ID'],
+                                                        data['ledTypeModel_ID'])
+            _copy_row(c, 'tblScenePattern', data)
+            s['lighting'] += 1
+
+    if _src_has(c, 'tblWledPattern'):
+        def _catalog_map(src_tbl, pk, name_col):
+            out = {}
+            if not _src_has(c, src_tbl):
+                return out
+            for cid, cname in c.execute(
+                    f"SELECT {pk}, {name_col} FROM src.{src_tbl}").fetchall():
+                hit = c.execute(f"SELECT {pk} FROM {src_tbl} WHERE lower({name_col})=lower(?)",
+                                (cname or '',)).fetchone()
+                if hit:
+                    out[cid] = hit[0]
+            return out
+        effect_map  = _catalog_map('tblEffect',   'effect_ID',   'effectName')
+        pallette_map = _catalog_map('tblPallette', 'pallette_ID', 'palletteName')
+        server_map = {}
+        if _src_has(c, 'tblServersIP'):
+            for sid_, sname in c.execute(
+                    "SELECT ServerIP_ID, serverName FROM src.tblServersIP").fetchall():
+                hit = c.execute("SELECT ServerIP_ID FROM tblServersIP "
+                                "WHERE lower(serverName)=lower(?)", (sname or '',)).fetchone()
+                if hit:
+                    server_map[sid_] = hit[0]
+                else:
+                    vcols = _common_cols(c, 'tblServersIP', exclude=('ServerIP_ID',))
+                    row = c.execute(f"SELECT {', '.join(vcols)} FROM src.tblServersIP "
+                                    "WHERE ServerIP_ID=?", (sid_,)).fetchone()
+                    server_map[sid_] = _copy_row(c, 'tblServersIP', dict(zip(vcols, row)))
+        wcols = _common_cols(c, 'tblWledPattern', exclude=('wledPattern_ID',))
+        for row in c.execute(f"SELECT {', '.join(wcols)} FROM src.tblWledPattern").fetchall():
+            data = dict(zip(wcols, row))
+            scene = scene_map.get(data.get('scene_ID'))
+            if not scene:
+                continue
+            if c.execute("SELECT 1 FROM tblWledPattern WHERE scene_ID=?", (scene,)).fetchone():
+                continue                          # scene already has local WLED lighting
+            data['scene_ID'] = scene
+            if 'server_ID' in data:
+                data['server_ID'] = server_map.get(data['server_ID'], data['server_ID'])
+            if 'effect' in data:
+                data['effect'] = effect_map.get(data['effect'], data['effect'])
+            if 'pallette' in data:
+                data['pallette'] = pallette_map.get(data['pallette'], data['pallette'])
+            _copy_row(c, 'tblWledPattern', data)
+            s['lighting'] += 1
+
+    return s
+
+
+# ---------------------------------------------------------------------------
 # Merge mode
 # ---------------------------------------------------------------------------
 
@@ -345,12 +683,17 @@ def _merge_homebrew_libraries(c):
     return copied
 
 
-def restore_merge(zip_path, include_uploads=True):
+def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=None):
     """Dedup-aware import of the archive's campaigns, scenes, media and
     scene-links into the live database. Media rows match by videoId, genres/
     campaigns/scenes by name (case-insensitive); metadata rides along for new
     media rows. Legacy media rows without a videoId are skipped (no safe
-    dedup identity). Returns a summary dict."""
+    dedup identity). Returns a summary dict.
+
+    full=True additionally merges the TTRPG tree (characters, sessions, maps,
+    monsters, tokens, notes) and scene lighting — see _merge_full for the
+    identity/conflict policy. fallback_user_id owns imported characters whose
+    archive owner has no same-named account here (default: first active DM)."""
     tmp_db = os.path.join(BACKUP_DIR, f'.merge-{_stamp()}.db')
     os.makedirs(BACKUP_DIR, exist_ok=True)
     manifest = _extract_db(zip_path, tmp_db)
@@ -520,6 +863,12 @@ def restore_merge(zip_path, include_uploads=True):
         # homebrew reference libraries (custom feats/weapons/spells/subclasses/
         # features/monsters...) — SRD rows stay behind, they re-sync per box
         s['homebrew'] = _merge_homebrew_libraries(c)
+
+        # full-tree merge: characters/sessions/maps/notes + scene lighting.
+        # Runs AFTER the libraries so template/lib name lookups see merged rows.
+        if full:
+            s.update(_merge_full(c, genre_map, campaign_map, scene_map,
+                                 media_map, fallback_user_id))
 
         conn.commit()
         c.execute("DETACH DATABASE src")

@@ -28,6 +28,26 @@ SCHEMA = [
     "CREATE TABLE tblSubclassesLibrary (subclass_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, class_name TEXT, flavor TEXT, description TEXT, source TEXT, created_at TEXT)",
     "CREATE TABLE tblFeaturesLibrary (feature_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, class_name TEXT, subclass_name TEXT, level INT, prerequisites TEXT, description TEXT, source TEXT, created_at TEXT)",
     "CREATE TABLE tblMonsterTemplates (template_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, cr TEXT, monster_type TEXT, size TEXT, hp_max INT, ac INT, source TEXT, stats_json TEXT, created_at TEXT)",
+    # full-merge (TTRPG tree + lighting) tables
+    "CREATE TABLE tblUsers (user_id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT, display_name TEXT, role TEXT, active INT, created_at TEXT)",
+    "CREATE TABLE tblCharacters (character_id INTEGER PRIMARY KEY, user_id INT NOT NULL, name TEXT, char_class TEXT, level INT, hp_current INT, hp_max INT, active INT, created_at TEXT)",
+    "CREATE TABLE tblCharacterWeapons (char_weapon_id INTEGER PRIMARY KEY, character_id INT, weapon_lib_id INT, weapon_name TEXT, damage_dice TEXT, equipped INT, order_by INT)",
+    "CREATE TABLE tblCharacterNotes (note_id INTEGER PRIMARY KEY, character_id INT, note_text TEXT, created_at TEXT)",
+    "CREATE TABLE tblWeaponsLibrary (weapon_lib_id INTEGER PRIMARY KEY, name TEXT, source TEXT)",
+    "CREATE TABLE tblSessions (session_id INTEGER PRIMARY KEY, title TEXT, session_number INT, campaign_id INT, status TEXT, dm_notes TEXT, session_date TEXT, created_at TEXT)",
+    "CREATE TABLE tblSessionParty (sp_id INTEGER PRIMARY KEY, session_id INT, character_id INT, is_active INT, joined_at TEXT)",
+    "CREATE TABLE tblSessionMonsters (monster_id INTEGER PRIMARY KEY, session_id INT, template_id INT, display_name TEXT, hp_current INT, hp_max INT, ac INT, initiative INT, conditions TEXT, is_alive INT, sort_order INT)",
+    "CREATE TABLE tblSessionNotes (note_id INTEGER PRIMARY KEY, session_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE tblBattleMaps (map_id INTEGER PRIMARY KEY, session_id INT, name TEXT, grid_cols INT, grid_rows INT, bg_image TEXT, is_active INT, movement_scale REAL, sort_order INT, created_at TEXT)",
+    "CREATE TABLE tblBattleMapTokens (token_id INTEGER PRIMARY KEY, map_id INT, entity_type TEXT, entity_id INT, col INT, row INT, updated_at TEXT)",
+    "CREATE TABLE tblBattleMapEffects (effect_id INTEGER PRIMARY KEY, map_id INT, shape TEXT, label TEXT, anchor_x REAL, anchor_y REAL, size_ft INT, angle REAL, fill_color TEXT, fill_opacity REAL, border_color TEXT, created_at TEXT)",
+    "CREATE TABLE tblBattleMapNotes (note_id INTEGER PRIMARY KEY, map_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, ledTypeModel_ID INT, color TEXT, wait_ms INT, iterations INT, direction INT, cdiff INT, orderBy INT, outPin INT, brightness INT)",
+    "CREATE TABLE tblWledPattern (wledPattern_ID INTEGER PRIMARY KEY, scene_ID INT, server_ID INT, effect INT, pallette INT, color1 TEXT, color2 TEXT, color3 TEXT, speed INT, brightness INT, orderBy INT)",
+    "CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, modelName TEXT, ledJSON TEXT)",
+    "CREATE TABLE tblEffect (effect_ID INTEGER PRIMARY KEY, effectName TEXT, ef_ID INT)",
+    "CREATE TABLE tblPallette (pallette_ID INTEGER PRIMARY KEY, palletteName TEXT, pa_ID INT)",
+    "CREATE TABLE tblServersIP (ServerIP_ID INTEGER PRIMARY KEY, serverName TEXT, ipAddress TEXT)",
 ]
 
 
@@ -486,3 +506,135 @@ class TestMergePkeyCollisions:
         assert scene_camp == new_camp
         assert q(env['live'], "SELECT song_ID FROM tblMusicScene WHERE scene_ID=?",
                  (new_scene,)) == [(new_song,)]
+
+
+class TestFullMerge:
+    """restore_merge(full=True): the TTRPG tree + lighting, per the locked
+    policy — users matched by username (else fallback), characters local-wins,
+    sessions/maps merge by name, tokens/effects only for new maps, notes
+    deduped, lighting only into scenes without local lighting."""
+
+    def _boxes(self, env):
+        live = env['live']
+        # LOCAL box: dm + alice, alice already has 'Zdravko', a weapons-library
+        # row under a DIFFERENT id than the source's, and an effect catalog
+        # where 'Aurora' sits at a different index.
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('alice', 'Alice', 'player', 1)")
+        x(live, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (2, 'Zdravko', 5, 1, 't')")
+        x(live, "INSERT INTO tblWeaponsLibrary(weapon_lib_id, name, source) VALUES (40, 'Laser Sword', 'homebrew')")
+        x(live, "INSERT INTO tblEffect(effect_ID, effectName, ef_ID) VALUES (9, 'Aurora', 9)")
+        x(live, "INSERT INTO tblPallette(pallette_ID, palletteName, pa_ID) VALUES (7, 'Lava', 7)")
+
+        # SOURCE box archive
+        src = str(env['tmp'] / 'srcfull.db')
+        make_db(src)
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('alice', 'Alice', 'player', 1)")
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('bob', 'Bob', 'player', 1)")
+        # characters: Zdravko (alice — exists locally, must be skipped) and
+        # Nova (bob — no local bob, lands under the fallback user)
+        x(src, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (1, 'Zdravko', 9, 1, 't')")
+        x(src, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (2, 'Nova', 3, 1, 't')")
+        x(src, "INSERT INTO tblWeaponsLibrary(weapon_lib_id, name, source) VALUES (3, 'Laser Sword', 'homebrew')")
+        x(src, "INSERT INTO tblCharacterWeapons(character_id, weapon_lib_id, weapon_name, damage_dice, equipped, order_by) "
+               "VALUES (2, 3, 'Laser Sword', '1d8', 1, 1)")
+        x(src, "INSERT INTO tblCharacterNotes(character_id, note_text, created_at) VALUES (2, 'backstory', 't')")
+        x(src, "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Star Wars', 1, '1')")
+        x(src, "INSERT INTO tblScenes(sceneName, active, orderBy, campaign_id) VALUES ('Bridge', 1, 0, 1)")
+        x(src, "INSERT INTO tblSessions(title, session_number, campaign_id, status, dm_notes, created_at) "
+               "VALUES ('Ep1', 1, 1, 'active', '', 't')")
+        x(src, "INSERT INTO tblSessionParty(session_id, character_id, is_active, joined_at) VALUES (1, 1, 1, 't')")
+        x(src, "INSERT INTO tblSessionParty(session_id, character_id, is_active, joined_at) VALUES (1, 2, 1, 't')")
+        x(src, "INSERT INTO tblMonsterTemplates(name, cr, hp_max, ac, source, created_at) "
+               "VALUES ('Gnark', '2', 30, 14, 'homebrew', 't')")
+        x(src, "INSERT INTO tblSessionMonsters(session_id, template_id, display_name, hp_current, hp_max, ac, is_alive, sort_order) "
+               "VALUES (1, 1, 'Gnark A', 30, 30, 14, 1, 0)")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, is_active, sort_order, created_at) "
+               "VALUES (1, 'Deck 5', 20, 20, 1, 0, 't')")
+        x(src, "INSERT INTO tblBattleMapTokens(map_id, entity_type, entity_id, col, row, updated_at) "
+               "VALUES (1, 'player', 1, 2, 3, 't')")   # Zdravko -> must remap to LOCAL char
+        x(src, "INSERT INTO tblBattleMapTokens(map_id, entity_type, entity_id, col, row, updated_at) "
+               "VALUES (1, 'monster', 1, 5, 5, 't')")  # Gnark A -> new session monster
+        x(src, "INSERT INTO tblBattleMapEffects(map_id, shape, label, size_ft, created_at) "
+               "VALUES (1, 'cloud', '', 20, 't')")
+        x(src, "INSERT INTO tblSessionNotes(session_id, title, body, sort_order, created_at, updated_at) "
+               "VALUES (1, 'Plot', 'the twist', 0, 't', 't')")
+        x(src, "INSERT INTO tblBattleMapNotes(map_id, title, body, sort_order, created_at, updated_at) "
+               "VALUES (1, 'Ambush', '3 goblins', 0, 't', 't')")
+        # lighting: LED model + pattern, WLED server + pattern (Aurora at id 5
+        # on the source, id 9 locally; Lava 3 -> 7)
+        x(src, "INSERT INTO tblLedTypeModel(modelName, ledJSON) VALUES ('strip60', '{}')")
+        x(src, "INSERT INTO tblScenePattern(scene_ID, ledTypeModel_ID, color, orderBy, outPin) "
+               "VALUES (1, 1, '[1,2,3]', 0, 2)")
+        x(src, "INSERT INTO tblEffect(effect_ID, effectName, ef_ID) VALUES (5, 'Aurora', 5)")
+        x(src, "INSERT INTO tblPallette(pallette_ID, palletteName, pa_ID) VALUES (3, 'Lava', 3)")
+        x(src, "INSERT INTO tblServersIP(serverName, ipAddress) VALUES ('wled1', '10.0.0.9')")
+        x(src, "INSERT INTO tblWledPattern(scene_ID, server_ID, effect, pallette, color1, orderBy) "
+               "VALUES (1, 1, 5, 3, '[9,9,9]', 0)")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='full')
+        finally:
+            sql.database = old
+
+    def test_full_tree_merges(self, env):
+        snap = self._boxes(env)
+        s = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+
+        # characters: Nova imported under fallback (dm=1), Zdravko kept local
+        assert s['characters'] == 1 and s['characters_skipped'] == 1
+        assert q(env['live'], "SELECT user_id, level FROM tblCharacters WHERE name='Nova'") == [(1, 3)]
+        assert q(env['live'], "SELECT level FROM tblCharacters WHERE name='Zdravko'") == [(5,)]  # untouched
+        # Nova's weapon re-pointed at the LOCAL library id, note carried
+        nova = q(env['live'], "SELECT character_id FROM tblCharacters WHERE name='Nova'")[0][0]
+        assert q(env['live'], "SELECT weapon_lib_id FROM tblCharacterWeapons WHERE character_id=?", (nova,)) == [(40,)]
+        assert q(env['live'], "SELECT note_text FROM tblCharacterNotes WHERE character_id=?", (nova,)) == [('backstory',)]
+
+        # session imported, live-status downgraded
+        assert s['sessions'] == 1
+        assert q(env['live'], "SELECT status FROM tblSessions WHERE title='Ep1'") == [('planning',)]
+        sid = q(env['live'], "SELECT session_id FROM tblSessions WHERE title='Ep1'")[0][0]
+        # party: both members, Zdravko wired to the LOCAL character row
+        zloc = q(env['live'], "SELECT character_id FROM tblCharacters WHERE name='Zdravko'")[0][0]
+        party = {r[0] for r in q(env['live'], "SELECT character_id FROM tblSessionParty WHERE session_id=?", (sid,))}
+        assert party == {zloc, nova} and s['party_links'] == 2
+
+        # monsters + map + battle state
+        assert s['session_monsters'] == 1 and s['maps'] == 1
+        assert q(env['live'], "SELECT is_active FROM tblBattleMaps WHERE name='Deck 5'") == [(0,)]
+        mid = q(env['live'], "SELECT map_id FROM tblBattleMaps WHERE name='Deck 5'")[0][0]
+        gnark = q(env['live'], "SELECT monster_id FROM tblSessionMonsters WHERE display_name='Gnark A'")[0][0]
+        toks = q(env['live'], "SELECT entity_type, entity_id FROM tblBattleMapTokens WHERE map_id=?", (mid,))
+        assert ('player', zloc) in toks and ('monster', gnark) in toks and s['tokens'] == 2
+        assert s['map_effects'] == 1
+
+        # notes on both levels
+        assert s['notes'] == 2
+        assert q(env['live'], "SELECT body FROM tblSessionNotes WHERE session_id=?", (sid,)) == [('the twist',)]
+        assert q(env['live'], "SELECT title FROM tblBattleMapNotes WHERE map_id=?", (mid,)) == [('Ambush',)]
+
+        # lighting: LED model copied + remapped; WLED server copied, effect/
+        # palette re-matched by name to the local catalog ids
+        assert s['lighting'] == 2
+        scene = q(env['live'], "SELECT scene_ID FROM tblScenes WHERE sceneName='Bridge'")[0][0]
+        model = q(env['live'], "SELECT ledTypeModel_ID FROM tblLedTypeModel WHERE modelName='strip60'")[0][0]
+        assert q(env['live'], "SELECT ledTypeModel_ID FROM tblScenePattern WHERE scene_ID=?", (scene,)) == [(model,)]
+        srv = q(env['live'], "SELECT ServerIP_ID FROM tblServersIP WHERE serverName='wled1'")[0][0]
+        assert q(env['live'], "SELECT server_ID, effect, pallette FROM tblWledPattern WHERE scene_ID=?", (scene,)) \
+               == [(srv, 9, 7)]
+
+    def test_full_merge_is_idempotent(self, env):
+        snap = self._boxes(env)
+        br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        s2 = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert (s2['characters'], s2['sessions'], s2['maps'], s2['session_monsters'],
+                s2['party_links'], s2['tokens'], s2['map_effects'], s2['notes'],
+                s2['lighting']) == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    def test_plain_merge_still_skips_ttrpg(self, env):
+        snap = self._boxes(env)
+        s = br.restore_merge(snap, include_uploads=False)   # full NOT set
+        assert 'sessions' not in s
+        assert q(env['live'], "SELECT COUNT(*) FROM tblSessions")[0][0] == 0
+        assert q(env['live'], "SELECT COUNT(*) FROM tblCharacters")[0][0] == 1  # just local Zdravko

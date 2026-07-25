@@ -214,12 +214,26 @@ def backup_import():
                   f"{summary['uploads_restored']} images, {summary['requeued_downloads']} downloads "
                   f"re-queued{img_note}. Safety copy: {summary['safety_backup']}. RESTART the app now.")
         else:
-            summary = backup_restore.restore_merge(staged, include_uploads=include_uploads)
-            flash(f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
-                  f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
-                  f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
-                  f"{summary['uploads_added']} images{img_note} "
-                  f"({summary['skipped_legacy']} legacy rows skipped). New media is downloading.")
+            # Full merge also brings the TTRPG tree; imported characters whose
+            # owner has no same-named account here land under the importing DM.
+            full = bool(request.form.get('full_merge'))
+            from flask_login import current_user
+            fallback_uid = (current_user.user_id
+                            if full and current_user.is_authenticated else None)
+            summary = backup_restore.restore_merge(staged, include_uploads=include_uploads,
+                                                   full=full, fallback_user_id=fallback_uid)
+            msg = (f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
+                   f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
+                   f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
+                   f"{summary['uploads_added']} images{img_note} "
+                   f"({summary['skipped_legacy']} legacy rows skipped).")
+            if full:
+                msg += (f" TTRPG: {summary['characters']} characters "
+                        f"({summary['characters_skipped']} kept local), "
+                        f"{summary['sessions']} sessions, {summary['maps']} maps, "
+                        f"{summary['session_monsters']} monsters, {summary['tokens']} tokens, "
+                        f"{summary['notes']} notes, {summary['lighting']} lighting links.")
+            flash(msg + ' New media is downloading.')
     except ValueError as e:
         flash(f'Import failed: {e}')
     finally:
