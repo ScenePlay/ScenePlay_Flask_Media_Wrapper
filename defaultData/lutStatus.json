@@ -14,5 +14,9 @@
   {
     "status_ID": 4,
     "status": "Failed"
+  },
+  {
+    "status_ID": 5,
+    "status": "Unavailable"
   }
 ]

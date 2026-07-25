@@ -47,9 +47,14 @@ def loadStatus():
 # Read the JSON file
     with open(baseDir + '/defaultData/lutStatus.json') as file:
         data = json.load(file)
-        
-    # Iterate over the JSON data and insert it into the database
+
+    # Insert only MISSING status_IDs. On a fresh install the baseline
+    # migration runs before this and seeds row 5 ('Unavailable') into the
+    # empty table — the old count()==0 gate then saw a non-empty table and
+    # skipped 1-4 entirely, leaving new installs with no download statuses.
     for item in data:
+        if session.query(lutstatus).filter_by(status_ID=item['status_ID']).count():
+            continue
         StatusRow = lutstatus(
             status_ID=item['status_ID'],
             status=item['status']
@@ -177,8 +182,10 @@ def defaultData():
     if query.count() == 0:
         loadlutGenre()
         
-    query = session.query(lutstatus)    
-    if query.count() == 0:
+    # Gate on the CORE lexicon (1-4), not table emptiness: the baseline
+    # migration seeds row 5 first on fresh installs (see loadStatus).
+    query = session.query(lutstatus).filter(lutstatus.status_ID.in_([1, 2, 3, 4]))
+    if query.count() < 4:
         loadStatus()
     
     query = session.query(tblcronschedule)    
