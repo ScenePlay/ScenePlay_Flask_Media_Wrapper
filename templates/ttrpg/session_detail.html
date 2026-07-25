@@ -95,9 +95,17 @@
 </div>
 {% endif %}
 
+<!-- Party 35% / DM Notes 65% — the 12-col grid can't express 65, so a
+     breakpoint-scoped override; below md both still stack full-width. -->
+<style>
+  @media (min-width: 768px) {
+    .sess-split-party { flex: 0 0 35%; max-width: 35%; }
+    .sess-split-notes { flex: 0 0 65%; max-width: 65%; }
+  }
+</style>
 <div class="row g-3">
   <!-- Party -->
-  <div class="col-md-6">
+  <div class="col-md-6 sess-split-party">
     <div class="ttrpg-card p-3">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h5 style="color:var(--ttrpg-accent);">Party</h5>
@@ -150,15 +158,44 @@
     </div>
   </div>
 
-  <!-- DM Notes -->
-  <div class="col-md-6">
+  <!-- DM Notes — many per session (legacy single dm_notes was migrated in) -->
+  <div class="col-md-6 sess-split-notes">
     <div class="ttrpg-card p-3 h-100 d-flex flex-column">
-      <h5 style="color:var(--ttrpg-accent);" class="mb-2">DM Notes</h5>
-      <textarea id="dm-notes" class="form-control bg-dark text-light border-secondary flex-grow-1"
-                rows="10" style="resize:vertical;" placeholder="Session notes…">{{ sess.dm_notes }}</textarea>
-      <div class="d-flex justify-content-between align-items-center mt-2">
-        <span id="notes-saved" class="small text-success" style="display:none;">Saved</span>
-        <button class="btn btn-ttrpg btn-sm ms-auto" onclick="saveNotes()">Save Notes</button>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="btn-group btn-group-sm">
+          <button id="notes-tab-session" class="btn btn-sm btn-ttrpg"
+                  onclick="notesTab('session')">Session Notes</button>
+          <button id="notes-tab-maps" class="btn btn-sm btn-outline-secondary"
+                  onclick="notesTab('maps')">Map Notes</button>
+        </div>
+        <!-- Session tab only — on the Map Notes tab each map has its own + -->
+        <button class="btn btn-sm btn-outline-secondary" id="sess-note-new-btn"
+                onclick="noteNew()">&#43; New Note</button>
+      </div>
+
+      <!-- List view. NOTE: no Bootstrap d-flex on these two — its
+           display:flex !important beats the inline display:none the JS
+           toggles, which left the editor fields permanently visible. -->
+      <div id="sess-notes-list" class="flex-column gap-1 flex-grow-1"
+           style="display:flex;overflow-y:auto;max-height:380px;">
+        <p class="text-muted small mb-0">Loading&#8230;</p>
+      </div>
+
+      <!-- Editor view: hidden until a note row (or + New Note) opens it -->
+      <div id="sess-note-editor" style="display:none;" class="flex-column flex-grow-1">
+        <input id="sess-note-title" maxlength="120" placeholder="Title"
+               class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
+        <textarea id="sess-note-body" rows="9" placeholder="Write your note&#8230;"
+                  class="form-control bg-dark text-light border-secondary flex-grow-1"
+                  style="resize:vertical;"></textarea>
+        <div class="d-flex gap-2 align-items-center mt-2">
+          <button class="btn btn-ttrpg btn-sm" onclick="noteSave()">Save</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="notesShowList()"
+                  title="Back to the list (saves any changes)">&#8592; Back</button>
+          <span id="sess-note-ctx" class="small text-muted"></span>
+          <span id="sess-note-status" class="small text-success ms-auto"></span>
+          <button class="btn btn-sm btn-outline-danger" onclick="noteDelete()" title="Delete this note">&#128465;</button>
+        </div>
       </div>
     </div>
   </div>
@@ -406,20 +443,299 @@ function removeFromParty(charId) {
     .then(() => location.reload());
 }
 
-function saveNotes() {
-  const notes = document.getElementById('dm-notes').value;
-  fetch(`/ttrpg/sessions/${SESSION_ID}/notes`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({notes})
-  }).then(() => {
-    const el = document.getElementById('notes-saved');
-    el.style.display = 'inline';
-    setTimeout(() => el.style.display = 'none', 2000);
+// ── DM notes: two tabs in one card ───────────────────────────────────────────
+// 'session' tab = tblSessionNotes rows; 'maps' tab = every battle map of this
+// session with its tblBattleMapNotes listed under it. One shared editor —
+// which backend a save/delete hits is decided by _noteMapId (null = session
+// note, otherwise the battlemap notes endpoints the map page already uses).
+let _notesTab  = 'session';
+let _notes     = [];     // session-notes cache
+let _mapGroups = [];     // maps tab cache: [{map_id, name, notes: [...]}]
+let _mapOpenId = null;   // maps tab drill-down: which map's notes are open
+let _noteId    = null;   // note being edited (null = new, unsaved)
+let _noteMapId = null;   // map the edited note belongs to (null = session note)
+let _noteClean = '';     // title\n\nbody snapshot at load, for dirty check
+let _noteGen   = 0;      // a slow save response must not touch a newer session
+
+function _noteBase() {
+  return _noteMapId == null
+    ? `/ttrpg/sessions/${SESSION_ID}/notes`
+    : `/ttrpg/battlemap/${_noteMapId}/notes`;
+}
+
+function notesTab(t) {
+  _notesTab = t;
+  _mapOpenId = null;         // tab switch always lands on the tab's top level
+  const bS = document.getElementById('notes-tab-session');
+  const bM = document.getElementById('notes-tab-maps');
+  bS.classList.toggle('btn-ttrpg',            t === 'session');
+  bS.classList.toggle('btn-outline-secondary', t !== 'session');
+  bM.classList.toggle('btn-ttrpg',            t === 'maps');
+  bM.classList.toggle('btn-outline-secondary', t !== 'maps');
+  // Global + New is session-tab only; maps tab adds per map.
+  document.getElementById('sess-note-new-btn').style.display =
+    t === 'session' ? '' : 'none';
+  notesShowList();
+}
+
+const _nEsc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function _noteKey() {
+  return document.getElementById('sess-note-title').value + '\n\n' +
+         document.getElementById('sess-note-body').value;
+}
+
+function notesShowList() {
+  const pendingSave = _noteSaveIfDirty();
+  _noteGen++;
+  _noteId = null;
+  _noteMapId = null;
+  document.getElementById('sess-note-editor').style.display = 'none';
+  document.getElementById('sess-notes-list').style.display  = 'flex';
+  const url = _notesTab === 'maps'
+    ? `/ttrpg/sessions/${SESSION_ID}/mapnotes/list`
+    : `/ttrpg/sessions/${SESSION_ID}/notes/list`;
+  Promise.resolve(pendingSave).then(() =>
+    fetch(url).then(r => r.json()).then(d => {
+      if (!d.ok) return;
+      if (_notesTab === 'maps') { _mapGroups = d.maps; _renderMapsTab(); }
+      else                      { _notes = d.notes;    _renderNotesList(); }
+    })
+  ).catch(() => {});
+}
+
+// Maps tab is a drill-down: a grid of map titles (session's map order, with
+// note counts) → one map's notes (add / delete / reorder) → the editor.
+function _renderMapsTab() {
+  const g = _mapOpenId != null && _mapGroups.find(x => x.map_id === _mapOpenId);
+  if (g) _renderMapGroupNotes(g);
+  else { _mapOpenId = null; _renderMapGrid(); }
+}
+
+function _renderMapGrid() {
+  const host = document.getElementById('sess-notes-list');
+  if (!_mapGroups.length) {
+    host.innerHTML = '<p class="text-muted small mb-0">No battle maps in this session yet.</p>';
+    return;
+  }
+  host.innerHTML = _mapGroups.map(g => `
+    <div class="sess-map-row d-flex align-items-center gap-2 p-2" data-map-id="${g.map_id}"
+         style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);
+                border-radius:6px;cursor:pointer;">
+      <div style="flex:1;min-width:0;font-weight:600;color:var(--ttrpg-accent);
+                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        &#128506; ${_nEsc(g.name)}
+      </div>
+      <span class="badge bg-secondary" title="${g.notes.length} note(s) on this map">${g.notes.length}</span>
+    </div>`).join('');
+  host.querySelectorAll('.sess-map-row').forEach(row =>
+    row.addEventListener('click', () => {
+      _mapOpenId = parseInt(row.dataset.mapId);
+      _renderMapsTab();
+    }));
+}
+
+function _renderMapGroupNotes(g) {
+  const host = document.getElementById('sess-notes-list');
+  const rows = g.notes.map((n, i) => {
+    const snip = (n.body || '').split('\n')[0].slice(0, 90);
+    return `
+    <div class="sess-note-row d-flex align-items-center gap-2 p-2"
+         data-note-id="${n.note_id}"
+         style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);
+                border-radius:6px;cursor:pointer;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:var(--ttrpg-accent);overflow:hidden;
+                    text-overflow:ellipsis;white-space:nowrap;">${_nEsc(n.title || 'Untitled')}</div>
+        ${snip ? `<div class="text-muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_nEsc(snip)}</div>` : ''}
+        <div class="text-muted" style="font-size:.64rem;">${_nEsc(n.updated_at || '')}</div>
+      </div>
+      <div class="d-flex flex-column" style="gap:2px;flex-shrink:0;">
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary sn-move" data-dir="up"
+                style="line-height:1;${i === 0 ? 'visibility:hidden;' : ''}" title="Move up">&#9650;</button>
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary sn-move" data-dir="down"
+                style="line-height:1;${i === g.notes.length - 1 ? 'visibility:hidden;' : ''}" title="Move down">&#9660;</button>
+      </div>
+      <button class="btn btn-sm py-0 px-1 btn-outline-danger sn-del" title="Delete note"
+              style="flex-shrink:0;">&#128465;</button>
+    </div>`;
+  }).join('');
+  host.innerHTML = `
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <button class="btn btn-sm py-0 btn-outline-secondary" id="sn-maps-back"
+              title="Back to the maps list">&#8592; Maps</button>
+      <div class="small flex-grow-1" style="color:var(--ttrpg-accent);font-weight:600;
+                  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        &#128506; ${_nEsc(g.name)}
+      </div>
+      <button class="btn btn-sm py-0 btn-outline-secondary" id="sn-map-add"
+              title="Add a note to this map">&#43; Add</button>
+    </div>
+    ${rows || '<p class="text-muted small mb-0">No notes for this map yet.</p>'}`;
+  document.getElementById('sn-maps-back').addEventListener('click', () => {
+    _mapOpenId = null;
+    _renderMapsTab();
+  });
+  document.getElementById('sn-map-add').addEventListener('click', () =>
+    mapNoteNew(g.map_id, g.name));
+  host.querySelectorAll('.sess-note-row').forEach(row => {
+    row.addEventListener('click', () =>
+      _noteOpen(parseInt(row.dataset.noteId), g.map_id));
+    row.querySelectorAll('.sn-move').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();   // arrows must not open the note
+        fetch(`/ttrpg/battlemap/${g.map_id}/notes/${row.dataset.noteId}/reorder`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: btn.dataset.dir }),
+        }).then(r => r.json()).then(d => { if (d.ok) notesShowList(); }).catch(() => {});
+      }));
+    row.querySelector('.sn-del').addEventListener('click', e => {
+      e.stopPropagation();     // delete must not open the note
+      if (!confirm('Delete this note?')) return;
+      fetch(`/ttrpg/battlemap/${g.map_id}/notes/${row.dataset.noteId}/delete`, { method: 'POST' })
+        .then(() => notesShowList());
+    });
   });
 }
 
-// Auto-save notes every 30 seconds
-setInterval(saveNotes, 30000);
+function _renderNotesList() {
+  const host = document.getElementById('sess-notes-list');
+  if (!_notes.length) {
+    host.innerHTML = '<p class="text-muted small mb-0">No notes yet — use + New Note.</p>';
+    return;
+  }
+  host.innerHTML = _notes.map((n, i) => {
+    const snip = (n.body || '').split('\n')[0].slice(0, 90);
+    return `<div class="sess-note-row d-flex align-items-center gap-2 p-2"
+                 data-note-id="${n.note_id}"
+                 style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);
+                        border-radius:6px;cursor:pointer;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:var(--ttrpg-accent);overflow:hidden;
+                    text-overflow:ellipsis;white-space:nowrap;">${_nEsc(n.title || 'Untitled')}</div>
+        ${snip ? `<div class="text-muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_nEsc(snip)}</div>` : ''}
+        <div class="text-muted" style="font-size:.64rem;">${_nEsc(n.updated_at || '')}</div>
+      </div>
+      <div class="d-flex flex-column" style="gap:2px;flex-shrink:0;">
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary sn-move" data-dir="up"
+                style="line-height:1;${i === 0 ? 'visibility:hidden;' : ''}" title="Move up">&#9650;</button>
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary sn-move" data-dir="down"
+                style="line-height:1;${i === _notes.length - 1 ? 'visibility:hidden;' : ''}" title="Move down">&#9660;</button>
+      </div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.sess-note-row').forEach(row => {
+    row.addEventListener('click', () => _noteOpen(parseInt(row.dataset.noteId)));
+    row.querySelectorAll('.sn-move').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();   // arrows must not open the note
+        fetch(`/ttrpg/sessions/${SESSION_ID}/notes/${row.dataset.noteId}/reorder`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: btn.dataset.dir }),
+        }).then(r => r.json()).then(d => { if (d.ok) notesShowList(); }).catch(() => {});
+      }));
+  });
+}
+
+function _noteShowEditor(ctxLabel) {
+  document.getElementById('sess-note-status').textContent = '';
+  document.getElementById('sess-note-ctx').textContent = ctxLabel || '';
+  document.getElementById('sess-notes-list').style.display = 'none';
+  document.getElementById('sess-note-editor').style.display = 'flex';
+}
+
+function _noteOpen(noteId, mapId = null) {
+  let n, ctx = '';
+  if (mapId != null) {
+    const g = _mapGroups.find(x => x.map_id === mapId);
+    n = g && g.notes.find(x => x.note_id === noteId);
+    ctx = g ? `Map: ${g.name}` : '';
+  } else {
+    n = _notes.find(x => x.note_id === noteId);
+  }
+  if (!n) return;
+  _noteGen++;
+  _noteId = noteId;
+  _noteMapId = mapId;
+  document.getElementById('sess-note-title').value = n.title || '';
+  document.getElementById('sess-note-body').value  = n.body  || '';
+  _noteClean = _noteKey();
+  _noteShowEditor(ctx);
+  document.getElementById('sess-note-body').focus();
+}
+
+function noteNew() {
+  _noteGen++;
+  _noteId = null;
+  _noteMapId = null;
+  document.getElementById('sess-note-title').value = '';
+  document.getElementById('sess-note-body').value  = '';
+  _noteClean = _noteKey();
+  _noteShowEditor();
+  document.getElementById('sess-note-title').focus();
+}
+
+function mapNoteNew(mapId, mapName) {
+  _noteGen++;
+  _noteId = null;
+  _noteMapId = mapId;
+  document.getElementById('sess-note-title').value = '';
+  document.getElementById('sess-note-body').value  = '';
+  _noteClean = _noteKey();
+  _noteShowEditor(`Map: ${mapName}`);
+  document.getElementById('sess-note-title').focus();
+}
+
+function noteSave() {
+  const title  = document.getElementById('sess-note-title').value;
+  const body   = document.getElementById('sess-note-body').value;
+  const status = document.getElementById('sess-note-status');
+  // A completely empty new note is a misclick, not a note.
+  if (_noteId == null && !title.trim() && !body.trim()) return;
+  const url = _noteId == null
+    ? `${_noteBase()}/add`
+    : `${_noteBase()}/${_noteId}/update`;
+  const gen = _noteGen;
+  // keepalive: lets a beforeunload-triggered save finish after the tab closes
+  return fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, body }), keepalive: true,
+  }).then(r => r.json()).then(d => {
+    if (gen !== _noteGen) return;   // editor moved on — don't touch its state
+    if (!d.ok) { status.textContent = 'Save failed'; return; }
+    if (_noteId == null && d.note_id) _noteId = d.note_id;
+    _noteClean = _noteKey();
+    status.textContent = 'Saved ✓';
+    setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 2000);
+  }).catch(() => { if (gen === _noteGen) status.textContent = 'Save failed'; });
+}
+
+function _noteSaveIfDirty() {
+  const ed = document.getElementById('sess-note-editor');
+  if (!ed || ed.style.display === 'none') return null;
+  return _noteKey() !== _noteClean ? noteSave() : null;
+}
+
+function noteDelete() {
+  if (_noteId == null) {   // never saved — just discard
+    _noteClean = _noteKey();
+    notesShowList();
+    return;
+  }
+  if (!confirm('Delete this note?')) return;
+  const id = _noteId, base = _noteBase();
+  _noteId = null;
+  _noteClean = _noteKey();   // discard edits so Back doesn't resave
+  fetch(`${base}/${id}/delete`, { method: 'POST' })
+    .then(() => notesShowList());
+}
+
+// Mid-session tab close shouldn't lose the note being typed; also autosave
+// an open editor every 30 s (the old single-textarea behavior, kept).
+window.addEventListener('beforeunload', _noteSaveIfDirty);
+setInterval(_noteSaveIfDirty, 30000);
+notesShowList();
 
 // ── Scene activation ────────────────────────────────────────────────────────
 

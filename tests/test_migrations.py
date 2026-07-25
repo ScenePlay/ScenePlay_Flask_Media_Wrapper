@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0005_music_scene_loops'
+HEAD = '0006_session_notes'
 
 
 def columns(path, table):
@@ -162,3 +162,46 @@ class TestBaselineUpgrade:
         conn.close()
         run_upgrade(path)
         assert 'videoId' in columns(path, 'tblMusic')
+
+
+class TestSessionNotesCarryOver:
+    """0006: tblSessions.dm_notes content becomes the first tblSessionNotes row."""
+
+    @pytest.fixture()
+    def sessions_db(self, old_db):
+        conn = sqlite3.connect(old_db)
+        conn.execute("CREATE TABLE tblSessions (session_id INTEGER PRIMARY KEY, "
+                     "title TEXT, dm_notes TEXT, created_at TEXT)")
+        conn.execute("INSERT INTO tblSessions VALUES (1, 'Camp A', 'plot hooks', '2026-01-01 10:00:00')")
+        conn.execute("INSERT INTO tblSessions VALUES (2, 'Camp B', '', '2026-01-02 10:00:00')")
+        conn.execute("INSERT INTO tblSessions VALUES (3, 'Camp C', '   ', '2026-01-03 10:00:00')")
+        conn.commit()
+        conn.close()
+        return old_db
+
+    def test_dm_notes_copied_once(self, sessions_db):
+        run_upgrade(sessions_db)
+        rows = q(sessions_db,
+                 "SELECT session_id, title, body, created_at FROM tblSessionNotes ORDER BY session_id")
+        assert rows == [(1, 'Session notes', 'plot hooks', '2026-01-01 10:00:00')]
+        # blank / whitespace-only dm_notes must NOT spawn empty notes
+        # second boot: no duplicate copy
+        run_upgrade(sessions_db)
+        assert q(sessions_db, "SELECT COUNT(*) FROM tblSessionNotes") == [(1,)]
+        # legacy column left intact (nothing writes it anymore, nothing lost)
+        assert q(sessions_db, "SELECT dm_notes FROM tblSessions WHERE session_id=1") == [('plot hooks',)]
+
+    def test_no_sessions_table_is_noop(self, old_db):
+        run_upgrade(old_db)   # old_db has no tblSessions at all
+        assert q(old_db, "SELECT version_num FROM alembic_version") == [(HEAD,)]
+
+    def test_session_with_existing_notes_not_recopied(self, sessions_db):
+        run_upgrade(sessions_db)
+        conn = sqlite3.connect(sessions_db)
+        # the DM deletes the migrated note, then... a later boot must not resurrect it
+        conn.execute("DELETE FROM tblSessionNotes WHERE session_id=1")
+        conn.execute("INSERT INTO tblSessionNotes(session_id, title, body, sort_order, created_at, updated_at) "
+                     "VALUES (1, 'fresh', 'x', 0, '2026-02-01 00:00:00', '2026-02-01 00:00:00')")
+        conn.commit(); conn.close()
+        run_upgrade(sessions_db)
+        assert q(sessions_db, "SELECT title FROM tblSessionNotes WHERE session_id=1") == [('fresh',)]

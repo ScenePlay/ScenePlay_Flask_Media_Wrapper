@@ -282,8 +282,14 @@ def session_maps(session_id):
             .filter_by(session_id=session_id)
             .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
             .all())
+    # DM note count per map — shown on each card's Notes button
+    note_counts = dict(
+        db.session.query(tblBattleMapNotes.map_id, db.func.count())
+        .filter(tblBattleMapNotes.map_id.in_([m.map_id for m in maps] or [0]))
+        .group_by(tblBattleMapNotes.map_id).all())
     from genre_packs import map_prompt_client_data
     return render_template('ttrpg/battlemap_manage.html', sess=sess, maps=maps,
+                           note_counts=note_counts,
                            map_prompt_data=map_prompt_client_data())
 
 

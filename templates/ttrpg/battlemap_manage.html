@@ -69,6 +69,13 @@
             <button class="btn btn-outline-secondary btn-sm">Set Active</button>
           </form>
           {% endif %}
+          <button class="btn btn-outline-secondary btn-sm" id="mn-toggle-{{ m.map_id }}"
+                  onclick="toggleMapNotes({{ m.map_id }})"
+                  title="Read, add and edit DM notes for this map">
+            &#128221; Notes
+            <span class="badge bg-secondary" id="mn-count-{{ m.map_id }}">{{ note_counts.get(m.map_id, 0) }}</span>
+            <span id="mn-caret-{{ m.map_id }}">&#9662;</span>
+          </button>
           <button class="btn btn-outline-secondary btn-sm"
                   onclick="toggleMapEdit({{ m.map_id }})" title="Edit name / grid">&#9998;</button>
           <button class="btn btn-outline-secondary btn-sm"
@@ -114,6 +121,10 @@
           </div>
         </form>
       </div>
+
+      <!-- DM notes panel (hidden; one shared JS state fills it on toggle) -->
+      <div id="map-notes-{{ m.map_id }}" data-map-name="{{ m.name }}" style="display:none;"
+           class="mb-2 p-2"></div>
 
       <!-- Background image / video -->
       <div class="mb-2">
@@ -349,6 +360,198 @@
 
 {% block scripts %}
 <script>
+// ── Per-card DM notes (read/edit/add/delete) ─────────────────────────────────
+// Same battlemap-notes backend as the map page's panel and the session page's
+// Map Notes tab. ONE card's panel is open at a time; the panel swaps between
+// a list view and an editor view, and the card button's count badge stays live.
+let _mnMapId  = null;   // map whose panel is open (null = all closed)
+let _mnNotes  = [];
+let _mnNoteId = null;   // note in the editor (null = new, unsaved)
+let _mnClean  = '';
+let _mnGen    = 0;
+
+const _mnEsc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const _mnPanel = () => document.getElementById('map-notes-' + _mnMapId);
+
+// Closing MUST also empty the panel: a hidden panel that keeps its markup
+// leaves duplicate mn-title/mn-body ids in the DOM, and lookups then hit the
+// FIRST (hidden) card's fields — which made adding notes on any later card
+// silently no-op. (_mnSave reads field values synchronously before the fetch,
+// so clearing right after _mnSaveIfDirty is safe.)
+// The toggle button doubles as the open/closed indicator: accent style +
+// caret flip while its panel is expanded, so the feature reads as expandable.
+function _mnMarkToggle(open) {
+  const b = document.getElementById('mn-toggle-' + _mnMapId);
+  const c = document.getElementById('mn-caret-'  + _mnMapId);
+  if (b) {
+    b.classList.toggle('btn-ttrpg', open);
+    b.classList.toggle('btn-outline-secondary', !open);
+  }
+  if (c) c.innerHTML = open ? '&#9652;' : '&#9662;';
+}
+
+function _mnClose() {
+  _mnSaveIfDirty();
+  _mnMarkToggle(false);
+  const p = _mnPanel();
+  if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+  _mnMapId = null;
+}
+
+function toggleMapNotes(mapId) {
+  if (_mnMapId === mapId) { _mnClose(); return; }   // second click closes
+  if (_mnMapId != null) _mnClose();                 // opening another card: close first
+  _mnMapId = mapId;
+  _mnMarkToggle(true);
+  _mnGen++;
+  _mnNoteId = null;
+  const p = _mnPanel();
+  p.style.display = 'block';
+  p.style.background = 'var(--sp-bg)';
+  p.style.border = '1px solid var(--sp-border)';
+  p.style.borderRadius = '6px';
+  p.innerHTML = '<p class="small text-muted mb-0">Loading&#8230;</p>';
+  _mnLoad();
+}
+
+function _mnLoad() {
+  const forMap = _mnMapId, gen = ++_mnGen;
+  _mnNoteId = null;
+  fetch(`/ttrpg/battlemap/${forMap}/notes/list`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok || _mnMapId !== forMap || gen !== _mnGen) return;
+      _mnNotes = d.notes;
+      const el = document.getElementById('mn-count-' + forMap);
+      if (el) el.textContent = d.notes.length;
+      _mnRenderList();
+    }).catch(() => {});
+}
+
+function _mnRenderList() {
+  const p = _mnPanel();
+  if (!p) return;
+  const rows = _mnNotes.map((n, i) => {
+    const snip = (n.body || '').split('\n')[0].slice(0, 80);
+    return `
+    <div class="mn-row d-flex align-items-center gap-2 p-2" data-note-id="${n.note_id}"
+         style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);
+                border-radius:6px;cursor:pointer;margin-top:4px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:var(--ttrpg-accent);overflow:hidden;
+                    text-overflow:ellipsis;white-space:nowrap;">${_mnEsc(n.title || 'Untitled')}</div>
+        ${snip ? `<div class="text-muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_mnEsc(snip)}</div>` : ''}
+        <div class="text-muted" style="font-size:.64rem;">${_mnEsc(n.updated_at || '')}</div>
+      </div>
+      <div class="d-flex flex-column" style="gap:2px;flex-shrink:0;">
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary mn-move" data-dir="up"
+                style="line-height:1;${i === 0 ? 'visibility:hidden;' : ''}" title="Move up">&#9650;</button>
+        <button class="btn btn-sm py-0 px-1 btn-outline-secondary mn-move" data-dir="down"
+                style="line-height:1;${i === _mnNotes.length - 1 ? 'visibility:hidden;' : ''}" title="Move down">&#9660;</button>
+      </div>
+      <button class="btn btn-sm py-0 px-1 btn-outline-danger mn-del" title="Delete note"
+              style="flex-shrink:0;">&#128465;</button>
+    </div>`;
+  }).join('');
+  p.innerHTML = `
+    <div class="d-flex align-items-center gap-2">
+      <div class="small flex-grow-1" style="color:var(--ttrpg-accent);font-weight:600;">
+        &#128221; Notes &mdash; ${_mnEsc(p.dataset.mapName)}</div>
+      <button class="btn btn-sm py-0 btn-outline-secondary" id="mn-add-btn">&#43; Add</button>
+    </div>
+    ${rows || '<p class="text-muted small mb-0 mt-1">No notes for this map yet.</p>'}`;
+  p.querySelector('#mn-add-btn').addEventListener('click', () => _mnEdit(null));
+  p.querySelectorAll('.mn-row').forEach(row => {
+    row.addEventListener('click', () => _mnEdit(parseInt(row.dataset.noteId)));
+    row.querySelectorAll('.mn-move').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();   // arrows must not open the note
+        fetch(`/ttrpg/battlemap/${_mnMapId}/notes/${row.dataset.noteId}/reorder`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction: btn.dataset.dir }),
+        }).then(r => r.json()).then(d => { if (d.ok) _mnLoad(); }).catch(() => {});
+      }));
+    row.querySelector('.mn-del').addEventListener('click', e => {
+      e.stopPropagation();     // delete must not open the note
+      if (!confirm('Delete this note?')) return;
+      fetch(`/ttrpg/battlemap/${_mnMapId}/notes/${row.dataset.noteId}/delete`, { method: 'POST' })
+        .then(() => _mnLoad());
+    });
+  });
+}
+
+function _mnEdit(noteId) {
+  const p = _mnPanel();
+  const n = noteId != null ? _mnNotes.find(x => x.note_id === noteId) : null;
+  if (noteId != null && !n) return;
+  _mnGen++;
+  _mnNoteId = noteId;
+  p.innerHTML = `
+    <input id="mn-title" maxlength="120" placeholder="Title"
+           class="form-control form-control-sm mb-2" value="${_mnEsc(n ? n.title : '')}">
+    <textarea id="mn-body" rows="7" placeholder="Write your note&#8230;"
+              class="form-control form-control-sm" style="resize:vertical;"></textarea>
+    <div class="d-flex gap-2 align-items-center mt-2">
+      <button class="btn btn-ttrpg btn-sm" id="mn-save-btn">Save</button>
+      <button class="btn btn-sm btn-outline-secondary" id="mn-back-btn"
+              title="Back to the list (saves any changes)">&#8592; Back</button>
+      <span id="mn-status" class="small text-success ms-auto"></span>
+    </div>`;
+  p.querySelector('#mn-body').value = n ? (n.body || '') : '';
+  _mnClean = _mnKey();
+  p.querySelector('#mn-save-btn').addEventListener('click', () => _mnSave());
+  p.querySelector('#mn-back-btn').addEventListener('click', () => {
+    Promise.resolve(_mnSaveIfDirty()).then(() => _mnLoad());
+  });
+  p.querySelector(n ? '#mn-body' : '#mn-title').focus();
+}
+
+// All field lookups are scoped to the OPEN panel (never getElementById):
+// belt-and-braces against the duplicate-id trap described at _mnClose.
+function _mnField(sel) {
+  const p = _mnPanel();
+  return p ? p.querySelector(sel) : null;
+}
+
+function _mnKey() {
+  const t = _mnField('#mn-title'), b = _mnField('#mn-body');
+  return (t ? t.value : '') + '\n\n' + (b ? b.value : '');
+}
+
+function _mnSave() {
+  const t = _mnField('#mn-title'), b = _mnField('#mn-body');
+  if (!t || !b) return null;
+  // A completely empty new note is a misclick, not a note.
+  if (_mnNoteId == null && !t.value.trim() && !b.value.trim()) return null;
+  const url = _mnNoteId == null
+    ? `/ttrpg/battlemap/${_mnMapId}/notes/add`
+    : `/ttrpg/battlemap/${_mnMapId}/notes/${_mnNoteId}/update`;
+  const gen = _mnGen, status = _mnField('#mn-status');
+  // keepalive: lets a page-leave-triggered save finish after navigation
+  return fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: t.value, body: b.value }), keepalive: true,
+  }).then(r => r.json()).then(d => {
+    if (gen !== _mnGen) return;   // editor moved on — don't touch its state
+    if (!d.ok) { if (status) status.textContent = 'Save failed'; return; }
+    if (_mnNoteId == null && d.note_id) _mnNoteId = d.note_id;
+    _mnClean = _mnKey();
+    if (status) {
+      status.textContent = 'Saved ✓';
+      setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 2000);
+    }
+  }).catch(() => { if (gen === _mnGen && status) status.textContent = 'Save failed'; });
+}
+
+function _mnSaveIfDirty() {
+  if (_mnMapId == null || !_mnField('#mn-title')) return null;
+  return _mnKey() !== _mnClean ? _mnSave() : null;
+}
+
+// Leaving the page mid-edit must not lose the note being typed.
+window.addEventListener('beforeunload', _mnSaveIfDirty);
+
 function toggleMapEdit(mapId) {
   const panel = document.getElementById('map-edit-' + mapId);
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';

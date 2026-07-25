@@ -11,7 +11,7 @@ from models.ttrpg import (tblCharacters, tblCharacterResources,
                            tblCharacterSkills, tblCharacterNotes,
                            tblCharacterFeats, tblCharacterArmor,
                            tblCharacterWeapons, tblCharacterSpells,
-                           tblSessions, tblSessionParty,
+                           tblSessions, tblSessionParty, tblSessionNotes,
                            tblRacesLibrary, tblClassesLibrary, tblDiceRolls,
                            tblFeaturesLibrary, tblClassLevelsLibrary)
 from models.campaigns import tblcampaigns
@@ -1249,14 +1249,130 @@ def session_status(session_id):
     return redirect(url_for('ttrpg.session_detail', session_id=session_id))
 
 
-@ttrpg.route('/sessions/<int:session_id>/notes', methods=['POST'])
+# ── Session notes (many per session; mirrors the battlemap notes CRUD) ───────
+# tblSessions.dm_notes is legacy — its content was migrated into these rows
+# (0006_session_notes) and nothing writes it anymore.
+
+@ttrpg.route('/sessions/<int:session_id>/notes/list')
 @login_required
 @dm_required
-def session_notes_save(session_id):
-    sess = tblSessions.query.get_or_404(session_id)
-    sess.dm_notes = request.get_json().get('notes', '')
+def session_notes_list(session_id):
+    tblSessions.query.get_or_404(session_id)
+    notes = (tblSessionNotes.query.filter_by(session_id=session_id)
+             .order_by(tblSessionNotes.sort_order,
+                       tblSessionNotes.note_id.desc())
+             .all())
+    return jsonify({'ok': True, 'notes': [{
+        'note_id':    n.note_id,
+        'title':      n.title,
+        'body':       n.body,
+        'updated_at': n.updated_at,
+    } for n in notes]})
+
+
+@ttrpg.route('/sessions/<int:session_id>/notes/add', methods=['POST'])
+@login_required
+@dm_required
+def session_notes_add(session_id):
+    tblSessions.query.get_or_404(session_id)
+    data = request.get_json() or {}
+    # New notes land at the top; reorder re-normalizes to 0..n-1, so drifting
+    # negative is harmless.
+    min_sort = (db.session.query(db.func.min(tblSessionNotes.sort_order))
+                .filter_by(session_id=session_id).scalar())
+    n = tblSessionNotes(
+        session_id = session_id,
+        title      = (data.get('title') or '').strip()[:120],
+        body       = data.get('body') or '',
+        sort_order = (min_sort - 1) if min_sort is not None else 0,
+        created_at = _now(),
+        updated_at = _now(),
+    )
+    db.session.add(n)
+    db.session.commit()
+    return jsonify({'ok': True, 'note_id': n.note_id})
+
+
+@ttrpg.route('/sessions/<int:session_id>/notes/<int:note_id>/update', methods=['POST'])
+@login_required
+@dm_required
+def session_notes_update(session_id, note_id):
+    n = tblSessionNotes.query.get_or_404(note_id)
+    if n.session_id != session_id:
+        return jsonify({'ok': False}), 403
+    data = request.get_json() or {}
+    if 'title' in data:
+        n.title = (data.get('title') or '').strip()[:120]
+    if 'body' in data:
+        n.body = data.get('body') or ''
+    n.updated_at = _now()
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@ttrpg.route('/sessions/<int:session_id>/notes/<int:note_id>/reorder', methods=['POST'])
+@login_required
+@dm_required
+def session_notes_reorder(session_id, note_id):
+    """Move a note one step up/down (normalize-then-swap, as map_reorder)."""
+    n = tblSessionNotes.query.get_or_404(note_id)
+    if n.session_id != session_id:
+        return jsonify({'ok': False}), 403
+    direction = (request.get_json() or {}).get('direction', '')
+    notes = (tblSessionNotes.query.filter_by(session_id=session_id)
+             .order_by(tblSessionNotes.sort_order,
+                       tblSessionNotes.note_id.desc())
+             .all())
+    for i, x in enumerate(notes):
+        x.sort_order = i
+    idx = next((i for i, x in enumerate(notes) if x.note_id == note_id), None)
+    if idx is not None:
+        swap = idx - 1 if direction == 'up' else idx + 1 if direction == 'down' else None
+        if swap is not None and 0 <= swap < len(notes):
+            notes[idx].sort_order, notes[swap].sort_order = \
+                notes[swap].sort_order, notes[idx].sort_order
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@ttrpg.route('/sessions/<int:session_id>/notes/<int:note_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def session_notes_delete(session_id, note_id):
+    n = tblSessionNotes.query.get_or_404(note_id)
+    if n.session_id != session_id:
+        return jsonify({'ok': False}), 403
+    db.session.delete(n)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@ttrpg.route('/sessions/<int:session_id>/mapnotes/list')
+@login_required
+@dm_required
+def session_mapnotes_list(session_id):
+    """All battle-map notes of this session, grouped by map (DM display order).
+
+    Feeds the session page's Map Notes tab; the CRUD itself reuses the
+    per-map /ttrpg/battlemap/<map_id>/notes/* endpoints."""
+    from models.ttrpg import tblBattleMaps, tblBattleMapNotes
+    tblSessions.query.get_or_404(session_id)
+    maps = (tblBattleMaps.query.filter_by(session_id=session_id)
+            .order_by(tblBattleMaps.sort_order, tblBattleMaps.map_id)
+            .all())
+    out = []
+    for m in maps:
+        notes = (tblBattleMapNotes.query.filter_by(map_id=m.map_id)
+                 .order_by(tblBattleMapNotes.sort_order,
+                           tblBattleMapNotes.note_id.desc())
+                 .all())
+        out.append({'map_id': m.map_id, 'name': m.name, 'notes': [{
+            'note_id':    n.note_id,
+            'title':      n.title,
+            'body':       n.body,
+            'updated_at': n.updated_at,
+        } for n in notes]})
+    return jsonify({'ok': True, 'maps': out})
 
 
 @ttrpg.route('/sessions/<int:session_id>/edit', methods=['POST'])

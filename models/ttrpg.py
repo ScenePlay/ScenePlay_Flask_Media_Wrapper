@@ -141,11 +141,29 @@ class tblSessions(db.Model):
     session_number = db.Column(db.Integer, default=1)
     campaign_id    = db.Column(db.Integer, db.ForeignKey('tblcampaigns.campaign_id'), nullable=True)
     status         = db.Column(db.Text, default='planning')  # planning | active | ended
+    # LEGACY single-note column: content was migrated into tblSessionNotes
+    # rows (0006_session_notes) and nothing writes here anymore.
     dm_notes       = db.Column(db.Text, default='')
     session_date   = db.Column(db.Text, default='')
     created_at     = db.Column(db.Text, nullable=False)
 
     campaign = db.relationship('tblcampaigns', backref='ttrpg_sessions', lazy=True)
+    session_notes = db.relationship('tblSessionNotes', backref='session',
+                                    cascade='all, delete-orphan', lazy=True)
+
+
+class tblSessionNotes(db.Model):
+    """DM campaign/prep notes for one session — many rows per session,
+    DM-only (session_detail and every endpoint are dm_required)."""
+    __tablename__ = 'tblSessionNotes'
+
+    note_id    = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('tblSessions.session_id'), nullable=False)
+    title      = db.Column(db.Text, default='')
+    body       = db.Column(db.Text, default='')
+    sort_order = db.Column(db.Integer, default=0)  # DM-defined order in the notes list
+    created_at = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.Text, nullable=False)
 
 
 class tblSessionParty(db.Model):

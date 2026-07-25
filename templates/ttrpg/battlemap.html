@@ -265,7 +265,8 @@
     top: 96px;
     right: 32px;
     z-index: 401;
-    width: 300px;
+    width: 450px;                       /* 50% wider than the dice-panel base */
+    max-width: calc(100vw - 48px);      /* never wider than the viewport */
     max-height: calc(100vh - 120px);
     overflow-y: auto;
     background: color-mix(in srgb, var(--ttrpg-primary) 75%, white);
@@ -278,6 +279,10 @@
   }
   #notes-drag-handle       { cursor: grab; }
   #notes-drag-handle:active{ cursor: grabbing; }
+  /* Minimized = header strip only (same pattern as the dice panel) */
+  #notes-map-panel.minimized > *:not(#notes-drag-handle) { display: none !important; }
+  #notes-map-panel.minimized { overflow-y: hidden; }
+  #notes-map-panel.minimized #notes-drag-handle { margin-bottom: 0; }
   .map-note-row {
     background: var(--ttrpg-surface);
     border: 1px solid var(--sp-border);
@@ -861,7 +866,10 @@
 <div id="notes-map-panel">
   <div id="notes-drag-handle" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
     <span style="font-weight:bold;color:var(--ttrpg-accent);">&#128221; DM Notes <span class="small text-muted">&mdash; {{ bm.name }}</span></span>
-    <button class="fx-close-btn" onclick="toggleMapNotesPanel()" style="cursor:pointer;" title="Close">&#10005;</button>
+    <div style="display:flex;gap:4px;">
+      <button id="map-notes-minimize-btn" class="fx-close-btn" onclick="minimizeMapNotesPanel()" style="cursor:pointer;" title="Minimize">&#8722;</button>
+      <button class="fx-close-btn" onclick="toggleMapNotesPanel()" style="cursor:pointer;" title="Close">&#10005;</button>
+    </div>
   </div>
 
   <!-- List view -->
@@ -876,7 +884,7 @@
   <div id="map-notes-editor" style="display:none;">
     <input id="map-note-title" maxlength="120" placeholder="Title"
            class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
-    <textarea id="map-note-body" rows="10" placeholder="Write your note&#8230;"
+    <textarea id="map-note-body" rows="15" placeholder="Write your note&#8230;"
               class="form-control form-control-sm bg-dark text-light border-secondary mb-2"
               style="resize:vertical;"></textarea>
     <div class="d-flex gap-2 align-items-center">

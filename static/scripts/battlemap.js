@@ -1910,6 +1910,9 @@ function toggleMapNotesPanel() {
   const open = p.style.display !== 'block';
   if (open) {
     p.style.display = 'block';
+    // Reopening always restores from minimized — a bare header strip
+    // appearing on open reads as a broken panel.
+    if (p.classList.contains('minimized')) minimizeMapNotesPanel();
     btn.classList.replace('btn-outline-secondary', 'btn-ttrpg');
     mapNotesShowList();
   } else {
@@ -1917,6 +1920,15 @@ function toggleMapNotesPanel() {
     p.style.display = 'none';
     btn.classList.replace('btn-ttrpg', 'btn-outline-secondary');
   }
+}
+
+function minimizeMapNotesPanel() {
+  const p   = document.getElementById('notes-map-panel');
+  const btn = document.getElementById('map-notes-minimize-btn');
+  if (!p || !btn) return;
+  const min = p.classList.toggle('minimized');
+  btn.textContent = min ? '+' : '−';
+  btn.title = min ? 'Restore' : 'Minimize';
 }
 
 function _mapNoteKey() {
