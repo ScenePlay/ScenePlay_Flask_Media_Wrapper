@@ -380,22 +380,26 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
     """Merge the TTRPG tree + scene lighting from the attached src database.
     Runs inside restore_merge's transaction; every step guards on the src
     table existing so pre-ttrpg archives pass through untouched."""
-    s = {'characters': 0, 'characters_skipped': 0, 'sessions': 0, 'maps': 0,
-         'session_monsters': 0, 'party_links': 0, 'tokens': 0, 'map_effects': 0,
-         'notes': 0, 'lighting': 0}
+    s = {'characters': 0, 'characters_skipped': 0, 'characters_no_owner': 0,
+         'sessions': 0, 'maps': 0, 'session_monsters': 0, 'party_links': 0,
+         'tokens': 0, 'map_effects': 0, 'notes': 0, 'lighting': 0}
 
     # -- users: match only, never copy ---------------------------------------
+    # Resolve the fallback owner FIRST — it seeds user_map for unmatched
+    # usernames below. (It used to be resolved after the map was built, which
+    # baked None in as the owner for unmatched players; the character INSERT
+    # then hit user_id NOT NULL and aborted the whole merge.)
+    if fallback_user_id is None:
+        row = (c.execute("SELECT user_id FROM tblUsers WHERE role='dm' AND active=1 "
+                         "ORDER BY user_id LIMIT 1").fetchone()
+               or c.execute("SELECT user_id FROM tblUsers ORDER BY user_id LIMIT 1").fetchone())
+        fallback_user_id = row[0] if row else None
     user_map = {}
     if _src_has(c, 'tblUsers'):
         for uid, uname in c.execute("SELECT user_id, username FROM src.tblUsers").fetchall():
             row = c.execute("SELECT user_id FROM tblUsers WHERE lower(username)=lower(?)",
                             (uname or '',)).fetchone()
             user_map[uid] = row[0] if row else fallback_user_id
-    if fallback_user_id is None:
-        row = (c.execute("SELECT user_id FROM tblUsers WHERE role='dm' AND active=1 "
-                         "ORDER BY user_id LIMIT 1").fetchone()
-               or c.execute("SELECT user_id FROM tblUsers ORDER BY user_id LIMIT 1").fetchone())
-        fallback_user_id = row[0] if row else None
 
     # -- characters (+ sub-tables), local wins on (owner, name) --------------
     char_map = {}
@@ -410,6 +414,11 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
         ('tblCharacterConditions', 'condition_id', None, None, None, None),
         ('tblCharacterNotes',      'note_id',      None, None, None, None),
     ]
+    if _src_has(c, 'tblCharacters') and fallback_user_id is None:
+        # Characters REQUIRE an owner; a box with no user accounts at all
+        # can't take them. Count it so the UI says so instead of silence.
+        s['characters_no_owner'] = c.execute(
+            "SELECT COUNT(*) FROM src.tblCharacters").fetchone()[0]
     if _src_has(c, 'tblCharacters') and fallback_user_id is not None:
         cols = _common_cols(c, 'tblCharacters', exclude=('character_id',))
         for row in c.execute(f"SELECT character_id, {', '.join(cols)} FROM src.tblCharacters").fetchall():
@@ -540,22 +549,31 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
             new_maps.add(map_map[src_id])
             s['maps'] += 1
 
-        # tokens + effects ride only with NEW maps — an existing map's live
-        # battle state (positions, fog) must never be disturbed by a merge
+        # tokens dedup by (map, entity): existing tokens are never moved, but
+        # a MISSING entity's token is added even on an existing map — that's
+        # what lets a re-run heal tokens whose characters couldn't import the
+        # first time (e.g. the no-user-accounts case).
         if _src_has(c, 'tblBattleMapTokens'):
             kcols = _common_cols(c, 'tblBattleMapTokens', exclude=('token_id',))
             for row in c.execute(f"SELECT {', '.join(kcols)} FROM src.tblBattleMapTokens").fetchall():
                 data = dict(zip(kcols, row))
                 mid = map_map.get(data.get('map_id'))
-                if not mid or mid not in new_maps:
+                if not mid:
                     continue
                 ent_map = char_map if data.get('entity_type') == 'player' else sm_map
                 ent = ent_map.get(data.get('entity_id'))
                 if ent is None:
                     continue                      # entity didn't survive the merge
+                if c.execute("SELECT 1 FROM tblBattleMapTokens WHERE map_id=? "
+                             "AND entity_type=? AND entity_id=?",
+                             (mid, data.get('entity_type'), ent)).fetchone():
+                    continue                      # already on this map — leave it be
                 data.update(map_id=mid, entity_id=ent)
                 _copy_row(c, 'tblBattleMapTokens', data)
                 s['tokens'] += 1
+        # effects (fog, spell shapes) still ride only with NEW maps: they have
+        # no dedup identity, so copying onto an existing map would duplicate
+        # them on every re-run.
         if _src_has(c, 'tblBattleMapEffects'):
             ecols = _common_cols(c, 'tblBattleMapEffects', exclude=('effect_id',))
             for row in c.execute(f"SELECT {', '.join(ecols)} FROM src.tblBattleMapEffects").fetchall():

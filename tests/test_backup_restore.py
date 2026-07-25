@@ -708,3 +708,74 @@ class TestLocalMediaLocate:
         s = br.restore_merge(snap, include_uploads=False)
         assert s['music'] == 1 and s['found_local'] == 1
         assert q(env['live'], "SELECT dnLoadStatus FROM tblMusic WHERE videoId='newsong00001'")[0][0] == 3
+
+
+class TestFullMergeOwnerFallback:
+    def _archive_with_char(self, env, username='ghost'):
+        src = str(env['tmp'] / 'srcowner.db')
+        make_db(src)
+        x(src, f"INSERT INTO tblUsers(username, display_name, role, active) VALUES ('{username}', 'G', 'player', 1)")
+        x(src, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (1, 'Wisp', 2, 1, 't')")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='owner')
+        finally:
+            sql.database = old
+
+    def test_unmatched_owner_resolves_to_dm_when_no_fallback_given(self, env):
+        # Regression: user_map used to be built BEFORE the fallback was
+        # resolved, baking None in as the owner -> NOT NULL abort.
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        snap = self._archive_with_char(env)
+        s = br.restore_merge(snap, include_uploads=False, full=True)  # no fallback param
+        assert s['characters'] == 1 and s['characters_no_owner'] == 0
+        assert q(env['live'], "SELECT user_id FROM tblCharacters WHERE name='Wisp'") == [(1,)]
+
+    def test_no_users_at_all_reports_instead_of_silence(self, env):
+        snap = self._archive_with_char(env)
+        s = br.restore_merge(snap, include_uploads=False, full=True)
+        assert s['characters'] == 0
+        assert s['characters_no_owner'] == 1
+        assert q(env['live'], "SELECT COUNT(*) FROM tblCharacters")[0][0] == 0
+
+    def test_rerun_after_creating_users_heals_the_tree(self, env):
+        """The exact recovery flow: first merge on a box with NO accounts
+        (characters skipped), DM account created afterwards, merge re-run —
+        characters, party links and player tokens must all land on the
+        sessions/maps the FIRST merge already created."""
+        src = str(env['tmp'] / 'srcheal.db')
+        make_db(src)
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('bob', 'B', 'player', 1)")
+        x(src, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (1, 'Wisp', 2, 1, 't')")
+        x(src, "INSERT INTO tblSessions(title, session_number, status, created_at) VALUES ('Ep9', 1, 'planning', 't')")
+        x(src, "INSERT INTO tblSessionParty(session_id, character_id, is_active, joined_at) VALUES (1, 1, 1, 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, is_active, sort_order, created_at) "
+               "VALUES (1, 'Cavern', 20, 20, 0, 0, 't')")
+        x(src, "INSERT INTO tblBattleMapTokens(map_id, entity_type, entity_id, col, row, updated_at) "
+               "VALUES (1, 'player', 1, 4, 4, 't')")
+        old = sql.database
+        sql.database = src
+        try:
+            snap = br.create_backup(label='heal')
+        finally:
+            sql.database = old
+
+        # 1st merge: no accounts on this box — session+map merge, character can't
+        s1 = br.restore_merge(snap, include_uploads=False, full=True)
+        assert s1['sessions'] == 1 and s1['maps'] == 1
+        assert s1['characters'] == 0 and s1['characters_no_owner'] == 1 and s1['tokens'] == 0
+
+        # DM sets up the box, merge re-run
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        s2 = br.restore_merge(snap, include_uploads=False, full=True)
+        assert s2['sessions'] == 0 and s2['maps'] == 0          # no duplicates
+        assert s2['characters'] == 1 and s2['party_links'] == 1
+        assert s2['tokens'] == 1                                 # healed onto the EXISTING map
+        wisp = q(env['live'], "SELECT character_id FROM tblCharacters WHERE name='Wisp'")[0][0]
+        mid = q(env['live'], "SELECT map_id FROM tblBattleMaps WHERE name='Cavern'")[0][0]
+        assert q(env['live'], "SELECT entity_id, col FROM tblBattleMapTokens WHERE map_id=?", (mid,)) == [(wisp, 4)]
+
+        # 3rd run: fully idempotent now
+        s3 = br.restore_merge(snap, include_uploads=False, full=True)
+        assert (s3['characters'], s3['party_links'], s3['tokens']) == (0, 0, 0)
