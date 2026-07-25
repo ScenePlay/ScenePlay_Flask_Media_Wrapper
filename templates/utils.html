@@ -154,9 +154,34 @@
                       restore; copy <code>static/uploads</code> separately if needed)
                     </label>
                     <br />
-                    <input type="submit" value="Import"
-                           onclick="return (document.querySelector('input[name=mode]:checked').value !== 'replace')
-                                    || confirm('Replace ALL data on this server with the backup? A safety snapshot of the current state is taken first, and the app must be restarted afterwards.');">
+                    <input type="submit" value="Import" onclick="return confirmImport();">
+                    <script>
+                    // The popup states EXACTLY what each mode imports — above all
+                    // that a standard merge does NOT bring characters/sessions/maps
+                    // (an easy-to-miss checkbox decides that, so say it out loud).
+                    function confirmImport() {
+                      const mode = document.querySelector('input[name=mode]:checked').value;
+                      if (mode === 'replace') {
+                        return confirm('Replace ALL data on this server with the backup? ' +
+                          'A safety snapshot of the current state is taken first, and the app ' +
+                          'must be restarted afterwards.');
+                      }
+                      const fullBox = document.querySelector('input[name=full_merge]');
+                      if (fullBox && fullBox.checked) {
+                        return confirm('FULL merge — imports campaigns, scenes, media, homebrew ' +
+                          'libraries AND the whole TTRPG world: characters, sessions, battle maps, ' +
+                          'monsters, tokens, notes and scene lighting.\n\n' +
+                          'Nothing local is overwritten: same-named items combine, and a character ' +
+                          'that already exists here is kept as-is. Safe to re-run with the same file.\n\n' +
+                          'Continue?');
+                      }
+                      return confirm('Standard merge — imports campaigns, scenes, media and homebrew ' +
+                        'library entries ONLY.\n\n' +
+                        'Characters, sessions, battle maps and notes will NOT be imported. ' +
+                        'If you want those, cancel and tick "Full merge" first.\n\n' +
+                        'Continue?');
+                    }
+                    </script>
                     </div>
                 </form>
                 <br />
