@@ -144,7 +144,7 @@
       // the sort callback maps col.index into this array.
       const tblColumns = ['song_ID','path','song', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus', 'duration', 'uploader', 'thumbnail'];
       const primeKey = tblColumns[0]
-      new gridjs.Grid({
+      window.spGrid = new gridjs.Grid({
         
         columns: [
           { id: tblColumns[0], name:'song_ID', 'hidden': true},

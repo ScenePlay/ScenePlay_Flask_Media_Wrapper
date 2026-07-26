@@ -193,7 +193,7 @@
 
       tblColumns = ['wledPattern_ID', 'scene_ID','server_ID', 'effect', 'pallette', 'color1', 'color2', 'color3', 'speed', 'brightness', 'orderBy']
       primeKey = tblColumns[0]
-      new gridjs.Grid({
+      window.spGrid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0], name: 'wledPattern_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Scenes', sort: false,

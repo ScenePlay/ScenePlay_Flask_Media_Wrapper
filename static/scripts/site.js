@@ -47,33 +47,88 @@ function sceneFilterChange(){
   jsn = {scene_id:ev.value}
   // console.log(JSON.stringify(jsn))
   saveSceneFilter(JSON.stringify(jsn))
-} 
+}
 
 function saveSceneFilter(json) {
+  var sceneValue = String(JSON.parse(json).scene_id);
   fetch('/api/sceneFilter', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: json
-  }).then(() => {
-    location.reload();
-  }).catch(error => {
+  }).then(function (r) { return r.json(); }).then(function (resp) {
+    applyFilterResponse(resp, sceneValue);
+  }).catch(function (error) {
     console.error('Error:', error);
   });
 }
 
 // Campaign filter sits ABOVE the scene filter on the table pages. Picking a
-// campaign also resets the scene filter server-side, and the reload
-// re-populates the scene dropdown with only that campaign's scenes.
+// campaign also resets the scene filter server-side; the response carries
+// that campaign's scene list so the dropdowns and table re-sync in place.
 function campaignFilterChange(){
   fetch('/api/campaignFilter', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({campaign_id: event.target.value})
-  }).then(() => {
-    location.reload();
-  }).catch(error => {
+  }).then(function (r) { return r.json(); }).then(function (resp) {
+    applyFilterResponse(resp, '0');
+  }).catch(function (error) {
     console.error('Error:', error);
   });
+}
+
+// Sync both filter dropdowns to the server's answer and re-fetch the table
+// IN PLACE — each table page registers its Grid.js instance as
+// window.spGrid. No location.reload(): the reload path could leave the
+// dropdowns visually stale, and the user shouldn't lose their spot on the
+// page just to change a filter.
+function applyFilterResponse(resp, sceneValue){
+  var camp = document.getElementById('campaignFilterDropdown');
+  if (camp) camp.value = String(resp.campaign_id);
+  var sc = document.getElementById('editSceneDropdown');
+  if (sc) {
+    sc.innerHTML = '';
+    var all = document.createElement('option');
+    all.value = '0';
+    all.textContent = 'All';
+    sc.appendChild(all);
+    (resp.scenes || []).forEach(function (s) {
+      var o = document.createElement('option');
+      o.value = String(s[0]);
+      o.textContent = s[1];
+      sc.appendChild(o);
+    });
+    sc.value = sceneValue;
+    if (sc.selectedIndex === -1) sc.value = '0';
+  }
+  if (window.spGrid) {
+    window.spGrid.forceRender();
+    restoreGridControls();
+  } else {
+    location.reload();
+  }
+}
+
+// forceRender() rebuilds the grid's DOM from scratch, which throws away the
+// toolbar controls the pages inject next to the search box: the Add New Row
+// button (each page's addButton(), run from body onload) and the Select
+// Page / Delete Selected pair (spInitBulkDelete, which remembers its config
+// in spBulkCfg and dedupes by element id). Re-insert both once the rebuilt
+// search bar exists, each only where the page set it up in the first place.
+function restoreGridControls(){
+  var onload = document.body.getAttribute('onload') || '';
+  var wantAdd = onload.indexOf('addButton') !== -1 && typeof addButton === 'function';
+  var tries = 0;
+  var t = setInterval(function () {
+    var search = document.querySelector('div.gridjs-search');
+    if (search) {
+      clearInterval(t);
+      if (wantAdd && !search.parentNode.querySelector('input[type=submit]')) addButton();
+      if (spBulkCfg) spInitBulkDelete(spBulkCfg.endpoint, spBulkCfg.primeKey);
+    } else if (++tries > 60) {
+      clearInterval(t);
+    }
+  }, 50);
 }
 
 

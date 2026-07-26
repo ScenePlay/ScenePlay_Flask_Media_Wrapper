@@ -213,7 +213,7 @@ let sceneCache = null;
 
       const tblColumns = ['videoScene_ID','scene_ID','video_ID', 'DisplayScreen_ID', 'orderBy', 'volume', 'loops'];
       primeKey = tblColumns[0]
-      const grid = new gridjs.Grid({
+      const grid = window.spGrid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0],name: 'videoScene_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Scene', sort: true,

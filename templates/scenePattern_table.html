@@ -263,7 +263,7 @@
     tblColumns = ['scenePattern_ID', 'scene_ID', 'ledTypeModel_ID', 'color', 'cdiff', 'wait_ms', 'iterations', 'direction', 'orderBy', 'outPin', 'brightness']
     primeKey = tblColumns[0]
 
-    const grid = new gridjs.Grid({
+    const grid = window.spGrid = new gridjs.Grid({
       columns: [
         { id: tblColumns[0], name: 'scenePattern_ID', 'hidden': true },
         {

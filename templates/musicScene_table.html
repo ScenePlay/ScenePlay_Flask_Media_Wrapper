@@ -210,7 +210,7 @@ let sceneCache = null;
       // 5    loops          INT      0                    0
       const tblColumns = ['musicScene_ID','scene_ID', 'song_ID','orderBy','volume','loops']
       primeKey = tblColumns[0]
-      const grid = new gridjs.Grid({
+      const grid = window.spGrid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0],name: 'musicScene_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Scenes', sort: false,

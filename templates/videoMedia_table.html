@@ -171,7 +171,7 @@
       tblColumns = ['video_ID','path','title', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus', 'duration', 'uploader', 'thumbnail'];
       primeKey = tblColumns[0]
 
-      new gridjs.Grid({
+      window.spGrid = new gridjs.Grid({
         columns: [
           { id: tblColumns[0], name:'video_ID', 'hidden': true},
           { id: tblColumns[1], name: 'Path', sort: true},

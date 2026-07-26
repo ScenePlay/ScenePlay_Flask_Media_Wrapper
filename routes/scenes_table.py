@@ -28,22 +28,29 @@ def add_headers(response):
 
 @sn.route('/scenes')
 def edittbl():
-    from routes._util import campaigns_for_filter
+    from routes._util import campaigns_for_filter, scenes_for_filter
     data = select_data_stats()#arr)
     volume = currentvolume()
+    campaignFilter = appsettingGetCampaignFilter()
+    sceneFilter = appsettingGetSceneFilter()
     return render_template('scenes_table.html',items=data,volume=volume,
                            campaigns=campaigns_for_filter(),
-                           campaignFilter=appsettingGetCampaignFilter())
+                           campaignFilter=campaignFilter,
+                           scenes=scenes_for_filter(campaignFilter),
+                           sceneFilter=int(sceneFilter[0][0]))
 
 
 @sn.route('/api/scenes')
 def data():
     query = tbl.query
 
-    # Campaign filter: the same persistent global setting (CampaignFilter)
-    # the media/scene-link table pages use — one selection scopes them all.
+    # Scene/campaign filters: the same persistent global settings the
+    # media/scene-link table pages use — one selection scopes them all.
+    sceneF = int(appsettingGetSceneFilter()[0][0])
     campaign = appsettingGetCampaignFilter()
-    if campaign:
+    if sceneF:
+        query = query.filter(tbl.scene_ID == sceneF)
+    elif campaign:
         query = query.filter(tbl.campaign_id == campaign)
 
     search = request.args.get('search')
@@ -112,19 +119,36 @@ def scenesdelrow():
 
 @sn.route('/api/sceneFilter', methods=['POST'])
 def sceneFilter():
+    from routes._util import scenes_for_filter
     data = request.get_json()
-    appsettingSetSceneFilter(int(data['scene_id']))
-    return '', 204
+    scene_id = int(data['scene_id'])
+    appsettingSetSceneFilter(scene_id)
+    # Picking a scene drags the campaign filter along to THAT scene's
+    # campaign, so the two dropdowns always agree. A scene without a
+    # campaign resets the campaign filter to All — that's the only value
+    # that can still show it. Scene 'All' (0) leaves the campaign alone.
+    # The response carries the resulting campaign and its scene list so
+    # site.js can re-sync the dropdowns and table in place, no reload.
+    if scene_id:
+        scene = db.session.get(tbl, scene_id)
+        appsettingSetCampaignFilter((scene.campaign_id or 0) if scene else 0)
+    campaign = appsettingGetCampaignFilter()
+    return jsonify(campaign_id=campaign,
+                   scenes=[list(s) for s in scenes_for_filter(campaign)])
 
 
 @sn.route('/api/campaignFilter', methods=['POST'])
 def campaignFilter():
-    """Set the global campaign filter (0=all, -1=no campaign). Changing the
-    campaign always RESETS the scene filter: the scene dropdown re-populates
-    with only that campaign's scenes, so a stale cross-campaign scene pick
-    can't leave the tables showing nothing."""
+    """Set the global campaign filter (0=all). Changing the campaign always
+    RESETS the scene filter: the scene dropdown re-populates with only that
+    campaign's scenes, so a stale cross-campaign scene pick can't leave the
+    tables showing nothing. Returns the (clamped) campaign and its scene
+    list so site.js can re-sync the dropdowns and table in place."""
+    from routes._util import scenes_for_filter
     data = request.get_json()
     appsettingSetCampaignFilter(int(data['campaign_id']))
     appsettingSetSceneFilter(0)
-    return '', 204
+    campaign = appsettingGetCampaignFilter()
+    return jsonify(campaign_id=campaign,
+                   scenes=[list(s) for s in scenes_for_filter(campaign)])
     
