@@ -230,6 +230,55 @@ def inject_remote_led_status():
     return out
 
 
+# ── DM-only ScenePlay (Utilities > Access Control) ───────────────────────
+# When the switch is on, the ScenePlay pages and their APIs require a DM
+# login. Wired as blueprint before_request hooks, which only take effect if
+# attached BEFORE register_blueprint below. The TTRPG/auth/battlemap
+# blueprints are untouched, and no-session automation endpoints stay open:
+# scene activation + playback (cron curl jobs, TTRPG session pages), the
+# browser-extension import, and the keep-music-playing toggles.
+from routes._util import sceneplay_dm_guard, dm_only_sceneplay_enabled
+
+for _bp in (sp, sn, ltm, cp, mu, ge, ip, sr, ms, vm, vs, wl, dls, lcf, cs):
+    _bp.before_request(sceneplay_dm_guard)
+
+
+def _main_sceneplay_guard():
+    # Only the control page itself — every other main endpoint (activate
+    # scene, next song, seek, extension import, server-info) is called by
+    # TTRPG pages, cron, remotes, or the extension without a session.
+    from flask import request
+    if request.endpoint == 'main.home':
+        return sceneplay_dm_guard()
+    return None
+
+
+main.before_request(_main_sceneplay_guard)
+
+_UT_OPEN_ENDPOINTS = {'ut.toggle_keep_music', 'ut.set_keep_music_off',
+                      'ut.set_keep_music_on', 'ut.processyt'}
+
+
+def _ut_sceneplay_guard():
+    from flask import request
+    if request.endpoint in _UT_OPEN_ENDPOINTS:
+        return None
+    return sceneplay_dm_guard()
+
+
+ut.before_request(_ut_sceneplay_guard)
+
+
+@app.context_processor
+def _sceneplay_access():
+    # base.html hides the ScenePlay nav links from visitors the guard would
+    # bounce, so the restriction reads as "not there" instead of "broken".
+    from flask_login import current_user
+    locked = (dm_only_sceneplay_enabled()
+              and not (current_user.is_authenticated and current_user.is_dm()))
+    return {'sceneplay_locked': locked}
+
+
 app.register_blueprint(main)
 app.register_blueprint(sp)
 app.register_blueprint(sn)

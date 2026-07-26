@@ -28,17 +28,32 @@ def is_git_install():
     return os.path.isdir(os.path.join(REPO_ROOT, '.git'))
 
 
-def _run(cmd, timeout=180):
+def _run(cmd, timeout=180, input_text=None):
     """Run a command in the repo root; return (stdout, stderr) text.
-    Never raises on failure — callers classify by output."""
+    Never raises on failure — callers classify by output. input_text is
+    fed to stdin (used to hand sudo -S its password)."""
     try:
         p = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, timeout=timeout, input=input_text)
         return (p.stdout or '').strip(), (p.stderr or '').strip()
     except subprocess.TimeoutExpired:
         return '', f'timed out after {timeout}s: {" ".join(cmd)}'
     except Exception as e:
         return '', f'failed to run {" ".join(cmd)}: {e}'
+
+
+def _sudo_blocked(out, err):
+    """True when sudo could not run because of a missing/wrong password.
+    Both -n (fail instead of prompting) and -S (password from stdin) name
+    the reason on stderr."""
+    low = (err or '').lower()
+    return any(m in low for m in ('password is required',
+                                  'authentication is required',
+                                  'a terminal is required',
+                                  'no askpass program',
+                                  'incorrect password',
+                                  'no password was provided',
+                                  'sorry, try again'))
 
 
 def git_failed(out, err):
@@ -79,9 +94,11 @@ def check_updates():
             'current': current, 'error': ''}
 
 
-def run_update():
+def run_update(sudo_password=None):
     """Execute the update. Returns {ok, log} — log is a list of step lines.
-    Stops at the first real failure and never restarts into a broken state."""
+    Stops at the first real failure and never restarts into a broken state.
+    sudo_password (optional, from the web page) unlocks the sudo step; it is
+    passed to sudo -S on stdin and never logged."""
     log = []
 
     def step(title, text=''):
@@ -132,11 +149,28 @@ def run_update():
 
     if os.name != 'nt':
         # 5. idempotent nginx upload-size fix (covers pull-only boxes that
-        #    predate it); best-effort — nginx may legitimately be absent
-        out, err = _run(['sudo', 'bash',
-                         os.path.join(REPO_ROOT, 'supportFiles',
-                                      'fixNginxUploadSize.sh')], timeout=60)
-        step('nginx upload-size fix (best-effort)', out or err)
+        #    predate it); best-effort — nginx may legitimately be absent.
+        # sudo must NEVER prompt on the server's terminal (that leaves the
+        # web request hanging on an invisible password prompt): -S reads the
+        # password the web page supplied from stdin, -n fails fast instead
+        # of prompting when no password was given.
+        script = os.path.join(REPO_ROOT, 'supportFiles',
+                              'fixNginxUploadSize.sh')
+        if sudo_password:
+            out, err = _run(['sudo', '-S', '-p', '', 'bash', script],
+                            timeout=60, input_text=sudo_password + '\n')
+        else:
+            out, err = _run(['sudo', '-n', 'bash', script], timeout=60)
+        if _sudo_blocked(out, err):
+            step('nginx upload-size fix SKIPPED — sudo needs your system '
+                 'password' + (' (the one entered was not accepted)'
+                               if sudo_password else '') + '.',
+                 'The update itself is unaffected. To apply this fix, enter '
+                 'your system password in the update box and run the update '
+                 'again, or run in a terminal: '
+                 'sudo bash supportFiles/fixNginxUploadSize.sh')
+        else:
+            step('nginx upload-size fix (best-effort)', out or err)
         # 6. new shell scripts must stay executable
         _run(['bash', '-c', 'chmod +x *.sh supportFiles/*.sh 2>/dev/null'])
 

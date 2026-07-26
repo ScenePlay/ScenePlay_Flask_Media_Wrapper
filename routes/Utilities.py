@@ -104,6 +104,19 @@ def main():
                       '(network/git problem?) — downloads fall back to the '
                       'pip-installed copy until the next successful refresh.')
             return redirect(url_for('ut.main'))
+        elif request.form['submit'] == 'Save DM Access':
+            # Flipping who may use ScenePlay is itself DM-only — otherwise a
+            # player could simply switch it back off.
+            from flask_login import current_user
+            if not (current_user.is_authenticated and current_user.is_dm()):
+                flash('Changing access control requires a DM login.')
+                return redirect(url_for('auth.login', next=url_for('ut.main')))
+            enable = bool(request.form.get('dm_only_sceneplay'))
+            appsettingSet('DMOnlyScenePlay', 1 if enable else 0, 'int')
+            flash('ScenePlay controls and tables are now DM-only.' if enable
+                  else 'ScenePlay controls and tables are open to everyone '
+                       'on the network.')
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
             # Rebooting the box is DM-only: anyone on the LAN can reach this
             # page, and a mid-session reboot kills music, maps, and the relay.
@@ -133,9 +146,14 @@ def main():
     backups = backup_restore.list_backups()
     backup_auto = str(appsettingGet('backup_auto', '0') or '0') == '1'
     media_roots = appsettingGet('media_search_roots', '') or ''
+    from routes._util import dm_only_sceneplay_enabled
+    from flask_login import current_user
     return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
                            keep_music=keep_music, backups=backups, backup_auto=backup_auto,
-                           media_roots=media_roots)
+                           media_roots=media_roots,
+                           dm_only_sceneplay=dm_only_sceneplay_enabled(),
+                           is_dm=(current_user.is_authenticated
+                                  and current_user.is_dm()))
 
     
 def _dm_required_json():
@@ -162,7 +180,11 @@ def update_run():
     if gate:
         return gate
     import app_update
-    return jsonify(app_update.run_update())
+    # Optional system password from the page, for the sudo step (nginx fix).
+    # Handed straight to sudo -S via stdin — never stored or logged.
+    data = request.get_json(silent=True) or {}
+    return jsonify(app_update.run_update(
+        sudo_password=data.get('sudo_password') or None))
 
 
 @ut.route('/utilities/restart-app')

@@ -67,3 +67,33 @@ def campaigns_for_filter():
     from models.campaigns import tblcampaigns as cp
     return (cp.query.with_entities(cp.campaign_id, cp.campaign_name)
             .order_by(cp.campaign_name).all())
+
+
+def dm_only_sceneplay_enabled():
+    """True when the 'DM-only ScenePlay' switch (Utilities > Access Control)
+    is on. Any read failure means open — the historical LAN-trust default."""
+    from sql import appsettingGet
+    try:
+        return str(appsettingGet('DMOnlyScenePlay', '0') or '0') == '1'
+    except Exception:
+        return False
+
+
+def sceneplay_dm_guard():
+    """Blueprint before_request guard for the ScenePlay controls/tables.
+
+    With the switch off (default) everything stays LAN-open, as it always
+    was. With it on, non-DM visitors get a JSON 403 for API/POST calls and
+    a login redirect for page views. The TTRPG/auth blueprints never route
+    through this guard, so players keep their pages either way."""
+    if not dm_only_sceneplay_enabled():
+        return None
+    from flask_login import current_user
+    if current_user.is_authenticated and current_user.is_dm():
+        return None
+    from flask import request, jsonify, redirect, url_for, flash
+    if request.path.startswith('/api/') or request.method != 'GET':
+        return jsonify({'error': 'This server restricts ScenePlay to DM '
+                        'logins.'}), 403
+    flash('That section is DM-only on this server — log in with a DM account.')
+    return redirect(url_for('auth.login', next=request.path))
