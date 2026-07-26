@@ -7,6 +7,7 @@ from models.wledPattern import tblpallette as pt
 from extensions import *
 
 from sql import *
+from routes._util import campaign_scene_ids, scenes_for_filter, campaigns_for_filter
 from wLed.wledCommand import setWledEffect
 
 wl = Blueprint('wl', __name__)
@@ -17,9 +18,11 @@ primeKey = tblColumns[0]
 def edittbl():
     data = select_data_stats()#arr)
     volume = currentvolume()
-    scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
+    campaignFilter = appsettingGetCampaignFilter()
+    scenes = scenes_for_filter(campaignFilter)
+    campaigns = campaigns_for_filter()
     sceneFilter = appsettingGetSceneFilter()
-    return render_template('wledPattern_table.html',items=data,volume=volume,scenes=scenes,sceneFilter=int(sceneFilter[0][0]))
+    return render_template('wledPattern_table.html',items=data,volume=volume,scenes=scenes,sceneFilter=int(sceneFilter[0][0]),campaigns=campaigns,campaignFilter=campaignFilter)
 
 @wl.route('/api/effects')
 def effect():
@@ -48,8 +51,12 @@ def WLEDTest():
 @wl.route('/api/wledPattern')
 def data():
     sceneFilter = appsettingGetSceneFilter()
+    campaignFilter = appsettingGetCampaignFilter()
     if int(sceneFilter[0][0]) != 0:
         query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(tbl.wledPattern_ID.desc())
+    elif campaignFilter != 0:
+        # campaign filter: rows belonging to any scene of the campaign
+        query = tbl.query.filter(tbl.scene_ID.in_(campaign_scene_ids(campaignFilter))).order_by(tbl.scene_ID)
     else:
         query = tbl.query.order_by(tbl.scene_ID)
  
@@ -84,6 +91,8 @@ def data():
         if order:
             if int(sceneFilter[0][0]) != 0:
                 query = tbl.query.filter(tbl.scene_ID == int(sceneFilter[0][0])).order_by(*order)
+            elif campaignFilter != 0:
+                query = tbl.query.filter(tbl.scene_ID.in_(campaign_scene_ids(campaignFilter))).order_by(*order)
             else:
                 query = tbl.query.order_by(*order)
 

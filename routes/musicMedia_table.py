@@ -7,6 +7,7 @@ from models.musicScene import tblmusicscene as sceneLinkTbl
 from models.scenes import tblscenes as sc
 
 from sql import *
+from routes._util import campaign_scene_ids, scenes_for_filter, campaigns_for_filter
 from thumbs import store as thumb_store
 
 mu = Blueprint('mu', __name__)
@@ -28,10 +29,12 @@ _meta_sort = {'duration': metaTbl.duration, 'uploader': metaTbl.uploader}
 def edittbl():
     data = select_data_stats()
     volume = currentvolume()
-    scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName).order_by(sc.sceneName).all()
+    campaignFilter = appsettingGetCampaignFilter()
+    scenes = scenes_for_filter(campaignFilter)
+    campaigns = campaigns_for_filter()
     sceneFilter = appsettingGetSceneFilter()
     return render_template('musicMedia_table.html',items=data,volume=volume,
-                           scenes=scenes,sceneFilter=int(sceneFilter[0][0]))
+                           scenes=scenes,sceneFilter=int(sceneFilter[0][0]),campaigns=campaigns,campaignFilter=campaignFilter)
 
 
 @mu.route('/api/music')
@@ -42,9 +45,15 @@ def data():
     # songs linked to the selected scene via tblMusicScene. Applied first so
     # search/sort/pagination and the total all respect it.
     sceneFilter = int(appsettingGetSceneFilter()[0][0])
+    campaignFilter = appsettingGetCampaignFilter()
     if sceneFilter != 0:
         scene_song_ids = db.session.query(sceneLinkTbl.song_ID).filter(
             sceneLinkTbl.scene_ID == sceneFilter)
+        query = query.filter(tbl.song_id.in_(scene_song_ids))
+    elif campaignFilter != 0:
+        # Campaign filter: songs linked to ANY scene of the campaign
+        scene_song_ids = db.session.query(sceneLinkTbl.song_ID).filter(
+            sceneLinkTbl.scene_ID.in_(campaign_scene_ids(campaignFilter)))
         query = query.filter(tbl.song_id.in_(scene_song_ids))
 
     search = request.args.get('search')

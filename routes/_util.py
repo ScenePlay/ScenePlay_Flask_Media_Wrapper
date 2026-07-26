@@ -35,3 +35,35 @@ def _now():
     module must format identically.
     """
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def campaign_scene_ids(campaign_filter):
+    """SQLAlchemy subquery of scene_IDs for the campaign filter
+    (-1 = scenes with no campaign). Call only when campaign_filter != 0."""
+    from extensions import db
+    from models.scenes import tblscenes as sc
+    q = db.session.query(sc.scene_ID)
+    if campaign_filter == -1:
+        return q.filter(db.or_(sc.campaign_id.is_(None), sc.campaign_id == 0))
+    return q.filter(sc.campaign_id == campaign_filter)
+
+
+def scenes_for_filter(campaign_filter):
+    """(scene_ID, sceneName) rows for the scene dropdown, limited to the
+    active campaign filter — the scene list must only offer scenes the
+    campaign filter can actually show."""
+    from extensions import db
+    from models.scenes import tblscenes as sc
+    q = sc.query.with_entities(sc.scene_ID, sc.sceneName)
+    if campaign_filter == -1:
+        q = q.filter(db.or_(sc.campaign_id.is_(None), sc.campaign_id == 0))
+    elif campaign_filter:
+        q = q.filter(sc.campaign_id == campaign_filter)
+    return q.order_by(sc.sceneName).all()
+
+
+def campaigns_for_filter():
+    """(campaign_id, campaign_name) rows for the campaign filter dropdowns."""
+    from models.campaigns import tblcampaigns as cp
+    return (cp.query.with_entities(cp.campaign_id, cp.campaign_name)
+            .order_by(cp.campaign_name).all())

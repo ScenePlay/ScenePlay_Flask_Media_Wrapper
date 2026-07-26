@@ -4,6 +4,18 @@
   <body onload="addButton()">
     <div>
       <h1>Scenes Table</h1>
+      <!-- Same persistent global CampaignFilter setting as the media/scene
+           tables — campaignFilterChange (site.js) saves it and reloads. -->
+      <label style="display:inline-block;margin:4px 0 8px 0;">
+        Campaign:
+        <select id="campaignFilterDropdown" onchange="campaignFilterChange()"
+                style="min-width:180px;">
+          <option value="0">All campaigns</option>
+          {% for camp in campaigns %}
+            <option value="{{camp[0]}}" {% if camp[0] == campaignFilter %}selected{% endif %}>{{camp[1]}}</option>
+          {% endfor %}
+        </select>
+      </label>
       <hr>
       <div id="table"></div>
     </div>

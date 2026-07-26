@@ -28,26 +28,36 @@ def add_headers(response):
 
 @sn.route('/scenes')
 def edittbl():
+    from routes._util import campaigns_for_filter
     data = select_data_stats()#arr)
     volume = currentvolume()
-    return render_template('scenes_table.html',items=data,volume=volume)
+    return render_template('scenes_table.html',items=data,volume=volume,
+                           campaigns=campaigns_for_filter(),
+                           campaignFilter=appsettingGetCampaignFilter())
 
 
 @sn.route('/api/scenes')
 def data():
-    query = tbl.query.order_by(tbl.sceneName)
+    query = tbl.query
+
+    # Campaign filter: the same persistent global setting (CampaignFilter)
+    # the media/scene-link table pages use — one selection scopes them all.
+    campaign = appsettingGetCampaignFilter()
+    if campaign:
+        query = query.filter(tbl.campaign_id == campaign)
+
     search = request.args.get('search')
-    
     if search:
         query = query.filter(db.or_(
             tbl.sceneName.like(f'%{search}%')
         ))
     total = query.count()
 
-    # sorting
+    # sorting — applied ON the filtered query (rebuilding from tbl.query here
+    # used to silently drop the search/campaign filters)
     sort = request.args.get('sort')
+    order = []
     if sort:
-        order = []
         for s in sort.split(','):
             direction = s[0]
             name = s[1:]
@@ -57,8 +67,7 @@ def data():
             if direction == '-':
                 col = col.desc()
             order.append(col)
-        if order:
-            query = tbl.query.order_by(*order)
+    query = query.order_by(*order) if order else query.order_by(tbl.sceneName)
 
     # pagination
     start = request.args.get('start', type=int, default=-1)
@@ -105,5 +114,17 @@ def scenesdelrow():
 def sceneFilter():
     data = request.get_json()
     appsettingSetSceneFilter(int(data['scene_id']))
+    return '', 204
+
+
+@sn.route('/api/campaignFilter', methods=['POST'])
+def campaignFilter():
+    """Set the global campaign filter (0=all, -1=no campaign). Changing the
+    campaign always RESETS the scene filter: the scene dropdown re-populates
+    with only that campaign's scenes, so a stale cross-campaign scene pick
+    can't leave the tables showing nothing."""
+    data = request.get_json()
+    appsettingSetCampaignFilter(int(data['campaign_id']))
+    appsettingSetSceneFilter(0)
     return '', 204
     

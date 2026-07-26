@@ -61,6 +61,21 @@ function saveSceneFilter(json) {
   });
 }
 
+// Campaign filter sits ABOVE the scene filter on the table pages. Picking a
+// campaign also resets the scene filter server-side, and the reload
+// re-populates the scene dropdown with only that campaign's scenes.
+function campaignFilterChange(){
+  fetch('/api/campaignFilter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({campaign_id: event.target.value})
+  }).then(() => {
+    location.reload();
+  }).catch(error => {
+    console.error('Error:', error);
+  });
+}
+
 
 let _volTimer = null;
 function volumeChange(){

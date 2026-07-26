@@ -789,11 +789,26 @@ def appsettingGetSceneFilter():
         return [(0,)]
     return data
 
+def appsettingGetCampaignFilter():
+    """Campaign filter shared by the table pages (sits above the scene
+    filter): 0 = all campaigns, else a tblCampaigns id. Uses the generic
+    getter so a missing row is just 0; negatives (the removed 'no campaign'
+    option) clamp to 0 so a stale value can't apply an invisible filter."""
+    try:
+        return max(0, int(appsettingGet('CampaignFilter', '0') or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def appsettingSetCampaignFilter(val):
+    appsettingSet('CampaignFilter', int(val), 'int')
+
+
 def appsettingSetSceneFilter(val):
     conn = sqlite3.connect(database)
     #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
     c = conn.cursor()
-    c.execute("Update tblAppSettings set value = ?  where name =  'SceneFilter'",(val,))    
+    c.execute("Update tblAppSettings set value = ?  where name =  'SceneFilter'",(val,))
     conn.commit()
     c.close()
     conn.close()
