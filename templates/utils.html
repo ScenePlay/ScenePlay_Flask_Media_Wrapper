@@ -306,6 +306,21 @@
                 </div>
                 </details>
                 <script>
+                  // ── Card open/closed memory ──────────────────────────────
+                  // Every submit reloads the page, which used to collapse all
+                  // the cards — re-opening the one you were working in after
+                  // every action is annoying. Remember each card's state in
+                  // localStorage (keyed by its title) and restore it on load.
+                  document.querySelectorAll('details').forEach(d => {
+                    const sum = d.querySelector('summary');
+                    if (!sum) return;
+                    const key = 'sp-utils-card:' + sum.textContent.trim();
+                    if (localStorage.getItem(key) === '1') d.open = true;
+                    d.addEventListener('toggle', () => {
+                      localStorage.setItem(key, d.open ? '1' : '0');
+                    });
+                  });
+
                   // ── Software Update card ─────────────────────────────────
                   (function () {
                     const status = document.getElementById('update-status');
