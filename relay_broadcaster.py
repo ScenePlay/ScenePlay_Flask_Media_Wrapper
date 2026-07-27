@@ -304,11 +304,17 @@ def _debounced_map_enqueue(fn):
 
 
 def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
-                         movement_scale=1.0, bg_filename=None):
+                         movement_scale=1.0, bg_filename=None,
+                         floorplan=None, floorplan_version=None, doors=None):
     """POST /api/v1/session/push  body: { session_id, map: { url, ... } }
 
     When bg_filename names a still image, its bytes are embedded as base64 so a
-    remote relay (which cannot reach this LAN server) can serve the map itself."""
+    remote relay (which cannot reach this LAN server) can serve the map itself.
+
+    floorplan/floorplan_version/doors feed the portal's view-only 3D mode.
+    The portal stores the whole map dict as one blob (sessions.map_json) and
+    its /sync strips map_json, so the extra keys never ride the 2 s player
+    poll — only push events and the SSE map_update fan-out."""
     cfg = _active()
     if not cfg:
         return
@@ -323,6 +329,10 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
             'movement_scale': movement_scale,
         },
     }
+    if floorplan is not None:
+        payload['map']['floorplan'] = floorplan
+        payload['map']['floorplan_version'] = floorplan_version
+        payload['map']['doors'] = doors or {}
     # Two-step background transfer: the normal push carries only a content sha
     # (tiny — token moves on a video map must not re-upload megabytes each
     # nudge). If the relay doesn't have that file it answers need_image and the

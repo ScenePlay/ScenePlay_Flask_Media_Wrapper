@@ -14,6 +14,8 @@ ASSETS=(
   "static/scripts/sfx.js:portal/sfx.js"
   "static/scripts/dice.js:portal/dice.js"
   "static/scripts/Tone.js:portal/Tone.js"
+  "static/scripts/battlemap3d.js:portal/battlemap3d.js"
+  "static/scripts/three.min.js:portal/three.min.js"
 )
 
 for pair in "${ASSETS[@]}"; do

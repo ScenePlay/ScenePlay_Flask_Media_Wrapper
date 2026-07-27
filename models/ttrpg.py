@@ -345,6 +345,10 @@ class tblBattleMaps(db.Model):
                                cascade='all, delete-orphan', lazy=True)
     notes   = db.relationship('tblBattleMapNotes',   backref='battle_map',
                                cascade='all, delete-orphan', lazy=True)
+    floorplan = db.relationship('tblBattleMapFloorplans', backref='battle_map',
+                                cascade='all, delete-orphan', lazy=True, uselist=False)
+    doors   = db.relationship('tblBattleMapDoors',   backref='battle_map',
+                               cascade='all, delete-orphan', lazy=True)
     session = db.relationship('tblSessions', backref='battle_maps', lazy=True)
 
 
@@ -389,6 +393,36 @@ class tblBattleMapNotes(db.Model):
     sort_order = db.Column(db.Integer, default=0)  # DM-defined order in the notes list
     created_at = db.Column(db.Text, nullable=False)
     updated_at = db.Column(db.Text, nullable=False)
+
+
+class tblBattleMapFloorplans(db.Model):
+    """3D wall/door/elevation geometry for one battle map, as validated
+    floorplan JSON (see floorplan.py for the schema). Kept out of tblBattleMaps
+    so the blob doesn't ride the map row loaded on every 2-second state poll.
+    version bumps on every save; clients re-fetch geometry when it changes."""
+    __tablename__ = 'tblBattleMapFloorplans'
+
+    floorplan_id = db.Column(db.Integer, primary_key=True)
+    map_id       = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'),
+                             nullable=False, unique=True)
+    json_data    = db.Column(db.Text, nullable=False)
+    version      = db.Column(db.Integer, default=1)
+    updated_at   = db.Column(db.Text, nullable=False)
+
+
+class tblBattleMapDoors(db.Model):
+    """Runtime open/closed state, one row per door in the map's floorplan.
+    Separate from json_data so a toggle is a one-row UPDATE and the state poll
+    can read door states without parsing the geometry blob."""
+    __tablename__ = 'tblBattleMapDoors'
+
+    row_id     = db.Column(db.Integer, primary_key=True)
+    map_id     = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'), nullable=False)
+    door_key   = db.Column(db.Text, nullable=False)   # matches doors[].id in json_data
+    is_open    = db.Column(db.Integer, default=0)
+    updated_at = db.Column(db.Text, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint('map_id', 'door_key'),)
 
 
 class tblSpellsLibrary(db.Model):

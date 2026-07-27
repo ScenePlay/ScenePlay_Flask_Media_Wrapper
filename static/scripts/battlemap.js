@@ -580,6 +580,12 @@ function pollState() {
       _hpSfxDiff(d.tokens);   // everyone hears HP changes (incl. DM-applied)
       renderTokens(d.tokens);
       renderEffects(d.effects || []);
+      // 3D mode rides the same poll: cached so BM3D can seat tokens instantly
+      // on open, forwarded live while the viewer is loaded. The DM floorplan
+      // editor (BMFP) tracks door states / external saves the same way.
+      window._bmLastState = d;
+      if (window.BM3D) BM3D.onState(d);
+      if (window.BMFP) BMFP.onState(d);
     })
     .catch(() => { _pollFails++; })
     .finally(() => _schedulePoll());
@@ -2190,6 +2196,8 @@ function setCellPx(val) {
 
   const label = document.getElementById('cell-px-label');
   if (label)  label.textContent = val + 'px';
+
+  if (window.BMFP) BMFP.redraw();   // floorplan layer is drawn in px, not %
 
   try { localStorage.setItem('bm_cell_px_' + MAP_ID, val); } catch(e) {}
 }

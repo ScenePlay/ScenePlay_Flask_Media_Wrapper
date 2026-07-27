@@ -85,6 +85,15 @@
                   data-map-rows="{{ m.grid_rows }}"
                   onclick="openMapPromptModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
                   title="Image Prompt">&#127748;</button>
+          {% if m.bg_image and m.bg_image.rsplit('.', 1)[1].lower() not in ('mp4', 'webm', 'ogv') %}
+          <button class="btn btn-outline-secondary btn-sm"
+                  data-map-id="{{ m.map_id }}"
+                  data-map-name="{{ m.name }}"
+                  data-map-cols="{{ m.grid_cols }}"
+                  data-map-rows="{{ m.grid_rows }}"
+                  onclick="open3dTraceModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
+                  title="3D Floorplan — trace walls/doors from the map image for 3D mode">&#9635;</button>
+          {% endif %}
           <form method="POST"
                 action="{{ url_for('battlemap_bp.map_delete', map_id=m.map_id) }}"
                 onsubmit="return confirm('Delete map \'{{ m.name }}\'?')">
@@ -356,6 +365,69 @@
     </div>
   </div>
 </div>
+
+<!-- ── 3D Floorplan Modal (trace prompt + JSON paste) ───────────────────────── -->
+<div class="modal fade" id="map3dModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content"
+         style="background:var(--ttrpg-primary);border:1px solid var(--ttrpg-accent);color:var(--ttrpg-text);">
+      <div class="modal-header" style="border-color:var(--ttrpg-accent);">
+        <h5 class="modal-title" id="map3d-modal-title"
+            style="color:var(--ttrpg-accent);">&#9635; 3D Floorplan</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Current floorplan status -->
+        <div class="d-flex align-items-center gap-2 mb-3 p-2"
+             style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);border-radius:6px;">
+          <span id="fp-status" class="small flex-grow-1 text-muted">No floorplan yet.</span>
+          <button id="fp-delete-btn" class="btn btn-outline-danger btn-sm" style="display:none;"
+                  onclick="delete3dFloorplan()">Delete Floorplan</button>
+        </div>
+
+        <p class="small text-muted mb-2">
+          <b>Step 1</b> — copy this prompt into a vision AI (ChatGPT, Claude&#8230;) and
+          <b>attach this map's background image</b> to the same message. The AI traces the
+          walls, doors and elevation into JSON.
+        </p>
+        <button class="btn btn-ttrpg btn-sm w-100 mb-2"
+                onclick="generateAndShow3dTracePrompt()">&#9889; Generate Trace Prompt</button>
+        <div id="fp-prompt-section" style="display:none;">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="small text-muted">Attach the map image with this prompt.</span>
+            <button class="btn btn-sm ms-auto"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="copy3dTracePrompt()">&#128203; Copy Prompt</button>
+          </div>
+          <textarea id="fp-prompt-text" class="form-control mb-3" readonly
+                    style="font-family:monospace;font-size:.78rem;min-height:200px;
+                           background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                           border-color:var(--sp-border);resize:vertical;"></textarea>
+        </div>
+
+        <hr style="border-color:var(--sp-border);">
+        <p class="small text-muted mb-2">
+          <b>Step 2</b> — paste the AI's JSON reply here and save. You can fix any
+          misaligned walls later with the Floorplan editor on the map page.
+        </p>
+        <textarea id="fp-paste-text" class="form-control mb-2" rows="6"
+                  placeholder='{"format": "sceneplay-floorplan", "walls": [...], ...}'
+                  style="font-family:monospace;font-size:.78rem;
+                         background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                         border-color:var(--sp-border);resize:vertical;"></textarea>
+        <button class="btn btn-ttrpg btn-sm w-100" id="fp-save-btn"
+                onclick="save3dFloorplan()">&#128190; Save Floorplan</button>
+        <div id="fp-result" class="small mt-2"></div>
+
+      </div>
+      <div class="modal-footer" style="border-color:var(--ttrpg-accent);">
+        <span id="fp-copy-fb" style="font-size:.8rem;color:var(--ttrpg-accent);display:none;">Copied!</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -561,6 +633,9 @@ function toggleMapEdit(mapId) {
 
 // {genres: {key: {label, battle_envs, travel_envs:[{name,scale}], flavor}}, scales: [...]}
 const _MAP_GENRES = {{ map_prompt_data | tojson }};
+
+// {map_id: {version, summary}} — floorplan status for the 3D Floorplan modal
+const _FP_INFO = {{ floorplan_info | tojson }};
 
 let _mapPromptType  = 'static';
 let _mapScaleKind   = 'battle';   // 'battle' (5-ft squares) | 'travel' (large distances)
@@ -985,6 +1060,151 @@ function _uploadMapBg(blob, ext, btnEl) {
     .catch(() => {
       if (btn) { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }
     });
+}
+
+// ── 3D Floorplan (trace prompt + JSON paste) ─────────────────────────────────
+// Image-first flow: the DM attaches the FINISHED map image to a vision LLM
+// with this prompt; the LLM traces it into floorplan JSON (schema owned by
+// floorplan.py server-side — the example below must stay in sync with it),
+// and the reply is pasted back and validated by POST /floorplan.
+
+let _fp3dMapId = null, _fp3dMapName = '', _fp3dCols = 20, _fp3dRows = 20;
+
+function open3dTraceModal(mapId, mapName, cols, rows) {
+  _fp3dMapId   = parseInt(mapId);
+  _fp3dMapName = mapName;
+  _fp3dCols    = parseInt(cols) || 20;
+  _fp3dRows    = parseInt(rows) || 20;
+  document.getElementById('map3d-modal-title').innerHTML =
+    '&#9635; 3D Floorplan &mdash; ' + _mnEsc(mapName);
+  document.getElementById('fp-prompt-section').style.display = 'none';
+  document.getElementById('fp-paste-text').value = '';
+  document.getElementById('fp-result').innerHTML = '';
+  _fpUpdateStatus();
+  new bootstrap.Modal(document.getElementById('map3dModal')).show();
+}
+
+function _fpUpdateStatus() {
+  const info = _FP_INFO[_fp3dMapId];
+  const status = document.getElementById('fp-status');
+  const delBtn = document.getElementById('fp-delete-btn');
+  if (info) {
+    status.innerHTML = 'Floorplan <b>v' + info.version + '</b> &mdash; ' + _mnEsc(info.summary);
+    status.classList.remove('text-muted');
+    delBtn.style.display = '';
+  } else {
+    status.textContent = 'No floorplan yet.';
+    status.classList.add('text-muted');
+    delBtn.style.display = 'none';
+  }
+}
+
+function _build3dTracePrompt() {
+  const c = _fp3dCols, r = _fp3dRows;
+  return [
+'You are tracing a floorplan from the ATTACHED top-down TTRPG battle map image.',
+'(The map image is attached to this message — if it is missing, ask for it before answering.)',
+'',
+'## TASK',
+'Trace the walls, doors, and elevation changes VISIBLE IN THE ART into JSON for a 3D renderer.',
+'',
+'## COORDINATE SYSTEM',
+'- The map is a grid ' + c + ' columns wide × ' + r + ' rows tall. Mentally divide the image into that ' + c + '×' + r + ' grid before tracing; if the art shows grid lines, align to them.',
+'- Origin is the TOP-LEFT corner. x increases RIGHTWARD (columns, 0 to ' + c + '); y increases DOWNWARD (rows, 0 to ' + r + ').',
+'- The image edges ARE the grid edges: the left edge of the image is x=0, the right edge is x=' + c + ', the top is y=0, the bottom is y=' + r + '. Anchor every coordinate to the full image extent — do not shift or shrink the layout toward one corner.',
+'- Units are grid squares; fractional values are allowed — prefer halves (e.g. 6.5) where a wall runs mid-square. 1 square = 5 ft.',
+'',
+'## WHAT TO TRACE',
+'- "walls": solid barriers visible in the art — masonry, cave walls, cliff faces, ship hulls. Straight segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment. Do NOT trace furniture, rubble, or decoration.',
+'- "doors": visually obvious doors, gates, or portcullises as separate entries (never part of a wall segment — leave a gap in the wall and cover it with the door). Give each a short unique id ("d1", "d2"…). "open": true only if the art clearly shows it standing open.',
+'- "elevations": ONLY where the art clearly shows a pit, chasm, ledge, platform, or balcony — axis-aligned rectangles with "floor_ft" (negative = pit/chasm depth, positive = raised platform height). When in doubt, LEAVE THE LIST EMPTY: flat ground is the default.',
+'- Optional per-segment fields: "height_ft" on walls (default 10); "base_ft" on walls that start above the floor. Doors default to the WALL height — give a door "height_ft" only when the art clearly shows a shorter opening (an archway, a low tunnel); the space above it is rendered as solid wall.',
+'',
+'## OUTPUT FORMAT (STRICT)',
+'Reply with RAW JSON only — no markdown code fences, no commentary, no explanations.',
+'The JSON must match this exact shape:',
+'',
+JSON.stringify({
+  format: 'sceneplay-floorplan',
+  schema_version: 1,
+  grid: { cols: c, rows: r },
+  default_wall_height_ft: 10,
+  walls: [ { x1: 3, y1: 0, x2: 3, y2: 6.5 } ],
+  doors: [ { id: 'd1', x1: 3, y1: 6.5, x2: 3, y2: 7.5, open: false } ],
+  elevations: [ { x1: 5, y1: 5, x2: 9, y2: 9, floor_ft: -10, label: 'pit' } ],
+}, null, 2),
+'',
+'Limits: at most 2000 walls, 200 doors, 200 elevation rectangles. All coordinates must lie inside the ' + c + '×' + r + ' grid.',
+'Before answering, verify each wall segment against the image: does its start and end land on the barrier as drawn?',
+  ].join('\n');
+}
+
+function generateAndShow3dTracePrompt() {
+  document.getElementById('fp-prompt-text').value = _build3dTracePrompt();
+  document.getElementById('fp-prompt-section').style.display = '';
+}
+
+function copy3dTracePrompt() {
+  const ta = document.getElementById('fp-prompt-text');
+  const fb = document.getElementById('fp-copy-fb');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => _mapFallbackCopy(ta, showFb));
+  } else {
+    _mapFallbackCopy(ta, showFb);
+  }
+}
+
+function _fpShowResult(html, isError) {
+  const el = document.getElementById('fp-result');
+  el.innerHTML = html;
+  el.style.color = isError ? 'var(--bs-danger, #dc3545)' : 'var(--ttrpg-accent)';
+}
+
+function save3dFloorplan() {
+  // LLMs love fences despite instructions — strip ```json ... ``` wrappers.
+  const raw = document.getElementById('fp-paste-text').value
+    .replace(/^\s*```[a-z]*\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  if (!raw) { _fpShowResult('Paste the JSON reply first.', true); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { _fpShowResult('Not valid JSON: ' + _mnEsc(e.message), true); return; }
+
+  const btn = document.getElementById('fp-save-btn');
+  btn.disabled = true;
+  fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ floorplan: parsed }),
+  }).then(r => r.json().then(d => ({ status: r.status, d })))
+    .then(({ status, d }) => {
+      btn.disabled = false;
+      if (!d.ok) {
+        _fpShowResult('<b>Rejected:</b><br>' +
+          (d.errors || ['save failed']).map(_mnEsc).join('<br>'), true);
+        return;
+      }
+      _FP_INFO[_fp3dMapId] = { version: d.version, summary: d.summary };
+      _fpUpdateStatus();
+      let html = '<b>Saved v' + d.version + '</b> &mdash; ' + _mnEsc(d.summary);
+      if (d.warnings && d.warnings.length) {
+        html += '<br>&#9888; ' + d.warnings.map(_mnEsc).join('<br>&#9888; ');
+      }
+      _fpShowResult(html, false);
+    })
+    .catch(() => { btn.disabled = false; _fpShowResult('Save failed (network).', true); });
+}
+
+function delete3dFloorplan() {
+  if (!confirm('Delete the floorplan for "' + _fp3dMapName + '"? 3D mode will be disabled for this map.')) return;
+  fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan/delete`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { _fpShowResult('Delete failed.', true); return; }
+      delete _FP_INFO[_fp3dMapId];
+      _fpUpdateStatus();
+      _fpShowResult('Floorplan deleted.', false);
+    })
+    .catch(() => _fpShowResult('Delete failed (network).', true));
 }
 </script>
 {% endblock %}

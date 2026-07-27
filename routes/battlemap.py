@@ -11,10 +11,12 @@ from flask_login import login_required, current_user
 
 from extensions import db, currentvolume
 from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects,
-                           tblBattleMapNotes, tblSessions, tblSessionParty,
+                           tblBattleMapNotes, tblBattleMapFloorplans,
+                           tblBattleMapDoors, tblSessions, tblSessionParty,
                            tblSessionMonsters, tblCharacters)
 from models.scenes import tblscenes
 from routes.auth import dm_required
+import floorplan as floorplan_mod
 import relay_broadcaster
 
 battlemap_bp = Blueprint('battlemap_bp', __name__, url_prefix='/ttrpg/battlemap')
@@ -214,12 +216,26 @@ def _push_map_state(bm):
         'border_color': e.border_color,
     } for e in bm.effects]
     monsters, chars = _fetch_token_entities(bm.tokens)
+    # Floorplan + door states ride the push so remote players get view-only 3D.
+    # Typical plans are tens of KB and pushes are event-driven (not per-poll).
+    floorplan = fp_version = doors = None
+    fp = tblBattleMapFloorplans.query.filter_by(map_id=bm.map_id).first()
+    if fp:
+        try:
+            floorplan = json.loads(fp.json_data)
+        except (ValueError, TypeError):
+            floorplan = None
+        if floorplan is not None:
+            fp_version = fp.version
+            doors = {d.door_key: d.is_open
+                     for d in tblBattleMapDoors.query.filter_by(map_id=bm.map_id)}
     relay_broadcaster.broadcast_map_update(
         bg_url, bm.grid_cols, bm.grid_rows,
         [p for p in (_token_relay_payload(t, bm, monsters, chars) for t in bm.tokens) if p],
         effects=effects,
         movement_scale=bm.movement_scale or 1.0,
         bg_filename=bm.bg_image,
+        floorplan=floorplan, floorplan_version=fp_version, doors=doors,
     )
 
 
@@ -287,9 +303,19 @@ def session_maps(session_id):
         db.session.query(tblBattleMapNotes.map_id, db.func.count())
         .filter(tblBattleMapNotes.map_id.in_([m.map_id for m in maps] or [0]))
         .group_by(tblBattleMapNotes.map_id).all())
+    # Floorplan status per map — the 3D Floorplan modal shows version + summary
+    floorplan_info = {}
+    for fp in tblBattleMapFloorplans.query.filter(
+            tblBattleMapFloorplans.map_id.in_([m.map_id for m in maps] or [0])).all():
+        try:
+            summary = floorplan_mod.floorplan_summary(json.loads(fp.json_data))
+        except (ValueError, TypeError):
+            summary = ''
+        floorplan_info[fp.map_id] = {'version': fp.version, 'summary': summary}
     from genre_packs import map_prompt_client_data
     return render_template('ttrpg/battlemap_manage.html', sess=sess, maps=maps,
                            note_counts=note_counts,
+                           floorplan_info=floorplan_info,
                            map_prompt_data=map_prompt_client_data())
 
 
@@ -621,6 +647,15 @@ def map_view(map_id):
     if current_user.is_dm() and bm.is_active:
         _push_map_state(bm)
 
+    # 3D mode needs a stored floorplan AND a static-image background (a looping
+    # video can't texture the 3D floor). The button/loader render only when both hold.
+    fp = (tblBattleMapFloorplans.query
+          .with_entities(tblBattleMapFloorplans.version)
+          .filter_by(map_id=map_id).first())
+    floorplan_version = fp.version if fp else None
+    bg_ext = bm.bg_image.rsplit('.', 1)[-1].lower() if '.' in (bm.bg_image or '') else ''
+    bm3d_available = bool(floorplan_version and bm.bg_image and bg_ext not in VIDEO_EXT)
+
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
                            monsters=monsters, party=party,
@@ -630,7 +665,9 @@ def map_view(map_id):
                            roller_name=roller_name,
                            roller_chars=roller_chars,
                            campaign_scenes=campaign_scenes,
-                           current_vol=current_vol)
+                           current_vol=current_vol,
+                           floorplan_version=floorplan_version,
+                           bm3d_available=bm3d_available)
 
 
 # ── Relay presence endpoint ──────────────────────────────────────────────────
@@ -753,6 +790,16 @@ def map_state(map_id):
         if active_bm:
             active_map_id = active_bm.map_id
 
+    # Floorplan geometry itself never rides the poll — clients re-fetch
+    # GET /floorplan only when this version changes. Door states are tiny.
+    fp = (tblBattleMapFloorplans.query
+          .with_entities(tblBattleMapFloorplans.version)
+          .filter_by(map_id=map_id).first())
+    doors = None
+    if fp:
+        doors = {d.door_key: d.is_open
+                 for d in tblBattleMapDoors.query.filter_by(map_id=map_id).all()}
+
     return jsonify({
         'tokens':        result,
         'effects':       effects,
@@ -760,6 +807,8 @@ def map_state(map_id):
         'grid_rows':     bm.grid_rows,
         'active_map_id': active_map_id,
         'roller_sig':    roller_sig,
+        'floorplan_version': fp.version if fp else None,
+        'doors':         doors,
     })
 
 
@@ -945,6 +994,93 @@ def effect_clear(map_id):
     db.session.commit()
     _push_map_state(tblBattleMaps.query.get(map_id))
     return jsonify({'ok': True})
+
+
+# ── Floorplan (3D-mode geometry) ─────────────────────────────────────────────
+# Wall/door/elevation JSON traced by a vision LLM (or drawn by the DM) that the
+# 3D viewer extrudes. GET is open to players — they need the geometry to
+# render 3D; writes and door toggling are DM-only.
+
+@battlemap_bp.route('/<int:map_id>/floorplan')
+@login_required
+def floorplan_get(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
+    if not fp:
+        return jsonify({'ok': True, 'version': None, 'floorplan': None})
+    return jsonify({'ok': True, 'version': fp.version,
+                    'floorplan': json.loads(fp.json_data)})
+
+
+@battlemap_bp.route('/<int:map_id>/floorplan', methods=['POST'])
+@login_required
+@dm_required
+def floorplan_save(map_id):
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    data = request.get_json() or {}
+    clean, warnings, errors = floorplan_mod.validate_floorplan(
+        data.get('floorplan'), bm.grid_cols, bm.grid_rows)
+    if errors:
+        return jsonify({'ok': False, 'errors': errors}), 400
+
+    fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
+    if fp:
+        fp.json_data  = json.dumps(clean)
+        fp.version    = (fp.version or 1) + 1
+        fp.updated_at = _now()
+    else:
+        fp = tblBattleMapFloorplans(map_id=map_id, json_data=json.dumps(clean),
+                                    version=1, updated_at=_now())
+        db.session.add(fp)
+
+    # Reconcile door-state rows against the new door set: add rows for new ids
+    # (initial state from the JSON), drop rows for removed ids, and PRESERVE
+    # is_open for ids that survive the re-save (an edit mid-session must not
+    # slam every door shut).
+    existing = {d.door_key: d for d in
+                tblBattleMapDoors.query.filter_by(map_id=map_id).all()}
+    new_ids = {d['id'] for d in clean['doors']}
+    for door in clean['doors']:
+        if door['id'] not in existing:
+            db.session.add(tblBattleMapDoors(
+                map_id=map_id, door_key=door['id'],
+                is_open=1 if door.get('open') else 0, updated_at=_now()))
+    for key, row in existing.items():
+        if key not in new_ids:
+            db.session.delete(row)
+
+    db.session.commit()
+    _push_map_state(bm)   # live map: remote 3D viewers rebuild on the next push
+    return jsonify({'ok': True, 'version': fp.version, 'warnings': warnings,
+                    'summary': floorplan_mod.floorplan_summary(clean)})
+
+
+@battlemap_bp.route('/<int:map_id>/floorplan/delete', methods=['POST'])
+@login_required
+@dm_required
+def floorplan_delete(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    tblBattleMapFloorplans.query.filter_by(map_id=map_id).delete()
+    tblBattleMapDoors.query.filter_by(map_id=map_id).delete()
+    db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))   # portal hides its 3D button
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/door/toggle', methods=['POST'])
+@login_required
+@dm_required
+def door_toggle(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    key = ((request.get_json() or {}).get('door_key') or '').strip()
+    d = tblBattleMapDoors.query.filter_by(map_id=map_id, door_key=key).first()
+    if not d:
+        return jsonify({'ok': False, 'error': 'unknown door'}), 404
+    d.is_open = 0 if d.is_open else 1
+    d.updated_at = _now()
+    db.session.commit()
+    _push_map_state(tblBattleMaps.query.get(map_id))
+    return jsonify({'ok': True, 'door_key': key, 'is_open': d.is_open})
 
 
 # ── DM map notes ──────────────────────────────────────────────────────────────
