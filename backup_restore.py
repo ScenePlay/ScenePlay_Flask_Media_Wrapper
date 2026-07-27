@@ -363,6 +363,9 @@ def restore_replace(zip_path, include_uploads=True):
 #   maps         (session, lower(name)); imported maps arrive is_active=0
 #   tokens/fx    copied for NEW maps only — an existing map's live battle
 #                state (positions, fog) is never touched
+#   floorplans   (3D wall/door geometry) one row per map — copied only when
+#                the destination map has NO plan (local wins); door open/
+#                closed states ride only with a copied plan
 #   notes        (parent, title, body) dedup; sort_order appended past ceiling
 #   lighting     copied only into scenes with NO local lighting of that type;
 #                LED models matched by modelName (copied if missing), WLED
@@ -399,7 +402,7 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
     table existing so pre-ttrpg archives pass through untouched."""
     s = {'characters': 0, 'characters_skipped': 0, 'characters_no_owner': 0,
          'sessions': 0, 'maps': 0, 'session_monsters': 0, 'party_links': 0,
-         'tokens': 0, 'map_effects': 0, 'notes': 0, 'lighting': 0}
+         'tokens': 0, 'map_effects': 0, 'floorplans': 0, 'notes': 0, 'lighting': 0}
 
     # -- users: match only, never copy ---------------------------------------
     # Resolve the fallback owner FIRST — it seeds user_map for unmatched
@@ -601,6 +604,37 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
                 data['map_id'] = mid
                 _copy_row(c, 'tblBattleMapEffects', data)
                 s['map_effects'] += 1
+        # 3D floorplans: one row per map, so there IS a dedup identity — copy
+        # whenever the destination map has no plan yet (new maps always; a
+        # re-run also heals maps that merged before the archive gained plans).
+        # A map that already has a local plan keeps it — local wins. Door
+        # open/closed rows ride only with a copied plan: their door_keys are
+        # meaningless against someone else's geometry.
+        if _src_has(c, 'tblBattleMapFloorplans'):
+            fcols = _common_cols(c, 'tblBattleMapFloorplans', exclude=('floorplan_id',))
+            for row in c.execute(
+                    f"SELECT {', '.join(fcols)} FROM src.tblBattleMapFloorplans").fetchall():
+                data = dict(zip(fcols, row))
+                src_mid, mid = data.get('map_id'), map_map.get(data.get('map_id'))
+                if not mid:
+                    continue
+                if c.execute("SELECT 1 FROM tblBattleMapFloorplans WHERE map_id=?",
+                             (mid,)).fetchone():
+                    continue                      # local plan wins
+                data['map_id'] = mid
+                _copy_row(c, 'tblBattleMapFloorplans', data)
+                s['floorplans'] += 1
+                if _src_has(c, 'tblBattleMapDoors'):
+                    dcols = _common_cols(c, 'tblBattleMapDoors', exclude=('row_id',))
+                    for drow in c.execute(
+                            f"SELECT {', '.join(dcols)} FROM src.tblBattleMapDoors "
+                            "WHERE map_id=?", (src_mid,)).fetchall():
+                        ddata = dict(zip(dcols, drow))
+                        if c.execute("SELECT 1 FROM tblBattleMapDoors WHERE map_id=? "
+                                     "AND door_key=?", (mid, ddata.get('door_key'))).fetchone():
+                            continue
+                        ddata['map_id'] = mid
+                        _copy_row(c, 'tblBattleMapDoors', ddata)
 
     # -- notes (session + map): dedup by (parent, title, body) ---------------------
     for tbl, pk, parent_col, parent_map in (

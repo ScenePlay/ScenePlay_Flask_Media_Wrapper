@@ -42,6 +42,8 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapTokens (token_id INTEGER PRIMARY KEY, map_id INT, entity_type TEXT, entity_id INT, col INT, row INT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapEffects (effect_id INTEGER PRIMARY KEY, map_id INT, shape TEXT, label TEXT, anchor_x REAL, anchor_y REAL, size_ft INT, angle REAL, fill_color TEXT, fill_opacity REAL, border_color TEXT, created_at TEXT)",
     "CREATE TABLE tblBattleMapNotes (note_id INTEGER PRIMARY KEY, map_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE tblBattleMapFloorplans (floorplan_id INTEGER PRIMARY KEY, map_id INT UNIQUE, json_data TEXT, version INT, updated_at TEXT)",
+    "CREATE TABLE tblBattleMapDoors (row_id INTEGER PRIMARY KEY, map_id INT, door_key TEXT, is_open INT, updated_at TEXT, UNIQUE(map_id, door_key))",
     "CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, ledTypeModel_ID INT, color TEXT, wait_ms INT, iterations INT, direction INT, cdiff INT, orderBy INT, outPin INT, brightness INT)",
     "CREATE TABLE tblWledPattern (wledPattern_ID INTEGER PRIMARY KEY, scene_ID INT, server_ID INT, effect INT, pallette INT, color1 TEXT, color2 TEXT, color3 TEXT, speed INT, brightness INT, orderBy INT)",
     "CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, modelName TEXT, ledJSON TEXT)",
@@ -557,6 +559,11 @@ class TestFullMerge:
                "VALUES (1, 'monster', 1, 5, 5, 't')")  # Gnark A -> new session monster
         x(src, "INSERT INTO tblBattleMapEffects(map_id, shape, label, size_ft, created_at) "
                "VALUES (1, 'cloud', '', 20, 't')")
+        # 3D floorplan + an open door on the source map
+        x(src, "INSERT INTO tblBattleMapFloorplans(map_id, json_data, version, updated_at) "
+               "VALUES (1, '{\"walls\": [], \"doors\": [{\"id\": \"d1\"}]}', 3, 't')")
+        x(src, "INSERT INTO tblBattleMapDoors(map_id, door_key, is_open, updated_at) "
+               "VALUES (1, 'd1', 1, 't')")
         x(src, "INSERT INTO tblSessionNotes(session_id, title, body, sort_order, created_at, updated_at) "
                "VALUES (1, 'Plot', 'the twist', 0, 't', 't')")
         x(src, "INSERT INTO tblBattleMapNotes(map_id, title, body, sort_order, created_at, updated_at) "
@@ -609,6 +616,11 @@ class TestFullMerge:
         assert ('player', zloc) in toks and ('monster', gnark) in toks and s['tokens'] == 2
         assert s['map_effects'] == 1
 
+        # 3D floorplan + door state ride with the new map, version intact
+        assert s['floorplans'] == 1
+        assert q(env['live'], "SELECT version FROM tblBattleMapFloorplans WHERE map_id=?", (mid,)) == [(3,)]
+        assert q(env['live'], "SELECT door_key, is_open FROM tblBattleMapDoors WHERE map_id=?", (mid,)) == [('d1', 1)]
+
         # notes on both levels
         assert s['notes'] == 2
         assert q(env['live'], "SELECT body FROM tblSessionNotes WHERE session_id=?", (sid,)) == [('the twist',)]
@@ -629,8 +641,23 @@ class TestFullMerge:
         br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
         s2 = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
         assert (s2['characters'], s2['sessions'], s2['maps'], s2['session_monsters'],
-                s2['party_links'], s2['tokens'], s2['map_effects'], s2['notes'],
-                s2['lighting']) == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+                s2['party_links'], s2['tokens'], s2['map_effects'], s2['floorplans'],
+                s2['notes'], s2['lighting']) == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    def test_full_merge_keeps_local_floorplan(self, env):
+        """A map that already has a local floorplan keeps it (and its door
+        states) on re-merge — the archive's plan never overwrites."""
+        snap = self._boxes(env)
+        br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        mid = q(env['live'], "SELECT map_id FROM tblBattleMaps WHERE name='Deck 5'")[0][0]
+        x(env['live'], "UPDATE tblBattleMapFloorplans SET json_data='LOCAL', version=9 WHERE map_id=?", (mid,))
+        x(env['live'], "UPDATE tblBattleMapDoors SET is_open=0 WHERE map_id=? AND door_key='d1'", (mid,))
+        s2 = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert s2['floorplans'] == 0
+        assert q(env['live'], "SELECT json_data, version FROM tblBattleMapFloorplans WHERE map_id=?",
+                 (mid,)) == [('LOCAL', 9)]
+        assert q(env['live'], "SELECT is_open FROM tblBattleMapDoors WHERE map_id=? AND door_key='d1'",
+                 (mid,)) == [(0,)]
 
     def test_plain_merge_still_skips_ttrpg(self, env):
         snap = self._boxes(env)

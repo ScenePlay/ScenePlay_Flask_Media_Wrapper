@@ -64,6 +64,7 @@ window.BM3D = (function () {
   var yaw = 0, pitch = 0;
   var fogRects = [];              // cloud footprints in cells: {x1,z1,x2,z2}
   var _fogSig = null;
+  var _decalSig = null;
   var _lastEffects = null;
   var view = { kind: 'overview', tokenId: null };   // 'first' | 'fly' | 'overview'
   var keys = {};
@@ -563,6 +564,147 @@ window.BM3D = (function () {
     refreshTokenVisibility();
   }
 
+  // ── AoE effect decals (circle / cone / line / square) ──────────────────────
+  // Flat shapes lying on the floor, same geometry math as battlemap.js's
+  // applyEffectGeometry (sizes in cells = size_ft/5; cone half-angle 26.57°;
+  // line half-width 0.5 cells). Fill + border colors/opacity mirror the 2D
+  // look; clouds are handled by the fog volumes above, not here.
+
+  var CONE_HALF_RAD = 26.57 * Math.PI / 180;
+
+  function effectShape(e) {
+    var ax = e.anchor_x, az = e.anchor_y;
+    var r = (e.size_ft || 5) / 5;
+    var th = (e.angle || 0) * Math.PI / 180;
+    var s = new THREE.Shape();
+    if (e.shape === 'circle') {
+      s.absarc(ax, az, r, 0, Math.PI * 2, false);
+    } else if (e.shape === 'square') {
+      s.moveTo(ax - r, az - r); s.lineTo(ax + r, az - r);
+      s.lineTo(ax + r, az + r); s.lineTo(ax - r, az + r); s.closePath();
+    } else if (e.shape === 'cone') {
+      s.moveTo(ax, az);
+      s.absarc(ax, az, r, th - CONE_HALF_RAD, th + CONE_HALF_RAD, false);
+      s.closePath();
+    } else if (e.shape === 'line') {
+      var hw = 0.5, nx = -Math.sin(th) * hw, nz = Math.cos(th) * hw;
+      var ex = r * Math.cos(th), ez = r * Math.sin(th);
+      s.moveTo(ax + nx, az + nz); s.lineTo(ax + ex + nx, az + ez + nz);
+      s.lineTo(ax + ex - nx, az + ez - nz); s.lineTo(ax - nx, az - nz);
+      s.closePath();
+    } else {
+      return null;
+    }
+    return s;
+  }
+
+  // Small floating name tag over a labeled effect — same pill style as the
+  // token nameplates, anchored where the 2D label sits (circle/square center,
+  // 55% along a cone's direction, a line's midpoint).
+  function labelSprite(text) {
+    var cv = document.createElement('canvas');
+    var ctx = cv.getContext('2d');
+    ctx.font = 'bold 28px sans-serif';
+    var tw = Math.ceil(ctx.measureText(text).width);
+    cv.width = tw + 28; cv.height = 44;
+    ctx = cv.getContext('2d');           // canvas resize resets the context
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, cv.width / 2, cv.height / 2 + 1);
+    var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(cv), transparent: true, alphaTest: 0.05 }));
+    var h = 0.32;                        // world units tall; width keeps aspect
+    sprite.scale.set(h * cv.width / cv.height, h, 1);
+    return sprite;
+  }
+
+  function effectLabelAnchor(e) {
+    var r = (e.size_ft || 5) / 5, th = (e.angle || 0) * Math.PI / 180;
+    if (e.shape === 'cone') {
+      return { x: e.anchor_x + r * 0.55 * Math.cos(th),
+               z: e.anchor_y + r * 0.55 * Math.sin(th) };
+    }
+    if (e.shape === 'line') {
+      return { x: e.anchor_x + (r / 2) * Math.cos(th),
+               z: e.anchor_y + (r / 2) * Math.sin(th) };
+    }
+    return { x: e.anchor_x, z: e.anchor_y };
+  }
+
+  function updateDecals(effects) {
+    if (!scene) return;
+    var fx = (effects || []).filter(function (e) { return e.shape !== 'cloud'; });
+    var sig = fx.map(function (e) {
+      return [e.effect_id, e.shape, e.anchor_x, e.anchor_y, e.size_ft, e.angle,
+              e.fill_color, e.fill_opacity, e.border_color, e.label].join(',');
+    }).join(';');
+    if (sig === _decalSig && groups.decals) return;
+    _decalSig = sig;
+    if (groups.decals) scene.remove(groups.decals);
+    groups.decals = new THREE.Group();
+    fx.forEach(function (e) {
+      var shp = effectShape(e);
+      if (!shp) return;
+      var y = floorAt(e.anchor_x, e.anchor_y) + 0.015;   // just under token bases
+      var fill = new THREE.Mesh(
+        new THREE.ShapeGeometry(shp),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(e.fill_color || '#ff4400'),
+          transparent: true,
+          opacity: e.fill_opacity != null ? e.fill_opacity : 0.35,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }));
+      fill.rotation.x = Math.PI / 2;   // shape (x, y) -> world (x, z), lying flat
+      fill.position.y = y;
+      groups.decals.add(fill);
+      var outline = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(shp.getPoints(48)),
+        new THREE.LineBasicMaterial({ color: new THREE.Color(e.border_color || '#ff8800') }));
+      outline.rotation.x = Math.PI / 2;
+      outline.position.y = y + 0.005;
+      groups.decals.add(outline);
+      if (e.label) {
+        var tag = labelSprite(e.label);
+        var at = effectLabelAnchor(e);
+        // same height as the decal itself (anchored at e.anchor), so a label
+        // point that happens to hang over a pit doesn't sink into it
+        tag.position.set(at.x, y + 0.45, at.z);
+        groups.decals.add(tag);
+      }
+    });
+    scene.add(groups.decals);
+  }
+
+  // A player whose viewpoint token stands INSIDE a fog cloud is blinded: the
+  // fog boxes are backface-culled from within, so without this the fogged
+  // player would see the whole map. The DM is exempt (translucent fog).
+  var _blindEl = null;
+
+  function setBlind(on) {
+    if (!_blindEl) {
+      _blindEl = document.createElement('div');
+      _blindEl.style.cssText =
+        'position:absolute;inset:0;z-index:1;display:none;background:#0a0b10;' +
+        'align-items:center;justify-content:center;text-align:center;' +
+        'color:#667;font:600 17px sans-serif;padding:0 12%;';
+      _blindEl.textContent =
+        'Thick fog surrounds you — you can\'t see anything from here.';
+      cfg.overlayEl.appendChild(_blindEl);
+      var bar = cfg.overlayEl.querySelector('#bm3d-topbar');
+      if (bar) bar.style.zIndex = '2';   // Exit button stays reachable
+    }
+    _blindEl.style.display = on ? 'flex' : 'none';
+  }
+
+  function isBlind() {
+    return !cfg.isDM && view.kind === 'first' && fogRects.length &&
+           inFog(camera.position.x, camera.position.z);
+  }
+
   function tokenVisible(rec) {
     if (view.kind === 'first' && view.tokenId === rec.tok.token_id) return false;
     if (!cfg.isDM && fogRects.length) {
@@ -792,7 +934,7 @@ window.BM3D = (function () {
     sun.position.set(cfg.gridCols * 0.3, span, cfg.gridRows * 0.15);
     scene.add(sun);
 
-    groups = { floor: null, walls: null, doors: null, fog: null,
+    groups = { floor: null, walls: null, doors: null, fog: null, decals: null,
                tokens: new THREE.Group() };
     scene.add(groups.tokens);
 
@@ -811,8 +953,9 @@ window.BM3D = (function () {
     groups.floor = buildFloor(_bgTex);
     scene.add(groups.walls, groups.doors, groups.floor);
     applyDoorStates(doorStates);
-    _fogSig = null;                       // fog bases sit on the (new) floor
-    if (_lastEffects) updateFog(_lastEffects);
+    _fogSig = null;                       // fog/decal bases sit on the (new) floor
+    _decalSig = null;
+    if (_lastEffects) { updateFog(_lastEffects); updateDecals(_lastEffects); }
     // reseat sprites/camera heights on the (possibly changed) elevations
     Object.keys(tokenRecs).forEach(function (tid) {
       var rec = tokenRecs[tid];
@@ -863,6 +1006,9 @@ window.BM3D = (function () {
     });
     animateDoors(dt);
     updateCamera(dt);
+    var blind = isBlind();
+    setBlind(blind);
+    if (blind) { renderer.clear(); return; }   // fogged player sees nothing
     renderer.render(scene, camera);
   }
 
@@ -878,6 +1024,7 @@ window.BM3D = (function () {
         antialias: !IS_TOUCH,
         powerPreference: 'high-performance',
       });
+      renderer.setClearColor(0x0b0d12);   // blind-in-fog frames clear to this
       camera = new THREE.PerspectiveCamera(72, 1, 0.05, 1000);
       raycaster = new THREE.Raycaster();
       plan = cfg.floorplan || null;
@@ -936,7 +1083,10 @@ window.BM3D = (function () {
   function onState(d) {
     if (!d || !renderer || !scene) return;
     if (d.doors) applyDoorStates(d.doors);
-    if (d.effects) updateFog(d.effects);   // fog first: token visibility depends on it
+    if (d.effects) {
+      updateFog(d.effects);      // fog first: token visibility depends on it
+      updateDecals(d.effects);   // AoE shapes lie flat on the floor
+    }
     if (d.tokens) updateTokens(d.tokens);
     if (d.floorplan_version && planVersion && d.floorplan_version !== planVersion) {
       planVersion = d.floorplan_version;
