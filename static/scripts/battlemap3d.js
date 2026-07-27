@@ -1114,11 +1114,49 @@ window.BM3D = (function () {
     if (scene) rebuildGeometry();
   }
 
+  // Whole-map swap for SPA hosts (the portal): the GM activated a DIFFERENT
+  // map, so grid size, background art and floorplan all change together.
+  // The local map page never needs this — switching maps there navigates to
+  // a fresh page. Safe to call while closed; tokens re-seat on the next
+  // onState/feed with the new map's token list.
+  function setMap(opts) {
+    if (!cfg) return;
+    cfg.gridCols = opts.gridCols || cfg.gridCols;
+    cfg.gridRows = opts.gridRows || cfg.gridRows;
+    plan = opts.floorplan || { walls: [], doors: [], elevations: [] };
+    planVersion = opts.floorplanVersion || null;
+    doorStates = {};
+    if (scene && scene.fog) {   // draw distance scales with the map span
+      var span = Math.max(cfg.gridCols, cfg.gridRows);
+      scene.fog.near = span * 0.8;
+      scene.fog.far = span * 2.6;
+    }
+    flyPos = null;              // old fly position may be off the new map
+    var bgUrl = opts.bgUrl || '';
+    if (bgUrl !== cfg.bgUrl) {
+      cfg.bgUrl = bgUrl;
+      _bgTex = null;            // old art must not texture the new floor
+      buildBgPixels(null);
+      if (bgUrl && renderer) {
+        new THREE.TextureLoader().load(bgUrl, function (tex) {
+          tex.anisotropy = Math.min(IS_TOUCH ? 2 : 8,
+                                    renderer.capabilities.getMaxAnisotropy());
+          _bgTex = tex;
+          buildBgPixels(tex.image);
+          if (scene) rebuildGeometry();
+        });
+      }
+    }
+    if (scene) rebuildGeometry();
+    if (open_) setView(defaultView());
+  }
+
   return {
     open: openViewer,
     close: closeViewer,
     onState: onState,
     setFloorplan: setFloorplan,
+    setMap: setMap,
     isOpen: function () { return open_; },
   };
 })();
