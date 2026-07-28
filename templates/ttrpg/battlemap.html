@@ -657,6 +657,12 @@
         <div id="map-lines"
              style="background-size:{{ cell_px }}px {{ cell_px }}px;"></div>
 
+        <!-- Player-visible floorplan walls (z:4, everyone) — walls the DM
+             flagged "players can see", e.g. blocking off impossible art -->
+        <svg id="fp-visible-layer"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;
+                    z-index:4;overflow:visible;pointer-events:none;"></svg>
+
         {% if current_user.is_dm() %}
         <!-- Floorplan editor layer (z:5 — DM only; walls/doors/elevation for 3D mode) -->
         <svg id="floorplan-layer"
@@ -802,25 +808,71 @@
     Walls &amp; doors drawn here are what 3D mode extrudes. Players never see this layer.
   </div>
 
-  <!-- Tools -->
-  <div class="d-flex gap-1 mb-2 flex-wrap">
-    <button id="fp-tool-wall" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('wall')" title="Drag to draw a wall (Shift = straight)">&#9998; Wall</button>
-    <button id="fp-tool-door" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('door')" title="Click a wall to turn it into a door; click a door to turn it back">&#128682; Door</button>
-    <button id="fp-tool-elev" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('elev')" title="Drag a rectangle, then enter its floor height (negative = pit)">&#8645; Elev</button>
-    <button id="fp-tool-erase" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('erase')" title="Click a wall / door / elevation to delete it">&#9003; Erase</button>
+  <!-- Walls group: line / square / circle + height + surface texture -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#9635; Walls</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="d-flex gap-1 mb-2">
+      <button id="fp-tool-wall" class="btn btn-sm btn-outline-secondary flex-grow-1"
+              onclick="BMFP.setTool('wall')" title="Drag to draw a wall line (Shift = straight)">&#9585; Line</button>
+      <button id="fp-tool-rect" class="btn btn-sm btn-outline-secondary flex-grow-1"
+              onclick="BMFP.setTool('rect')" title="Drag corner to corner — a rectangle of four walls">&#9645; Square</button>
+      <button id="fp-tool-circle" class="btn btn-sm btn-outline-secondary flex-grow-1"
+              onclick="BMFP.setTool('circle')" title="Drag from the center outward — a circular ring of walls">&#9675; Circle</button>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label">Height</label>
+      <input type="number" id="fp-wall-height" value="10" min="1" max="100" step="5"
+             class="form-control form-control-sm bg-dark text-light border-secondary"
+             style="width:62px;" oninput="BMFP.setWallHeight(this.value)">
+      <span class="fx-label">ft</span>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label">Texture</label>
+      <select id="fp-wall-style" class="form-select form-select-sm bg-dark text-light border-secondary"
+              style="width:auto;flex:1;" onchange="BMFP.setWallStyle(this.value)"
+              title="Surface finish for 3D walls and elevation sides — tinted by the map art">
+        <option value="none">Smooth</option>
+        <option value="brick">Brick</option>
+        <option value="stone">Stone</option>
+        <option value="wood">Wood</option>
+      </select>
+    </div>
+    <div class="form-check" style="margin-bottom:0;">
+      <input class="form-check-input" type="checkbox" id="fp-wall-show"
+             onchange="BMFP.setWallShow(this.checked)">
+      <label class="form-check-label fx-label" for="fp-wall-show"
+             title="New walls also render on the 2D map for players — e.g. to block off art that's wrong (stairs that don't exist)">
+        Players can see new walls (2D)
+      </label>
+    </div>
   </div>
 
-  <!-- Wall height -->
-  <div class="d-flex align-items-center gap-2 mb-2">
-    <label class="fx-label">Wall&nbsp;height</label>
-    <input type="number" id="fp-wall-height" value="10" min="1" max="100" step="5"
-           class="form-control form-control-sm bg-dark text-light border-secondary"
-           style="width:62px;" oninput="BMFP.setWallHeight(this.value)">
-    <span class="fx-label">ft</span>
+  <!-- Elevation group: square / circle pits & platforms -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#8645; Elevation</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="d-flex gap-1 mb-1">
+      <button id="fp-tool-elev" class="btn btn-sm btn-outline-secondary flex-grow-1"
+              onclick="BMFP.setTool('elev')" title="Drag a rectangle — it gets the height set below">&#9645; Square</button>
+      <button id="fp-tool-elevc" class="btn btn-sm btn-outline-secondary flex-grow-1"
+              onclick="BMFP.setTool('elevc')" title="Drag from the center outward — it gets the height set below">&#9675; Circle</button>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label">Height</label>
+      <input type="number" id="fp-elev-height" value="-10" min="-50" max="100" step="5"
+             class="form-control form-control-sm bg-dark text-light border-secondary"
+             style="width:70px;" oninput="BMFP.setElevHeight(this.value)"
+             title="Applied to elevation shapes as you draw them — remembered for next time">
+      <span class="fx-label">ft</span>
+    </div>
+    <div class="fx-label" style="color:#666;font-size:.68rem;">Negative feet = pit, positive = platform.</div>
+  </div>
+
+  <!-- Door / erase -->
+  <div class="d-flex gap-1 mb-2">
+    <button id="fp-tool-door" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="BMFP.setTool('door')" title="Click a wall to turn it into a door; click a door to turn it back">&#128682; Door</button>
+    <button id="fp-tool-erase" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="BMFP.setTool('erase')" title="Click a wall / door / elevation to delete it">&#9003; Erase</button>
   </div>
 
   <hr style="border-color:var(--sp-border);margin:6px 0;">
@@ -828,20 +880,21 @@
   <!-- Align: shift/scale the WHOLE floorplan to fit the art (LLM traces often
        come back offset or slightly the wrong size) -->
   <div class="fx-label mb-1">Align &mdash; fit the whole plan to the art</div>
-  <div class="d-flex align-items-center gap-1 mb-2 flex-wrap">
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.nudge(-0.5, 0)"
+  <div class="d-flex align-items-center gap-1 mb-1">
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.nudge(-0.5, 0)"
             title="Shift the whole floorplan left ½ square">&#9664;</button>
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.nudge(0, -0.5)"
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.nudge(0, -0.5)"
             title="Shift the whole floorplan up ½ square">&#9650;</button>
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.nudge(0, 0.5)"
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.nudge(0, 0.5)"
             title="Shift the whole floorplan down ½ square">&#9660;</button>
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.nudge(0.5, 0)"
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.nudge(0.5, 0)"
             title="Shift the whole floorplan right ½ square">&#9654;</button>
-    <span style="width:8px;"></span>
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.scalePlan(1 / 1.05)"
+  </div>
+  <div class="d-flex align-items-center gap-1 mb-2">
+    <span class="fx-label" style="min-width:36px;">Scale</span>
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.scalePlan(1 / 1.05)"
             title="Shrink the whole floorplan 5% (about its center)">&#8722;</button>
-    <span class="fx-label">scale</span>
-    <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.scalePlan(1.05)"
+    <button class="btn btn-sm btn-outline-secondary px-2 flex-grow-1" onclick="BMFP.scalePlan(1.05)"
             title="Grow the whole floorplan 5% (about its center)">&#43;</button>
   </div>
 
@@ -1001,9 +1054,16 @@
             style="background:rgba(255,255,255,.08);border:1px solid #e8e6e3;color:#f2f0ec;
                    border-radius:6px;padding:4px 12px;font-size:.85rem;cursor:pointer;white-space:nowrap;">
       &#10005; Exit 3D</button>
-    {% if current_user.is_dm() %}
-    <select id="bm3d-viewpoint" class="form-select form-select-sm" style="width:auto;
+    <!-- DM: any token / free fly. Player: own tokens (shown only with 2+). -->
+    <select id="bm3d-viewpoint" class="form-select form-select-sm"
+            style="width:auto;{% if not current_user.is_dm() %}display:none;{% endif %}
             background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#555;"></select>
+    {% if current_user.is_dm() %}
+    <button id="bm3d-fog-btn" onclick="bm3dToggleFog()"
+            title="Toggle between your translucent fog and the solid fog players see (tokens inside hidden, blackout from a fogged token's eyes)"
+            style="background:rgba(255,255,255,.08);border:1px solid #777;color:#ccc;
+                   border-radius:6px;padding:4px 10px;font-size:.8rem;cursor:pointer;white-space:nowrap;">
+      &#128065; Fog: DM</button>
     {% endif %}
     <span id="bm3d-hint" class="small text-muted flex-grow-1" style="text-align:right;">
       Click the view to look around &middot; Esc releases the mouse
@@ -1095,7 +1155,12 @@ function _bm3dOpen() {
     bgUrl:        (document.getElementById('map-bg') || {}).src || '',
     floorplanUrl: `/ttrpg/battlemap/${MAP_ID}/floorplan`,
     isDM:         IS_DM,
-    isMyToken:    t => !IS_DM && t.entity_type === 'player' && t.user_id === CURRENT_USER_ID,
+    // "Mine" = my user AND a character in THIS session's party (ROLLER_CHARS is
+    // session-scoped and refreshed by the roller_sig reload) — a stale token
+    // for my character from another/removed session assignment doesn't count.
+    isMyToken:    t => !IS_DM && t.entity_type === 'player'
+                    && t.user_id === CURRENT_USER_ID
+                    && ROLLER_CHARS.some(c => c.id === t.entity_id),
     onDoorToggle: IS_DM ? (key =>
       fetch(`/ttrpg/battlemap/${MAP_ID}/door/toggle`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1106,6 +1171,17 @@ function _bm3dOpen() {
 }
 
 function exit3d() { if (window.BM3D) BM3D.close(); }
+
+function bm3dToggleFog() {
+  if (!window.BM3D) return;
+  const preview = BM3D.toggleFogPreview();
+  const btn = document.getElementById('bm3d-fog-btn');
+  if (btn) {
+    btn.innerHTML = preview ? '&#128065; Fog: Player' : '&#128065; Fog: DM';
+    btn.style.borderColor = preview ? 'var(--ttrpg-accent)' : '#777';
+    btn.style.color = preview ? 'var(--ttrpg-accent)' : '#ccc';
+  }
+}
 {% endif %}
 </script>
 <script src="{{ static_v('scripts/battlemap.js') }}"></script>

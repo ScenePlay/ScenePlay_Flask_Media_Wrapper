@@ -103,6 +103,37 @@ class TestNormalization:
         ids = [d['id'] for d in clean['doors']]
         assert len(set(ids)) == 3 and 'd1' in ids
 
+    def test_wall_show_passthrough(self):
+        clean, _, errors = validate_floorplan(_plan(walls=[
+            {'x1': 1, 'y1': 1, 'x2': 5, 'y2': 1, 'show': True},
+            {'x1': 1, 'y1': 2, 'x2': 5, 'y2': 2},
+        ]), 20, 20)
+        assert errors == []
+        assert clean['walls'][0]['show'] is True
+        assert 'show' not in clean['walls'][1]
+
+    def test_wall_style_passthrough(self):
+        clean, warnings, errors = validate_floorplan(_plan(wall_style='brick'), 20, 20)
+        assert errors == [] and clean['wall_style'] == 'brick'
+        # 'none' and absent are both omitted from the clean JSON
+        clean2, _, _ = validate_floorplan(_plan(wall_style='none'), 20, 20)
+        assert 'wall_style' not in clean2
+        clean3, w3, e3 = validate_floorplan(_plan(wall_style='marble'), 20, 20)
+        assert e3 == [] and 'wall_style' not in clean3
+        assert any('wall_style' in w for w in w3)
+
+    def test_circle_elevation(self):
+        clean, _, errors = validate_floorplan(_plan(elevations=[
+            {'shape': 'circle', 'cx': 10, 'cy': 8, 'r': 2.5, 'floor_ft': -10, 'label': 'well'},
+        ]), 20, 20)
+        assert errors == []
+        e = clean['elevations'][0]
+        assert e == {'shape': 'circle', 'cx': 10.0, 'cy': 8.0, 'r': 2.5,
+                     'floor_ft': -10.0, 'label': 'well'}
+        _, _, errs = validate_floorplan(_plan(elevations=[
+            {'shape': 'circle', 'cx': 10, 'cy': 8}]), 20, 20)
+        assert any('circle needs' in x for x in errs)
+
     def test_elevation_corners_normalized(self):
         clean, _, _ = validate_floorplan(
             _plan(elevations=[{'x1': 9, 'y1': 9, 'x2': 5, 'y2': 5, 'floor_ft': 10}]),

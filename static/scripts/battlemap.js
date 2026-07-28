@@ -409,6 +409,46 @@ function renderTokens(tokens) {
   if (IS_DM) updateSidebar(tokens);
 }
 
+// ── Player-visible floorplan walls ───────────────────────────────────────────
+// Walls the DM flagged "players can see" (floorplan wall.show) render for
+// EVERYONE on the 2D map — used to block off art that's wrong, e.g. painted
+// stairs that don't actually exist. Geometry re-fetches when the poll reports
+// a new floorplan version.
+
+let _fpvVersion = undefined;   // undefined = never synced; null = no floorplan
+let _fpvWalls = [];
+
+function _fpvRender() {
+  const svg = document.getElementById('fp-visible-layer');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  _fpvWalls.forEach(w => {
+    // dark under-stroke + light top-stroke so the bar reads on any art
+    svg.appendChild(svgEl('line', {
+      x1: w.x1 * CELL_PX, y1: w.y1 * CELL_PX, x2: w.x2 * CELL_PX, y2: w.y2 * CELL_PX,
+      stroke: '#14120e', 'stroke-width': 9, 'stroke-linecap': 'round', 'stroke-opacity': 0.85,
+    }));
+    svg.appendChild(svgEl('line', {
+      x1: w.x1 * CELL_PX, y1: w.y1 * CELL_PX, x2: w.x2 * CELL_PX, y2: w.y2 * CELL_PX,
+      stroke: '#d8d2bf', 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-opacity': 0.95,
+    }));
+  });
+}
+
+function _fpvSync(version) {
+  if (version === undefined || version === _fpvVersion) return;
+  _fpvVersion = version;
+  if (!version) { _fpvWalls = []; _fpvRender(); return; }
+  fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`)
+    .then(r => r.json())
+    .then(d => {
+      _fpvWalls = (((d || {}).floorplan || {}).walls || []).filter(w => w.show);
+      _fpvRender();
+    })
+    .catch(() => { _fpvVersion = undefined; });   // retry on the next poll
+}
+if (typeof FLOORPLAN_VERSION !== 'undefined') _fpvSync(FLOORPLAN_VERSION);
+
 // ── Sidebar toggle ────────────────────────────────────────────────────────────
 
 function toggleSidebar() {
@@ -586,6 +626,7 @@ function pollState() {
       window._bmLastState = d;
       if (window.BM3D) BM3D.onState(d);
       if (window.BMFP) BMFP.onState(d);
+      _fpvSync(d.floorplan_version);
     })
     .catch(() => { _pollFails++; })
     .finally(() => _schedulePoll());
@@ -2198,6 +2239,7 @@ function setCellPx(val) {
   if (label)  label.textContent = val + 'px';
 
   if (window.BMFP) BMFP.redraw();   // floorplan layer is drawn in px, not %
+  _fpvRender();                     // ditto for the player-visible walls
 
   try { localStorage.setItem('bm_cell_px_' + MAP_ID, val); } catch(e) {}
 }

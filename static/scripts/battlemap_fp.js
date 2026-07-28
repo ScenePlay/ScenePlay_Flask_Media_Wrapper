@@ -22,6 +22,12 @@ window.BMFP = (function () {
   let dirty = false;
   let tool = null;             // 'wall' | 'door' | 'elev' | 'erase' | null
   let wallHeightFt = 10;
+  let wallShow = false;        // new walls also render on players' 2D maps
+  let elevFt = -10;            // height applied to new elevation shapes
+  try {                        // remembered across sessions
+    const saved = parseInt(localStorage.getItem('bmfp_elev_ft'), 10);
+    if (!isNaN(saved) && saved) elevFt = Math.max(-50, Math.min(100, saved));
+  } catch (e) {}
   let doorStates = {};         // door_key -> 0|1 (from the poll)
   let drag = null;             // active draw drag
   let loaded = false;
@@ -44,6 +50,10 @@ window.BMFP = (function () {
         wallHeightFt = plan.default_wall_height_ft || 10;
         const hEl = document.getElementById('fp-wall-height');
         if (hEl) hEl.value = wallHeightFt;
+        const sEl = document.getElementById('fp-wall-style');
+        if (sEl) sEl.value = plan.wall_style || 'none';
+        const eEl = document.getElementById('fp-elev-height');
+        if (eEl) eEl.value = elevFt;     // remembered from last session
         redraw();
         updateStatus();
       })
@@ -109,13 +119,26 @@ window.BMFP = (function () {
     plan.elevations.forEach((e, i) => {
       const up = e.floor_ft >= 0;
       const g = svgEl('g');
-      g.appendChild(svgEl('rect', {
-        x: px(e.x1), y: px(e.y1), width: px(e.x2 - e.x1), height: px(e.y2 - e.y1),
+      const stroke = up ? '#4a9eff' : '#b06060';
+      const fillAttrs = {
         fill: up ? '#4a9eff' : '#000000', 'fill-opacity': up ? '0.18' : '0.35',
-        stroke: up ? '#4a9eff' : '#b06060', 'stroke-width': 2, 'stroke-dasharray': '6 4',
-      }));
+        stroke: stroke, 'stroke-width': 2, 'stroke-dasharray': '6 4',
+      };
+      let lx, ly;
+      if (e.shape === 'circle') {
+        g.appendChild(svgEl('circle', Object.assign({
+          cx: px(e.cx), cy: px(e.cy), r: px(e.r) }, fillAttrs)));
+        lx = px(e.cx) - px(e.r) * 0.5;
+        ly = px(e.cy);
+      } else {
+        g.appendChild(svgEl('rect', Object.assign({
+          x: px(e.x1), y: px(e.y1),
+          width: px(e.x2 - e.x1), height: px(e.y2 - e.y1) }, fillAttrs)));
+        lx = px(e.x1) + 6;
+        ly = px(e.y1) + 16;
+      }
       const label = svgEl('text', {
-        x: px(e.x1) + 6, y: px(e.y1) + 16,
+        x: lx, y: ly,
         fill: up ? '#8fc3ff' : '#e09090', 'font-size': '12', 'font-weight': '700',
       });
       label.textContent = (e.floor_ft > 0 ? '+' : '') + e.floor_ft + ' ft' +
@@ -126,10 +149,12 @@ window.BMFP = (function () {
     });
 
     plan.walls.forEach((w, i) => {
+      // player-visible walls read brighter in the editor so the DM can tell
+      // which corrections the table can see
       const line = svgEl('line', {
         x1: px(w.x1), y1: px(w.y1), x2: px(w.x2), y2: px(w.y2),
-        stroke: '#c9c4b4', 'stroke-width': 5, 'stroke-linecap': 'round',
-        'stroke-opacity': '0.85',
+        stroke: w.show ? '#f2ead0' : '#c9c4b4', 'stroke-width': w.show ? 6 : 5,
+        'stroke-linecap': 'round', 'stroke-opacity': w.show ? '1' : '0.85',
       });
       line.dataset.wallIdx = i;
       svg.appendChild(line);
@@ -219,7 +244,7 @@ window.BMFP = (function () {
 
   function setTool(t) {
     tool = (tool === t) ? null : t;
-    ['wall', 'door', 'elev', 'erase'].forEach(name => {
+    ['wall', 'rect', 'circle', 'door', 'elev', 'elevc', 'erase'].forEach(name => {
       const b = document.getElementById('fp-tool-' + name);
       if (!b) return;
       b.classList.toggle('btn-ttrpg', tool === name);
@@ -236,6 +261,24 @@ window.BMFP = (function () {
 
   function setWallHeight(v) {
     wallHeightFt = Math.max(1, Math.min(100, parseInt(v) || 10));
+  }
+
+  function setWallStyle(v) {
+    if (!plan) return;
+    if (v === 'none') delete plan.wall_style;
+    else plan.wall_style = v;
+    markDirty();
+  }
+
+  function setWallShow(v) {
+    wallShow = !!v;
+  }
+
+  function setElevHeight(v) {
+    const ft = parseInt(v, 10);
+    if (isNaN(ft)) return;               // mid-typing (e.g. just "-") — keep last
+    elevFt = Math.max(-50, Math.min(100, ft));
+    try { localStorage.setItem('bmfp_elev_ft', String(elevFt)); } catch (e) {}
   }
 
   // ── geometry helpers ───────────────────────────────────────────────────────
@@ -319,7 +362,23 @@ window.BMFP = (function () {
     e.preventDefault();
     const p = evtCell(e);
 
-    if (tool === 'erase') { eraseAt(p); return; }
+    if (tool === 'erase') {
+      // Brush: erase at the press point, then keep erasing whatever the
+      // pointer sweeps over until release. The cursor ring lives in the draw
+      // OVERLAY (a div) because every removal redraws the SVG layer, which
+      // would wipe a ring placed there.
+      const ring = document.createElement('div');
+      const rPx = HIT_RADIUS * CELL_PX;
+      ring.style.cssText =
+        'position:absolute;pointer-events:none;border:2px solid #e66;' +
+        'border-radius:50%;box-shadow:0 0 6px rgba(230,102,102,.7);' +
+        `width:${rPx * 2}px;height:${rPx * 2}px;` +
+        `left:${p.x * CELL_PX - rPx}px;top:${p.y * CELL_PX - rPx}px;`;
+      overlay().appendChild(ring);
+      drag = { kind: 'erase', previewEl: ring };
+      eraseAt(p);
+      return;
+    }
     if (tool === 'door')  { doorAt(p);  return; }
 
     if (tool === 'wall') {
@@ -331,6 +390,22 @@ window.BMFP = (function () {
       });
       layer().appendChild(previewEl);
       drag = { kind: 'wall', start, previewEl };
+    } else if (tool === 'rect') {
+      const start = { x: snapHalf(p.x), y: snapHalf(p.y) };
+      const previewEl = svgEl('rect', {
+        x: start.x * CELL_PX, y: start.y * CELL_PX, width: 0, height: 0,
+        fill: 'none', stroke: 'var(--ttrpg-accent, #c9a84c)', 'stroke-width': 5,
+      });
+      layer().appendChild(previewEl);
+      drag = { kind: 'rect', start, previewEl };
+    } else if (tool === 'circle') {
+      const start = { x: snapHalf(p.x), y: snapHalf(p.y) };   // center
+      const previewEl = svgEl('circle', {
+        cx: start.x * CELL_PX, cy: start.y * CELL_PX, r: 0,
+        fill: 'none', stroke: 'var(--ttrpg-accent, #c9a84c)', 'stroke-width': 5,
+      });
+      layer().appendChild(previewEl);
+      drag = { kind: 'circle', start, previewEl };
     } else if (tool === 'elev') {
       const start = { x: snapInt(p.x), y: snapInt(p.y) };
       const previewEl = svgEl('rect', {
@@ -340,12 +415,28 @@ window.BMFP = (function () {
       });
       layer().appendChild(previewEl);
       drag = { kind: 'elev', start, previewEl };
+    } else if (tool === 'elevc') {
+      const start = { x: snapHalf(p.x), y: snapHalf(p.y) };   // center
+      const previewEl = svgEl('circle', {
+        cx: start.x * CELL_PX, cy: start.y * CELL_PX, r: 0,
+        fill: '#4a9eff', 'fill-opacity': '0.2',
+        stroke: '#4a9eff', 'stroke-width': 2, 'stroke-dasharray': '6 4',
+      });
+      layer().appendChild(previewEl);
+      drag = { kind: 'elevc', start, previewEl };
     }
   }
 
   function onMove(e) {
     if (!drag) return;
     const p = evtCell(e);
+    if (drag.kind === 'erase') {
+      const rPx = HIT_RADIUS * CELL_PX;
+      drag.previewEl.style.left = (p.x * CELL_PX - rPx) + 'px';
+      drag.previewEl.style.top  = (p.y * CELL_PX - rPx) + 'px';
+      eraseAt(p);   // clears anything the brush touches along the sweep
+      return;
+    }
     if (drag.kind === 'wall') {
       let end = { x: snapHalf(p.x), y: snapHalf(p.y) };
       if (e.shiftKey) {   // axis lock to the dominant direction
@@ -355,6 +446,19 @@ window.BMFP = (function () {
       drag.end = end;
       drag.previewEl.setAttribute('x2', end.x * CELL_PX);
       drag.previewEl.setAttribute('y2', end.y * CELL_PX);
+    } else if (drag.kind === 'rect') {
+      const end = { x: snapHalf(p.x), y: snapHalf(p.y) };
+      drag.end = end;
+      const x1 = Math.min(drag.start.x, end.x), y1 = Math.min(drag.start.y, end.y);
+      drag.previewEl.setAttribute('x', x1 * CELL_PX);
+      drag.previewEl.setAttribute('y', y1 * CELL_PX);
+      drag.previewEl.setAttribute('width',  Math.abs(end.x - drag.start.x) * CELL_PX);
+      drag.previewEl.setAttribute('height', Math.abs(end.y - drag.start.y) * CELL_PX);
+    } else if (drag.kind === 'circle' || drag.kind === 'elevc') {
+      const r = Math.round(Math.hypot(p.x - drag.start.x, p.y - drag.start.y) / SNAP) * SNAP;
+      drag.r = r;
+      drag.end = p;   // onUp requires an end point to commit any drag
+      drag.previewEl.setAttribute('r', r * CELL_PX);
     } else if (drag.kind === 'elev') {
       const end = { x: snapInt(p.x), y: snapInt(p.y) };
       drag.end = end;
@@ -373,26 +477,57 @@ window.BMFP = (function () {
     d.previewEl.remove();
     if (!d.end) return;
 
+    // walls from any shape tool carry the panel's height when it differs
+    const pushWall = (x1, y1, x2, y2) => {
+      const seg = { x1: +x1.toFixed(2), y1: +y1.toFixed(2),
+                    x2: +x2.toFixed(2), y2: +y2.toFixed(2) };
+      if (wallHeightFt !== (plan.default_wall_height_ft || 10)) seg.height_ft = wallHeightFt;
+      if (wallShow) seg.show = true;   // players see it on the 2D map
+      plan.walls.push(seg);
+    };
+
     if (d.kind === 'wall') {
       if (d.start.x === d.end.x && d.start.y === d.end.y) return;
-      const seg = { x1: d.start.x, y1: d.start.y, x2: d.end.x, y2: d.end.y };
-      if (wallHeightFt !== (plan.default_wall_height_ft || 10)) seg.height_ft = wallHeightFt;
-      plan.walls.push(seg);
+      pushWall(d.start.x, d.start.y, d.end.x, d.end.y);
+      markDirty();
+    } else if (d.kind === 'rect') {
+      const x1 = Math.min(d.start.x, d.end.x), x2 = Math.max(d.start.x, d.end.x);
+      const y1 = Math.min(d.start.y, d.end.y), y2 = Math.max(d.start.y, d.end.y);
+      if (x1 === x2 || y1 === y2) return;
+      pushWall(x1, y1, x2, y1); pushWall(x2, y1, x2, y2);
+      pushWall(x2, y2, x1, y2); pushWall(x1, y2, x1, y1);
+      markDirty();
+    } else if (d.kind === 'circle') {
+      const r = d.r || 0;
+      if (r < SNAP) return;
+      // ~12 segments per cell of radius reads smoothly without wall spam
+      const n = Math.max(12, Math.min(48, Math.round(r * 12)));
+      let px = d.start.x + r, py = d.start.y;
+      for (let i = 1; i <= n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const nx = d.start.x + r * Math.cos(a), ny = d.start.y + r * Math.sin(a);
+        pushWall(px, py, nx, ny);
+        px = nx; py = ny;
+      }
       markDirty();
     } else if (d.kind === 'elev') {
       const x1 = Math.min(d.start.x, d.end.x), x2 = Math.max(d.start.x, d.end.x);
       const y1 = Math.min(d.start.y, d.end.y), y2 = Math.max(d.start.y, d.end.y);
-      if (x1 === x2 || y1 === y2) return;
-      const raw = prompt('Floor height in feet (negative = pit, positive = platform):', '-10');
-      if (raw === null) return;
-      const ft = parseInt(raw, 10);
-      if (isNaN(ft) || !ft) return;
-      plan.elevations.push({ x1, y1, x2, y2, floor_ft: Math.max(-50, Math.min(100, ft)) });
+      if (x1 === x2 || y1 === y2 || !elevFt) return;
+      plan.elevations.push({ x1, y1, x2, y2, floor_ft: elevFt });
+      markDirty();
+    } else if (d.kind === 'elevc') {
+      if (!d.r || d.r < SNAP || !elevFt) return;
+      plan.elevations.push({ shape: 'circle', cx: d.start.x, cy: d.start.y,
+                             r: d.r, floor_ft: elevFt });
       markDirty();
     }
   }
 
-  function eraseAt(p) {
+  // Removes the nearest wall/door (or covering elevation) within brush range.
+  // Returns true when something was removed so the brush can keep clearing a
+  // spot until it's empty.
+  function eraseOne(p) {
     const wi = nearestSeg(plan.walls, p);
     const di = nearestSeg(plan.doors, p);
     // Prefer whichever is genuinely closer when both are in range.
@@ -401,12 +536,19 @@ window.BMFP = (function () {
         distToSeg(p, { x: plan.walls[wi].x1, y: plan.walls[wi].y1 }, { x: plan.walls[wi].x2, y: plan.walls[wi].y2 }))) {
       plan.doors.splice(di, 1);
       markDirty();
-      return;
+      return true;
     }
-    if (wi !== null) { plan.walls.splice(wi, 1); markDirty(); return; }
-    const ei = plan.elevations.findIndex(e2 =>
-      p.x >= e2.x1 && p.x < e2.x2 && p.y >= e2.y1 && p.y < e2.y2);
-    if (ei !== -1) { plan.elevations.splice(ei, 1); markDirty(); }
+    if (wi !== null) { plan.walls.splice(wi, 1); markDirty(); return true; }
+    const ei = plan.elevations.findIndex(e2 => e2.shape === 'circle'
+      ? Math.hypot(p.x - e2.cx, p.y - e2.cy) <= e2.r
+      : (p.x >= e2.x1 && p.x < e2.x2 && p.y >= e2.y1 && p.y < e2.y2));
+    if (ei !== -1) { plan.elevations.splice(ei, 1); markDirty(); return true; }
+    return false;
+  }
+
+  function eraseAt(p) {
+    let guard = 200;                       // plan caps make this unreachable
+    while (guard-- > 0 && eraseOne(p)) {}  // clear EVERYTHING the brush touches
   }
 
   function doorAt(p) {
@@ -434,6 +576,12 @@ window.BMFP = (function () {
   (function init() {
     const ov = overlay();
     if (!ov) return;   // not the DM page
+    // Same floating-drag behavior as the FX / dice / notes panels
+    // (makeDraggable comes from battlemap.js, which loads before this file).
+    if (typeof makeDraggable === 'function') {
+      makeDraggable(document.getElementById('fp-panel'),
+                    document.getElementById('fp-drag-handle'));
+    }
     ov.addEventListener('pointerdown', onDown);
     ov.addEventListener('pointermove', onMove);
     ov.addEventListener('pointerup', onUp);
@@ -446,8 +594,8 @@ window.BMFP = (function () {
   })();
 
   return {
-    onState, redraw, save, revert, setTool, setWallHeight,
-    nudge, scalePlan,
+    onState, redraw, save, revert, setTool, setWallHeight, setWallStyle,
+    setWallShow, setElevHeight, nudge, scalePlan,
     toggle: togglePanel, close: closePanel,
     isDirty: () => dirty,
   };

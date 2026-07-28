@@ -171,7 +171,27 @@ def my_character():
     if active_session:
         active_map = tblBattleMaps.query.filter_by(
             session_id=active_session.session_id, is_active=1).first()
-    return render_template('ttrpg/my_characters.html', characters=chars, active_map=active_map)
+
+    # Campaign scoping: while a session is live, default to the characters in
+    # ITS party — a player's roster spans campaigns, and their sci-fi captain
+    # shouldn't sit next to tonight's dungeon crawlers. "?all=1" shows the
+    # full roster (that's also where brand-new characters appear).
+    hidden_count = 0
+    show_all = request.args.get('all') == '1'
+    campaign_name = ''
+    if active_session and not show_all:
+        party_ids = {sp.character_id for sp in active_session.party}
+        in_session = [c for c in chars if c.character_id in party_ids]
+        if in_session:
+            hidden_count = len(chars) - len(in_session)
+            chars = in_session
+            if active_session.campaign_id:
+                camp = db.session.get(tblcampaigns, active_session.campaign_id)
+                campaign_name = camp.campaign_name if camp else ''
+
+    return render_template('ttrpg/my_characters.html', characters=chars,
+                           active_map=active_map, hidden_count=hidden_count,
+                           show_all=show_all, campaign_name=campaign_name)
 
 
 # ── Character create ───────────────────────────────────────────────────────────

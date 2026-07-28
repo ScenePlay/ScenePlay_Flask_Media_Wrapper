@@ -644,6 +644,27 @@ class TestFullMerge:
                 s2['party_links'], s2['tokens'], s2['map_effects'], s2['floorplans'],
                 s2['notes'], s2['lighting']) == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
+    def test_full_merge_heals_existing_map_without_floorplan(self, env):
+        """The user's box already has the same session + map (matched by name)
+        but no floorplan — the archive's plan and door states must land on the
+        EXISTING map row, not just on newly imported maps."""
+        snap = self._boxes(env)
+        # Pre-create the matching session + map locally, with no floorplan.
+        x(env['live'], "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Star Wars', 1, '1')")
+        cid = q(env['live'], "SELECT campaign_id FROM tblCampaigns WHERE campaign_name='Star Wars'")[0][0]
+        x(env['live'], "INSERT INTO tblSessions(title, session_number, campaign_id, status, created_at) "
+                       "VALUES ('Ep1', 1, ?, 'planning', 't')", (cid,))
+        sid = q(env['live'], "SELECT session_id FROM tblSessions WHERE title='Ep1'")[0][0]
+        x(env['live'], "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, is_active, sort_order, created_at) "
+                       "VALUES (?, 'Deck 5', 20, 20, 0, 0, 't')", (sid,))
+        mid = q(env['live'], "SELECT map_id FROM tblBattleMaps WHERE name='Deck 5'")[0][0]
+
+        s = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert s['maps'] == 0, 'map should match the existing row, not import'
+        assert s['floorplans'] == 1
+        assert q(env['live'], "SELECT version FROM tblBattleMapFloorplans WHERE map_id=?", (mid,)) == [(3,)]
+        assert q(env['live'], "SELECT door_key, is_open FROM tblBattleMapDoors WHERE map_id=?", (mid,)) == [('d1', 1)]
+
     def test_full_merge_keeps_local_floorplan(self, env):
         """A map that already has a local floorplan keeps it (and its door
         states) on re-merge — the archive's plan never overwrites."""

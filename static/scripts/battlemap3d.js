@@ -99,7 +99,12 @@ window.BM3D = (function () {
     if (!plan || !plan.elevations) return 0;
     for (var i = 0; i < plan.elevations.length; i++) {
       var e = plan.elevations[i];
-      if (x >= e.x1 && x < e.x2 && z >= e.y1 && z < e.y2) h = e.floor_ft * FT;
+      if (e.shape === 'circle') {
+        var dx = x - e.cx, dz = z - e.cy;
+        if (dx * dx + dz * dz <= e.r * e.r) h = e.floor_ft * FT;
+      } else if (x >= e.x1 && x < e.x2 && z >= e.y1 && z < e.y2) {
+        h = e.floor_ft * FT;
+      }
     }
     return h;
   }
@@ -195,12 +200,87 @@ window.BM3D = (function () {
             Math.round(acc[2] / n);
   }
 
+  // Average art color of one grid cell — used to tint elevation skirts (pit
+  // walls, platform sides) from the surface art around them.
+  function cellAvgColor(cx, cz) {
+    var acc = [0, 0, 0];
+    samplePoint(cx + 0.5, cz + 0.5, acc);
+    samplePoint(cx + 0.25, cz + 0.25, acc);
+    samplePoint(cx + 0.75, cz + 0.75, acc);
+    return [acc[0] / 3, acc[1] / 3, acc[2] / 3];
+  }
+
+  function _hash01(n) {
+    n = (n * 2654435761) >>> 0;
+    return ((n >>> 8) % 1000) / 1000;
+  }
+
+  // Procedural surface finish multiplied over the sampled colors, so brick on
+  // a mossy wall stays mossy. Deterministic (hash, not random) so rebuilds
+  // look identical. Patterns are laid out in FEET (1 cell = 5 ft) as
+  // horizontal courses precomputed per texture:
+  //   brick — uniform 1.25 ft courses, 2.5 ft bricks, alternate offset
+  //   stone — irregular courses (1.2-2.6 ft) of oblong blocks with random
+  //           lengths (2-4.8 ft) and jittered joints
+  //   wood  — horizontal planks (0.8-1.3 ft) with random lengths and a pair
+  //           of nail holes near each plank end
+  function makePatternCtx(style, heightFt, seed) {
+    if (!style || style === 'none') return null;
+    var rows = [], y = 0, i = 0;
+    while (y < heightFt && rows.length < 48) {
+      var h, w;
+      if (style === 'brick')      { h = 1.25; w = 2.5; }
+      else if (style === 'stone') { h = 1.2 + _hash01(seed + i * 17) * 1.4;
+                                    w = 2.0 + _hash01(seed + i * 29 + 5) * 2.8; }
+      else                        { h = 0.8 + _hash01(seed + i * 11) * 0.5;
+                                    w = 2.8 + _hash01(seed + i * 23 + 7) * 3.2; }
+      rows.push({ y0: y, y1: y + h, w: w, idx: i,
+                  off: style === 'brick' ? (i % 2 ? w / 2 : 0)
+                                         : _hash01(seed + i * 41 + 3) * w });
+      y += h; i++;
+    }
+    return { style: style, rows: rows, seed: seed };
+  }
+
+  function patFactor(ctx, xf, yf) {
+    if (!ctx) return 1;
+    var rows = ctx.rows, row = rows[rows.length - 1];
+    for (var i = 0; i < rows.length; i++) {
+      if (yf < rows[i].y1) { row = rows[i]; break; }
+    }
+    var JOINT = 0.12;
+    if (yf - row.y0 < JOINT) return ctx.style === 'wood' ? 0.75 : 0.68;  // course seam
+    var u = xf + row.off;
+    var k = Math.floor(u / row.w);
+    // jittered block/plank ends — bricks stay regular, stone/wood irregular
+    var j0 = ctx.style === 'brick' ? 0
+           : (_hash01(ctx.seed + row.idx * 101 + k * 7) - 0.5) * row.w * 0.4;
+    var j1 = ctx.style === 'brick' ? 0
+           : (_hash01(ctx.seed + row.idx * 101 + (k + 1) * 7) - 0.5) * row.w * 0.4;
+    var b0 = k * row.w + j0, b1 = (k + 1) * row.w + j1;
+    if (u - b0 < JOINT || b1 - u < JOINT) return ctx.style === 'wood' ? 0.72 : 0.68;
+    if (ctx.style === 'wood') {
+      var rh = row.y1 - row.y0, ry = yf - row.y0;
+      var endDist = Math.min(u - b0, b1 - u);
+      if (endDist > 0.25 && endDist < 0.42 &&
+          (Math.abs(ry - rh * 0.3) < 0.07 || Math.abs(ry - rh * 0.7) < 0.07)) {
+        return 0.48;                                          // nail holes
+      }
+      return 0.94 + _hash01(ctx.seed + row.idx * 61 + k * 13) * 0.12;  // plank tone
+    }
+    return 0.9 + _hash01(ctx.seed + row.idx * 31 + k * 13) * 0.18;     // block tone
+  }
+
   // Doom-style strip: sample the art along the wall's length, extrude each
   // column vertically with a grounding gradient + light noise so it reads as
   // a surface rather than a smear.
-  function wallStripTexture(seg, lenCells) {
+  function wallStripTexture(seg, lenCells, heightFt) {
     var W = Math.max(16, Math.min(256, Math.round(lenCells * 32)));
-    var H = 32;
+    var H = 64;   // enough rows for crisp brick courses / stone bands
+    var style = (plan && plan.wall_style) || 'none';
+    var seed = ((seg.x1 * 73 + seg.y1 * 179 + seg.x2 * 37 + seg.y2 * 97) | 0) >>> 0;
+    var pctx = makePatternCtx(style, heightFt, seed);
+    var ftPerPx = lenCells * 5 / W;
     var cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
     var ctx = cv.getContext('2d');
@@ -212,8 +292,47 @@ window.BM3D = (function () {
       var r = acc[0] / n, g = acc[1] / n, b = acc[2] / n;
       // deterministic per-column jitter (Math.random is unseeded noise anyway)
       var jit = ((x * 2654435761 >>> 0) % 13 - 6) / 100;
+      var xf = x * ftPerPx;
       for (var y = 0; y < H; y++) {
-        var shade = 1.08 - 0.33 * (y / (H - 1)) + jit;   // lighter top, darker base
+        var shade = (1.08 - 0.33 * (y / (H - 1)) + jit) *
+                    patFactor(pctx, xf, (y / (H - 1)) * heightFt);
+        var i = (y * W + x) * 4;
+        d[i]     = Math.max(0, Math.min(255, r * shade));
+        d[i + 1] = Math.max(0, Math.min(255, g * shade));
+        d[i + 2] = Math.max(0, Math.min(255, b * shade));
+        d[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    var tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+
+  // Skirt strip (one grid-cell-wide vertical face of an elevation step),
+  // sampled from the HIGHER cell's art and patterned like the walls.
+  function skirtStripTexture(edge, heightFt) {
+    var W = 32;
+    var H = Math.max(8, Math.min(96, Math.round(heightFt * 6.4)));
+    var style = (plan && plan.wall_style) || 'none';
+    var seed = ((edge.x * 131 + edge.z * 61 + (edge.orient === 'e' ? 7 : 0)) | 0) >>> 0;
+    var pctx = makePatternCtx(style, heightFt, seed);
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d');
+    var img = ctx.createImageData(W, H);
+    var d = img.data;
+    for (var x = 0; x < W; x++) {
+      var t = x / (W - 1);
+      var acc = [0, 0, 0];
+      if (edge.orient === 'e') samplePoint(edge.hx + 0.5, edge.z + t, acc);
+      else samplePoint(edge.x + t, edge.hz + 0.5, acc);
+      samplePoint(edge.hx + 0.5, edge.hz + 0.5, acc);
+      var r = acc[0] / 2, g = acc[1] / 2, b = acc[2] / 2;
+      var xf = t * 5;
+      for (var y = 0; y < H; y++) {
+        var shade = 0.82 * (1.05 - 0.25 * (y / (H - 1))) *
+                    patFactor(pctx, xf, (y / (H - 1)) * heightFt);
         var i = (y * W + x) * 4;
         d[i]     = Math.max(0, Math.min(255, r * shade));
         d[i + 1] = Math.max(0, Math.min(255, g * shade));
@@ -245,7 +364,8 @@ window.BM3D = (function () {
       // Each wall textured from the art directly beneath it.
       walls.forEach(function (seg) {
         var dx = seg.x2 - seg.x1, dz = seg.y2 - seg.y1;
-        var tex = wallStripTexture(seg, Math.sqrt(dx * dx + dz * dz));
+        var tex = wallStripTexture(seg, Math.sqrt(dx * dx + dz * dz),
+                                   seg.height_ft || defH);
         group.add(new THREE.Mesh(wallGeometry(seg, defH),
                                  new THREE.MeshLambertMaterial({ map: tex })));
       });
@@ -340,8 +460,18 @@ window.BM3D = (function () {
     var cols = cfg.gridCols, rows = cfg.gridRows;
     var group = new THREE.Group();
     var pos = [], uv = [], idx = [], n = 0;
-    var spos = [], sidx = [], sn = 0;
+    var edges = [];
     var x, z;
+
+    // Skirt tint: sampled from the art of the HIGHER cell at the height step —
+    // a platform's side matches the platform top, a pit's wall matches the
+    // ground it's cut into — mildly darkened so the vertical face still reads
+    // as depth. Falls back to the flat dark color with no image pixels.
+    function skirtColor(ax, az, ah, bx, bz, bh) {
+      if (!_bgPix) return null;
+      var c = ah >= bh ? cellAvgColor(ax, az) : cellAvgColor(bx, bz);
+      return [c[0] * 0.82 / 255, c[1] * 0.82 / 255, c[2] * 0.82 / 255];
+    }
 
     function cellH(cx, cz) {
       if (cx < 0 || cz < 0 || cx >= cols || cz >= rows) return null; // outside
@@ -359,21 +489,19 @@ window.BM3D = (function () {
         idx.push(n, n + 2, n + 1, n, n + 3, n + 2);
         n += 4;
         // skirts against east and south neighbours (each shared edge once)
+        // Collect elevation-step edges; skirt faces are built after the loop
+        // (textured with the selected wall style, or tint-only fallback).
         var he = cellH(x + 1, z);
         if (he !== null && he !== h) {
-          var lo = Math.min(h, he), hi = Math.max(h, he);
-          spos.push(x + 1, lo, z,  x + 1, hi, z,  x + 1, hi, z + 1,  x + 1, lo, z + 1);
-          sidx.push(sn, sn + 1, sn + 2, sn, sn + 2, sn + 3,
-                    sn, sn + 2, sn + 1, sn, sn + 3, sn + 2);  // both sides
-          sn += 4;
+          edges.push({ orient: 'e', x: x, z: z, lo: Math.min(h, he), hi: Math.max(h, he),
+                       hx: h >= he ? x : x + 1, hz: z,
+                       ax: x, az: z, ah: h, bx: x + 1, bz: z, bh: he });
         }
         var hs = cellH(x, z + 1);
         if (hs !== null && hs !== h) {
-          var lo2 = Math.min(h, hs), hi2 = Math.max(h, hs);
-          spos.push(x, lo2, z + 1,  x, hi2, z + 1,  x + 1, hi2, z + 1,  x + 1, lo2, z + 1);
-          sidx.push(sn, sn + 1, sn + 2, sn, sn + 2, sn + 3,
-                    sn, sn + 2, sn + 1, sn, sn + 3, sn + 2);
-          sn += 4;
+          edges.push({ orient: 's', x: x, z: z, lo: Math.min(h, hs), hi: Math.max(h, hs),
+                       hx: x, hz: h >= hs ? z : z + 1,
+                       ax: x, az: z, ah: h, bx: x, bz: z + 1, bh: hs });
         }
       }
     }
@@ -388,12 +516,60 @@ window.BM3D = (function () {
       : new THREE.MeshLambertMaterial({ color: 0x394027 });
     group.add(new THREE.Mesh(g, mat));
 
-    if (spos.length) {
-      var sg = new THREE.BufferGeometry();
-      sg.setAttribute('position', new THREE.Float32BufferAttribute(spos, 3));
-      sg.setIndex(sidx);
-      sg.computeVertexNormals();
-      group.add(new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ color: SKIRT_COLOR })));
+    if (edges.length) {
+      var styled = _bgPix && plan && plan.wall_style && plan.wall_style !== 'none';
+      if (styled && edges.length <= 400) {
+        // One textured plane per step face — elevations share the wall finish.
+        edges.forEach(function (edge) {
+          var hU = edge.hi - edge.lo;
+          var tex = skirtStripTexture(edge, hU * 5);
+          var m = new THREE.Mesh(
+            new THREE.PlaneGeometry(1, hU),
+            new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
+          if (edge.orient === 'e') {
+            m.rotation.y = Math.PI / 2;
+            m.position.set(edge.x + 1, edge.lo + hU / 2, edge.z + 0.5);
+          } else {
+            m.position.set(edge.x + 0.5, edge.lo + hU / 2, edge.z + 1);
+          }
+          group.add(m);
+        });
+      } else {
+        // Merged tint-only skirts. Single winding + DoubleSide: indexing both
+        // windings over shared vertices makes computeVertexNormals average
+        // opposite normals to zero, which normalizes to NaN and renders black.
+        var spos = [], sidx = [], scol = [], sn = 0;
+        edges.forEach(function (edge) {
+          if (edge.orient === 'e') {
+            spos.push(edge.x + 1, edge.lo, edge.z,  edge.x + 1, edge.hi, edge.z,
+                      edge.x + 1, edge.hi, edge.z + 1,  edge.x + 1, edge.lo, edge.z + 1);
+          } else {
+            spos.push(edge.x, edge.lo, edge.z + 1,  edge.x, edge.hi, edge.z + 1,
+                      edge.x + 1, edge.hi, edge.z + 1,  edge.x + 1, edge.lo, edge.z + 1);
+          }
+          sidx.push(sn, sn + 1, sn + 2, sn, sn + 2, sn + 3);
+          var c = skirtColor(edge.ax, edge.az, edge.ah, edge.bx, edge.bz, edge.bh);
+          if (c) pushSkirtColor(c);
+          sn += 4;
+        });
+        function pushSkirtColor(c) {
+          for (var k = 0; k < 4; k++) scol.push(c[0], c[1], c[2]);
+        }
+        var sg = new THREE.BufferGeometry();
+        sg.setAttribute('position', new THREE.Float32BufferAttribute(spos, 3));
+        sg.setIndex(sidx);
+        sg.computeVertexNormals();
+        var smat;
+        if (scol.length === spos.length) {   // every quad got an art-sampled tint
+          sg.setAttribute('color', new THREE.Float32BufferAttribute(scol, 3));
+          smat = new THREE.MeshLambertMaterial({ vertexColors: true,
+                                                 side: THREE.DoubleSide });
+        } else {
+          smat = new THREE.MeshLambertMaterial({ color: SKIRT_COLOR,
+                                                 side: THREE.DoubleSide });
+        }
+        group.add(new THREE.Mesh(sg, smat));
+      }
     }
     return group;
   }
@@ -515,7 +691,7 @@ window.BM3D = (function () {
         delete tokenRecs[tid];
       }
     });
-    if (cfg && cfg.isDM) rebuildViewpointSelect(tokens);
+    if (cfg) rebuildViewpointSelect(tokens);
   }
 
   // ── fog of war (the DM's 2D fog clouds, extruded) ──────────────────────────
@@ -533,6 +709,23 @@ window.BM3D = (function () {
     return false;
   }
 
+  // DM fog preview: render fog exactly as players get it (solid volumes,
+  // covered tokens hidden, blackout when a viewed token stands inside) —
+  // the 3D counterpart of the 2D fog-peek eye.
+  var fogPreview = false;
+
+  function playerFog() {
+    return !cfg.isDM || fogPreview;
+  }
+
+  function toggleFogPreview() {
+    fogPreview = !fogPreview;
+    _fogSig = null;                       // force the fog material rebuild
+    if (_lastEffects) updateFog(_lastEffects);
+    refreshTokenVisibility();
+    return fogPreview;
+  }
+
   function updateFog(effects) {
     if (!scene) return;
     _lastEffects = effects;
@@ -546,10 +739,10 @@ window.BM3D = (function () {
     groups.fog = new THREE.Group();
     fogRects = [];
     var hU = Math.max(3, ((plan && plan.default_wall_height_ft) || 10) * FT * 1.5);
-    var mat = cfg.isDM
-      ? new THREE.MeshBasicMaterial({ color: FOG_COLOR, transparent: true,
-                                      opacity: 0.3, depthWrite: false })
-      : new THREE.MeshBasicMaterial({ color: FOG_COLOR });
+    var mat = playerFog()
+      ? new THREE.MeshBasicMaterial({ color: FOG_COLOR })
+      : new THREE.MeshBasicMaterial({ color: FOG_COLOR, transparent: true,
+                                      opacity: 0.3, depthWrite: false });
     clouds.forEach(function (e) {
       var w = Math.max(1, (e.size_ft || 5) / 5);
       var h = e.angle > 0 ? e.angle : w;
@@ -701,13 +894,16 @@ window.BM3D = (function () {
   }
 
   function isBlind() {
-    return !cfg.isDM && view.kind === 'first' && fogRects.length &&
+    return playerFog() && view.kind === 'first' && fogRects.length &&
            inFog(camera.position.x, camera.position.z);
   }
 
   function tokenVisible(rec) {
-    if (view.kind === 'first' && view.tokenId === rec.tok.token_id) return false;
-    if (!cfg.isDM && fogRects.length) {
+    // String-normalize: local token ids are numbers, portal ids are strings,
+    // and the select handler produces strings — never compare strictly.
+    if (view.kind === 'first' &&
+        String(view.tokenId) === String(rec.tok.token_id)) return false;
+    if (playerFog() && fogRects.length) {
       var span = Math.max(1, rec.tok.size_squares || 1);
       if (inFog(tokCol(rec.tok) + span / 2, tokRow(rec.tok) + span / 2)) return false;
     }
@@ -778,6 +974,34 @@ window.BM3D = (function () {
                 : { kind: 'overview', tokenId: null };
   }
 
+  // Re-entering 3D resumes the viewpoint you last chose (kept in
+  // localStorage so it also survives the page reloads the map page does on
+  // character reassignment). Falls back to the default when the remembered
+  // token is gone — or, for players, no longer theirs.
+  var lastView = null;
+
+  function rememberView() {
+    lastView = { kind: view.kind, tokenId: view.tokenId };
+    try { localStorage.setItem('bm3d_last_view', JSON.stringify(lastView)); }
+    catch (e) {}
+  }
+
+  function restoreView() {
+    var lv = lastView;
+    if (!lv) {
+      try { lv = JSON.parse(localStorage.getItem('bm3d_last_view') || 'null'); }
+      catch (e) { lv = null; }
+    }
+    if (lv && lv.kind === 'fly' && cfg.isDM) return lv;
+    if (lv && lv.kind === 'first') {
+      var rec = tokenRecs[lv.tokenId];
+      if (rec && (cfg.isDM || (cfg.isMyToken && cfg.isMyToken(rec.tok)))) {
+        return { kind: 'first', tokenId: lv.tokenId };
+      }
+    }
+    return defaultView();
+  }
+
   function setOverviewCamera() {
     var cols = cfg.gridCols, rows = cfg.gridRows;
     camera.position.set(cols / 2, Math.max(cols, rows) * 0.85, rows / 2 + rows * 0.4);
@@ -791,8 +1015,27 @@ window.BM3D = (function () {
     var sel = cfg.overlayEl.querySelector('#bm3d-viewpoint');
     if (!sel) return;
     var current = view.kind === 'fly' ? 'fly' : 't' + view.tokenId;
-    var wanted = [['fly', '🕊 Free fly']];
-    tokens.forEach(function (t) { wanted.push(['t' + t.token_id, '👁 ' + t.name]); });
+    var wanted = [];
+    if (cfg.isDM) {
+      // DM: free-fly plus every token on the map.
+      wanted.push(['fly', '🕊 Free fly']);
+      tokens.forEach(function (t) { wanted.push(['t' + t.token_id, '👁 ' + t.name]); });
+    } else {
+      // Player: only their OWN tokens — a user running several characters
+      // picks whose eyes to look through. Hidden with fewer than two.
+      tokens.forEach(function (t) {
+        if (cfg.isMyToken && cfg.isMyToken(t)) {
+          wanted.push(['t' + t.token_id, '👁 ' + t.name]);
+        }
+      });
+      if (wanted.length < 2) {
+        sel.style.display = 'none';
+        sel.dataset.sig = '';
+        sel.innerHTML = '';
+        return;
+      }
+    }
+    sel.style.display = '';
     var sig = wanted.map(function (w) { return w[0] + w[1]; }).join(';');
     if (sel.dataset.sig !== sig) {
       sel.dataset.sig = sig;
@@ -915,8 +1158,13 @@ window.BM3D = (function () {
     var sel = cfg.overlayEl.querySelector('#bm3d-viewpoint');
     if (sel) {
       sel.addEventListener('change', function () {
+        // Keep the id AS A STRING: portal token ids are strings and a
+        // parseInt here made the own-sprite-hiding strict comparison fail
+        // after switching characters (2 !== '2'), leaving the viewed token's
+        // sprite floating in front of the camera.
         if (sel.value === 'fly') setView({ kind: 'fly', tokenId: null });
-        else setView({ kind: 'first', tokenId: parseInt(sel.value.slice(1), 10) });
+        else setView({ kind: 'first', tokenId: sel.value.slice(1) });
+        rememberView();
       });
     }
   }
@@ -1039,7 +1287,7 @@ window.BM3D = (function () {
     lastT = 0;
     var st = cfg.getState && cfg.getState();
     if (st) onState(st);
-    setView(defaultView());
+    setView(restoreView());
     var selEl = cfg.overlayEl.querySelector('#bm3d-viewpoint');
     if (selEl) selEl.value = view.kind === 'fly' ? 'fly' : 't' + view.tokenId;
     rafId = requestAnimationFrame(loop);
@@ -1076,7 +1324,7 @@ window.BM3D = (function () {
       }
       var st2 = cfg.getState && cfg.getState();
       if (st2) onState(st2);
-      setView(defaultView());
+      setView(restoreView());
     }
   }
 
@@ -1157,6 +1405,7 @@ window.BM3D = (function () {
     onState: onState,
     setFloorplan: setFloorplan,
     setMap: setMap,
+    toggleFogPreview: toggleFogPreview,
     isOpen: function () { return open_; },
   };
 })();

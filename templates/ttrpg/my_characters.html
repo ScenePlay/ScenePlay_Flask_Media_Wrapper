@@ -17,6 +17,20 @@
 </div>
 {% endif %}
 
+{% if hidden_count %}
+<p class="small text-muted mb-2">
+  Showing your character{{ 's' if characters | length != 1 }} in the current
+  campaign{% if campaign_name %} &mdash; <strong>{{ campaign_name }}</strong>{% endif %}.
+  <a href="{{ url_for('ttrpg.my_character', all=1) }}">Show all my characters
+    ({{ hidden_count }} more)</a>
+</p>
+{% elif show_all %}
+<p class="small text-muted mb-2">
+  Showing all your characters across campaigns.
+  <a href="{{ url_for('ttrpg.my_character') }}">Show only the current campaign</a>
+</p>
+{% endif %}
+
 {% if characters %}
 <div class="row g-3">
   {% for char in characters %}

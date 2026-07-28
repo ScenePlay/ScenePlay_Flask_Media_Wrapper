@@ -271,6 +271,7 @@ def backup_import():
                         f"({summary['characters_skipped']} kept local), "
                         f"{summary['sessions']} sessions, {summary['maps']} maps, "
                         f"{summary['session_monsters']} monsters, {summary['tokens']} tokens, "
+                        f"{summary.get('floorplans', 0)} 3D floorplans, "
                         f"{summary['notes']} notes, {summary['lighting']} lighting links.")
                 if summary.get('characters_no_owner'):
                     msg += (f" WARNING: {summary['characters_no_owner']} characters were NOT "

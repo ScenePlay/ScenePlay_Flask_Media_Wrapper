@@ -33,6 +33,10 @@ DEFAULT_WALL_HEIGHT_FT = 10
 HEIGHT_FT_RANGE = (1, 100)     # wall/door height_ft
 LEVEL_FT_RANGE  = (-50, 100)   # base_ft / floor_ft
 
+# Optional per-map wall surface finish, drawn by the 3D renderer over the
+# colors it samples from the map art. 'none'/absent = smooth (default).
+WALL_STYLES = {'none', 'brick', 'stone', 'wood'}
+
 
 def _num(v):
     """Coerce to float, or None if not a finite number."""
@@ -140,6 +144,8 @@ def validate_floorplan(data, grid_cols, grid_rows):
             seg['height_ft'] = h
         if b:
             seg['base_ft'] = b
+        if raw.get('show'):
+            seg['show'] = True    # players see this wall on the 2D map too
         walls.append(seg)
 
     doors, seen_ids, auto_n = [], set(), 0
@@ -162,6 +168,24 @@ def validate_floorplan(data, grid_cols, grid_rows):
 
     elevs = []
     for i, raw in enumerate(raw_elevs):
+        # Circle form (editor's round pit/platform tool): center + radius.
+        if isinstance(raw, dict) and raw.get('shape') == 'circle':
+            cx, cy, r = _num(raw.get('cx')), _num(raw.get('cy')), _num(raw.get('r'))
+            floor = _num(raw.get('floor_ft'))
+            if cx is None or cy is None or r is None or floor is None:
+                errors.append(f'elevations[{i}]: circle needs cx, cy, r, floor_ft')
+                continue
+            r = round(_clamp(r * max(sx, sy), 0.25, float(max(grid_cols, grid_rows))), 2)
+            circ = {'shape': 'circle',
+                    'cx': round(_clamp(cx * sx, 0.0, float(grid_cols)), 2),
+                    'cy': round(_clamp(cy * sy, 0.0, float(grid_rows)), 2),
+                    'r': r,
+                    'floor_ft': round(_clamp(floor, *LEVEL_FT_RANGE), 1)}
+            label = raw.get('label')
+            if label:
+                circ['label'] = str(label).strip()[:40]
+            elevs.append(circ)
+            continue
         seg = _segment(raw, sx, sy, grid_cols, grid_rows, errors, f'elevations[{i}]')
         if seg is None:
             continue
@@ -193,6 +217,12 @@ def validate_floorplan(data, grid_cols, grid_rows):
         'doors': doors,
         'elevations': elevs,
     }
+
+    style = str(data.get('wall_style') or '').strip().lower()
+    if style and style not in WALL_STYLES:
+        warnings.append(f'unknown wall_style {style!r} ignored')
+    elif style and style != 'none':
+        clean['wall_style'] = style
 
     import json
     if len(json.dumps(clean)) > MAX_JSON_BYTES:
