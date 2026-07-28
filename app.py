@@ -453,15 +453,31 @@ def startTheadPlayer():
     appsettingYT_QuePlayFlagUpdatePID(999999)
     queue_next()
 
-    # Start relay receiver and push current party + library to relay
+    # Start relay receiver and push current party + library to relay.
+    # Guarded against boot loops: if the previous start crashed during relay
+    # bring-up (a Pi Zero can OOM on the startup sync), skip the relay and
+    # switch it off so the box comes up healthy — the DM re-enables it from
+    # the Relay page. See relay_guard.py.
     if appsettingGet('relay_enabled', '0') == '1':
-        import relay_receiver
-        relay_receiver.start(app)
-        with app.app_context():
-            import relay_broadcaster
-            relay_broadcaster.push_all_characters()
-            relay_broadcaster.push_session_users()
-            relay_broadcaster.push_library()
+        import relay_guard
+        if relay_guard.tripped():
+            from datetime import datetime as _dt
+            relay_guard.disarm()
+            appsettingSet('relay_enabled', '0')
+            appsettingSet('relay_boot_tripped', _dt.now().strftime('%Y-%m-%d %H:%M:%S'))
+            print('*** Relay auto-start SKIPPED: the previous start crashed during '
+                  'relay bring-up. Relay has been DISABLED — re-enable it from the '
+                  'Relay page when ready. ***')
+        else:
+            relay_guard.arm()
+            import relay_receiver
+            relay_receiver.start(app)
+            with app.app_context():
+                import relay_broadcaster
+                relay_broadcaster.push_all_characters()
+                relay_broadcaster.push_session_users()
+                relay_broadcaster.push_library()
+            relay_guard.disarm_after_grace()
     
     
 def _another_instance_running(port=8086):

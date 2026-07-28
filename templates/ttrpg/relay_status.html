@@ -10,6 +10,15 @@
       <a href="{{ url_for('relay_admin_bp.status') }}" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</a>
     </div>
 
+    {% if cfg.boot_tripped %}
+    <div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #c0392b;color:#e09090;">
+      &#9888; The relay was <strong>automatically disabled</strong> on {{ cfg.boot_tripped }}:
+      the previous app start crashed while connecting to the relay (this can happen on
+      low-memory boxes like a Pi Zero). Enable it again below when you're ready —
+      re-enabling clears this notice.
+    </div>
+    {% endif %}
+
     <!-- Status card -->
     <div class="ttrpg-card p-3 mb-3">
       <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">

@@ -28,6 +28,9 @@ def _relay_cfg():
         'audio_bitrate':    appsettingGet('relay_audio_bitrate',   '128'),
         'audio_profile':    appsettingGet('relay_audio_profile',   'low'),
         'audio_gain':       appsettingGet('relay_audio_gain',      '50'),
+        # set by app.py's boot guard when a start crashed during relay
+        # bring-up and the relay was auto-disabled (see relay_guard.py)
+        'boot_tripped':     appsettingGet('relay_boot_tripped',    ''),
     }
 
 
@@ -234,11 +237,18 @@ def toggle():
     appsettingSet('relay_enabled', new_val)
 
     if new_val == '1':
+        # Same crash guard as the boot auto-start: if this enable takes the
+        # box down (low-memory OOM), the next start skips the relay instead
+        # of boot-looping. Clearing relay_boot_tripped dismisses the warning.
+        import relay_guard
+        appsettingSet('relay_boot_tripped', '')
+        relay_guard.arm()
         _start_receiver()
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
         relay_broadcaster.push_session_users()
         relay_broadcaster.push_library()   # same set as generate-code / Party Sync
+        relay_guard.disarm_after_grace()
         flash('Relay enabled — receiver started and party synced.')
     else:
         _stop_receiver()
