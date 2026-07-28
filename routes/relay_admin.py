@@ -198,8 +198,16 @@ def api_health():
         except ValueError:
             pass
 
+    # transport: 'connected' = GM WebSocket live (poll paused); anything else
+    # means the legacy 2s poll is carrying sync. Shown on the status page and
+    # used by the integration drill.
+    try:
+        import relay_ws
+        transport = 'ws' if relay_ws.connected() else f'polling ({relay_ws.state()})'
+    except Exception:
+        transport = 'polling'
     return jsonify({'enabled': True, 'ok': not problems, 'problems': problems,
-                    'sync_age': sync_age})
+                    'sync_age': sync_age, 'transport': transport})
 
 
 @relay_admin_bp.route('/api/presence')
@@ -244,6 +252,8 @@ def toggle():
         appsettingSet('relay_boot_tripped', '')
         relay_guard.arm()
         _start_receiver()
+        import relay_ws
+        relay_ws.start(current_app._get_current_object())
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
         relay_broadcaster.push_session_users()
@@ -251,6 +261,8 @@ def toggle():
         relay_guard.disarm_after_grace()
         flash('Relay enabled — receiver started and party synced.')
     else:
+        import relay_ws
+        relay_ws.stop()
         _stop_receiver()
         flash('Relay disabled.')
 
@@ -263,10 +275,18 @@ def toggle():
 def save_config():
     relay_url    = request.form.get('relay_url', '').strip()
     relay_secret = request.form.get('relay_secret', '').strip()
+    url_changed = secret_changed = False
     if relay_url:
+        url_changed = relay_url != appsettingGet('relay_url', '')
         appsettingSet('relay_url',    relay_url)
     if relay_secret:
+        secret_changed = relay_secret != appsettingGet('relay_secret', '')
         appsettingSet('relay_secret', relay_secret)
+    if url_changed or secret_changed:
+        # a different relay/credentials: reconnect the GM WebSocket (also
+        # clears a previous 'unsupported' verdict — the new relay may have it)
+        import relay_ws
+        relay_ws.restart()
     # Checkbox: absent from the form data when unchecked. Applies at the
     # next track start / push rotation (relay_audio_stream re-reads config).
     appsettingSet('relay_audio_enabled',
@@ -407,6 +427,10 @@ def _start_session(requested_id=None, requested_code=None):
         relay_broadcaster.push_session_users()
         step = 'queue library push'
         relay_broadcaster.push_library()
+        # The GM WebSocket is bound to a session id — reconnect under the new one
+        step = 'restart gm websocket'
+        import relay_ws
+        relay_ws.restart()
         return code, session_id
     except Exception as e:
         # The session EXISTS on the relay at this point — don't report it as

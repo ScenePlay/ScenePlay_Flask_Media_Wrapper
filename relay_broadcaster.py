@@ -82,10 +82,37 @@ def _enqueue(key, fn):
 
 
 def _is_permanent(exc):
-    """4xx = the relay understood and refused; retrying cannot help."""
+    """4xx = the relay understood and refused; retrying cannot help.
+    Applies identically to HTTP responses and WsRejected replies."""
+    status = getattr(exc, 'status', None)          # relay_ws.WsRejected
+    if status is not None:
+        return 400 <= status < 500
     resp = getattr(exc, 'response', None)
     code = getattr(resp, 'status_code', None)
     return code is not None and 400 <= code < 500
+
+
+def _send_small(ws_type, payload, http_path, cfg, timeout=5):
+    """Transport chooser for the small frequent pushes: the GM WebSocket when
+    it's connected, HTTP otherwise — decided PER ATTEMPT inside the queue
+    worker, so a retry after a WS drop lands on HTTP automatically. A WS that
+    dies mid-attempt falls through to HTTP in the same attempt; a WsRejected
+    (relay said 4xx over the socket) propagates so _is_permanent drops it,
+    exactly like an HTTP 4xx.
+
+    Lazy relay_ws import keeps this fork-safe: the forked music worker never
+    calls relay_ws.start(), so connected() is False there and its pushes stay
+    on plain HTTP."""
+    try:
+        import relay_ws
+        if relay_ws.connected():
+            try:
+                return relay_ws.request(ws_type, payload, timeout=timeout)
+            except relay_ws.WsUnavailable:
+                pass                              # socket just died — same-attempt HTTP
+    except ImportError:
+        pass
+    return _post(http_path, payload, cfg, timeout=timeout)
 
 
 def _record_push_drop(key, exc):
@@ -181,7 +208,8 @@ def broadcast_roll(char_name, expression, label, dice, modifier, total, adv_mode
         c = _exec_cfg()
         if not c:
             return
-        _post(f'/api/v1/session/{c["session_id"]}/push-roll', payload, c)
+        _send_small('roll', payload,
+                    f'/api/v1/session/{c["session_id"]}/push-roll', c)
 
     _enqueue(f'roll-{next(_seq)}', _go)   # unique key: every roll is delivered
 
@@ -402,7 +430,8 @@ def broadcast_led(led_pattern_json):
         c = _exec_cfg()
         if not c:
             return
-        _post(f'/api/v1/session/{c["session_id"]}/led', payload, c)
+        _send_small('led', payload,
+                    f'/api/v1/session/{c["session_id"]}/led', c)
 
     _enqueue('led-state', _go)   # coalesce: only the latest lighting state matters
 
@@ -496,7 +525,8 @@ def broadcast_wled(wled_rows):
         c = _exec_cfg()
         if not c:
             return
-        _post(f'/api/v1/session/{c["session_id"]}/wled', payload, c)
+        _send_small('wled', payload,
+                    f'/api/v1/session/{c["session_id"]}/wled', c)
 
     _enqueue('wled-state', _go)   # coalesce: only the latest lighting state matters
 
@@ -523,7 +553,7 @@ def broadcast_token_move(token_id, x_pct, y_pct,
         if not c:
             return
         body['session_id'] = c['session_id']
-        _post('/api/v1/token/move', body, c)
+        _send_small('token_move', body, '/api/v1/token/move', c)
 
     _enqueue(f'token-move-{token_id}', _go)   # coalesce per token
 
@@ -541,7 +571,7 @@ def broadcast_token_health(token_id, hp_current, hp_max):
         if not c:
             return
         body['session_id'] = c['session_id']
-        _post('/api/v1/token/health', body, c)
+        _send_small('token_health', body, '/api/v1/token/health', c)
 
     _enqueue(f'token-health-{token_id}', _go)   # coalesce per token
 
@@ -561,7 +591,8 @@ def broadcast_condition_update(conditions, token_id=None, player_name=None):
         c = _exec_cfg()
         if not c:
             return
-        _post(f'/api/v1/session/{c["session_id"]}/condition-update', body, c)
+        _send_small('condition_update', body,
+                    f'/api/v1/session/{c["session_id"]}/condition-update', c)
 
     _enqueue(f'condition-{token_id or player_name}', _go)   # coalesce per target
 
@@ -928,10 +959,19 @@ def push_library():
 
 
 def get_relay_rolls(since_id=0):
-    """GET /api/v1/session/{id}/rolls — fetch relay roll log entries newer than since_id."""
+    """Relay roll log entries newer than since_id. Served from the GM
+    WebSocket's local cache when connected (this runs inside browser-polled
+    request handlers — no blocking relay GET in WS mode); falls back to the
+    legacy HTTP GET otherwise."""
     cfg = _active()
     if not cfg:
         return []
+    try:
+        import relay_ws
+        if relay_ws.connected():
+            return relay_ws.get_rolls_cached(since_id)
+    except ImportError:
+        pass
     try:
         import requests
         url = cfg['url'].rstrip('/') + f'/api/v1/session/{cfg["session_id"]}/rolls'
@@ -945,10 +985,17 @@ def get_relay_rolls(since_id=0):
 
 
 def get_presence():
-    """GET /api/v1/session/{id}/presence — {player_name: seconds_since_last_seen}."""
+    """{player_name: seconds_since_last_seen}. Served from the GM WebSocket's
+    cache when connected (see get_relay_rolls); legacy HTTP GET otherwise."""
     cfg = _active()
     if not cfg:
         return {}
+    try:
+        import relay_ws
+        if relay_ws.connected():
+            return relay_ws.get_presence_cached()
+    except ImportError:
+        pass
     try:
         import requests
         url = cfg['url'].rstrip('/') + f'/api/v1/session/{cfg["session_id"]}/presence'

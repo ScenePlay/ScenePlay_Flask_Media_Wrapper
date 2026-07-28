@@ -472,6 +472,8 @@ def startTheadPlayer():
             relay_guard.arm()
             import relay_receiver
             relay_receiver.start(app)
+            import relay_ws
+            relay_ws.start(app)   # GM WebSocket; falls back to the poll on its own
             with app.app_context():
                 import relay_broadcaster
                 relay_broadcaster.push_all_characters()

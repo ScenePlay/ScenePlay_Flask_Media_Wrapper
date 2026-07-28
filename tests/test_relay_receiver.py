@@ -251,3 +251,36 @@ def test_background_non_relay_urls_are_trusted():
     assert rr._map_out_of_sync((True, {1}, 'http://192.168.1.5/bg.png'), {1}, 'x.png') is False
     # but an EMPTY url with a background expected is stale
     assert rr._map_out_of_sync((True, {1}, ''), {1}, 'x.png') is True
+
+
+class TestStartIdempotent:
+    def test_start_reuses_live_thread(self, monkeypatch):
+        """Two start() calls must not spawn two pollers (the old bug left
+        duplicate threads mutating the same rows)."""
+        import threading
+        import relay_receiver as rr
+        started = []
+
+        class FakeThread:
+            def __init__(self, **kw):
+                started.append(kw)
+                self._alive = False
+            def start(self):
+                self._alive = True
+            def is_alive(self):
+                return self._alive
+
+        monkeypatch.setattr(rr.threading, 'Thread', FakeThread)
+        monkeypatch.setattr(rr, '_thread', None)
+        rr.start(app=None)
+        rr.start(app=None)
+        assert len(started) == 1
+        rr.stop()
+        monkeypatch.setattr(rr, '_thread', None)
+
+    def test_pause_resume_flags(self):
+        import relay_receiver as rr
+        rr.pause()
+        assert rr._paused.is_set()
+        rr.resume()
+        assert not rr._paused.is_set()
