@@ -411,6 +411,12 @@
       <button id="set-active-btn" class="btn btn-sm btn-outline-warning"
               onclick="setMapActive()" title="Make this the live map players see">Set Active</button>
       {% endif %}
+      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
+         class="btn btn-sm btn-outline-secondary" title="All maps in this session — view, activate, edit">Maps</a>
+      {% endif %}
+      <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleMapDicePanel()" title="Dice Roller"><span class="dice-ico">&#127922;</span> Dice</button>
+      {% if current_user.is_dm() %}
       <button id="fx-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleFxPanel()" title="Map effects">&#10022; FX</button>
       <button id="fp-toggle-btn" class="btn btn-sm btn-outline-secondary"
@@ -418,11 +424,7 @@
               title="Floorplan editor — draw the walls/doors/elevation that 3D mode extrudes">&#9635; Walls</button>
       <button id="notes-toggle-btn" class="btn btn-sm btn-outline-secondary"
               onclick="toggleMapNotesPanel()" title="DM notes for this map (players never see these)">&#128221; Notes</button>
-      <a href="{{ url_for('battlemap_bp.session_maps', session_id=sess.session_id) }}"
-         class="btn btn-sm btn-outline-secondary" title="All maps in this session — view, activate, edit">Maps</a>
       {% endif %}
-      <button id="dice-map-toggle-btn" class="btn btn-sm btn-outline-secondary"
-              onclick="toggleMapDicePanel()" title="Dice Roller"><span class="dice-ico">&#127922;</span> Dice</button>
       <a href="{{ url_for('ttrpg.my_character') }}"
          class="btn btn-sm btn-outline-secondary">Character(s)</a>
 
@@ -430,9 +432,9 @@
       <div id="sfx-ctrl" style="display:inline-flex;align-items:center;gap:6px;
         background:rgba(20,18,12,.5);border:1px solid var(--ttrpg-border,#3a3420);
         border-radius:16px;padding:2px 8px;font:600 12px system-ui,sans-serif;user-select:none;">
-        <button id="sfx-toggle" type="button" title="Click to enable / mute sound effects"
+        <button id="sfx-toggle" type="button" title="Sound is on by default — click to mute / unmute"
           style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
-          white-space:nowrap;color:#c9a84c;">&#128264; Sound: tap to start</button>
+          white-space:nowrap;color:#c9a84c;">&#128266; Sound: ON</button>
         <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
           style="width:64px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
         <button id="sfx-choose" type="button" title="Choose which sound plays for each action"

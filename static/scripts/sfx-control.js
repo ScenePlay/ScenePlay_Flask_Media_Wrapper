@@ -19,26 +19,39 @@
   function syncUI() {
     if (!SFX.hasTone()) { toggle.innerHTML = '&#9888; Tone.js not loaded'; toggle.style.color = '#e06666'; return; }
     let icon, text, color;
-    if (!SFX.isEnabled())   { icon = '&#128264;'; text = 'Sound: tap to start'; color = '#c9a84c'; }
-    else if (SFX.isMuted()) { icon = '&#128263;'; text = 'Sound: MUTED';        color = '#e06666'; }
-    else                    { icon = '&#128266;'; text = 'Sound: ON';           color = '#7bc77b'; }
+    // Sound is ON by default — before the browser lets audio actually start
+    // (it needs one user gesture anywhere on the page) the pill already
+    // reads ON, amber until the audio context is truly running.
+    if (SFX.isMuted())           { icon = '&#128263;'; text = 'Sound: MUTED'; color = '#e06666'; }
+    else if (!SFX.isEnabled())   { icon = '&#128266;'; text = 'Sound: ON';    color = '#c9a84c'; }
+    else                         { icon = '&#128266;'; text = 'Sound: ON';    color = '#7bc77b'; }
     toggle.innerHTML = icon + ' ' + text;
     toggle.style.color = color;
-    slider.style.opacity = (SFX.isEnabled() && !SFX.isMuted()) ? '1' : '.5';
+    slider.style.opacity = SFX.isMuted() ? '.5' : '1';
   }
 
-  // Sound is enabled ONLY by interacting with the pill, so clicking the other
-  // toolbar buttons next to it no longer toggles sound. (Browsers still require
-  // a user gesture — the pill's own click below satisfies that.)
+  // Auto-start: browsers demand ONE user gesture before audio may play, but
+  // it can be ANY gesture — so the first click/keypress anywhere arms the
+  // audio context and sound is simply on, no dedicated tap on the pill
+  // needed. A user who muted (persisted) stays muted; unmuting re-enables.
+  function autoStart() {
+    document.removeEventListener('pointerdown', autoStart, true);
+    document.removeEventListener('keydown', autoStart, true);
+    if (SFX.isMuted() || SFX.isEnabled()) return;
+    SFX.enable().then(syncUI).catch(() => {});
+  }
+  document.addEventListener('pointerdown', autoStart, true);
+  document.addEventListener('keydown', autoStart, true);
+
+  // The pill toggles MUTE (sound is on by default; tap = turn off).
   toggle.addEventListener('click', async () => {
-    const wasOn = SFX.isEnabled();
     const ok = await SFX.enable();
     if (!ok) {   // surface WHY, instead of doing nothing
       toggle.innerHTML = '&#9888; ' + (SFX.lastError() || 'audio failed');
       toggle.style.color = '#e06666';
       return;
     }
-    if (wasOn) SFX.mute(!SFX.isMuted());   // first click only enables; later clicks toggle mute
+    SFX.mute(!SFX.isMuted());
     syncUI();
   });
   slider.addEventListener('input', () => SFX.setVolume(slider.value / 100));
