@@ -309,27 +309,33 @@ window.BM3D = (function () {
     return tex;
   }
 
-  // Skirt strip (one grid-cell-wide vertical face of an elevation step),
-  // sampled from the HIGHER cell's art and patterned like the walls.
+  // Skirt strip (one step-wide vertical face of an elevation edge), sampled
+  // from the HIGHER side's art and patterned like the walls. Edges can be
+  // sub-cell wide (circle elevations tessellate finer): the pattern seed
+  // anchors to the containing GRID cell and xf carries the fractional offset
+  // along it, so brick/stone courses continue across a cell's sub-strips.
   function skirtStripTexture(edge, heightFt) {
-    var W = 32;
+    var W = Math.max(8, Math.round(32 * edge.step));
     var H = Math.max(8, Math.min(96, Math.round(heightFt * 6.4)));
     var style = (plan && plan.wall_style) || 'none';
-    var seed = ((edge.x * 131 + edge.z * 61 + (edge.orient === 'e' ? 7 : 0)) | 0) >>> 0;
+    var seed = ((Math.floor(edge.x) * 131 + Math.floor(edge.z) * 61 +
+                 (edge.orient === 'e' ? 7 : 0)) | 0) >>> 0;
     var pctx = makePatternCtx(style, heightFt, seed);
+    var frac = edge.orient === 'e' ? edge.z - Math.floor(edge.z)
+                                   : edge.x - Math.floor(edge.x);
     var cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
     var ctx = cv.getContext('2d');
     var img = ctx.createImageData(W, H);
     var d = img.data;
     for (var x = 0; x < W; x++) {
-      var t = x / (W - 1);
+      var t = x / (W - 1 || 1);
       var acc = [0, 0, 0];
-      if (edge.orient === 'e') samplePoint(edge.hx + 0.5, edge.z + t, acc);
-      else samplePoint(edge.x + t, edge.hz + 0.5, acc);
-      samplePoint(edge.hx + 0.5, edge.hz + 0.5, acc);
+      if (edge.orient === 'e') samplePoint(edge.sx, edge.z + t * edge.step, acc);
+      else samplePoint(edge.x + t * edge.step, edge.sz, acc);
+      samplePoint(edge.sx, edge.sz, acc);
       var r = acc[0] / 2, g = acc[1] / 2, b = acc[2] / 2;
-      var xf = t * 5;
+      var xf = (frac + t * edge.step) * 5;
       for (var y = 0; y < H; y++) {
         var shade = 0.82 * (1.05 - 0.25 * (y / (H - 1))) *
                     patFactor(pctx, xf, (y / (H - 1)) * heightFt);
@@ -459,49 +465,64 @@ window.BM3D = (function () {
   function buildFloor(bgTexture) {
     var cols = cfg.gridCols, rows = cfg.gridRows;
     var group = new THREE.Group();
-    var pos = [], uv = [], idx = [], n = 0;
-    var edges = [];
-    var x, z;
 
-    // Skirt tint: sampled from the art of the HIGHER cell at the height step —
+    // Circle elevations need finer floor tessellation than one quad per grid
+    // cell, or their rims quantize into rectangles (a r=1.5 circle covered a
+    // 3x2 block of whole cells). Rect-only plans keep the cheap 1-cell grid.
+    var hasCircle = !!(plan && plan.elevations && plan.elevations.some(function (e) {
+      return e.shape === 'circle';
+    }));
+    var SUB = hasCircle ? (cols * rows <= 1600 ? 4 : 2) : 1;
+    var step = 1 / SUB;
+    var nx = cols * SUB, nz = rows * SUB;
+
+    // Skirt tint: sampled from the art on the HIGHER side of the height step —
     // a platform's side matches the platform top, a pit's wall matches the
     // ground it's cut into — mildly darkened so the vertical face still reads
     // as depth. Falls back to the flat dark color with no image pixels.
-    function skirtColor(ax, az, ah, bx, bz, bh) {
+    function skirtColor(edge) {
       if (!_bgPix) return null;
-      var c = ah >= bh ? cellAvgColor(ax, az) : cellAvgColor(bx, bz);
-      return [c[0] * 0.82 / 255, c[1] * 0.82 / 255, c[2] * 0.82 / 255];
+      var acc = [0, 0, 0];
+      samplePoint(edge.sx, edge.sz, acc);
+      samplePoint(edge.sx + step / 4, edge.sz + step / 4, acc);
+      samplePoint(edge.sx - step / 4, edge.sz - step / 4, acc);
+      return [acc[0] / 3 * 0.82 / 255, acc[1] / 3 * 0.82 / 255, acc[2] / 3 * 0.82 / 255];
     }
 
-    function cellH(cx, cz) {
-      if (cx < 0 || cz < 0 || cx >= cols || cz >= rows) return null; // outside
-      return floorAt(cx + 0.5, cz + 0.5);
+    function hAt(ix, iz) {
+      if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) return null; // outside
+      return floorAt((ix + 0.5) * step, (iz + 0.5) * step);
     }
 
-    for (z = 0; z < rows; z++) {
-      for (x = 0; x < cols; x++) {
-        var h = cellH(x, z);
+    var pos = [], uv = [], idx = [], n = 0;
+    var edges = [];
+
+    for (var iz = 0; iz < nz; iz++) {
+      for (var ix = 0; ix < nx; ix++) {
+        var x = ix * step, z = iz * step;
+        var h = hAt(ix, iz);
         // top face (two triangles, CCW seen from above/+y)
-        pos.push(x, h, z,   x + 1, h, z,   x + 1, h, z + 1,   x, h, z + 1);
+        pos.push(x, h, z,   x + step, h, z,   x + step, h, z + step,   x, h, z + step);
         // image row 0 is v=1 (flipY default)
-        uv.push(x / cols, 1 - z / rows,   (x + 1) / cols, 1 - z / rows,
-                (x + 1) / cols, 1 - (z + 1) / rows,   x / cols, 1 - (z + 1) / rows);
+        uv.push(x / cols, 1 - z / rows,   (x + step) / cols, 1 - z / rows,
+                (x + step) / cols, 1 - (z + step) / rows,   x / cols, 1 - (z + step) / rows);
         idx.push(n, n + 2, n + 1, n, n + 3, n + 2);
         n += 4;
-        // skirts against east and south neighbours (each shared edge once)
-        // Collect elevation-step edges; skirt faces are built after the loop
-        // (textured with the selected wall style, or tint-only fallback).
-        var he = cellH(x + 1, z);
+        // Collect elevation-step edges against the east and south neighbours;
+        // skirt faces are built after the loop (textured with the selected
+        // wall style, or tint-only fallback). sx/sz = sample point on the
+        // HIGHER side for art tinting.
+        var he = hAt(ix + 1, iz);
         if (he !== null && he !== h) {
-          edges.push({ orient: 'e', x: x, z: z, lo: Math.min(h, he), hi: Math.max(h, he),
-                       hx: h >= he ? x : x + 1, hz: z,
-                       ax: x, az: z, ah: h, bx: x + 1, bz: z, bh: he });
+          edges.push({ orient: 'e', x: x, z: z, step: step,
+                       lo: Math.min(h, he), hi: Math.max(h, he),
+                       sx: (h >= he ? x : x + step) + step / 2, sz: z + step / 2 });
         }
-        var hs = cellH(x, z + 1);
+        var hs = hAt(ix, iz + 1);
         if (hs !== null && hs !== h) {
-          edges.push({ orient: 's', x: x, z: z, lo: Math.min(h, hs), hi: Math.max(h, hs),
-                       hx: x, hz: h >= hs ? z : z + 1,
-                       ax: x, az: z, ah: h, bx: x, bz: z + 1, bh: hs });
+          edges.push({ orient: 's', x: x, z: z, step: step,
+                       lo: Math.min(h, hs), hi: Math.max(h, hs),
+                       sx: x + step / 2, sz: (h >= hs ? z : z + step) + step / 2 });
         }
       }
     }
@@ -518,19 +539,19 @@ window.BM3D = (function () {
 
     if (edges.length) {
       var styled = _bgPix && plan && plan.wall_style && plan.wall_style !== 'none';
-      if (styled && edges.length <= 400) {
+      if (styled && edges.length <= 400 * SUB) {
         // One textured plane per step face — elevations share the wall finish.
         edges.forEach(function (edge) {
           var hU = edge.hi - edge.lo;
           var tex = skirtStripTexture(edge, hU * 5);
           var m = new THREE.Mesh(
-            new THREE.PlaneGeometry(1, hU),
+            new THREE.PlaneGeometry(edge.step, hU),
             new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
           if (edge.orient === 'e') {
             m.rotation.y = Math.PI / 2;
-            m.position.set(edge.x + 1, edge.lo + hU / 2, edge.z + 0.5);
+            m.position.set(edge.x + edge.step, edge.lo + hU / 2, edge.z + edge.step / 2);
           } else {
-            m.position.set(edge.x + 0.5, edge.lo + hU / 2, edge.z + 1);
+            m.position.set(edge.x + edge.step / 2, edge.lo + hU / 2, edge.z + edge.step);
           }
           group.add(m);
         });
@@ -539,22 +560,23 @@ window.BM3D = (function () {
         // windings over shared vertices makes computeVertexNormals average
         // opposite normals to zero, which normalizes to NaN and renders black.
         var spos = [], sidx = [], scol = [], sn = 0;
-        edges.forEach(function (edge) {
-          if (edge.orient === 'e') {
-            spos.push(edge.x + 1, edge.lo, edge.z,  edge.x + 1, edge.hi, edge.z,
-                      edge.x + 1, edge.hi, edge.z + 1,  edge.x + 1, edge.lo, edge.z + 1);
-          } else {
-            spos.push(edge.x, edge.lo, edge.z + 1,  edge.x, edge.hi, edge.z + 1,
-                      edge.x + 1, edge.hi, edge.z + 1,  edge.x + 1, edge.lo, edge.z + 1);
-          }
-          sidx.push(sn, sn + 1, sn + 2, sn, sn + 2, sn + 3);
-          var c = skirtColor(edge.ax, edge.az, edge.ah, edge.bx, edge.bz, edge.bh);
-          if (c) pushSkirtColor(c);
-          sn += 4;
-        });
         function pushSkirtColor(c) {
           for (var k = 0; k < 4; k++) scol.push(c[0], c[1], c[2]);
         }
+        edges.forEach(function (edge) {
+          var s = edge.step;
+          if (edge.orient === 'e') {
+            spos.push(edge.x + s, edge.lo, edge.z,  edge.x + s, edge.hi, edge.z,
+                      edge.x + s, edge.hi, edge.z + s,  edge.x + s, edge.lo, edge.z + s);
+          } else {
+            spos.push(edge.x, edge.lo, edge.z + s,  edge.x, edge.hi, edge.z + s,
+                      edge.x + s, edge.hi, edge.z + s,  edge.x + s, edge.lo, edge.z + s);
+          }
+          sidx.push(sn, sn + 1, sn + 2, sn, sn + 2, sn + 3);
+          var c = skirtColor(edge);
+          if (c) pushSkirtColor(c);
+          sn += 4;
+        });
         var sg = new THREE.BufferGeometry();
         sg.setAttribute('position', new THREE.Float32BufferAttribute(spos, 3));
         sg.setIndex(sidx);
