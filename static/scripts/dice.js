@@ -55,6 +55,10 @@ window.DiceCore = (function () {
   }
 
   function expr(r, label) {
+    // A URL is never a meaningful roll label. Phone browsers autofill the
+    // portal's address into the bare label input, and every roll then read
+    // "d20 http://<the server's ip>" in the feed — drop URL-shaped labels.
+    if (label && /^https?:\/\/\S*$/i.test(String(label).trim())) label = '';
     const modeTag = r.mode !== 'normal' ? ` [${r.mode}]` : '';
     const countTag = (r.count > 1 || r.mode !== 'normal') ? r.count : '';
     return `${countTag}d${r.sides}${_modTag(r.modifier)}${modeTag}${label ? ' ' + label : ''}`;
