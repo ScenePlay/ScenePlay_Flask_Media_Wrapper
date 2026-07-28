@@ -31,10 +31,22 @@ def is_git_install():
 def _run(cmd, timeout=180, input_text=None):
     """Run a command in the repo root; return (stdout, stderr) text.
     Never raises on failure — callers classify by output. input_text is
-    fed to stdin (used to hand sudo -S its password)."""
+    fed to stdin (used to hand sudo -S its password).
+
+    git is forced NON-INTERACTIVE: a remote that wants a login must FAIL with
+    a readable message instead of prompting. Without this, git prompts for a
+    username/password on the server's terminal (or a tty that isn't there)
+    and the web request just hangs until the timeout — the useless
+    'timed out after 30s: git fetch' failure mode."""
+    env = None
+    if cmd and cmd[0] == 'git':
+        env = dict(os.environ,
+                   GIT_TERMINAL_PROMPT='0',
+                   GIT_SSH_COMMAND='ssh -oBatchMode=yes')
     try:
         p = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True,
-                           text=True, timeout=timeout, input=input_text)
+                           text=True, timeout=timeout, input=input_text,
+                           env=env)
         return (p.stdout or '').strip(), (p.stderr or '').strip()
     except subprocess.TimeoutExpired:
         return '', f'timed out after {timeout}s: {" ".join(cmd)}'
@@ -64,6 +76,31 @@ def git_failed(out, err):
                                   'could not resolve', 'timed out', 'failed to run'))
 
 
+def git_auth_needed(out, err):
+    """True when git failed because this machine isn't logged in to the code
+    server (missing/rejected credentials, no SSH key) — the messages git
+    emits when GIT_TERMINAL_PROMPT=0 / BatchMode stop it from prompting."""
+    low = ((out or '') + '\n' + (err or '')).lower()
+    return any(m in low for m in (
+        'could not read username',
+        'could not read password',
+        'terminal prompts disabled',
+        'authentication failed',
+        'invalid username or password',
+        'permission denied (publickey',
+        'host key verification failed',
+        'support for password authentication was removed',
+    ))
+
+
+GIT_LOGIN_HELP = (
+    'Update server login required — this computer is not signed in to the '
+    'code server, so it cannot download the new version. Open a terminal in '
+    'the ScenePlay folder and run "git pull" once to sign in (or set up an '
+    'SSH key / credential helper), then run the update again.'
+)
+
+
 def pip_failed(out, err):
     """True when pip output names a real failure. pip prints WARNINGs and
     notices to stderr routinely — only ERROR lines mean the install failed."""
@@ -81,6 +118,9 @@ def check_updates():
                 'current': '', 'error': ''}
     out, err = _run(['git', 'fetch', '--quiet'], timeout=30)
     if git_failed(out, err):
+        if git_auth_needed(out, err):
+            return {'git': True, 'behind': 0, 'commits': [], 'current': '',
+                    'error': GIT_LOGIN_HELP}
         return {'git': True, 'behind': 0, 'commits': [], 'current': '',
                 'error': f'Could not check for updates: {err or out}'}
     current, _ = _run(['git', 'log', '-1', '--format=%h %s'])
@@ -133,9 +173,12 @@ def run_update(sudo_password=None):
     out, err = _run(['git', 'pull', '--ff-only'], timeout=300)
     step('Downloading update (git pull)', out or err)
     if git_failed(out, err):
-        log.append('Update aborted — the app was NOT changed. '
-                   '(If this says "diverging", the local copy has been '
-                   'modified; resolve it in a terminal.)')
+        if git_auth_needed(out, err):
+            log.append(GIT_LOGIN_HELP)
+        else:
+            log.append('Update aborted — the app was NOT changed. '
+                       '(If this says "diverging", the local copy has been '
+                       'modified; resolve it in a terminal.)')
         return {'ok': False, 'log': log}
 
     # 4. Python packages — sys.executable IS the venv python

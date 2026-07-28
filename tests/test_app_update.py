@@ -111,3 +111,58 @@ class TestRunUpdate:
                             lambda cmd, timeout=180: calls.append(cmd) or ('', ''))
         r = app_update.run_update()
         assert r['ok'] is False and calls == []     # no git ops at all
+
+
+class TestAuthDetection:
+    """'Not signed in to the code server' must produce the friendly login
+    alert, not raw git-speak or a 30s hang-then-timeout."""
+
+    @pytest.mark.parametrize('err', [
+        "fatal: could not read Username for 'https://github.com': "
+        "terminal prompts disabled",
+        "fatal: could not read Password for 'https://x@github.com': "
+        "No such device or address",
+        "remote: Support for password authentication was removed on "
+        "August 13, 2021.\nfatal: Authentication failed for 'https://...'",
+        "git@github.com: Permission denied (publickey).\n"
+        "fatal: Could not read from remote repository.",
+        "Host key verification failed.\nfatal: Could not read from remote",
+    ])
+    def test_auth_failures_recognized(self, err):
+        assert app_update.git_auth_needed('', err)
+        assert app_update.git_failed('', err)      # still a failure overall
+
+    def test_non_auth_failures_not_flagged(self):
+        assert not app_update.git_auth_needed('', 'fatal: could not resolve host')
+        assert not app_update.git_auth_needed('Already up to date.', '')
+
+    def test_check_updates_gives_login_alert(self, monkeypatch):
+        monkeypatch.setattr(app_update, 'is_git_install', lambda: True)
+        monkeypatch.setattr(
+            app_update, '_run',
+            lambda cmd, timeout=180: ('', "fatal: could not read Username for "
+                                          "'https://github.com': terminal prompts disabled"))
+        d = app_update.check_updates()
+        assert d['error'] == app_update.GIT_LOGIN_HELP
+
+    def test_run_update_gives_login_alert_on_pull(self, monkeypatch):
+        monkeypatch.setattr(app_update, 'is_git_install', lambda: True)
+
+        class FakeBackup:
+            @staticmethod
+            def create_backup(label=''):
+                return '/tmp/x.zip'
+        import sys as _sys
+        monkeypatch.setitem(_sys.modules, 'backup_restore', FakeBackup)
+
+        def fake_run(cmd, timeout=180, input_text=None):
+            if cmd[:2] == ['git', 'stash']:
+                return ('No local changes to save', '')
+            if cmd[:2] == ['git', 'pull']:
+                return ('', 'git@github.com: Permission denied (publickey).\n'
+                            'fatal: Could not read from remote repository.')
+            return ('', '')
+        monkeypatch.setattr(app_update, '_run', fake_run)
+        d = app_update.run_update()
+        assert d['ok'] is False
+        assert app_update.GIT_LOGIN_HELP in d['log']
