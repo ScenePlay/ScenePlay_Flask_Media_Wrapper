@@ -17,7 +17,7 @@
 </div>
 {% endif %}
 
-{% if hidden_count %}
+{% if hidden_count and characters %}
 <p class="small text-muted mb-2">
   Showing your character{{ 's' if characters | length != 1 }} in the current
   campaign{% if campaign_name %} &mdash; <strong>{{ campaign_name }}</strong>{% endif %}.
@@ -79,6 +79,11 @@
     </a>
   </div>
   {% endfor %}
+</div>
+{% elif hidden_count %}
+<div class="ttrpg-card p-4 text-center">
+  <p class="text-muted">None of your characters are in the current session's party.</p>
+  <a href="{{ url_for('ttrpg.my_character', all=1) }}" class="btn btn-ttrpg mt-2">Show All My Characters</a>
 </div>
 {% else %}
 <div class="ttrpg-card p-4 text-center">

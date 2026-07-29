@@ -182,12 +182,11 @@ def my_character():
     if active_session and not show_all:
         party_ids = {sp.character_id for sp in active_session.party}
         in_session = [c for c in chars if c.character_id in party_ids]
-        if in_session:
-            hidden_count = len(chars) - len(in_session)
-            chars = in_session
-            if active_session.campaign_id:
-                camp = db.session.get(tblcampaigns, active_session.campaign_id)
-                campaign_name = camp.campaign_name if camp else ''
+        hidden_count = len(chars) - len(in_session)
+        chars = in_session
+        if active_session.campaign_id:
+            camp = db.session.get(tblcampaigns, active_session.campaign_id)
+            campaign_name = camp.campaign_name if camp else ''
 
     return render_template('ttrpg/my_characters.html', characters=chars,
                            active_map=active_map, hidden_count=hidden_count,
