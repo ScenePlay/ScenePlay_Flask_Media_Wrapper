@@ -145,6 +145,54 @@ class TestReplace:
         # a safety snapshot of the pre-restore state was taken
         assert any(f.startswith('sceneplay-pre-restore-') for f in os.listdir(env['backups']))
 
+    def test_replace_succeeds_while_db_handle_open(self, env):
+        """The Windows regression: an os.replace file swap fails with
+        PermissionError while ANY handle points at the db (the web pool, a
+        worker poll, a second app process). The copy-into-live approach must
+        restore fine with a foreign connection held open the whole time —
+        and that connection must see the restored data afterwards."""
+        x(env['live'], "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('Tavern', 1, 0)")
+        snap = br.create_backup(label='manual')
+        x(env['live'], "DELETE FROM tblScenes")
+
+        held = sqlite3.connect(env['live'])
+        held.execute("SELECT COUNT(*) FROM tblScenes").fetchone()   # really open
+        try:
+            br.restore_replace(snap)
+            assert held.execute(
+                "SELECT COUNT(*) FROM tblScenes WHERE sceneName='Tavern'").fetchone()[0] == 1
+        finally:
+            held.close()
+        assert q(env['live'], "SELECT COUNT(*) FROM tblScenes WHERE sceneName='Tavern'")[0][0] == 1
+
+    def test_replace_normalizes_page_size(self, env):
+        """Archives from old source boxes can carry a pre-4096 page size; the
+        snapshot is normalized to the live file's page size before the copy
+        (a WAL-mode destination hard-requires the match)."""
+        small = str(env['tmp'] / 'smallpage.db')
+        conn = sqlite3.connect(small)
+        conn.execute("PRAGMA page_size = 1024")
+        for stmt in SCHEMA:
+            conn.execute(stmt)
+        conn.execute("INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('OldBox', 1, 0)")
+        conn.commit()
+        conn.close()
+        old = sql.database
+        sql.database = small
+        try:
+            snap = br.create_backup(label='oldbox')
+        finally:
+            sql.database = old
+
+        # WAL destination is what makes mismatched page sizes a hard error —
+        # and it's what the live app runs (sqlite_tune).
+        wal = sqlite3.connect(env['live'])
+        assert wal.execute("PRAGMA journal_mode=WAL").fetchone()[0] == 'wal'
+        wal.close()
+
+        br.restore_replace(snap)
+        assert q(env['live'], "SELECT COUNT(*) FROM tblScenes WHERE sceneName='OldBox'")[0][0] == 1
+
     def test_uploads_restored(self, env):
         snap = br.create_backup(label='manual')
         os.remove(env['uploads'] / 'portraits' / 'hero.png')
@@ -370,6 +418,11 @@ class TestOldArchiveCompat:
         Migrate(app, db, directory=_os.path.join(
             _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'migrations'))
         with app.app_context():
+            # Emulate the real route: the login check has already run queries,
+            # so the session holds a CHECKED-OUT sqlite connection when the
+            # swap happens. On Windows that handle blocks os.replace unless
+            # _dispose_web_pool releases it (session.remove before dispose).
+            db.session.execute(db.text('SELECT 1')).fetchall()
             summary = br.restore_replace(archive)
         assert summary['schema_upgraded'] is True
         cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblMusic)")]
@@ -738,7 +791,8 @@ class TestLocalMediaLocate:
         out = br.requeue_missing_media()
         assert out == {'requeued': 1, 'found_local': 0}
         path, status = q(env['live'], "SELECT path, dnLoadStatus FROM tblMusic")[0]
-        assert path == str(home / 'Music' / 'SP') + os.sep and status == 1
+        # forward slashes on BOTH OSes — the intake convention the code pins
+        assert path == str(home) + '/Music/SP/' and status == 1
 
     def test_merge_marks_already_local_files_downloaded(self, env, monkeypatch):
         home = self._home(env, monkeypatch)

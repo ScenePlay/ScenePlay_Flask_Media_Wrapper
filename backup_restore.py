@@ -27,6 +27,7 @@ All DB work is plain sqlite3 against sql.database (same idiom as the queue
 helpers), so tests can point it at a scratch file.
 """
 
+import gc
 import os
 import json
 import shutil
@@ -308,10 +309,56 @@ def _upgrade_restored_db():
         return False
 
 
+def _dispose_web_pool():
+    """Return the web app's connections so the ORM starts clean against the
+    restored data. The restoring request's OWN session holds a checked-out
+    connection (the login check already ran queries), and engine.dispose()
+    never closes checked-out connections — it just orphans them in the old
+    pool — so session.remove() must come first. The gc.collect() closes any
+    connection stranded in a previously-disposed pool. Best-effort: outside
+    the Flask app (unit tests, CLI) there is no pool to release."""
+    try:
+        from extensions import db
+        db.session.remove()
+        db.engine.dispose()
+    except Exception:
+        pass
+    gc.collect()
+
+
+def _overwrite_db(tmp_db):
+    """Copy the restored snapshot INTO the live database file with sqlite's
+    online backup API — deliberately NOT an os.replace file swap. Windows
+    refuses to rename over a file while ANY handle is open (the web pool, a
+    worker thread's poll, even a second app process pointed at the same db),
+    and no amount of in-process disposing can reach the other holders. The
+    backup API instead goes through sqlite's normal locking, overwriting
+    schema + content in one destination transaction no matter who else has
+    the file open; concurrent readers/writers simply wait out the copy, and
+    existing connections carry on against the new contents afterwards."""
+    _dispose_web_pool()
+    src = sqlite3.connect(tmp_db)
+    dst = sqlite3.connect(sql.database, timeout=30)
+    try:
+        # A WAL-mode destination requires matching page sizes. The snapshot
+        # is ours alone, so normalize IT (an old source box may predate the
+        # 4096-byte default) rather than touching the live file's setting.
+        dst_ps = dst.execute("PRAGMA page_size").fetchone()[0]
+        if src.execute("PRAGMA page_size").fetchone()[0] != dst_ps:
+            src.execute(f"PRAGMA page_size = {dst_ps}")
+            src.execute("VACUUM")
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    os.remove(tmp_db)
+
+
 def restore_replace(zip_path, include_uploads=True):
-    """Whole-database restore. Safety snapshot first; atomic file swap; WAL
-    sidecars cleared; schema brought current; uploads overwritten; missing
-    media re-queued.
+    """Whole-database restore. Safety snapshot first; snapshot copied into
+    the live file (sqlite backup API — transactional, so a crash mid-copy
+    leaves the old data); schema brought current; uploads overwritten;
+    missing media re-queued.
 
     include_uploads=False restores the DATABASE ONLY: extracting a big
     uploads/ tree (battlemap images/videos) crashes low-memory boxes like a
@@ -327,12 +374,9 @@ def restore_replace(zip_path, include_uploads=True):
 
     safety = create_backup(label='pre-restore')
 
-    os.replace(tmp_db, sql.database)
-    for sidecar in ('-wal', '-shm'):
-        try:
-            os.remove(sql.database + sidecar)
-        except OSError:
-            pass
+    # No sidecar (-wal/-shm) cleanup here: with the copy-into-live approach
+    # they belong to the LIVE file and other connections may have them open.
+    _overwrite_db(tmp_db)
     upgraded = _upgrade_restored_db()
     uploads = _extract_uploads(zip_path, overwrite=True) if include_uploads else 0
     requeue = requeue_missing_media()

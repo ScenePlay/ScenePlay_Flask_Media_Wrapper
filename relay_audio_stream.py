@@ -539,9 +539,33 @@ def _push_ws(cfg, buf, first):
             pass
 
 
+def _canonical_base(url):
+    """Resolve a host-level redirect on the relay base URL once per worker
+    (e.g. Cloudflare's apex→www 301 on 20roller.com). A redirected base
+    breaks both transports: websocket-client follows the redirect into an
+    https:// Location and dies on 'scheme https is invalid', and requests
+    rewrites the chunked ingest POST into a GET (301/302 method rewrite).
+    Any failure returns the URL unchanged — worst case is today's behavior."""
+    try:
+        import requests
+        from urllib.parse import urlsplit
+        r = requests.head(url, allow_redirects=False, timeout=5)
+        loc = r.headers.get("location", "")
+        if r.status_code in (301, 302, 307, 308) and loc:
+            parts = urlsplit(loc)
+            if parts.scheme in ("http", "https") and parts.netloc:
+                base = f"{parts.scheme}://{parts.netloc}"
+                log.info("relay url %s redirects — streaming to %s", url, base)
+                return base
+    except Exception:
+        pass
+    return url
+
+
 def _run(cfg):
     """Worker thread: capture → encode → push until playback goes idle."""
     import requests
+    cfg = dict(cfg, url=_canonical_base(cfg["url"].rstrip("/")))
     url = (cfg["url"].rstrip("/")
            + f"/api/v1/session/{cfg['session_id']}/audio-ingest")
     headers = {"X-Relay-Secret": cfg["secret"], "Content-Type": "audio/mpeg",
