@@ -217,6 +217,16 @@
                     </span>
                     <br />
                     <br />
+                    <div style="margin:6px 0;">
+                      <label for="restart-sudo" style="font-size:.85em;display:block;margin-bottom:2px;">
+                        <b>System (sudo) password — optional.</b>
+                        Needed only when this box's sudo prompts for a password;
+                        leave blank if reboots already work. Used once and never stored.
+                      </label>
+                      <input type="password" id="restart-sudo" name="sudo_password"
+                             autocomplete="new-password"
+                             placeholder="sudo password (optional)" style="max-width:260px;">
+                    </div>
                     <input type="submit" name="submit" value="Restart Computer"
                            title="Requires a DM login"
                            onclick="return confirm('Are you sure you want to restart the computer? (Requires a DM login.)');"/>

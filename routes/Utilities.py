@@ -19,11 +19,22 @@ import backup_restore
 ut = Blueprint('ut', __name__)
 
 
-def restart_computer():
+def restart_computer(sudo_password=None):
     """Reboot the box: shutdown.exe on Windows, the repo-root
-    restartComputer.sh (sudo shutdown -r now) on Linux."""
+    restartComputer.sh (sudo shutdown -r now) on Linux.
+
+    sudo_password (optional, from the web page) is for boxes where sudo
+    prompts: it goes to sudo -S on stdin and is never stored or logged."""
     if os.name == 'nt':
         subprocess.Popen(['shutdown', '/r', '/t', '3'], shell=False)
+        return
+    if sudo_password:
+        # -S reads the password from stdin; -p '' silences the prompt so it
+        # never hits the server's terminal.
+        subprocess.run(['sudo', '-S', '-p', '', 'shutdown', '-r', 'now'],
+                       input=sudo_password + '\n', text=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=30)
         return
     repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     subprocess.Popen(['bash', os.path.join(repo_root, 'restartComputer.sh')],
@@ -133,7 +144,9 @@ def main():
             # browser before the network drops. It polls /api/server-info and
             # loads the app again once the box is back.
             import threading
-            threading.Timer(3.0, restart_computer).start()
+            sudo_pw = request.form.get('sudo_password') or None
+            threading.Timer(3.0, restart_computer,
+                            kwargs={'sudo_password': sudo_pw}).start()
             return render_template('restarting.html')
         else:
             pass
