@@ -1150,11 +1150,16 @@ function enter3d() {
 }
 
 function _bm3dOpen() {
+  // Video maps: hand the page's own playing <video> to the viewer — the 3D
+  // floor renders it live (THREE.VideoTexture). Still maps pass the image URL.
+  const bgEl  = document.getElementById('map-bg');
+  const isVid = !!bgEl && bgEl.tagName === 'VIDEO';
   BM3D.open({
     overlayEl:    document.getElementById('bm3d-overlay'),
     gridCols:     GRID_COLS,
     gridRows:     GRID_ROWS,
-    bgUrl:        (document.getElementById('map-bg') || {}).src || '',
+    bgUrl:        (!isVid && bgEl && bgEl.src) || '',
+    bgVideoEl:    isVid ? bgEl : null,
     floorplanUrl: `/ttrpg/battlemap/${MAP_ID}/floorplan`,
     isDM:         IS_DM,
     // "Mine" = my user AND a character in THIS session's party (ROLLER_CHARS is

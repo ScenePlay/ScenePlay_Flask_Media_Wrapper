@@ -647,14 +647,14 @@ def map_view(map_id):
     if current_user.is_dm() and bm.is_active:
         _push_map_state(bm)
 
-    # 3D mode needs a stored floorplan AND a static-image background (a looping
-    # video can't texture the 3D floor). The button/loader render only when both hold.
+    # 3D mode needs a stored floorplan AND a background. Still images texture
+    # the floor directly; VIDEO backgrounds play live on the 3D floor via a
+    # THREE.VideoTexture fed from the page's own <video> element.
     fp = (tblBattleMapFloorplans.query
           .with_entities(tblBattleMapFloorplans.version)
           .filter_by(map_id=map_id).first())
     floorplan_version = fp.version if fp else None
-    bg_ext = bm.bg_image.rsplit('.', 1)[-1].lower() if '.' in (bm.bg_image or '') else ''
-    bm3d_available = bool(floorplan_version and bm.bg_image and bg_ext not in VIDEO_EXT)
+    bm3d_available = bool(floorplan_version and bm.bg_image)
 
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,

@@ -85,14 +85,14 @@
                   data-map-rows="{{ m.grid_rows }}"
                   onclick="openMapPromptModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
                   title="Image Prompt">&#127748;</button>
-          {% if m.bg_image and m.bg_image.rsplit('.', 1)[1].lower() not in ('mp4', 'webm', 'ogv') %}
+          {% if m.bg_image %}
           <button class="btn btn-outline-secondary btn-sm"
                   data-map-id="{{ m.map_id }}"
                   data-map-name="{{ m.name }}"
                   data-map-cols="{{ m.grid_cols }}"
                   data-map-rows="{{ m.grid_rows }}"
                   onclick="open3dTraceModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
-                  title="3D Floorplan — trace walls/doors from the map image for 3D mode">&#9635;</button>
+                  title="3D Floorplan — trace walls/doors from the map for 3D mode (video maps: attach a screenshot of a frame)">&#9635;</button>
           {% endif %}
           <form method="POST"
                 action="{{ url_for('battlemap_bp.map_delete', map_id=m.map_id) }}"
@@ -390,6 +390,7 @@
           <b>Step 1</b> — copy this prompt into a vision AI (ChatGPT, Claude&#8230;) and
           <b>attach this map's background image</b> to the same message. The AI traces the
           walls, doors and elevation into JSON.
+          <em>Video map? Attach a screenshot of one frame instead.</em>
         </p>
         <button class="btn btn-ttrpg btn-sm w-100 mb-2"
                 onclick="generateAndShow3dTracePrompt()">&#9889; Generate Trace Prompt</button>

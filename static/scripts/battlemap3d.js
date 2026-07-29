@@ -161,10 +161,15 @@ window.BM3D = (function () {
 
   function buildBgPixels(img) {
     _bgPix = null;
-    if (!img || !img.width) return;
+    if (!img) return;
+    // <video> elements expose their size as videoWidth/videoHeight; walls on
+    // a video map sample the CURRENT frame at build time.
+    var iw = img.videoWidth || img.width;
+    var ih = img.videoHeight || img.height;
+    if (!iw || !ih) return;
     try {
-      var w = Math.min(1024, img.width);
-      var h = Math.max(1, Math.round(img.height * w / img.width));
+      var w = Math.min(1024, iw);
+      var h = Math.max(1, Math.round(ih * w / iw));
       var cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
       var ctx = cv.getContext('2d');
@@ -1236,6 +1241,41 @@ window.BM3D = (function () {
 
   var _bgTex = null;
 
+  // Load/refresh the floor texture: still image via TextureLoader, or a LIVE
+  // looping video via THREE.VideoTexture fed by the host page's own <video>
+  // element (which keeps playing behind the overlay). Wall/skirt tinting
+  // samples the video's current frame once at build time.
+  function _loadBgTexture() {
+    _bgTex = null;
+    buildBgPixels(null);
+    if (cfg.bgVideoEl) {
+      var v = cfg.bgVideoEl;
+      var apply = function () {
+        if (!renderer) return;
+        var tex = new THREE.VideoTexture(v);
+        tex.anisotropy = Math.min(IS_TOUCH ? 2 : 8,
+                                  renderer.capabilities.getMaxAnisotropy());
+        _bgTex = tex;
+        buildBgPixels(v);
+        if (scene) rebuildGeometry();
+      };
+      if (v.readyState >= 2 && v.videoWidth) apply();
+      else v.addEventListener('loadeddata', apply, { once: true });
+      var p = v.play && v.play();
+      if (p && p.catch) p.catch(function () {});
+      return;
+    }
+    if (cfg.bgUrl) {
+      new THREE.TextureLoader().load(cfg.bgUrl, function (tex) {
+        tex.anisotropy = Math.min(IS_TOUCH ? 2 : 8,
+                                  renderer.capabilities.getMaxAnisotropy());
+        _bgTex = tex;
+        buildBgPixels(tex.image);
+        if (scene) rebuildGeometry();
+      });
+    }
+  }
+
   function fetchPlanAndRebuild() {
     if (_fetchingPlan || !cfg.floorplanUrl) return;
     _fetchingPlan = true;
@@ -1333,17 +1373,9 @@ window.BM3D = (function () {
 
     function buildAll() {
       buildScene();
-      if (cfg.bgUrl) {
-        new THREE.TextureLoader().load(cfg.bgUrl, function (tex) {
-          tex.anisotropy = Math.min(IS_TOUCH ? 2 : 8,
-                                    renderer.capabilities.getMaxAnisotropy());
-          _bgTex = tex;
-          buildBgPixels(tex.image);
-          // Full rebuild, not just the floor: walls/doors sample their
-          // color/pattern from the image pixels underneath them.
-          if (scene) rebuildGeometry();
-        });
-      }
+      // Async: when the texture/pixels land, _loadBgTexture triggers a full
+      // rebuild so walls/doors sample their color from the art beneath them.
+      _loadBgTexture();
       var st2 = cfg.getState && cfg.getState();
       if (st2) onState(st2);
       setView(restoreView());
@@ -1403,19 +1435,11 @@ window.BM3D = (function () {
     }
     flyPos = null;              // old fly position may be off the new map
     var bgUrl = opts.bgUrl || '';
-    if (bgUrl !== cfg.bgUrl) {
-      cfg.bgUrl = bgUrl;
-      _bgTex = null;            // old art must not texture the new floor
-      buildBgPixels(null);
-      if (bgUrl && renderer) {
-        new THREE.TextureLoader().load(bgUrl, function (tex) {
-          tex.anisotropy = Math.min(IS_TOUCH ? 2 : 8,
-                                    renderer.capabilities.getMaxAnisotropy());
-          _bgTex = tex;
-          buildBgPixels(tex.image);
-          if (scene) rebuildGeometry();
-        });
-      }
+    var bgVid = opts.bgVideoEl || null;
+    if (bgUrl !== cfg.bgUrl || bgVid !== cfg.bgVideoEl) {
+      cfg.bgUrl = bgUrl;        // old art must not texture the new floor
+      cfg.bgVideoEl = bgVid;
+      if (renderer) _loadBgTexture();
     }
     if (scene) rebuildGeometry();
     if (open_) setView(defaultView());
