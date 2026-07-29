@@ -128,6 +128,12 @@ def _ensure_graph_pactl():
     if sink.returncode != 0:
         raise RuntimeError(sink.stderr.strip())
     _graph_modules.append(sink.stdout.strip())
+    # Pin the capture sink to unity gain: the monitor (= the stream) is scaled
+    # by the sink's own volume, and stream-restore resurrects whatever volume
+    # the desktop last wrote to a sink of this name (e.g. volume keys while it
+    # was briefly the active output) — which silently attenuates the stream.
+    _run_cmd("pactl", "set-sink-volume", SINK_NAME, "100%")
+    _run_cmd("pactl", "set-sink-mute", SINK_NAME, "0")
     # GM keeps hearing the music: mirror the capture sink to the default
     # output. (Not re-pointed if the default sink changes mid-session.)
     loop = _run_cmd("pactl", "load-module", "module-loopback",
