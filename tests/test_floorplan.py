@@ -5,6 +5,7 @@ persistence and endpoints live in routes/battlemap.py."""
 import pytest
 
 from floorplan import (validate_floorplan, floorplan_summary,
+                       floorplan_layout_text,
                        MAX_WALLS, DEFAULT_WALL_HEIGHT_FT)
 
 
@@ -140,3 +141,57 @@ class TestNormalization:
             20, 20)
         e = clean['elevations'][0]
         assert (e['x1'], e['y1'], e['x2'], e['y2']) == (5.0, 5.0, 9.0, 9.0)
+
+
+class TestLayoutText:
+    def _text(self, **over):
+        clean, _, errors = validate_floorplan(_plan(**over), 20, 20)
+        assert errors == []
+        return floorplan_layout_text(clean)
+
+    def test_header_and_feet_conversion(self):
+        text = self._text()
+        assert 'Grid: 20 x 20 squares (100 ft x 100 ft)' in text
+        assert '1 square = 5 ft' in text
+
+    def test_wall_aggregate_and_trailer(self):
+        text = self._text()
+        assert '1 wall segment;' in text
+        assert 'columns 3-3, rows 0-6.5' in text
+        assert text.endswith('Everything not listed is flat open floor at ground level.')
+
+    def test_door_line(self):
+        # d1 runs down column 3 from row 6.5 to 7.5 -> vertical, 5 ft, left/middle.
+        # No door ids in the prose: models paint them into the art as labels.
+        text = self._text()
+        assert 'A vertical doorway 5 ft wide at column 3, rows 6.5-7.5' in text
+        assert 'left of the map' in text
+        assert 'd1' not in text
+
+    def test_horizontal_door(self):
+        text = self._text(doors=[{'id': 'gate', 'x1': 8, 'y1': 10, 'x2': 9.5, 'y2': 10}])
+        assert 'A horizontal doorway 7.5 ft wide at row 10, columns 8-9.5' in text
+        assert 'center of the map' in text
+        assert 'gate' not in text
+
+    def test_pit_platform_and_circle_phrasing(self):
+        text = self._text(elevations=[
+            {'x1': 5, 'y1': 5, 'x2': 9, 'y2': 9, 'floor_ft': -10, 'label': 'spike pit'},
+            {'x1': 12, 'y1': 2, 'x2': 16, 'y2': 4, 'floor_ft': 15},
+            {'shape': 'circle', 'cx': 10, 'cy': 18, 'r': 2, 'floor_ft': -20},
+        ])
+        assert 'Pit 10 ft deep: 20 ft x 20 ft, from (5,5) to (9,9) ("spike pit").' in text
+        assert 'Raised platform 15 ft high: 20 ft x 10 ft, from (12,2) to (16,4).' in text
+        assert 'Circular pit 20 ft deep: radius 10 ft, centered at (10,18).' in text
+
+    def test_door_truncation_past_cap(self):
+        doors = [{'id': f'd{i}', 'x1': 0.5 * i, 'y1': 1, 'x2': 0.5 * i + 0.5, 'y2': 1}
+                 for i in range(25)]
+        text = self._text(doors=doors)
+        assert '...and 5 more doorways' in text
+        assert text.count('doorway ') == 20
+
+    def test_empty_plan_no_crash(self):
+        text = self._text(walls=[], doors=[], elevations=[])
+        assert 'open ground' in text
+        assert 'doorway' not in text and 'Pit' not in text

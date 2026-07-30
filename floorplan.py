@@ -240,3 +240,104 @@ def floorplan_summary(clean):
     if n:
         parts.append(f'{n} elevation region{"s" if n != 1 else ""}')
     return ' · '.join(parts)
+
+
+# The art prompt caps door/elevation prose at this many lines: an image model
+# can't act on hundreds of coordinates, and the schematic image carries the
+# exact geometry anyway.
+LAYOUT_TEXT_MAX_ITEMS = 20
+
+
+def _fmt(v):
+    """Trim float noise: 6.0 -> '6', 6.5 -> '6.5'."""
+    return f'{v:g}'
+
+
+def _region(mx, my, cols, rows):
+    """Coarse position of a midpoint, by thirds: 'top-left area' … 'center'."""
+    col = 'left' if mx < cols / 3 else ('right' if mx > cols * 2 / 3 else '')
+    row = 'top' if my < rows / 3 else ('bottom' if my > rows * 2 / 3 else '')
+    if not col and not row:
+        return 'center of the map'
+    if col and row:
+        return f'{row}-{col} area'
+    return f'{row or col} of the map'
+
+
+def floorplan_layout_text(clean):
+    """Prose description of a validated plan, for the map-art prompt.
+
+    Deterministic, feet-converted (1 cell = 5 ft). Walls are summarized in
+    aggregate — the schematic image the DM attaches carries exact geometry;
+    doors and elevations get one line each (capped)."""
+    grid = clean.get('grid', {})
+    cols, rows = grid.get('cols', 0), grid.get('rows', 0)
+    lines = [f'Grid: {cols} x {rows} squares ({cols * 5} ft x {rows * 5} ft); '
+             f'1 square = 5 ft. Coordinates below are (col, row) from the '
+             f'top-left corner.']
+
+    walls = clean.get('walls', [])
+    doors = clean.get('doors', [])
+    elevs = clean.get('elevations', [])
+    if not walls and not doors and not elevs:
+        lines.append('No walls, doors, or elevations — open ground.')
+        return '\n'.join(lines)
+
+    if walls:
+        xs = [w[k] for w in walls for k in ('x1', 'x2')]
+        ys = [w[k] for w in walls for k in ('y1', 'y2')]
+        lines.append(f'{len(walls)} wall segment{"s" if len(walls) != 1 else ""}; '
+                     f'built area spans columns {_fmt(min(xs))}-{_fmt(max(xs))}, '
+                     f'rows {_fmt(min(ys))}-{_fmt(max(ys))}.')
+
+    # Deliberately NO door ids here: models paint identifiers like "d3" as
+    # literal labels in the art (seen in practice) despite no-text rules.
+    for d in doors[:LAYOUT_TEXT_MAX_ITEMS]:
+        dx, dy = abs(d['x2'] - d['x1']), abs(d['y2'] - d['y1'])
+        width_ft = _fmt(round(((dx * dx + dy * dy) ** 0.5) * 5, 1))
+        region = _region((d['x1'] + d['x2']) / 2, (d['y1'] + d['y2']) / 2,
+                         cols, rows)
+        if dy > dx:
+            where = (f'at column {_fmt(d["x1"])}, rows '
+                     f'{_fmt(min(d["y1"], d["y2"]))}-{_fmt(max(d["y1"], d["y2"]))}')
+            orient = 'vertical'
+        elif dx > dy:
+            where = (f'at row {_fmt(d["y1"])}, columns '
+                     f'{_fmt(min(d["x1"], d["x2"]))}-{_fmt(max(d["x1"], d["x2"]))}')
+            orient = 'horizontal'
+        else:
+            where = (f'from ({_fmt(d["x1"])},{_fmt(d["y1"])}) to '
+                     f'({_fmt(d["x2"])},{_fmt(d["y2"])})')
+            orient = 'diagonal'
+        lines.append(f'A {orient} doorway {width_ft} ft wide {where} ({region}).')
+    if len(doors) > LAYOUT_TEXT_MAX_ITEMS:
+        lines.append(f'...and {len(doors) - LAYOUT_TEXT_MAX_ITEMS} more doorways '
+                     f'(see the schematic).')
+
+    for e in elevs[:LAYOUT_TEXT_MAX_ITEMS]:
+        ft = e['floor_ft']
+        if ft < 0:
+            kind, amount = 'pit', f'{_fmt(-ft)} ft deep'
+        elif ft > 0:
+            kind, amount = 'raised platform', f'{_fmt(ft)} ft high'
+        else:
+            kind, amount = 'ground-level area', 'at 0 ft'
+        if e.get('shape') == 'circle':
+            desc = (f'Circular {kind} {amount}: radius {_fmt(e["r"] * 5)} ft, '
+                    f'centered at ({_fmt(e["cx"])},{_fmt(e["cy"])})')
+        else:
+            w_ft = _fmt((e['x2'] - e['x1']) * 5)
+            h_ft = _fmt((e['y2'] - e['y1']) * 5)
+            desc = (f'{kind.capitalize()} {amount}: {w_ft} ft x {h_ft} ft, '
+                    f'from ({_fmt(e["x1"])},{_fmt(e["y1"])}) to '
+                    f'({_fmt(e["x2"])},{_fmt(e["y2"])})')
+        if e.get('label'):
+            desc += f' ("{e["label"]}")'
+        lines.append(desc + '.')
+    if len(elevs) > LAYOUT_TEXT_MAX_ITEMS:
+        lines.append(f'...and {len(elevs) - LAYOUT_TEXT_MAX_ITEMS} more '
+                     f'elevation regions (see the schematic).')
+
+    if walls:
+        lines.append('Everything not listed is flat open floor at ground level.')
+    return '\n'.join(lines)

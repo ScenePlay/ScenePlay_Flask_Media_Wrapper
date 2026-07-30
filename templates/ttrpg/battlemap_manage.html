@@ -47,6 +47,10 @@
         <div>
           <h5 class="mb-0" style="color:var(--ttrpg-accent);">{{ m.name }}</h5>
           <span class="small text-muted">#{{ loop.index }} &middot; {{ m.grid_cols }}&times;{{ m.grid_rows }} grid</span>
+          <span class="badge bg-secondary ms-1" id="fp-badge-{{ m.map_id }}"
+                title="This map has a saved 3D floorplan"
+                {% if m.map_id not in floorplan_info %}style="display:none;"{% endif %}>3D
+            v<span id="fp-badge-v-{{ m.map_id }}">{{ floorplan_info.get(m.map_id, {}).get('version', '') }}</span></span>
           {% if m.is_active %}
           <span class="badge ms-2" style="background:var(--ttrpg-accent);color:#1a1a2e;">Active</span>
           {% endif %}
@@ -83,17 +87,17 @@
                   data-map-name="{{ m.name }}"
                   data-map-cols="{{ m.grid_cols }}"
                   data-map-rows="{{ m.grid_rows }}"
-                  onclick="openMapPromptModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
+                  data-map-has-bg="{{ 1 if m.bg_image else 0 }}"
+                  onclick="openMapPromptModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows, this.dataset.mapHasBg === '1')"
                   title="Image Prompt">&#127748;</button>
-          {% if m.bg_image %}
           <button class="btn btn-outline-secondary btn-sm"
                   data-map-id="{{ m.map_id }}"
                   data-map-name="{{ m.name }}"
                   data-map-cols="{{ m.grid_cols }}"
                   data-map-rows="{{ m.grid_rows }}"
-                  onclick="open3dTraceModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows)"
-                  title="3D Floorplan — trace walls/doors from the map for 3D mode (video maps: attach a screenshot of a frame)">&#9635;</button>
-          {% endif %}
+                  data-map-has-bg="{{ 1 if m.bg_image else 0 }}"
+                  onclick="open3dModal(this.dataset.mapId, this.dataset.mapName, this.dataset.mapCols, this.dataset.mapRows, this.dataset.mapHasBg === '1')"
+                  title="3D Floorplan — design a wall layout for the AI to paint, or trace walls from existing map art">&#9635;</button>
           <form method="POST"
                 action="{{ url_for('battlemap_bp.map_delete', map_id=m.map_id) }}"
                 onsubmit="return confirm('Delete map \'{{ m.name }}\'?')">
@@ -197,6 +201,20 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+
+        <!-- Walls-first routing: shown when the map has neither a floorplan
+             nor a background — the moment to decide whether it needs 3D. -->
+        <div id="mpt-3d-banner" class="p-2 mb-3" style="display:none;background:var(--ttrpg-surface);
+             border:1px solid var(--ttrpg-accent);border-radius:6px;">
+          <div class="small mb-2">&#9635; <b>Will this map use 3D walls/elevations?</b>
+            Design the wall layout first — the art prompt will then tell the AI to
+            paint a map that matches it exactly.</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-ttrpg btn-sm" onclick="switchToLayoutDesign()">Design 3D layout first &rarr;</button>
+            <button class="btn btn-outline-secondary btn-sm"
+                    onclick="document.getElementById('mpt-3d-banner').style.display='none'">No 3D &mdash; just art</button>
+          </div>
+        </div>
 
         <!-- Battle / Travel toggle: encounter-scale grid vs large-distance travel map -->
         <div class="d-flex gap-2 mb-2">
@@ -334,6 +352,17 @@
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);resize:vertical;"></textarea>
         </div>
 
+        <!-- Layout match: only visible when this map has a saved floorplan -->
+        <div id="mpt-layout-row" class="form-check mb-2" style="display:none;">
+          <input class="form-check-input" type="checkbox" id="mpt-same-session"
+                 onchange="_mptSameSessionChanged()">
+          <label class="form-check-label small" for="mpt-same-session">
+            Same AI chat as the layout design
+            <span class="text-muted">— still attach the schematic; it reminds the
+            model this is its own geometry, not inspiration</span>
+          </label>
+        </div>
+
         <!-- Generate button -->
         <button class="btn btn-ttrpg btn-sm w-100 mb-3"
                 onclick="generateAndShowMapPrompt()">&#9889; Generate Prompt</button>
@@ -341,6 +370,21 @@
         <!-- Output section -->
         <div id="mpt-output-section" style="display:none;">
           <hr style="border-color:var(--sp-border);">
+          <div id="mpt-schematic-row" style="display:none;">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <img id="mpt-schematic-img" alt="floorplan schematic"
+                 style="width:120px;max-height:120px;object-fit:contain;border:1px solid var(--sp-border);
+                        border-radius:4px;background:#fff;">
+            <div class="small text-muted flex-grow-1" id="mpt-schematic-caption">
+              Attach this schematic to the same message as the prompt.</div>
+            <button class="btn btn-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="copyFpSchematic(this)">&#128203; Copy Schematic</button>
+            <button class="btn btn-sm"
+                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                    onclick="downloadFpSchematic()">&#11015; PNG</button>
+          </div>
+          </div>
           <div class="d-flex align-items-center gap-2 mb-2">
             <span class="small text-muted">Copy and paste into your AI image/video tool.</span>
             <button class="btn btn-sm ms-auto"
@@ -386,25 +430,115 @@
                   onclick="delete3dFloorplan()">Delete Floorplan</button>
         </div>
 
-        <p class="small text-muted mb-2">
-          <b>Step 1</b> — copy this prompt into a vision AI (ChatGPT, Claude&#8230;) and
-          <b>attach this map's background image</b> to the same message. The AI traces the
-          walls, doors and elevation into JSON.
-          <em>Video map? Attach a screenshot of one frame instead.</em>
-        </p>
-        <button class="btn btn-ttrpg btn-sm w-100 mb-2"
-                onclick="generateAndShow3dTracePrompt()">&#9889; Generate Trace Prompt</button>
-        <div id="fp-prompt-section" style="display:none;">
-          <div class="d-flex align-items-center gap-2 mb-2">
-            <span class="small text-muted">Attach the map image with this prompt.</span>
-            <button class="btn btn-sm ms-auto"
-                    style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
-                    onclick="copy3dTracePrompt()">&#128203; Copy Prompt</button>
+        <!-- Design (walls-first) vs Trace (image-first) -->
+        <div class="d-flex gap-2 mb-3">
+          <button id="fp-tab-design-btn" onclick="setFp3dTab('design')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
+            &#9998; Design Layout <span class="text-nowrap" style="opacity:.75;">(walls first)</span>
+          </button>
+          <button id="fp-tab-trace-btn" onclick="setFp3dTab('trace')"
+                  class="btn btn-sm flex-grow-1"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border:1px solid var(--sp-border);">
+            &#128444; Trace from Image <span class="text-nowrap" style="opacity:.75;">(art exists)</span>
+          </button>
+        </div>
+
+        <!-- Design pane: a text LLM invents the layout; the art is generated
+             afterwards to match it (walls-first flow). -->
+        <div id="fp-design-pane">
+          <p class="small text-muted mb-2">
+            <b>Step 1</b> — copy this prompt into an AI chat (ChatGPT, Claude&#8230;).
+            The AI <b>designs</b> a wall/door/elevation layout as JSON — no image needed.
+            After saving it here, generate the map art to match.
+          </p>
+          <div class="row g-2 mb-2">
+            <div class="col-sm-6">
+              <label class="form-label small text-muted mb-1">Genre</label>
+              <select id="fpd-genre" class="form-select form-select-sm" onchange="fpdGenreChanged()"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label small text-muted mb-1">Environment</label>
+              <select id="fpd-env" class="form-select form-select-sm"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label small text-muted mb-1">Time of Day</label>
+              <select id="fpd-time" class="form-select form-select-sm"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+                <option value="">-- any --</option>
+                <option>Dawn / Sunrise</option>
+                <option>Morning</option>
+                <option>Midday</option>
+                <option>Afternoon</option>
+                <option>Dusk / Sunset</option>
+                <option>Night</option>
+                <option>Midnight</option>
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label small text-muted mb-1">Wall Style <span class="text-muted">(3D finish)</span></label>
+              <select id="fpd-wallstyle" class="form-select form-select-sm"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+                <option value="">-- smooth --</option>
+                <option value="brick">Brick</option>
+                <option value="stone">Stone</option>
+                <option value="wood">Wood</option>
+              </select>
+            </div>
           </div>
-          <textarea id="fp-prompt-text" class="form-control mb-3" readonly
-                    style="font-family:monospace;font-size:.78rem;min-height:200px;
-                           background:var(--ttrpg-surface);color:var(--ttrpg-text);
-                           border-color:var(--sp-border);resize:vertical;"></textarea>
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Describe the layout <span class="text-muted">(optional)</span></label>
+            <textarea id="fpd-desc" class="form-control form-control-sm" rows="2"
+                      placeholder="e.g. a ruined chapel with a crypt below, a pit trap before the altar, two side rooms"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);resize:vertical;"></textarea>
+          </div>
+          <button class="btn btn-ttrpg btn-sm w-100 mb-2"
+                  onclick="generateAndShowLayoutPrompt()">&#9889; Generate Layout Prompt</button>
+          <div id="fpd-prompt-section" style="display:none;">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="small text-muted">Paste into an AI chat — no image needed.</span>
+              <button class="btn btn-sm ms-auto"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                      onclick="copyLayoutPrompt()">&#128203; Copy Prompt</button>
+            </div>
+            <textarea id="fpd-prompt-text" class="form-control mb-3" readonly
+                      style="font-family:monospace;font-size:.78rem;min-height:200px;
+                             background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                             border-color:var(--sp-border);resize:vertical;"></textarea>
+          </div>
+        </div>
+
+        <!-- Trace pane: image-first flow for maps whose art already exists. -->
+        <div id="fp-trace-pane" style="display:none;">
+          <p class="small text-muted mb-2">
+            <b>Step 1</b> — copy this prompt into a vision AI (ChatGPT, Claude&#8230;) and
+            <b>attach this map's background image</b> to the same message. The AI traces the
+            walls, doors and elevation into JSON.
+            <em>Video map? Attach a screenshot of one frame instead.</em>
+          </p>
+          <div id="fp-trace-nobg" class="small text-muted p-2 mb-2" style="display:none;
+               background:var(--ttrpg-surface);border:1px solid var(--sp-border);border-radius:6px;">
+            This map has no background art yet — use the <b>Design Layout</b> tab,
+            or add art first.
+          </div>
+          <button id="fp-trace-gen-btn" class="btn btn-ttrpg btn-sm w-100 mb-2"
+                  onclick="generateAndShow3dTracePrompt()">&#9889; Generate Trace Prompt</button>
+          <div id="fp-prompt-section" style="display:none;">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="small text-muted">Attach the map image with this prompt.</span>
+              <button class="btn btn-sm ms-auto"
+                      style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                      onclick="copy3dTracePrompt()">&#128203; Copy Prompt</button>
+            </div>
+            <textarea id="fp-prompt-text" class="form-control mb-3" readonly
+                      style="font-family:monospace;font-size:.78rem;min-height:200px;
+                             background:var(--ttrpg-surface);color:var(--ttrpg-text);
+                             border-color:var(--sp-border);resize:vertical;"></textarea>
+          </div>
         </div>
 
         <hr style="border-color:var(--sp-border);">
@@ -432,6 +566,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='scripts/floorplan_prompt.js') }}"></script>
 <script>
 // ── Per-card DM notes (read/edit/add/delete) ─────────────────────────────────
 // Same battlemap-notes backend as the map page's panel and the session page's
@@ -644,6 +779,60 @@ let _activeMapId    = null;
 let _activeMapName  = '';
 let _activeMapCols  = 20;
 let _activeMapRows  = 20;
+let _activeMapHasBg = false;
+let _fpSchematicCanvas = null;    // last rendered schematic (for copy/download)
+
+// map_id -> {version, plan, layout_text} — lazily fetched saved floorplans,
+// used by the art prompt's LAYOUT MATCH section and the schematic renderer.
+const _fpPlanCache = {};
+
+function _fpFetchPlan(mapId) {
+  const info = _FP_INFO[mapId];
+  if (!info) return Promise.resolve(null);
+  const cached = _fpPlanCache[mapId];
+  if (cached && cached.version === info.version) return Promise.resolve(cached);
+  return fetch(`/ttrpg/battlemap/${mapId}/floorplan`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok || !d.floorplan) return null;
+      _fpPlanCache[mapId] = { version: d.version, plan: d.floorplan,
+                              layout_text: d.layout_text || '' };
+      return _fpPlanCache[mapId];
+    })
+    .catch(() => null);
+}
+
+// map_id -> {art: {...}|null, layout: {...}|null} — stored LLM prompts, so
+// the dialogs reopen with the last-used selections.
+const _mapPromptsCache = {};
+
+function _fetchStoredPrompts(mapId) {
+  if (_mapPromptsCache[mapId]) return Promise.resolve(_mapPromptsCache[mapId]);
+  return fetch(`/ttrpg/battlemap/${mapId}/prompts`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return null;
+      _mapPromptsCache[mapId] = { art: d.art, layout: d.layout };
+      return _mapPromptsCache[mapId];
+    })
+    .catch(() => null);
+}
+
+function _persistPrompt(mapId, kind, promptText, settings) {
+  // Fire-and-forget: losing a stored prompt must never break the flow.
+  const cached = _mapPromptsCache[mapId];
+  if (cached) cached[kind] = { prompt_text: promptText, settings: settings,
+                               updated_at: new Date().toISOString() };
+  fetch(`/ttrpg/battlemap/${mapId}/prompt`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: kind, prompt_text: promptText, settings: settings }),
+  }).catch(() => {});
+}
+
+function _sv(id, val) {   // set a select/textarea value if the element exists
+  const el = document.getElementById(id);
+  if (el && val !== undefined && val !== null) el.value = val;
+}
 
 function _mapGenre() {
   const sel = document.getElementById('mpt-genre');
@@ -729,11 +918,12 @@ function _updateModalTitle() {
   document.getElementById('map-prompt-modal-title').innerHTML = icon + ' Image Prompt &mdash; ' + _activeMapName;
 }
 
-function openMapPromptModal(mapId, mapName, cols, rows) {
+function openMapPromptModal(mapId, mapName, cols, rows, hasBg, fromDesign) {
   _activeMapId   = parseInt(mapId);
   _activeMapName = mapName;
   _activeMapCols = parseInt(cols) || 20;
   _activeMapRows = parseInt(rows) || 20;
+  _activeMapHasBg = !!hasBg;
   _updateModalTitle();
   _populateMapGenres();
   if (!document.getElementById('mpt-env').options.length) {
@@ -741,7 +931,62 @@ function openMapPromptModal(mapId, mapName, cols, rows) {
     mapEnvChanged();
   }
   document.getElementById('mpt-output-section').style.display = 'none';
+
+  const hasFp = !!_FP_INFO[_activeMapId];
+  // Walls-first routing question: only when the map is a blank slate.
+  document.getElementById('mpt-3d-banner').style.display =
+    (!hasFp && !_activeMapHasBg) ? '' : 'none';
+  // Layout-match controls: only when a floorplan exists to match.
+  document.getElementById('mpt-layout-row').style.display = hasFp ? '' : 'none';
+  // Arriving from the Design tab = the DM is mid-conversation with the AI
+  // that just designed the layout, so default the same-session wording on.
+  document.getElementById('mpt-same-session').checked = !!fromDesign;
+  if (hasFp) _fpFetchPlan(_activeMapId);   // warm the cache before Generate
+
+  _fetchStoredPrompts(_activeMapId).then(p => {
+    if (p && p.art && p.art.settings) _applyArtSettings(p.art.settings);
+  });
   new bootstrap.Modal(document.getElementById('mapPromptModal')).show();
+}
+
+function _applyArtSettings(s) {
+  if (s.scaleKind) setMapScaleKind(s.scaleKind);
+  if (s.type) setMapPromptType(s.type);
+  _sv('mpt-genre', s.genre); mapGenreChanged();
+  _sv('mpt-env', s.env); mapEnvChanged();
+  if (s.scale) _sv('mpt-scale', s.scale);
+  _sv('mpt-time', s.time); _sv('mpt-weather', s.weather);
+  _sv('mpt-light', s.light); _sv('mpt-style', s.style);
+  _sv('mpt-freetext', s.freetext);
+  ['fire', 'water', 'fog', 'weather'].forEach(k => {
+    const el = document.getElementById('mpt-fx-' + k);
+    if (el && s.fx) el.checked = !!s.fx[k];
+  });
+}
+
+function _collectArtSettings() {
+  return {
+    scaleKind: _mapScaleKind, type: _mapPromptType,
+    genre: _gv('mpt-genre'), env: _gv('mpt-env'), scale: _gv('mpt-scale'),
+    time: _gv('mpt-time'), weather: _gv('mpt-weather'),
+    light: _gv('mpt-light'), style: _gv('mpt-style'),
+    freetext: _gv('mpt-freetext'),
+    fx: { fire: _gc('mpt-fx-fire'), water: _gc('mpt-fx-water'),
+          fog: _gc('mpt-fx-fog'), weather: _gc('mpt-fx-weather') },
+  };
+}
+
+function switchToLayoutDesign() {
+  bootstrap.Modal.getInstance(document.getElementById('mapPromptModal')).hide();
+  open3dModal(_activeMapId, _activeMapName, _activeMapCols, _activeMapRows,
+              _activeMapHasBg, 'design');
+}
+
+function _mptSameSessionChanged() {
+  // Re-generate with the new wording if a prompt is already showing.
+  if (document.getElementById('mpt-output-section').style.display !== 'none') {
+    generateAndShowMapPrompt();
+  }
 }
 
 function setMapPromptType(type) {
@@ -793,13 +1038,18 @@ function _buildMapPrompt() {
   const fxWeather = _gc('mpt-fx-weather');
 
   const lines = [];
+  // Walls-first: when this map has a saved floorplan, the art must match it.
+  const fpCache = !isTravel && _fpPlanCache[_activeMapId];
 
   if (isTravel) {
     lines.push('Please generate a strictly TOP-DOWN ' + (isLive ? 'SEAMLESSLY LOOPING video' : 'image') +
                ' of a large-scale TRAVEL MAP for a TTRPG — a map the party moves across over ' +
                'days or weeks of travel, not a single encounter. Cartographic, not a floorplan.\n');
   } else if (isLive) {
-    lines.push('Please generate a SHORT, SEAMLESSLY LOOPING video clip for use as a live TTRPG battlemap background.\n');
+    lines.push('Please generate a SHORT, SEAMLESSLY LOOPING video clip for use as a live TTRPG battlemap background.' +
+               (fpCache ? ' The layout must EXACTLY reproduce the ATTACHED schematic floorplan — see LAYOUT MATCH below.' : '') + '\n');
+  } else if (fpCache) {
+    lines.push('Please generate a strictly TOP-DOWN TTRPG battlemap background image that EXACTLY reproduces the ATTACHED schematic floorplan — see LAYOUT MATCH below. Do NOT use isometric perspective — isometric does not align with a square grid overlay.\n');
   } else {
     lines.push('Please generate a strictly TOP-DOWN TTRPG battlemap background image. Do NOT use isometric perspective — isometric does not align with a square grid overlay.\n');
   }
@@ -827,6 +1077,13 @@ function _buildMapPrompt() {
   }
   lines.push('');
 
+  if (fpCache) {
+    const sameSession = _gc('mpt-same-session');
+    FPPrompt.layoutMatchLines(fpCache.layout_text, sameSession)
+      .forEach(l => lines.push(l));
+    lines.push('');
+  }
+
   // Genre flavor lines are cartographic art direction — travel maps only
   // (battle maps get their genre from the Setting line + environment).
   if (isTravel && genre.flavor && genre.flavor.length) {
@@ -849,6 +1106,9 @@ function _buildMapPrompt() {
     } else {
       lines.push('- The main terrain, walls, floors, furniture, and structures must be COMPLETELY STATIC — zero movement.');
       lines.push('- Only the following elements should animate: ' + (fxList.length ? fxList.join(', ') : 'subtle ambient motion only') + '.');
+      if (fpCache) {
+        lines.push('- The walls and layout described above are part of the STATIC structure — zero movement. If your video tool accepts a reference or start frame, use the attached schematic (or a still generated from it) as that frame.');
+      }
     }
     lines.push('- The animated elements must look physically realistic — natural fluid motion, not cartoon.');
     lines.push('');
@@ -923,8 +1183,64 @@ function _buildMapPrompt() {
 
 function generateAndShowMapPrompt() {
   _updateModalTitle();
-  document.getElementById('map-prompt-text').value = _buildMapPrompt();
-  document.getElementById('mpt-output-section').style.display = '';
+  const go = () => {
+    const text = _buildMapPrompt();
+    document.getElementById('map-prompt-text').value = text;
+    document.getElementById('mpt-output-section').style.display = '';
+    _persistPrompt(_activeMapId, 'art', text, _collectArtSettings());
+    _renderSchematicPreview();
+  };
+  // The LAYOUT MATCH section needs the saved plan — wait for the fetch if
+  // the DM clicked Generate before the modal-open warmup finished.
+  if (_FP_INFO[_activeMapId] && !_fpPlanCache[_activeMapId]) {
+    _fpFetchPlan(_activeMapId).then(go);
+  } else {
+    go();
+  }
+}
+
+function _renderSchematicPreview() {
+  const row = document.getElementById('mpt-schematic-row');
+  const cache = _mapScaleKind !== 'travel' && _fpPlanCache[_activeMapId];
+  if (!cache) { row.style.display = 'none'; _fpSchematicCanvas = null; return; }
+  _fpSchematicCanvas = FPPrompt.renderSchematic(cache.plan,
+                                                _activeMapCols, _activeMapRows);
+  document.getElementById('mpt-schematic-img').src =
+    _fpSchematicCanvas.toDataURL('image/png');
+  // Required in BOTH modes: relying on same-session memory alone proved to
+  // drift room positions — the attached image is what keeps the art honest.
+  document.getElementById('mpt-schematic-caption').textContent =
+    'REQUIRED: attach this schematic to the same message as the prompt' +
+    (_gc('mpt-same-session') ? ' (yes, even in the same chat — it prevents drift).' : '.');
+  row.style.display = '';
+}
+
+function copyFpSchematic(btn) {
+  if (!_fpSchematicCanvas) return;
+  const orig = btn.innerHTML;
+  const done = ok => {
+    btn.innerHTML = ok ? 'Copied!' : 'Copy failed — downloading';
+    setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    if (!ok) downloadFpSchematic();
+  };
+  // ClipboardItem needs a secure context (HTTPS/localhost); LAN-IP HTTP
+  // falls back to the PNG download.
+  if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+    _fpSchematicCanvas.toBlob(blob => {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        .then(() => done(true)).catch(() => done(false));
+    }, 'image/png');
+  } else {
+    done(false);
+  }
+}
+
+function downloadFpSchematic() {
+  if (!_fpSchematicCanvas) return;
+  const a = document.createElement('a');
+  a.download = (_activeMapName || 'map').replace(/[^\w.-]+/g, '_') + '-schematic.png';
+  a.href = _fpSchematicCanvas.toDataURL('image/png');
+  a.click();
 }
 
 function copyMapPrompt() {
@@ -1063,26 +1379,144 @@ function _uploadMapBg(blob, ext, btnEl) {
     });
 }
 
-// ── 3D Floorplan (trace prompt + JSON paste) ─────────────────────────────────
-// Image-first flow: the DM attaches the FINISHED map image to a vision LLM
-// with this prompt; the LLM traces it into floorplan JSON (schema owned by
-// floorplan.py server-side — the example below must stay in sync with it),
-// and the reply is pasted back and validated by POST /floorplan.
+// ── 3D Floorplan (design + trace prompts, JSON paste) ────────────────────────
+// Two flows into the same schema and save path:
+//  - Design (walls-first): a text LLM INVENTS the layout; the map art is
+//    generated afterwards to match it (the art prompt's LAYOUT MATCH section).
+//  - Trace (image-first): a vision LLM traces the FINISHED map art.
+// Schema fragments shared with the art prompt live in floorplan_prompt.js
+// (window.FPPrompt) — the JSON example there must stay in sync with
+// floorplan.py. Replies are pasted back and validated by POST /floorplan.
 
 let _fp3dMapId = null, _fp3dMapName = '', _fp3dCols = 20, _fp3dRows = 20;
+let _fp3dHasBg = false, _fp3dTab = 'design';
 
-function open3dTraceModal(mapId, mapName, cols, rows) {
+function open3dModal(mapId, mapName, cols, rows, hasBg, tab) {
   _fp3dMapId   = parseInt(mapId);
   _fp3dMapName = mapName;
   _fp3dCols    = parseInt(cols) || 20;
   _fp3dRows    = parseInt(rows) || 20;
+  _fp3dHasBg   = !!hasBg;
   document.getElementById('map3d-modal-title').innerHTML =
     '&#9635; 3D Floorplan &mdash; ' + _mnEsc(mapName);
   document.getElementById('fp-prompt-section').style.display = 'none';
+  document.getElementById('fpd-prompt-section').style.display = 'none';
   document.getElementById('fp-paste-text').value = '';
   document.getElementById('fp-result').innerHTML = '';
+  document.getElementById('fp-trace-nobg').style.display = _fp3dHasBg ? 'none' : '';
+  document.getElementById('fp-trace-gen-btn').style.display = _fp3dHasBg ? '' : 'none';
+  _populateFpdGenres();
+  // Default tab: trace when the art already exists and nothing is designed
+  // yet; design otherwise (walls-first is the recommended path for new maps).
+  setFp3dTab(tab || (_fp3dHasBg && !_FP_INFO[_fp3dMapId] ? 'trace' : 'design'));
   _fpUpdateStatus();
+  _fetchStoredPrompts(_fp3dMapId).then(p => {
+    if (p && p.layout && p.layout.settings) _applyLayoutSettings(p.layout.settings);
+  });
   new bootstrap.Modal(document.getElementById('map3dModal')).show();
+}
+
+function setFp3dTab(tab) {
+  _fp3dTab = tab;
+  const designBtn = document.getElementById('fp-tab-design-btn');
+  const traceBtn  = document.getElementById('fp-tab-trace-btn');
+  const accent = 'var(--ttrpg-accent)', surface = 'var(--ttrpg-surface)', text = 'var(--ttrpg-text)';
+  const on  = b => { b.style.background = accent;  b.style.color = 'var(--sp-on-accent)'; b.style.border = 'none'; };
+  const off = b => { b.style.background = surface; b.style.color = text; b.style.border = '1px solid var(--sp-border)'; };
+  if (tab === 'design') { on(designBtn); off(traceBtn); }
+  else                  { on(traceBtn);  off(designBtn); }
+  document.getElementById('fp-design-pane').style.display = tab === 'design' ? '' : 'none';
+  document.getElementById('fp-trace-pane').style.display  = tab === 'trace'  ? '' : 'none';
+}
+
+// ── Design pane (walls-first) ────────────────────────────────────────────────
+
+function _populateFpdGenres() {
+  const sel = document.getElementById('fpd-genre');
+  if (!sel.options.length) {
+    Object.entries(_MAP_GENRES.genres).forEach(([key, g]) => {
+      const o = document.createElement('option');
+      o.value = key; o.textContent = g.label;
+      sel.appendChild(o);
+    });
+  }
+  if (!document.getElementById('fpd-env').options.length) fpdGenreChanged();
+}
+
+function fpdGenreChanged() {
+  const g = _MAP_GENRES.genres[_gv('fpd-genre')] || _MAP_GENRES.genres.fantasy;
+  const sel = document.getElementById('fpd-env');
+  sel.innerHTML = '<option value="">-- any --</option>';
+  g.battle_envs.forEach(name => {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+}
+
+function _applyLayoutSettings(s) {
+  _sv('fpd-genre', s.genre); fpdGenreChanged();
+  _sv('fpd-env', s.env); _sv('fpd-time', s.time);
+  _sv('fpd-wallstyle', s.wallStyle); _sv('fpd-desc', s.desc);
+}
+
+function _buildLayoutDesignPrompt() {
+  const c = _fp3dCols, r = _fp3dRows;
+  const genreKey = _gv('fpd-genre') || 'fantasy';
+  const genre = _MAP_GENRES.genres[genreKey] || _MAP_GENRES.genres.fantasy;
+  const env = _gv('fpd-env'), time = _gv('fpd-time'), desc = _gv('fpd-desc');
+
+  const lines = [
+    'You are DESIGNING the floorplan layout for a top-down TTRPG battle map that does not exist yet.',
+    'Invent a playable layout and output it as JSON for a 3D renderer.',
+    '',
+    '## SETTING',
+  ];
+  if (genreKey !== 'fantasy') lines.push('Setting: ' + genre.label + ' — not medieval fantasy.');
+  if (env)  lines.push('Environment: ' + env);
+  if (time) lines.push('Time of day: ' + time);
+  if (desc) lines.push("DM's description — follow it closely: " + desc);
+  lines.push('');
+  FPPrompt.coordSystemLines(c, r).forEach(l => lines.push(l));
+  lines.push('');
+  lines.push('## DESIGN GUIDANCE');
+  lines.push('- Design for tabletop combat: 2–6 distinct spaces (rooms, chambers, open yards) connected by doors and corridors, with enough open floor for 1-square tokens to maneuver.');
+  lines.push('- Sensible sizes at the 5-ft scale: small room 10–20 ft (2–4 squares) across; large hall 20–50 ft; corridors 5–10 ft wide (1–2 squares); doors 2.5–5 ft wide (0.5–1 square).');
+  lines.push('- Straight wall segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment.');
+  lines.push('- Doors are separate entries, never part of a wall: leave a gap in the wall exactly the door\'s width and cover the gap with the door segment. Short unique ids ("d1", "d2"…).');
+  lines.push('- Every enclosed room must be reachable — at least one door or opening.');
+  lines.push('- Use "elevations" sparingly and only where they fit the scene: negative floor_ft = pit/chasm depth, positive = raised platform height. Flat ground is the default.');
+  lines.push('- Use most of the ' + c + '×' + r + ' grid, but leave some open ground for the encounter to start in. Do not wall off the entire perimeter unless the scene is indoors.');
+  lines.push('- Do NOT place furniture, rubble, or decoration — walls, doors, and elevations only; the map art will add the rest.');
+  lines.push('');
+  FPPrompt.outputFormatLines(c, r).forEach(l => lines.push(l));
+  lines.push('Before answering, verify: every door covers a gap of its own width in a wall; every room has an entrance; nothing crosses the grid edge.');
+  lines.push('');
+  lines.push('After you reply with the JSON, WAIT — a follow-up message will ask you to paint the matching map art.');
+  return lines.join('\n');
+}
+
+function _collectLayoutSettings() {
+  return { genre: _gv('fpd-genre'), env: _gv('fpd-env'), time: _gv('fpd-time'),
+           wallStyle: _gv('fpd-wallstyle'), desc: _gv('fpd-desc') };
+}
+
+function generateAndShowLayoutPrompt() {
+  const text = _buildLayoutDesignPrompt();
+  document.getElementById('fpd-prompt-text').value = text;
+  document.getElementById('fpd-prompt-section').style.display = '';
+  _persistPrompt(_fp3dMapId, 'layout', text, _collectLayoutSettings());
+}
+
+function copyLayoutPrompt() {
+  const ta = document.getElementById('fpd-prompt-text');
+  const fb = document.getElementById('fp-copy-fb');
+  function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => _mapFallbackCopy(ta, showFb));
+  } else {
+    _mapFallbackCopy(ta, showFb);
+  }
 }
 
 function _fpUpdateStatus() {
@@ -1102,6 +1536,12 @@ function _fpUpdateStatus() {
 
 function _build3dTracePrompt() {
   const c = _fp3dCols, r = _fp3dRows;
+  const coord = FPPrompt.coordSystemLines(c, r);
+  // Trace-specific coordinate anchoring: the image IS the grid.
+  coord.splice(2, 0,
+    '- Mentally divide the image into that ' + c + '×' + r + ' grid before tracing; if the art shows grid lines, align to them.');
+  coord.splice(4, 0,
+    '- The image edges ARE the grid edges: the left edge of the image is x=0, the right edge is x=' + c + ', the top is y=0, the bottom is y=' + r + '. Anchor every coordinate to the full image extent — do not shift or shrink the layout toward one corner.');
   return [
 'You are tracing a floorplan from the ATTACHED top-down TTRPG battle map image.',
 '(The map image is attached to this message — if it is missing, ask for it before answering.)',
@@ -1109,11 +1549,7 @@ function _build3dTracePrompt() {
 '## TASK',
 'Trace the walls, doors, and elevation changes VISIBLE IN THE ART into JSON for a 3D renderer.',
 '',
-'## COORDINATE SYSTEM',
-'- The map is a grid ' + c + ' columns wide × ' + r + ' rows tall. Mentally divide the image into that ' + c + '×' + r + ' grid before tracing; if the art shows grid lines, align to them.',
-'- Origin is the TOP-LEFT corner. x increases RIGHTWARD (columns, 0 to ' + c + '); y increases DOWNWARD (rows, 0 to ' + r + ').',
-'- The image edges ARE the grid edges: the left edge of the image is x=0, the right edge is x=' + c + ', the top is y=0, the bottom is y=' + r + '. Anchor every coordinate to the full image extent — do not shift or shrink the layout toward one corner.',
-'- Units are grid squares; fractional values are allowed — prefer halves (e.g. 6.5) where a wall runs mid-square. 1 square = 5 ft.',
+  ].concat(coord).concat([
 '',
 '## WHAT TO TRACE',
 '- "walls": solid barriers visible in the art — masonry, cave walls, cliff faces, ship hulls. Straight segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment. Do NOT trace furniture, rubble, or decoration.',
@@ -1121,23 +1557,9 @@ function _build3dTracePrompt() {
 '- "elevations": ONLY where the art clearly shows a pit, chasm, ledge, platform, or balcony — axis-aligned rectangles with "floor_ft" (negative = pit/chasm depth, positive = raised platform height). When in doubt, LEAVE THE LIST EMPTY: flat ground is the default.',
 '- Optional per-segment fields: "height_ft" on walls (default 10); "base_ft" on walls that start above the floor. Doors default to the WALL height — give a door "height_ft" only when the art clearly shows a shorter opening (an archway, a low tunnel); the space above it is rendered as solid wall.',
 '',
-'## OUTPUT FORMAT (STRICT)',
-'Reply with RAW JSON only — no markdown code fences, no commentary, no explanations.',
-'The JSON must match this exact shape:',
-'',
-JSON.stringify({
-  format: 'sceneplay-floorplan',
-  schema_version: 1,
-  grid: { cols: c, rows: r },
-  default_wall_height_ft: 10,
-  walls: [ { x1: 3, y1: 0, x2: 3, y2: 6.5 } ],
-  doors: [ { id: 'd1', x1: 3, y1: 6.5, x2: 3, y2: 7.5, open: false } ],
-  elevations: [ { x1: 5, y1: 5, x2: 9, y2: 9, floor_ft: -10, label: 'pit' } ],
-}, null, 2),
-'',
-'Limits: at most 2000 walls, 200 doors, 200 elevation rectangles. All coordinates must lie inside the ' + c + '×' + r + ' grid.',
+  ]).concat(FPPrompt.outputFormatLines(c, r)).concat([
 'Before answering, verify each wall segment against the image: does its start and end land on the barrier as drawn?',
-  ].join('\n');
+  ]).join('\n');
 }
 
 function generateAndShow3dTracePrompt() {
@@ -1162,6 +1584,15 @@ function _fpShowResult(html, isError) {
   el.style.color = isError ? 'var(--bs-danger, #dc3545)' : 'var(--ttrpg-accent)';
 }
 
+function _fpUpdateCardBadge() {
+  const badge = document.getElementById('fp-badge-' + _fp3dMapId);
+  if (!badge) return;
+  const info = _FP_INFO[_fp3dMapId];
+  badge.style.display = info ? '' : 'none';
+  const v = document.getElementById('fp-badge-v-' + _fp3dMapId);
+  if (v && info) v.textContent = info.version;
+}
+
 function save3dFloorplan() {
   // LLMs love fences despite instructions — strip ```json ... ``` wrappers.
   const raw = document.getElementById('fp-paste-text').value
@@ -1170,6 +1601,16 @@ function save3dFloorplan() {
   let parsed;
   try { parsed = JSON.parse(raw); }
   catch (e) { _fpShowResult('Not valid JSON: ' + _mnEsc(e.message), true); return; }
+
+  const fromDesign = _fp3dTab === 'design';
+  if (fromDesign) {
+    const existing = _FP_INFO[_fp3dMapId];
+    if (existing && !confirm('Replace the existing floorplan (v' + existing.version +
+        ') for "' + _fp3dMapName + '" with this new design?')) return;
+    // The 3D wall finish is the DM's pick, not the LLM's — inject it here.
+    const style = _gv('fpd-wallstyle');
+    if (style && !parsed.wall_style) parsed.wall_style = style;
+  }
 
   const btn = document.getElementById('fp-save-btn');
   btn.disabled = true;
@@ -1185,14 +1626,26 @@ function save3dFloorplan() {
         return;
       }
       _FP_INFO[_fp3dMapId] = { version: d.version, summary: d.summary };
+      delete _fpPlanCache[_fp3dMapId];   // re-fetch normalized geometry on demand
       _fpUpdateStatus();
+      _fpUpdateCardBadge();
       let html = '<b>Saved v' + d.version + '</b> &mdash; ' + _mnEsc(d.summary);
       if (d.warnings && d.warnings.length) {
         html += '<br>&#9888; ' + d.warnings.map(_mnEsc).join('<br>&#9888; ');
       }
+      if (fromDesign) {
+        html += '<br><button class="btn btn-ttrpg btn-sm mt-2" ' +
+                'onclick="fpProceedToArt()">Next: generate matching art &rarr;</button>';
+      }
       _fpShowResult(html, false);
     })
     .catch(() => { btn.disabled = false; _fpShowResult('Save failed (network).', true); });
+}
+
+function fpProceedToArt() {
+  bootstrap.Modal.getInstance(document.getElementById('map3dModal')).hide();
+  openMapPromptModal(_fp3dMapId, _fp3dMapName, _fp3dCols, _fp3dRows,
+                     _fp3dHasBg, true /* fromDesign: same-session default on */);
 }
 
 function delete3dFloorplan() {
@@ -1202,7 +1655,9 @@ function delete3dFloorplan() {
     .then(d => {
       if (!d.ok) { _fpShowResult('Delete failed.', true); return; }
       delete _FP_INFO[_fp3dMapId];
+      delete _fpPlanCache[_fp3dMapId];
       _fpUpdateStatus();
+      _fpUpdateCardBadge();
       _fpShowResult('Floorplan deleted.', false);
     })
     .catch(() => _fpShowResult('Delete failed (network).', true));

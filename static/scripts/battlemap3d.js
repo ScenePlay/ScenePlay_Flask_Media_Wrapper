@@ -984,6 +984,134 @@ window.BM3D = (function () {
     }).catch(function () {});
   }
 
+  // ── first-person movement ──────────────────────────────────────────────────
+  // Double-click steps the viewed token one square (5 ft) toward the camera
+  // facing, snapped to the nearest of 8 compass directions. Host page supplies
+  // cfg.onTokenMove(tokenId, col, row) -> Promise({ok, col, row}); the relay
+  // portal doesn't, so remote 3D stays view-only. The server re-checks
+  // ownership — this is a convenience gate, not security.
+
+  var _stepPending = false;
+
+  function flashHint(msg) {
+    var el = cfg.overlayEl && cfg.overlayEl.querySelector('#bm3d-hint');
+    if (!el) return;
+    if (el.dataset.orig === undefined) el.dataset.orig = el.innerHTML;
+    el.textContent = msg;
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.innerHTML = el.dataset.orig; }, 1500);
+  }
+
+  function segsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+    function cross(ox, oy, px, py, qx, qy) {
+      return (px - ox) * (qy - oy) - (py - oy) * (qx - ox);
+    }
+    var d1 = cross(cx, cy, dx, dy, ax, ay);
+    var d2 = cross(cx, cy, dx, dy, bx, by);
+    var d3 = cross(ax, ay, bx, by, cx, cy);
+    var d4 = cross(ax, ay, bx, by, dx, dy);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  }
+
+  // Does the step from (x1,z1) to (x2,z2) cross a wall or a CLOSED door?
+  // Elevation changes never block — pits are stepped into (fallen into),
+  // climbing is the table's business. Walls raised 5+ ft off the floor
+  // (bridges, arrow slits) are walked under, not into.
+  //
+  // Geometry nuance: doors sit on half-cell boundaries while tokens sit on
+  // integer cells, so a step through a 1-square doorway grazes the door's
+  // ENDPOINTS (and the flanking walls' endpoints) rather than crossing an
+  // interior. Every barrier is therefore tested slightly EXTENDED, and a
+  // step through an OPEN door is allowed outright — the doorway IS the
+  // passage, even though the extended flanking walls also graze it.
+  function stepBlocked(x1, z1, x2, z2) {
+    if (!plan) return false;
+    var EPS = 0.3;
+    function crosses(s) {
+      var dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ex = dx / len * EPS, ey = dy / len * EPS;
+      return segsIntersect(x1, z1, x2, z2,
+                           s.x1 - ex, s.y1 - ey, s.x2 + ex, s.y2 + ey);
+    }
+    var doors = plan.doors || [];
+    var j, d, isOpen;
+    for (j = 0; j < doors.length; j++) {
+      d = doors[j];
+      isOpen = doorStates[d.id] !== undefined ? !!doorStates[d.id] : !!d.open;
+      if (isOpen && crosses(d)) return false;   // walking through the doorway
+    }
+    var walls = plan.walls || [];
+    for (var i = 0; i < walls.length; i++) {
+      var w = walls[i];
+      if ((w.base_ft || 0) >= 5) continue;
+      if (crosses(w)) return true;
+    }
+    for (j = 0; j < doors.length; j++) {
+      d = doors[j];
+      isOpen = doorStates[d.id] !== undefined ? !!doorStates[d.id] : !!d.open;
+      if (!isOpen && crosses(d)) return true;
+    }
+    return false;
+  }
+
+  function tryStepForward() {
+    if (view.kind !== 'first' || !cfg.onTokenMove || _stepPending) return;
+    var rec = tokenRecs[view.tokenId];
+    if (!rec) return;
+    var tok = rec.tok;
+    if (!(cfg.isDM || (cfg.isMyToken && cfg.isMyToken(tok)))) return;
+
+    // Facing -> nearest of 8 directions (threshold cos 67.5° keeps pure
+    // cardinal steps until the camera is clearly angled diagonally).
+    var fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    var dc = Math.abs(fx) < 0.3827 ? 0 : (fx > 0 ? 1 : -1);
+    var dr = Math.abs(fz) < 0.3827 ? 0 : (fz > 0 ? 1 : -1);
+    if (!dc && !dr) return;
+
+    var col = Math.round(tokCol(tok)), row = Math.round(tokRow(tok));
+    var span = Math.max(1, tok.size_squares || 1);
+    var half = span / 2;
+
+    // The map's movement scale makes feet = squares × 5 × scale, so 5 ft of
+    // character movement is 1/scale squares (min 1 — tokens sit on whole
+    // cells, so on a coarse map one square is simply more than 5 ft).
+    var scale = (cfg.getMoveScale && parseFloat(cfg.getMoveScale())) || 1.0;
+    if (!(scale > 0)) scale = 1.0;
+    var cells = Math.max(1, Math.round(1 / scale));
+
+    // Walk cell by cell so a multi-square step stops AT a wall instead of
+    // teleporting through or refusing the whole move.
+    var nc = col, nr = row, hitWall = false;
+    for (var s = 0; s < cells; s++) {
+      var cc = Math.max(0, Math.min(cfg.gridCols - span, nc + dc));
+      var rr = Math.max(0, Math.min(cfg.gridRows - span, nr + dr));
+      if (cc === nc && rr === nr) break;             // map edge
+      if (stepBlocked(nc + half, nr + half, cc + half, rr + half)) {
+        hitWall = true;
+        break;
+      }
+      nc = cc; nr = rr;
+    }
+    if (nc === col && nr === row) {
+      flashHint(hitWall ? 'A wall blocks the way' : 'Edge of the map');
+      return;
+    }
+
+    _stepPending = true;
+    cfg.onTokenMove(tok.token_id, nc, nr).then(function (d) {
+      _stepPending = false;
+      if (d && d.ok) {
+        // Optimistic seat: the camera lerps to tokCol/tokRow every frame, so
+        // updating the token is all a smooth glide needs. The sprite is
+        // hidden in first person; the next state poll reseats everything.
+        tok.col = d.col; tok.row = d.row;
+      } else {
+        flashHint('Move refused');
+      }
+    }).catch(function () { _stepPending = false; });
+  }
+
   // ── cameras / input ────────────────────────────────────────────────────────
 
   function myTokenRec() {
@@ -1139,6 +1267,11 @@ window.BM3D = (function () {
         return;   // first click locks; the next clicks interact
       }
       tryToggleDoor();
+    });
+    canvas.addEventListener('dblclick', function (e) {
+      if (!open_) return;
+      e.preventDefault();
+      tryStepForward();
     });
     document.addEventListener('mousemove', function (e) {
       if (!open_) return;

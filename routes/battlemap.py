@@ -12,7 +12,8 @@ from flask_login import login_required, current_user
 from extensions import db, currentvolume
 from models.ttrpg import (tblBattleMaps, tblBattleMapTokens, tblBattleMapEffects,
                            tblBattleMapNotes, tblBattleMapFloorplans,
-                           tblBattleMapDoors, tblSessions, tblSessionParty,
+                           tblBattleMapDoors, tblBattleMapPrompts,
+                           tblSessions, tblSessionParty,
                            tblSessionMonsters, tblCharacters)
 from models.scenes import tblscenes
 from routes.auth import dm_required
@@ -1008,8 +1009,10 @@ def floorplan_get(map_id):
     fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
     if not fp:
         return jsonify({'ok': True, 'version': None, 'floorplan': None})
+    plan = json.loads(fp.json_data)
     return jsonify({'ok': True, 'version': fp.version,
-                    'floorplan': json.loads(fp.json_data)})
+                    'floorplan': plan,
+                    'layout_text': floorplan_mod.floorplan_layout_text(plan)})
 
 
 @battlemap_bp.route('/<int:map_id>/floorplan', methods=['POST'])
@@ -1065,6 +1068,59 @@ def floorplan_delete(map_id):
     db.session.commit()
     _push_map_state(tblBattleMaps.query.get(map_id))   # portal hides its 3D button
     return jsonify({'ok': True})
+
+
+# ── Stored LLM prompts ────────────────────────────────────────────────────────
+# Latest generated prompt per map and kind ('art' | 'layout'), plus the modal
+# selections that built it, so the prompt dialogs reopen pre-filled and the
+# prompt that produced a map's art/layout is never lost.
+
+PROMPT_KINDS = ('art', 'layout')
+MAX_PROMPT_BYTES = 64 * 1024
+
+
+@battlemap_bp.route('/<int:map_id>/prompt', methods=['POST'])
+@login_required
+@dm_required
+def prompt_save(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    data = request.get_json() or {}
+    kind = data.get('kind')
+    text = (data.get('prompt_text') or '').strip()
+    if kind not in PROMPT_KINDS or not text:
+        return jsonify({'ok': False, 'error': 'kind must be art|layout and '
+                        'prompt_text non-empty'}), 400
+    if len(text.encode('utf-8')) > MAX_PROMPT_BYTES:
+        return jsonify({'ok': False,
+                        'error': f'prompt too large (> {MAX_PROMPT_BYTES // 1024} KB)'}), 400
+    settings = json.dumps(data.get('settings') or {})
+
+    row = tblBattleMapPrompts.query.filter_by(map_id=map_id, kind=kind).first()
+    if row:
+        row.prompt_text, row.settings_json, row.updated_at = text, settings, _now()
+    else:
+        db.session.add(tblBattleMapPrompts(
+            map_id=map_id, kind=kind, prompt_text=text,
+            settings_json=settings, updated_at=_now()))
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@battlemap_bp.route('/<int:map_id>/prompts')
+@login_required
+def prompts_get(map_id):
+    tblBattleMaps.query.get_or_404(map_id)
+    out = {k: None for k in PROMPT_KINDS}
+    for row in tblBattleMapPrompts.query.filter_by(map_id=map_id).all():
+        if row.kind in out:
+            try:
+                settings = json.loads(row.settings_json or '{}')
+            except ValueError:
+                settings = {}
+            out[row.kind] = {'prompt_text': row.prompt_text,
+                             'settings': settings,
+                             'updated_at': row.updated_at}
+    return jsonify({'ok': True, **out})
 
 
 @battlemap_bp.route('/<int:map_id>/door/toggle', methods=['POST'])

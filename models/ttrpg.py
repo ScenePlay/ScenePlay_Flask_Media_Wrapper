@@ -349,6 +349,8 @@ class tblBattleMaps(db.Model):
                                 cascade='all, delete-orphan', lazy=True, uselist=False)
     doors   = db.relationship('tblBattleMapDoors',   backref='battle_map',
                                cascade='all, delete-orphan', lazy=True)
+    prompts = db.relationship('tblBattleMapPrompts', backref='battle_map',
+                               cascade='all, delete-orphan', lazy=True)
     session = db.relationship('tblSessions', backref='battle_maps', lazy=True)
 
 
@@ -408,6 +410,24 @@ class tblBattleMapFloorplans(db.Model):
     json_data    = db.Column(db.Text, nullable=False)
     version      = db.Column(db.Integer, default=1)
     updated_at   = db.Column(db.Text, nullable=False)
+
+
+class tblBattleMapPrompts(db.Model):
+    """Last LLM prompt generated for one battle map, per kind ('art' = the
+    image/video prompt, 'layout' = the walls-first floorplan design prompt).
+    settings_json holds the modal selections that built the prompt so the
+    dialog reopens pre-filled. Latest-wins upsert — no history."""
+    __tablename__ = 'tblBattleMapPrompts'
+
+    prompt_id     = db.Column(db.Integer, primary_key=True)
+    map_id        = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'),
+                              nullable=False)
+    kind          = db.Column(db.Text, nullable=False)   # 'art' | 'layout'
+    prompt_text   = db.Column(db.Text, nullable=False)
+    settings_json = db.Column(db.Text, default='')
+    updated_at    = db.Column(db.Text, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint('map_id', 'kind'),)
 
 
 class tblBattleMapDoors(db.Model):

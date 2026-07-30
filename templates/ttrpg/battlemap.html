@@ -1068,7 +1068,7 @@
       &#128065; Fog: DM</button>
     {% endif %}
     <span id="bm3d-hint" class="small text-muted flex-grow-1" style="text-align:right;">
-      Click the view to look around &middot; Esc releases the mouse
+      Click the view to look around &middot; double-click steps <span id="bm3d-step-ft">5 ft</span> where you face &middot; Esc releases the mouse
       {%- if current_user.is_dm() %} &middot; fog shows translucent to you, solid to players{% endif %}
     </span>
   </div>
@@ -1150,6 +1150,17 @@ function enter3d() {
 }
 
 function _bm3dOpen() {
+  // Scale-aware step distance in the hint: one double-click moves
+  // max(1, round(1/MOVE_SCALE)) squares of 5 × MOVE_SCALE ft each.
+  const hintFt = document.getElementById('bm3d-step-ft');
+  if (hintFt) {
+    const sc = MOVE_SCALE > 0 ? MOVE_SCALE : 1;
+    const cells = Math.max(1, Math.round(1 / sc));
+    hintFt.textContent = (Math.round(cells * 5 * sc * 10) / 10) + ' ft';
+    // The hint flasher caches the bar's original text on first use — drop
+    // the cache so a scale change between 3D sessions isn't restored stale.
+    delete document.getElementById('bm3d-hint').dataset.orig;
+  }
   // Video maps: hand the page's own playing <video> to the viewer — the 3D
   // floor renders it live (THREE.VideoTexture). Still maps pass the image URL.
   const bgEl  = document.getElementById('map-bg');
@@ -1173,6 +1184,17 @@ function _bm3dOpen() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ door_key: key }),
       }).then(r => r.json())) : null,
+    // Double-click 5-ft step in first person. The server enforces ownership
+    // (players: own player tokens only), so every viewer gets the callback.
+    // The relay portal never passes this — remote 3D stays view-only.
+    onTokenMove: ((tokenId, col, row) =>
+      fetch(`/ttrpg/battlemap/${MAP_ID}/token/move`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token_id: tokenId, col: col, row: row }),
+      }).then(r => r.json())),
+    // Live value: the DM can change the per-map feet-per-square multiplier
+    // while 3D is open; each step re-reads it.
+    getMoveScale: () => MOVE_SCALE,
     getState:     () => window._bmLastState || null,
   });
 }
