@@ -366,6 +366,17 @@
     text-overflow: ellipsis;
     max-width: 110px;
   }
+  /* Row buttons sit in fixed right-hand columns. The name absorbs the slack,
+     so the OBS indicator lands at the same x on every row instead of drifting
+     with the name's length (space-between put the middle button wherever the
+     text ended). Widths match .sidebar-btn so the columns line up. */
+  .sidebar-entity-row > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .sidebar-entity-row > button { flex: 0 0 auto; }
+  .obs-live-btn { min-width: 36px; text-align: center; }
   .presence-dot {
     width: 8px; height: 8px; border-radius: 50%;
     display: inline-block; flex-shrink: 0;
@@ -487,13 +498,38 @@
       {% endfor %}
 
       <!-- Party -->
-      <div class="sidebar-section-title mt-2">Party</div>
+      <div class="sidebar-section-title mt-2 d-flex justify-content-between align-items-center">
+        <span>Party</span>
+        {% if obs_enabled %}
+        <span class="d-flex align-items-center gap-1" style="text-transform:none;letter-spacing:0;">
+          <button class="btn btn-sm py-0 px-1 btn-outline-secondary" onclick="obsStep(-1)"
+                  title="Previous camera (Left arrow)" style="font-size:.7rem;">&#9664;</button>
+          <button class="btn btn-sm py-0 px-1 btn-outline-secondary" onclick="obsGroupShot()"
+                  title="Group shot (G)" style="font-size:.7rem;">&#128101;</button>
+          <button class="btn btn-sm py-0 px-1 btn-outline-secondary" onclick="obsStep(1)"
+                  title="Next camera (Right arrow)" style="font-size:.7rem;">&#9654;</button>
+        </span>
+        <a id="obs-sidebar-pill" href="{{ url_for('obs_bp.broadcast') }}"
+           class="badge text-decoration-none" style="display:none;font-weight:500;
+                  background:var(--ttrpg-surface);color:var(--ttrpg-accent);
+                  border:1px solid var(--sp-border);
+                  text-transform:none;letter-spacing:0;"
+           title="Open the Broadcast page">OBS</a>
+        {% endif %}
+      </div>
       {% for char in party %}
       <div class="sidebar-entity"
            data-entity-type="player"
            data-entity-id="{{ char.character_id }}">
         <div class="sidebar-entity-row">
           <span><span class="presence-dot" data-presence="{{ char.name | e }}" title="Offline"></span>{{ char.name }}</span>
+          {% if obs_enabled %}
+          <button class="obs-live-btn btn btn-sm py-0 px-1 btn-outline-secondary"
+                  data-character-id="{{ char.character_id }}"
+                  data-obs-scene="{{ obs_scene_map.get(char.character_id, '') | e }}"
+                  title="Put this player on screen in OBS"
+                  onclick="obsGoLive(event, this)">&#9673;</button>
+          {% endif %}
           <button class="sidebar-btn btn btn-sm py-0 px-1
                          {% if char.character_id in on_map_player_ids %}btn-outline-danger{% else %}btn-outline-secondary{% endif %}">
             {% if char.character_id in on_map_player_ids %}&#10005;{% else %}+{% endif %}
@@ -1117,6 +1153,7 @@ const MAP_ROLLER_NAME = '{{ roller_name | e }}';
 const ROLLER_CHARS = {{ roller_chars | tojson }};  // characters this user may roll as
 const FLOORPLAN_VERSION = {{ floorplan_version or 'null' }};
 const BM3D_AVAILABLE    = {{ 'true' if bm3d_available else 'false' }};
+const OBS_ENABLED       = {{ 'true' if obs_enabled else 'false' }};
 DiceCore.renderQuickLabels(document.getElementById('map-dice-quicklabels'),
                            document.getElementById('map-dice-label'),
                            'btn btn-sm btn-outline-secondary');

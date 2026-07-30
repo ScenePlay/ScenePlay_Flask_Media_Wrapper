@@ -1,0 +1,111 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block title %}My Camera — {{ char.name }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#128247; My Camera &mdash; {{ char.name }}</h4>
+      <a href="{{ url_for('ttrpg.my_character') }}" class="btn btn-sm btn-outline-secondary">Back</a>
+    </div>
+
+    {% if push_url %}
+    <div class="ttrpg-card p-3 mb-3">
+      <p class="small text-muted mb-3">
+        Start your camera and you'll appear on the stream when the GM puts you on screen.
+        Nothing to install &mdash; it runs in your browser.
+        <b>Phone camera?</b> Scan the code below instead of typing the link.
+      </p>
+
+      <div class="d-flex flex-wrap gap-3 align-items-start">
+        {% if qr_svg %}
+        <div style="background:#fff;padding:8px;border-radius:8px;line-height:0;flex:0 0 auto;">
+          <div style="width:190px;height:190px;">{{ qr_svg | safe }}</div>
+        </div>
+        {% endif %}
+        <div class="flex-grow-1" style="min-width:15rem;">
+          <!-- Top-level link, NEVER an iframe: the camera prompt needs a
+               secure context and this page is usually plain LAN http. -->
+          <a href="{{ push_url }}" target="_blank" rel="noopener"
+             class="btn btn-ttrpg w-100 mb-2">&#128247; Start My Camera</a>
+          <p class="small text-muted mb-2">
+            Opens vdo.ninja in a new tab. Allow camera and microphone when asked,
+            then leave that tab open for the session.
+          </p>
+          <label class="form-label small text-muted mb-1">Or copy this link to another device</label>
+          <div class="d-flex gap-2">
+            <input id="feed-push-url" class="form-control form-control-sm" readonly
+                   value="{{ push_url }}"
+                   style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+            <button class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                    onclick="feedCopy(this)">Copy</button>
+          </div>
+          <p class="small text-muted mt-2 mb-0">
+            &#128274; Treat this link like a password &mdash; anyone with it can watch
+            your camera. Don't post it in chat.
+          </p>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">Using your own setup?</h6>
+      <p class="small text-muted">
+        Already streaming from OBS, a capture card, or your own vdo.ninja room?
+        Paste the <b>view</b> link here and the GM's OBS will use it instead.
+        Leave it blank to go back to the ScenePlay link above.
+      </p>
+      <form method="post" action="{{ url_for('obs_bp.save_feed', character_id=char.character_id) }}">
+        <input type="hidden" name="action" value="save">
+        <div class="d-flex gap-2 mb-2">
+          <input type="url" name="video_feed_url" class="form-control form-control-sm"
+                 placeholder="https://vdo.ninja/?view=…"
+                 value="{{ char.video_feed_url }}"
+                 style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
+          <button class="btn btn-ttrpg btn-sm flex-shrink-0">Save</button>
+        </div>
+      </form>
+      {% if char.video_feed_url %}
+      <p class="small mb-0" style="color:var(--ttrpg-accent);">
+        &#9989; Using your custom feed. The GM's OBS loads this URL.
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="ttrpg-card p-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">Trouble?</h6>
+      <form method="post" action="{{ url_for('obs_bp.save_feed', character_id=char.character_id) }}"
+            onsubmit="return confirm('Generate a new camera link? Your current one stops working immediately.');">
+        <input type="hidden" name="action" value="regenerate">
+        <button class="btn btn-sm btn-outline-danger">Generate a new link</button>
+        <span class="small text-muted ms-2">
+          Use this if you shared the link by mistake, or someone else is on your feed.
+        </span>
+      </form>
+      {% if is_dm and view_url %}
+      <hr style="border-color:var(--sp-border);">
+      <label class="form-label small text-muted mb-1">
+        GM only &mdash; the URL OBS loads for this player</label>
+      <input class="form-control form-control-sm" readonly value="{{ view_url }}"
+             style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);font-size:.75rem;">
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script>
+function feedCopy(btn) {
+  const inp = document.getElementById('feed-push-url');
+  const done = () => { const t = btn.textContent; btn.textContent = 'Copied!';
+                       setTimeout(() => { btn.textContent = t; }, 1500); };
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(inp.value).then(done).catch(() => { inp.select(); done(); });
+  } else {
+    inp.select(); document.execCommand('copy'); done();
+  }
+}
+</script>
+{% endblock %}

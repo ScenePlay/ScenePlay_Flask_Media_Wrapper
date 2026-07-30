@@ -188,9 +188,11 @@ def my_character():
             camp = db.session.get(tblcampaigns, active_session.campaign_id)
             campaign_name = camp.campaign_name if camp else ''
 
+    from sql import appsettingGet
     return render_template('ttrpg/my_characters.html', characters=chars,
                            active_map=active_map, hidden_count=hidden_count,
-                           show_all=show_all, campaign_name=campaign_name)
+                           show_all=show_all, campaign_name=campaign_name,
+                           obs_enabled=appsettingGet('obs_enabled', '0') == '1')
 
 
 # ── Character create ───────────────────────────────────────────────────────────
@@ -1265,6 +1267,7 @@ def session_status(session_id):
         if new_status == 'active':
             relay_broadcaster.push_all_characters()
             relay_broadcaster.push_session_users()
+            relay_broadcaster.push_character_feeds()
     return redirect(url_for('ttrpg.session_detail', session_id=session_id))
 
 

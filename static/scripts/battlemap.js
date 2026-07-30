@@ -627,6 +627,7 @@ function pollState() {
       if (window.BM3D) BM3D.onState(d);
       if (window.BMFP) BMFP.onState(d);
       _fpvSync(d.floorplan_version);
+      _obsSync(d.obs);
     })
     .catch(() => { _pollFails++; })
     .finally(() => _schedulePoll());
@@ -2124,6 +2125,111 @@ function mapVolChange(val) {
       body: JSON.stringify({volume: parseInt(val)})
     });
   }, 120);
+}
+
+// ── OBS go-live ───────────────────────────────────────────────────────────────
+// Click a party member to cut OBS to their camera. Optimistic highlight, then
+// the 2 s state poll corrects from OBS's own event feed (_obsSync) — so a
+// scene the DM switches inside OBS also lands here.
+
+function obsGoLive(ev, btn) {
+  ev.stopPropagation();          // the row itself has no click, but be safe
+  if (btn.disabled) return;
+  btn.disabled = true;
+  fetch('/ttrpg/obs/api/switch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: btn.dataset.characterId }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      btn.disabled = false;
+      if (!ok || !d.ok) {
+        alert(d.need_map
+          ? 'No OBS scene is mapped to this player yet — set it on the Broadcast page.'
+          : (d.error || 'OBS switch failed.'));
+        return;
+      }
+      _obsSync({ connected: true, current_scene: d.current_scene });
+    })
+    .catch(() => { btn.disabled = false; alert('OBS switch failed (network).'); });
+}
+
+function obsStep(direction) {
+  fetch('/ttrpg/obs/api/next', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not step the camera rotation.'); return; }
+      _obsSync({ connected: true, current_scene: d.current_scene });
+    })
+    .catch(() => {});
+}
+
+function obsJump(position) {
+  fetch('/ttrpg/obs/api/next', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ position }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch.'); return; }
+      _obsSync({ connected: true, current_scene: d.current_scene });
+    })
+    .catch(() => {});
+}
+
+function obsGroupShot() {
+  fetch('/ttrpg/obs/api/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'No group scene is set.'); return; }
+      _obsSync({ connected: true, current_scene: d.current_scene });
+    })
+    .catch(() => {});
+}
+
+// Camera hotkeys for live play: hunting for a small sidebar button mid-combat
+// is slow. Only bound when OBS is on and the user is the DM; suppressed while
+// typing, and while the 3D viewer is open (it owns WASD and its own keys).
+(function () {
+  if (typeof OBS_ENABLED === 'undefined' || !OBS_ENABLED) return;
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (window.BM3D && BM3D.isOpen()) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' ||
+              t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key >= '1' && e.key <= '9') { e.preventDefault(); obsJump(parseInt(e.key)); }
+    else if (e.key === '0' || e.key.toLowerCase() === 'g') { e.preventDefault(); obsGroupShot(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); obsStep(1); }
+    else if (e.key === 'ArrowLeft')  { e.preventDefault(); obsStep(-1); }
+  });
+})();
+
+function _obsSync(obs) {
+  const btns = document.querySelectorAll('.obs-live-btn');
+  if (!btns.length) return;
+  if (!obs) return;                       // OBS disabled server-side
+  btns.forEach(b => {
+    const live = !!obs.current_scene && b.dataset.obsScene === obs.current_scene;
+    b.classList.toggle('btn-outline-success', live);
+    b.classList.toggle('btn-outline-secondary', !live);
+    b.style.opacity = obs.connected ? '' : '.45';
+    b.title = !obs.connected ? 'OBS is not connected'
+            : live ? 'On screen in OBS now'
+            : 'Put this player on screen in OBS';
+  });
+  const pill = document.getElementById('obs-sidebar-pill');
+  if (pill) {
+    const bits = [];
+    if (obs.recording) bits.push('● REC');
+    if (obs.streaming) bits.push('LIVE');
+    const scene = obs.connected ? (obs.current_scene || '—') : 'offline';
+    pill.textContent = 'OBS: ' + scene + (bits.length ? ' · ' + bits.join(' ') : '');
+    pill.style.display = '';
+  }
 }
 
 // ── Campaign Scenes ───────────────────────────────────────────────────────────

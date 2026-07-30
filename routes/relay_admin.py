@@ -257,6 +257,7 @@ def toggle():
         import relay_broadcaster
         relay_broadcaster.push_all_characters()
         relay_broadcaster.push_session_users()
+        relay_broadcaster.push_character_feeds()
         relay_broadcaster.push_library()   # same set as generate-code / Party Sync
         relay_guard.disarm_after_grace()
         flash('Relay enabled — receiver started and party synced.')
@@ -425,6 +426,8 @@ def _start_session(requested_id=None, requested_code=None):
         relay_broadcaster.push_all_characters()
         step = 'queue user push'
         relay_broadcaster.push_session_users()
+        step = 'queue feed push'
+        relay_broadcaster.push_character_feeds()
         step = 'queue library push'
         relay_broadcaster.push_library()
         # The GM WebSocket is bound to a session id — reconnect under the new one
@@ -492,6 +495,7 @@ def sync_characters():
     import relay_broadcaster
     relay_broadcaster.push_all_characters()
     relay_broadcaster.push_session_users()
+    relay_broadcaster.push_character_feeds()
     relay_broadcaster.push_library()
     flash('Party characters, user accounts and library pushed to relay.')
     return redirect(url_for('relay_admin_bp.status'))

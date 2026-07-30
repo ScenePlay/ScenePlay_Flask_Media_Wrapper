@@ -13,6 +13,10 @@ requests~=2.34.2
 websocket-client~=1.8
 SQLAlchemy~=2.0.50
 Pillow~=12.2.0
+# QR codes for the player camera page (scan the push link on a phone). Pure
+# Python, SVG output so Pillow isn't involved; absent -> the page still shows
+# the link and a Copy button, it just can't draw the code.
+qrcode~=8.2
 python-crontab~=3.3.0; sys_platform == "linux"
 gTTS~=2.5.4
 psutil~=7.2.2

@@ -23,6 +23,7 @@ from routes.monsters import monsters_bp
 from routes.battlemap import battlemap_bp
 from routes.reference import reference_bp
 from routes.relay_admin import relay_admin_bp
+from routes.obs import obs_bp
 
 from defaultData import *
 from sql import *
@@ -302,6 +303,7 @@ app.register_blueprint(monsters_bp)
 app.register_blueprint(battlemap_bp)
 app.register_blueprint(reference_bp)
 app.register_blueprint(relay_admin_bp)
+app.register_blueprint(obs_bp)
 
 # Startup schema sync. create_table()/db.create_all() only CREATE missing
 # tables — they never alter existing ones. Column adds, indexes and seed fixes
@@ -478,10 +480,30 @@ def startTheadPlayer():
                 import relay_broadcaster
                 relay_broadcaster.push_all_characters()
                 relay_broadcaster.push_session_users()
+                relay_broadcaster.push_character_feeds()
                 relay_broadcaster.push_library()
             relay_guard.disarm_after_grace()
-    
-    
+
+    # OBS Studio control (obs-websocket). Same boot-loop guard as the relay,
+    # with its own sentinel so one integration's crash can't disable the
+    # other. Connecting is one LAN socket — a missing OBS just backs off.
+    if appsettingGet('obs_enabled', '0') == '1':
+        import relay_guard
+        if relay_guard.tripped(relay_guard.OBS_GUARD_PATH):
+            from datetime import datetime as _dt
+            relay_guard.disarm(relay_guard.OBS_GUARD_PATH)
+            appsettingSet('obs_enabled', '0')
+            appsettingSet('obs_boot_tripped', _dt.now().strftime('%Y-%m-%d %H:%M:%S'))
+            print('*** OBS auto-start SKIPPED: the previous start crashed during '
+                  'OBS bring-up. OBS control has been DISABLED — re-enable it from '
+                  'the Broadcast page when ready. ***')
+        else:
+            relay_guard.arm(relay_guard.OBS_GUARD_PATH)
+            import obs_ws
+            obs_ws.start(app)
+            relay_guard.disarm_after_grace(relay_guard.OBS_GUARD_PATH)
+
+
 def _another_instance_running(port=8086):
     """True when the app already runs elsewhere (dev-server F5 while the
     waitress instance is up). Starting anyway would add a second set of queue

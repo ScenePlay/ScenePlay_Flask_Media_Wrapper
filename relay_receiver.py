@@ -1009,6 +1009,31 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
         if portrait_rel and portrait_rel.startswith('/portraits/'):
             _download_portrait(char, relay_url, portrait_rel)
 
+    elif mutation_type == 'video_feed_set':
+        # A remote player supplied (or cleared) their own camera URL in the
+        # portal. ScenePlay owns the value; OBS reads it from here. Re-checked
+        # rather than trusted: the relay validates too, but this is the
+        # boundary where portal input becomes local data.
+        url = (data.get('feed_url') or '').strip()
+        if url and (len(url) > 500 or not url.lower().startswith(('http://', 'https://'))):
+            log.warning('Rejected video_feed_set URL for %s', char.name)
+        else:
+            char.video_feed_url = url
+            # Keep an already-built OBS browser source pointing at the right
+            # feed, so a player swapping to their own capture mid-session
+            # doesn't leave OBS showing the old one.
+            try:
+                from models.ttrpg import tblObsSceneMap
+                row = tblObsSceneMap.query.filter_by(
+                    entity_type='player', entity_id=char.character_id,
+                    entity_key='').first()
+                if row and row.source_name:
+                    import obs_ws
+                    if obs_ws.connected():
+                        obs_ws.set_browser_url(row.source_name, char.video_view_url())
+            except Exception as exc:
+                log.info('Could not repoint OBS source for %s: %s', char.name, exc)
+
 
 def _download_portrait(char, relay_url, portrait_rel):
     """Download a relay portrait and save it locally, updating char.portrait_path."""

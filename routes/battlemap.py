@@ -19,6 +19,7 @@ from models.scenes import tblscenes
 from routes.auth import dm_required
 import floorplan as floorplan_mod
 import relay_broadcaster
+from sql import appsettingGet
 
 battlemap_bp = Blueprint('battlemap_bp', __name__, url_prefix='/ttrpg/battlemap')
 
@@ -657,6 +658,16 @@ def map_view(map_id):
     floorplan_version = fp.version if fp else None
     bm3d_available = bool(floorplan_version and bm.bg_image)
 
+    # OBS go-live buttons in the party sidebar — DM only, and only once the
+    # DM has enabled OBS control on the Broadcast page.
+    obs_enabled = (current_user.is_dm()
+                   and appsettingGet('obs_enabled', '0') == '1')
+    obs_scene_map = {}
+    if obs_enabled:
+        from models.ttrpg import tblObsSceneMap
+        obs_scene_map = {r.entity_id: r.scene_name for r in
+                         tblObsSceneMap.query.filter_by(entity_type='player').all()}
+
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
                            monsters=monsters, party=party,
@@ -668,7 +679,9 @@ def map_view(map_id):
                            campaign_scenes=campaign_scenes,
                            current_vol=current_vol,
                            floorplan_version=floorplan_version,
-                           bm3d_available=bm3d_available)
+                           bm3d_available=bm3d_available,
+                           obs_enabled=obs_enabled,
+                           obs_scene_map=obs_scene_map)
 
 
 # ── Relay presence endpoint ──────────────────────────────────────────────────
@@ -810,7 +823,28 @@ def map_state(map_id):
         'roller_sig':    roller_sig,
         'floorplan_version': fp.version if fp else None,
         'doors':         doors,
+        'obs':           _obs_poll_state(),
     })
+
+
+def _obs_poll_state():
+    """OBS status for the DM's sidebar, or None when it isn't wanted.
+
+    DM-only (no reason to hand the rig's state to player pages) and a pure
+    in-memory read of obs_ws's event-fed cache — the 2 s poll must never
+    round-trip to OBS. Imported lazily: obs_ws must stay off the import path
+    of the forked music workers."""
+    if not current_user.is_dm() or appsettingGet('obs_enabled', '0') != '1':
+        return None
+    try:
+        import obs_ws
+        snap = obs_ws.current_state()
+    except Exception:
+        return None
+    return {'connected': snap['connected'],
+            'current_scene': snap['current_scene'],
+            'recording': snap['recording'],
+            'streaming': snap['streaming']}
 
 
 # ── Token CRUD ────────────────────────────────────────────────────────────────

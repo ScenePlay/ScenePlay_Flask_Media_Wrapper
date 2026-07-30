@@ -1033,6 +1033,60 @@ def push_session_users():
     _enqueue('session-users', _go)   # coalesce: latest user list wins
 
 
+def push_character_feeds():
+    """POST /session/{id}/feeds — each party member's camera link, so remote
+    players can start their own camera from the portal with no GM help.
+
+    Scoped per player on the relay: these links are capabilities (holding one
+    lets you watch that camera or impersonate the push), so they go to a table
+    the relay never broadcasts, and a portal login only ever reads its own
+    back. Nothing here rides the character payload every player receives.
+
+    Authoritative replace — a character dropped from the party loses their
+    link on the relay too."""
+    cfg = _active()
+    if not cfg:
+        return
+    from models.ttrpg import tblSessions
+    sess = tblSessions.query.filter_by(status='active').first()
+    if not sess:
+        return
+    feeds = []
+    for sp in sess.party:
+        char = sp.character
+        if not char or not char.active:
+            continue
+        feeds.append({
+            'player_name': char.name,
+            'username': (char.user.username if char.user else '') or '',
+            # ScenePlay builds the push URL: it owns the VDO.ninja base,
+            # params and the shared table password, so the relay never needs
+            # to know any of them.
+            'push_url': char.video_push_url(),
+            'feed_url': char.video_feed_url or '',
+        })
+    payload = {'feeds': feeds}
+
+    def _go():
+        c = _exec_cfg()
+        if not c:
+            return
+        try:
+            _post(f'/api/v1/session/{c["session_id"]}/feeds', payload, c)
+        except Exception as exc:
+            # A relay that predates this endpoint answers 404/405. That is not
+            # a failure worth retrying for two minutes — remote players simply
+            # use the link the GM sends them until the relay is updated.
+            status = getattr(getattr(exc, 'response', None), 'status_code', 0)
+            if status in (404, 405):
+                log.info('Relay has no /feeds endpoint yet — skipping feed push')
+                return
+            raise
+        log.info('push_character_feeds: pushed %d feeds', len(feeds))
+
+    _enqueue('character-feeds', _go)   # coalesce: latest feed list wins
+
+
 def remove_character(player_name):
     """DELETE /session/{id}/characters/{name} — drop a character that left the
     party. The relay broadcasts character_removed to connected portals, so the

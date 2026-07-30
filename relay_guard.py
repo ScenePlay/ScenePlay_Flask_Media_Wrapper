@@ -17,6 +17,9 @@ import threading
 
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
 GUARD_PATH = os.path.join(_START_DIR, '.relay_boot_guard')
+# Same guard, second integration: OBS bring-up gets its own sentinel so one
+# integration's boot crash never disables the other.
+OBS_GUARD_PATH = os.path.join(_START_DIR, '.obs_boot_guard')
 GRACE_SECONDS = 90
 
 

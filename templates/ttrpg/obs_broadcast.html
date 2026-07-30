@@ -1,0 +1,420 @@
+{% extends 'ttrpg/base_ttrpg.html' %}
+{% block title %}Broadcast — ScenePlay{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#127909; Broadcast (OBS)</h4>
+      <a href="{{ url_for('obs_bp.broadcast') }}" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</a>
+    </div>
+
+    {% if cfg.boot_tripped %}
+    <div class="alert mb-3" style="background:var(--ttrpg-primary);border:1px solid #c0392b;color:#e09090;">
+      &#9888; OBS control was <strong>automatically disabled</strong> on {{ cfg.boot_tripped }}:
+      the previous app start crashed while connecting to OBS. Enable it again below
+      when you're ready &mdash; re-enabling clears this notice.
+    </div>
+    {% endif %}
+
+    <!-- Status -->
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <span class="fw-bold">Status:</span>
+          <span class="badge ms-1" id="obs-state-badge">…</span>
+          <span class="small text-muted ms-2" id="obs-version-line">
+            {% if snap.obs_version %}OBS {{ snap.obs_version }}{% endif %}
+            {% if snap.ws_version %}&middot; obs-websocket {{ snap.ws_version }}{% endif %}
+          </span>
+        </div>
+        <form method="post" action="{{ url_for('obs_bp.toggle') }}">
+          <button class="btn btn-sm {% if cfg.enabled == '1' %}btn-outline-danger{% else %}btn-ttrpg{% endif %}">
+            {% if cfg.enabled == '1' %}Disable{% else %}Enable{% endif %} OBS Control
+          </button>
+        </form>
+      </div>
+      <div class="mt-2 small">
+        <span class="text-muted">Live scene:</span>
+        <strong style="color:var(--ttrpg-accent);" id="obs-current-scene">
+          {{ snap.current_scene or '—' }}</strong>
+        <span class="badge bg-danger ms-2" id="obs-rec-pill"
+              style="display:{% if snap.recording %}inline-block{% else %}none{% endif %};">&#9679; REC</span>
+        <span class="badge bg-primary ms-1" id="obs-live-pill"
+              style="display:{% if snap.streaming %}inline-block{% else %}none{% endif %};">LIVE</span>
+      </div>
+      <div id="obs-problems" class="mt-2 small" style="color:#e09090;">
+        {% for p in problems %}<div>&#9888; {{ p }}</div>{% endfor %}
+      </div>
+      {% if cfg.last_error %}
+      <div class="mt-2 small text-muted">Last error: {{ cfg.last_error }}</div>
+      {% endif %}
+    </div>
+
+    <!-- Scene mapping: the point of the page -->
+    <div class="ttrpg-card p-3 mb-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-0">Player Scenes</h6>
+        <button class="btn btn-sm btn-outline-secondary" onclick="obsRefreshScenes(this)">
+          &#8635; Re-read scenes from OBS</button>
+      </div>
+      <p class="small text-muted">
+        Map each player to the OBS scene showing their camera, then hit <b>Go Live</b>
+        when it's their turn. The same buttons appear on the battle map sidebar.
+      </p>
+      {% if not has_party %}
+      <p class="small text-muted mb-0">No active session &mdash; start a session and add a party to map players.</p>
+      {% else %}
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <button class="btn btn-sm btn-outline-secondary" onclick="obsStep(-1)">&#9664; Previous</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="obsStep(1)">Next &#9654;</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="obsGroup()">&#128101; Group shot</button>
+        <span class="small text-muted">Number keys 1&ndash;9 jump straight to a player.</span>
+      </div>
+      <div id="obs-rows">
+        {% for r in rows %}
+        <div class="d-flex align-items-center gap-2 mb-2 obs-row" data-character-id="{{ r.character_id }}">
+          <span class="text-muted small obs-row-pos" style="width:1.3rem;text-align:right;">
+            {{ r.pos or '·' }}</span>
+          <span class="obs-feed-dot" title="{{ {'live': 'Camera feed set, player online',
+                                                'ready': 'Camera feed set',
+                                                'stale': 'Camera feed set, but the player looks offline',
+                                                'nofeed': 'No camera feed yet'}[r.feed] }}"
+                style="width:.6rem;height:.6rem;border-radius:50%;flex:0 0 auto;
+                       background:{{ {'live':'#28a745','ready':'#b8a24a','stale':'#c0392b','nofeed':'#555'}[r.feed] }};"></span>
+          <span style="min-width:8rem;">{{ r.name }}</span>
+          <select class="form-select form-select-sm obs-row-scene" style="max-width:15rem;"
+                  onchange="obsSaveMap(this)">
+            <option value="">— not mapped —</option>
+            {% for s in snap.scenes %}
+            <option value="{{ s }}"{% if s == r.scene %} selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+            {% if r.missing %}
+            <option value="{{ r.scene }}" selected>{{ r.scene }} (missing in OBS)</option>
+            {% endif %}
+          </select>
+          <button class="btn btn-sm btn-ttrpg obs-row-live" onclick="obsGoLiveRow(this)">Go Live</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="obsCreateScene(this)"
+                  title="Build an OBS scene showing this player's camera">&#10010; Scene</button>
+          <a class="btn btn-sm btn-outline-secondary"
+             href="{{ url_for('obs_bp.my_feed', character_id=r.character_id) }}"
+             title="Their camera link / QR code">&#128247;</a>
+          <span class="text-muted" style="cursor:pointer;user-select:none;"
+                onclick="obsReorder({{ r.character_id }}, -1)" title="Earlier in the rotation">&#9650;</span>
+          <span class="text-muted" style="cursor:pointer;user-select:none;"
+                onclick="obsReorder({{ r.character_id }}, 1)" title="Later in the rotation">&#9660;</span>
+          <span class="badge bg-success obs-row-badge"
+                style="display:{% if r.live %}inline-block{% else %}none{% endif %};">on air</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="small text-muted mt-2 mb-0">
+        The dot shows whether a player has a camera feed set (and, for remote
+        players, whether they're online). &#10010; Scene builds the OBS scene for you.
+      </p>
+      {% endif %}
+    </div>
+
+    <!-- ScenePlay scene -> OBS scene -->
+    {% if scene_rows %}
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">Scene Links</h6>
+      <p class="small text-muted">
+        Activating one of your ScenePlay scenes can cut OBS at the same time &mdash;
+        e.g. a battle scene switches to the map view. Needs
+        <i>Switch OBS when a ScenePlay scene is activated</i> below.
+      </p>
+      {% for s in scene_rows %}
+      <div class="d-flex align-items-center gap-2 mb-2 obs-scene-row" data-scene-id="{{ s.scene_id }}">
+        <span style="min-width:11rem;">{{ s.name }}</span>
+        <select class="form-select form-select-sm" style="max-width:18rem;"
+                onchange="obsSaveSceneLink(this)">
+          <option value="">— no OBS switch —</option>
+          {% for o in snap.scenes %}
+          <option value="{{ o }}"{% if o == s.obs_scene %} selected{% endif %}>{{ o }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Manual switch -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">All Scenes</h6>
+      <div id="obs-scene-buttons" class="d-flex flex-wrap gap-2">
+        {% for s in snap.scenes %}
+        <button class="btn btn-sm obs-scene-btn"
+                data-scene="{{ s }}" onclick="obsSwitchScene(this)"
+                style="background:{% if s == snap.current_scene %}var(--ttrpg-accent);color:var(--sp-on-accent){% else %}var(--ttrpg-surface);color:var(--ttrpg-text){% endif %};
+                       border:1px solid {% if s == snap.current_scene %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
+          {{ s }}</button>
+        {% else %}
+        <span class="small text-muted">No scenes yet &mdash; connect to OBS first.</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Connection settings -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
+      <form method="post" action="{{ url_for('obs_bp.save_config') }}">
+        <div class="row g-2 mb-2">
+          <div class="col-sm-8">
+            <label class="form-label small">OBS host</label>
+            <input type="text" name="obs_host" class="form-control form-control-sm"
+                   placeholder="127.0.0.1" value="{{ cfg.host }}">
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small">Port</label>
+            <input type="number" name="obs_port" class="form-control form-control-sm"
+                   min="1" max="65535" value="{{ cfg.port }}">
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">WebSocket password</label>
+          <input type="password" name="obs_password" class="form-control form-control-sm"
+                 placeholder="{% if cfg.has_password %}leave blank to keep existing{% else %}from OBS → Tools → WebSocket Server Settings{% endif %}"
+                 value="" autocomplete="new-password">
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-sm-8">
+            <label class="form-label small">Group shot scene
+              <span class="text-muted">— everyone on screen</span></label>
+            <select name="obs_group_scene" class="form-select form-select-sm">
+              <option value="">— none —</option>
+              {% for s in snap.scenes %}
+              <option value="{{ s }}"{% if s == cfg.group_scene %} selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+              {% if cfg.group_scene and cfg.group_scene not in snap.scenes %}
+              <option value="{{ cfg.group_scene }}" selected>{{ cfg.group_scene }} (missing in OBS)</option>
+              {% endif %}
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small">Auto-return after (s)</label>
+            <input type="number" name="obs_auto_return_s" class="form-control form-control-sm"
+                   min="0" max="3600" step="5" value="{{ cfg.auto_return_s }}">
+            <div class="form-text">0 = stay put.</div>
+          </div>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="obs-scene-link"
+                 name="obs_scene_link" value="1"
+                 {% if cfg.scene_link == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-scene-link">
+            Switch OBS when a ScenePlay scene is activated
+            <span class="text-muted">(uses the Scene Links above)</span>
+          </label>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">Shared camera password
+            <span class="text-muted">— protects every player's feed</span></label>
+          <input type="password" name="obs_vdo_password" class="form-control form-control-sm"
+                 placeholder="{% if cfg.has_vdo_password %}leave blank to keep existing{% else %}recommended — one secret for the whole table{% endif %}"
+                 value="" autocomplete="new-password">
+          <div class="form-text">
+            Baked into every player's link, so a leaked link alone isn't enough to
+            watch a feed. Changing it changes everyone's links.
+            {% if cfg.has_vdo_password %}
+            <label class="ms-2"><input type="checkbox" name="obs_vdo_password_clear" value="1"> clear it</label>
+            {% endif %}
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-sm-8">
+            <label class="form-label small">Transition when switching</label>
+            <select name="obs_transition" class="form-select form-select-sm">
+              <option value="">— leave whatever OBS is set to —</option>
+              {% for t in snap.transitions %}
+              <option value="{{ t.name }}"{% if t.name == cfg.transition %} selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small">Duration (ms)</label>
+            <input type="number" name="obs_transition_ms" class="form-control form-control-sm"
+                   min="0" max="20000" step="50" value="{{ cfg.transition_ms }}">
+          </div>
+        </div>
+        <button class="btn btn-ttrpg btn-sm">Save Settings</button>
+        <span class="small text-muted ms-2">Changing host, port or password reconnects.</span>
+      </form>
+      <hr style="border-color:var(--sp-border);">
+      <p class="small text-muted mb-0">
+        In OBS: <b>Tools &rarr; WebSocket Server Settings</b> &rarr; tick <i>Enable WebSocket server</i>,
+        then <i>Show Connect Info</i> for the port and password. If OBS runs on this
+        same machine, leave the host at 127.0.0.1.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const OBS_STATE_URL   = "{{ url_for('obs_bp.api_state') }}";
+const OBS_SWITCH_URL  = "{{ url_for('obs_bp.api_switch') }}";
+const OBS_MAP_URL     = "{{ url_for('obs_bp.api_map') }}";
+const OBS_REFRESH_URL = "{{ url_for('obs_bp.api_refresh') }}";
+const OBS_NEXT_URL    = "{{ url_for('obs_bp.api_next') }}";
+const OBS_GROUP_URL   = "{{ url_for('obs_bp.api_group') }}";
+const OBS_CREATE_URL  = "{{ url_for('obs_bp.api_create_scene') }}";
+const OBS_REORDER_URL = "{{ url_for('obs_bp.api_reorder') }}";
+const OBS_MAPSCENE_URL = "{{ url_for('obs_bp.api_map_scene') }}";
+
+function _obsPost(url, body) {
+  return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify(body || {})})
+    .then(r => r.json().then(d => ({ok: r.ok, d})));
+}
+
+function obsSaveMap(sel) {
+  const row = sel.closest('.obs-row');
+  _obsPost(OBS_MAP_URL, {character_id: row.dataset.characterId,
+                         scene_name: sel.value})
+    .then(({ok, d}) => { if (!ok || !d.ok) alert(d.error || 'Could not save the mapping.'); });
+}
+
+function obsGoLiveRow(btn) {
+  const row = btn.closest('.obs-row');
+  btn.disabled = true;
+  _obsPost(OBS_SWITCH_URL, {character_id: row.dataset.characterId})
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      if (!ok || !d.ok) { alert(d.error || 'Switch failed.'); return; }
+      _obsApply({current_scene: d.current_scene});
+    })
+    .catch(() => { btn.disabled = false; alert('Switch failed (network).'); });
+}
+
+function obsSwitchScene(btn) {
+  const scene = btn.dataset.scene;
+  _obsPost(OBS_SWITCH_URL, {scene})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Switch failed.'); return; }
+      _obsApply({current_scene: d.current_scene});
+    });
+}
+
+function obsStep(direction) {
+  _obsPost(OBS_NEXT_URL, {direction})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not step the rotation.'); return; }
+      _obsApply({current_scene: d.current_scene});
+    });
+}
+
+function obsJump(position) {
+  _obsPost(OBS_NEXT_URL, {position})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch.'); return; }
+      _obsApply({current_scene: d.current_scene});
+    });
+}
+
+function obsGroup() {
+  _obsPost(OBS_GROUP_URL, {})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch to the group shot.'); return; }
+      _obsApply({current_scene: d.current_scene});
+    });
+}
+
+function obsCreateScene(btn) {
+  const row = btn.closest('.obs-row');
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.textContent = '…';
+  _obsPost(OBS_CREATE_URL, {character_id: row.dataset.characterId})
+    .then(({ok, d}) => {
+      btn.disabled = false; btn.innerHTML = orig;
+      if (!ok || !d.ok) { alert(d.error || 'Could not build the scene.'); return; }
+      if (d.warnings && d.warnings.length) alert(d.warnings.join('\n'));
+      location.reload();          // dropdowns + mapping now include the new scene
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+function obsReorder(characterId, delta) {
+  _obsPost(OBS_REORDER_URL, {character_id: characterId, delta})
+    .then(({ok, d}) => { if (ok && d.ok) location.reload(); });
+}
+
+function obsSaveSceneLink(sel) {
+  const row = sel.closest('.obs-scene-row');
+  _obsPost(OBS_MAPSCENE_URL, {scene_id: row.dataset.sceneId, scene_name: sel.value})
+    .then(({ok, d}) => { if (!ok || !d.ok) alert(d.error || 'Could not save.'); });
+}
+
+// Number keys jump to a player; arrows step; 0 or G returns to the group.
+// Ignored while typing so the scene dropdowns stay usable.
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' ||
+            t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key >= '1' && e.key <= '9') { e.preventDefault(); obsJump(parseInt(e.key)); }
+  else if (e.key === '0' || e.key.toLowerCase() === 'g') { e.preventDefault(); obsGroup(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); obsStep(1); }
+  else if (e.key === 'ArrowLeft')  { e.preventDefault(); obsStep(-1); }
+});
+
+function obsRefreshScenes(btn) {
+  btn.disabled = true;
+  _obsPost(OBS_REFRESH_URL, {})
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      if (!ok || !d.ok) { alert(d.error || 'Could not read scenes.'); return; }
+      location.reload();   // rebuild the dropdowns from the fresh list
+    })
+    .catch(() => { btn.disabled = false; });
+}
+
+// Optimistic click, then the 3 s poll corrects — same shape as the battle
+// map's scene buttons.
+function _obsApply(s) {
+  if (s.current_scene !== undefined) {
+    const el = document.getElementById('obs-current-scene');
+    if (el) el.textContent = s.current_scene || '—';
+    document.querySelectorAll('.obs-scene-btn').forEach(b => {
+      const on = b.dataset.scene === s.current_scene;
+      b.style.background = on ? 'var(--ttrpg-accent)' : 'var(--ttrpg-surface)';
+      b.style.color = on ? 'var(--sp-on-accent)' : 'var(--ttrpg-text)';
+      b.style.borderColor = on ? 'var(--ttrpg-accent)' : 'var(--sp-border)';
+    });
+  }
+  if (s.rows) {
+    s.rows.forEach(r => {
+      const row = document.querySelector(`.obs-row[data-character-id="${r.character_id}"]`);
+      if (!row) return;
+      const badge = row.querySelector('.obs-row-badge');
+      if (badge) badge.style.display = r.live ? 'inline-block' : 'none';
+    });
+  }
+  if (s.state !== undefined) {
+    const badge = document.getElementById('obs-state-badge');
+    const label = {connected: 'Connected', connecting: 'Connecting…',
+                   identifying: 'Connecting…', reconnecting: 'Reconnecting…',
+                   auth_failed: 'Auth failed', unsupported: 'Unsupported',
+                   disabled: 'Disabled'}[s.state] || s.state;
+    const cls = s.state === 'connected' ? 'bg-success'
+              : (s.state === 'auth_failed' || s.state === 'unsupported') ? 'bg-danger'
+              : s.state === 'disabled' ? 'bg-secondary' : 'bg-warning text-dark';
+    badge.className = 'badge ms-1 ' + cls;
+    badge.textContent = label;
+  }
+  if (s.recording !== undefined) {
+    document.getElementById('obs-rec-pill').style.display = s.recording ? 'inline-block' : 'none';
+  }
+  if (s.streaming !== undefined) {
+    document.getElementById('obs-live-pill').style.display = s.streaming ? 'inline-block' : 'none';
+  }
+}
+
+function obsPoll() {
+  fetch(OBS_STATE_URL).then(r => r.json()).then(_obsApply).catch(() => {});
+}
+obsPoll();
+setInterval(obsPoll, 3000);
+</script>
+{% endblock %}

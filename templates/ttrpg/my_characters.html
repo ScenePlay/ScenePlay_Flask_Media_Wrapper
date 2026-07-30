@@ -77,6 +77,13 @@
         {% endif %}
       </div>
     </a>
+    {% if obs_enabled %}
+    <!-- Outside the card's <a>: nested links are invalid and the sheet link
+         would swallow the click. -->
+    <a href="{{ url_for('obs_bp.my_feed', character_id=char.character_id) }}"
+       class="btn btn-sm btn-outline-secondary w-100 mt-1">
+      &#128247; My Camera{% if not char.has_feed() %} &mdash; set up{% endif %}</a>
+    {% endif %}
   </div>
   {% endfor %}
 </div>

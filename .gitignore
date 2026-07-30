@@ -181,3 +181,9 @@ ScenePlay.db-wal
 ScenePlay.db-shm
 ScenePlay.db-journal
 player_debug.log
+
+# Boot-crash sentinels (relay_guard.py). These are RUNTIME files: if one is
+# committed it exists at every boot, so the guard reads it as "the last
+# bring-up crashed" and auto-disables that integration.
+.relay_boot_guard
+.obs_boot_guard

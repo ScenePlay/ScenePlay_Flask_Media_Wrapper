@@ -272,6 +272,22 @@ def _activate_scene(id):
     # screen/loops for media rows now shared across scenes (video-id dedup).
     if scene_id is not None:
         appsettingSetCurrentScene(scene_id)
+    # Optional: cut OBS to the scene's paired camera/graphic. Done EARLY so
+    # the visual switch lands with the music rather than after the media
+    # teardown below. obs_ws is imported inside the function on purpose —
+    # this module is on the forked music-worker import path and the OBS
+    # client must never be dragged in there. Wrapped whole: a scene must
+    # still activate with OBS closed, misconfigured, or throwing.
+    if scene_id is not None and scene_id > 0:
+        try:
+            from routes.obs import obs_scene_for_sceneplay_scene
+            obs_scene = obs_scene_for_sceneplay_scene(scene_id)
+            if obs_scene:
+                import obs_ws
+                if obs_ws.connected():
+                    obs_ws.switch_scene(obs_scene, timeout=1.5)
+        except Exception as exc:
+            print(f'OBS scene link skipped: {exc}')
     scnID = []
     scnID.append(id)
     scnPat = CRUD_tblScenePattern(scnID,"bySceneID")
