@@ -993,6 +993,42 @@ window.BM3D = (function () {
 
   var _stepPending = false;
 
+  // ── movement counter ───────────────────────────────────────────────────────
+  // Upper-right running total of feet moved by double-click steps. Holds the
+  // count while the player keeps moving; 10 s with no movement hides it and
+  // resets to zero (a D&D "this turn" tape measure, not a session odometer).
+  var MOVE_COUNTER_IDLE_MS = 10000;
+  var _moveFt = 0, _moveTimer = null, _moveEl = null;
+
+  function _moveCounterEl() {
+    if (_moveEl && _moveEl.parentNode === cfg.overlayEl) return _moveEl;
+    _moveEl = document.createElement('div');
+    _moveEl.id = 'bm3d-move-counter';
+    _moveEl.style.cssText =
+      'position:absolute;top:52px;right:12px;z-index:5;pointer-events:none;' +
+      'padding:5px 12px;border-radius:6px;display:none;' +
+      'font:600 14px/1.4 system-ui,sans-serif;letter-spacing:.02em;' +
+      'background:rgba(10,12,18,.82);color:#ffd166;border:1px solid #ffd166;';
+    cfg.overlayEl.appendChild(_moveEl);
+    return _moveEl;
+  }
+
+  function bumpMoveCounter(feet) {
+    _moveFt += feet;
+    var el = _moveCounterEl();
+    el.textContent = '👣 ' + (Math.round(_moveFt * 10) / 10) + ' ft';
+    el.style.display = '';
+    clearTimeout(_moveTimer);
+    _moveTimer = setTimeout(resetMoveCounter, MOVE_COUNTER_IDLE_MS);
+  }
+
+  function resetMoveCounter() {
+    _moveFt = 0;
+    clearTimeout(_moveTimer);
+    _moveTimer = null;
+    if (_moveEl) _moveEl.style.display = 'none';
+  }
+
   function flashHint(msg) {
     var el = cfg.overlayEl && cfg.overlayEl.querySelector('#bm3d-hint');
     if (!el) return;
@@ -1099,6 +1135,8 @@ window.BM3D = (function () {
     }
 
     _stepPending = true;
+    // Diagonal cells count 5 ft like cardinals (5e simple diagonals).
+    var movedCells = Math.max(Math.abs(nc - col), Math.abs(nr - row));
     cfg.onTokenMove(tok.token_id, nc, nr).then(function (d) {
       _stepPending = false;
       if (d && d.ok) {
@@ -1106,6 +1144,7 @@ window.BM3D = (function () {
         // updating the token is all a smooth glide needs. The sprite is
         // hidden in first person; the next state poll reseats everything.
         tok.col = d.col; tok.row = d.row;
+        bumpMoveCounter(movedCells * 5 * scale);
       } else {
         flashHint('Move refused');
       }
@@ -1208,6 +1247,8 @@ window.BM3D = (function () {
   }
 
   function setView(v) {
+    // Another character's eyes = another character's movement budget.
+    if (String(v.tokenId) !== String(view.tokenId)) resetMoveCounter();
     view = v;
     refreshTokenVisibility();   // own-token hiding + player fog cover
     if (v.kind === 'overview') { setOverviewCamera(); return; }
@@ -1556,6 +1597,7 @@ window.BM3D = (function () {
 
   function closeViewer() {
     open_ = false;
+    resetMoveCounter();
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
     if (document.pointerLockElement) document.exitPointerLock();
