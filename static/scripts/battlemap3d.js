@@ -1281,11 +1281,16 @@ window.BM3D = (function () {
     });
     // touch / no-pointer-lock fallback: drag to look. e.preventDefault() on
     // pointerdown stops mobile browsers from starting text-selection /
-    // long-press handling that competes with the drag.
+    // long-press handling that competes with the drag — but it ALSO
+    // suppresses the browser's synthesized click/dblclick events, so
+    // double-tap-to-step is detected by hand from the pointer stream:
+    // two low-movement taps within 400 ms / 40 px = one dblclick.
+    var tapT = 0, tapX = 0, tapY = 0, tapMoved = 0;
     canvas.addEventListener('pointerdown', function (e) {
       if (hasLock && e.pointerType === 'mouse') return;
       e.preventDefault();
       dragging = true; lastX = e.clientX; lastY = e.clientY;
+      tapMoved = 0;
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     });
     canvas.addEventListener('pointermove', function (e) {
@@ -1295,16 +1300,32 @@ window.BM3D = (function () {
       var pts = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
       if (pts && pts.length) {
         for (var i = 0; i < pts.length; i++) {
+          tapMoved += Math.abs(pts[i].clientX - lastX) + Math.abs(pts[i].clientY - lastY);
           onPointerMove((pts[i].clientX - lastX) * 2.6, (pts[i].clientY - lastY) * 2.6);
           lastX = pts[i].clientX; lastY = pts[i].clientY;
         }
       } else {
+        tapMoved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
         onPointerMove((e.clientX - lastX) * 2.6, (e.clientY - lastY) * 2.6);
         lastX = e.clientX; lastY = e.clientY;
       }
     });
-    canvas.addEventListener('pointerup', function () { dragging = false; });
-    canvas.addEventListener('pointercancel', function () { dragging = false; });
+    canvas.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      dragging = false;
+      // Mouse users get a native dblclick — hand-detect only for touch/pen,
+      // and only when the gesture was a tap, not a drag-look.
+      if (e.pointerType === 'mouse' || tapMoved > 12) { tapT = 0; return; }
+      var now = e.timeStamp || Date.now();
+      if (now - tapT < 400 &&
+          Math.abs(e.clientX - tapX) < 40 && Math.abs(e.clientY - tapY) < 40) {
+        tapT = 0;
+        tryStepForward();
+      } else {
+        tapT = now; tapX = e.clientX; tapY = e.clientY;
+      }
+    });
+    canvas.addEventListener('pointercancel', function () { dragging = false; tapT = 0; });
 
     document.addEventListener('keydown', function (e) { setKey(e, true); });
     document.addEventListener('keyup', function (e) { setKey(e, false); });
