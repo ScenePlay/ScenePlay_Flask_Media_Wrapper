@@ -105,8 +105,6 @@
             <input type="checkbox" class="obs-card-chk" onchange="obsCardOverride(this)"
                    {% if r.show_card %}checked{% endif %}> card
           </label>
-          <button class="btn btn-sm btn-ttrpg obs-row-live" onclick="obsGoLiveRow(this)"
-                  title="Give this player the turn — their tile grows in place">Turn</button>
           <a class="btn btn-sm btn-outline-secondary"
              href="{% if r.character_id == dm_id %}{{ url_for('obs_bp.dm_feed') }}
                    {%- else %}{{ url_for('obs_bp.my_feed', character_id=r.character_id) }}{% endif %}"
@@ -233,16 +231,31 @@
         e.g. a battle scene switches to the map view. Needs
         <i>Switch OBS when a ScenePlay scene is activated</i> below.
       </p>
+      {% if not snap.scenes %}
+      <div class="small mb-2" style="color:#c9a227;">
+        &#9888; OBS isn't connected, so its scene list is empty. You can still
+        type a scene name below &mdash; it's matched when the scene activates.
+      </div>
+      {% endif %}
+      <!-- A typeable field, NOT a select. The options used to come only from
+           OBS's live scene list, so with OBS closed there was nothing to pick
+           (the field looked broken), and an existing binding rendered as unset
+           and got wiped by the next change event. -->
+      <datalist id="obs-scene-names">
+        {% for o in snap.scenes %}<option value="{{ o }}"></option>{% endfor %}
+      </datalist>
       {% for s in scene_rows %}
       <div class="d-flex align-items-center gap-2 mb-2 obs-scene-row" data-scene-id="{{ s.scene_id }}">
         <span style="min-width:11rem;">{{ s.name }}</span>
-        <select class="form-select form-select-sm" style="max-width:18rem;"
-                onchange="obsSaveSceneLink(this)">
-          <option value="">— no OBS switch —</option>
-          {% for o in snap.scenes %}
-          <option value="{{ o }}"{% if o == s.obs_scene %} selected{% endif %}>{{ o }}</option>
-          {% endfor %}
-        </select>
+        <input type="text" class="form-control form-control-sm obs-scene-link"
+               style="max-width:18rem;" list="obs-scene-names"
+               value="{{ s.obs_scene }}" placeholder="— no OBS switch —"
+               onchange="obsSaveSceneLink(this)">
+        <span class="small obs-scene-note" style="min-width:9rem;">
+          {% if s.obs_scene and snap.scenes and s.obs_scene not in snap.scenes %}
+          <span style="color:#c9a227;">&#9888; not in OBS</span>
+          {% endif %}
+        </span>
       </div>
       {% endfor %}
     </div>
@@ -532,18 +545,6 @@ function _obsPost(url, body) {
     .then(r => r.json().then(d => ({ok: r.ok, d})));
 }
 
-function obsGoLiveRow(btn) {
-  const row = btn.closest('.obs-row');
-  btn.disabled = true;
-  _obsPost(OBS_SWITCH_URL, {character_id: row.dataset.characterId})
-    .then(({ok, d}) => {
-      btn.disabled = false;
-      if (!ok || !d.ok) { alert(d.error || 'Switch failed.'); return; }
-      _obsApply({current_scene: d.current_scene});
-    })
-    .catch(() => { btn.disabled = false; alert('Switch failed (network).'); });
-}
-
 function obsSwitchScene(btn) {
   const scene = btn.dataset.scene;
   _obsPost(OBS_SWITCH_URL, {scene})
@@ -639,10 +640,21 @@ function obsReorder(characterId, delta) {
     .then(({ok, d}) => { if (ok && d.ok) location.reload(); });
 }
 
-function obsSaveSceneLink(sel) {
-  const row = sel.closest('.obs-scene-row');
-  _obsPost(OBS_MAPSCENE_URL, {scene_id: row.dataset.sceneId, scene_name: sel.value})
-    .then(({ok, d}) => { if (!ok || !d.ok) alert(d.error || 'Could not save.'); });
+function obsSaveSceneLink(inp) {
+  const row = inp.closest('.obs-scene-row');
+  const note = row.querySelector('.obs-scene-note');
+  _obsPost(OBS_MAPSCENE_URL, {scene_id: row.dataset.sceneId, scene_name: inp.value.trim()})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not save.'); return; }
+      // Say so: a silent save on a field that used to do nothing is exactly
+      // what made this look broken.
+      if (note) {
+        note.innerHTML = d.scene_name
+          ? '<span style="color:#3fa14a;">\u2713 linked</span>'
+          : '<span class="text-muted">cleared</span>';
+        setTimeout(() => { note.textContent = ''; }, 2500);
+      }
+    });
 }
 
 // Number keys jump to a player; arrows step; 0 or G returns to the group.
