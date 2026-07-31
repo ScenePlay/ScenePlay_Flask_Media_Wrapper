@@ -163,6 +163,15 @@ def dm_tile():
     return _DmTile(dm_name())
 
 
+def dm_player_name():
+    """Login behind the DM tile. dm_name() already prefers display_name for
+    the tile's title, so this shows the account it belongs to instead of
+    repeating the same string twice."""
+    from models.user import tblUsers
+    row = tblUsers.query.filter_by(role='dm', active=1).first()
+    return (row.username or '') if row else ''
+
+
 def _active_party():
     """Party of the ACTIVE session — the people who could be on camera now.
     Mirrors how the battle map builds its sidebar list."""
@@ -1405,7 +1414,11 @@ def player_name_for(char):
 
 
 def tile_url(character_id):
-    return (f'{_card_base()}{obs_bp.url_prefix}/tile/{character_id}'
+    # Same reason card_url does this: Flask's <int:> converter never matches a
+    # negative number, so the DM tile (id -1) needs its own leaf. Without it
+    # the DM's camera tile was a 404 in OBS.
+    leaf = 'dm' if character_id == DM_TILE_ID else str(character_id)
+    return (f'{_card_base()}{obs_bp.url_prefix}/tile/{leaf}'
             f'?t={_card_token(character_id)}')
 
 
@@ -1875,7 +1888,25 @@ def dm_card_state():
         abort(403)
     tile = dm_tile()
     return jsonify({'name': tile.name, 'hp_current': 0, 'hp_max': 0,
-                    'hp_pct': 0, 'ac': 0, 'conditions': []})
+                    'hp_pct': 0, 'ac': 0, 'conditions': [],
+                    'player': dm_player_name(), 'is_dm': True})
+
+
+@obs_bp.route('/tile/dm')
+def dm_tile_view():
+    """The DM's camera with their name over it. Separate path for the same
+    reason /card/dm is: <int:> will not match the DM's negative id."""
+    import hmac
+    token = request.args.get('t', '')
+    if not hmac.compare_digest(token, _card_token(DM_TILE_ID)):
+        abort(403)
+    tile = dm_tile()
+    return render_template(
+        'ttrpg/obs_tile.html', char=tile,
+        player=dm_player_name(), portrait_url='',
+        feed_url=tile.video_view_url(),
+        conditions=[], is_dm=True, poll_s=card_poll_s(),
+        poll_url=url_for('obs_bp.dm_card_state', t=token))
 
 
 @obs_bp.route('/tile/<int:character_id>')

@@ -105,10 +105,16 @@
       <div id="char-name">{{ char.name }}</div>
       <div id="player-name">{{ player }}</div>
     </div>
+    {# The DM has no hit points; an empty bar would just read as 0 HP. #}
+    {% if not is_dm %}
     <div id="hp-wrap">
       <div id="hp-bar"><div id="hp-fill"></div></div>
       <div id="hp-text"></div>
     </div>
+    {% else %}
+    <div id="hp-wrap" style="text-align:right;opacity:.75;
+         font-size:calc(var(--u, 7px) * 3.6);">Dungeon Master</div>
+    {% endif %}
   </div>
 </div>
 
@@ -135,11 +141,14 @@ function apply(d) {
   // Only take the player's name from the poll when it has one: a payload
   // without the field must not wipe what the page rendered.
   if (d.player !== undefined) el('player-name').textContent = d.player || '';
-  const pct = Math.max(0, Math.min(100, d.hp_pct == null ? 100 : d.hp_pct));
-  el('hp-fill').style.width = pct + '%';
-  el('hp-fill').style.background = hpColor(pct);
-  el('hp-text').textContent = (d.hp_current == null ? '' :
-                               d.hp_current + ' / ' + d.hp_max);
+  const fill = el('hp-fill');
+  if (fill) {                       // the DM tile has no HP block
+    const pct = Math.max(0, Math.min(100, d.hp_pct == null ? 100 : d.hp_pct));
+    fill.style.width = pct + '%';
+    fill.style.background = hpColor(pct);
+    el('hp-text').textContent = (d.hp_current == null ? '' :
+                                 d.hp_current + ' / ' + d.hp_max);
+  }
   const host = el('conds');
   host.innerHTML = '';
   (d.conditions || []).forEach(c => {
