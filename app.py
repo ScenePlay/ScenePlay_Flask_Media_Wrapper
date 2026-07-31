@@ -501,6 +501,10 @@ def startTheadPlayer():
             relay_guard.arm(relay_guard.OBS_GUARD_PATH)
             import obs_ws
             obs_ws.start(app)
+            # Swaps a dropped camera's tile to that player's stat card and
+            # back again, without anyone touching the Broadcast page.
+            from routes.obs import start_feed_watch
+            start_feed_watch(app)
             relay_guard.disarm_after_grace(relay_guard.OBS_GUARD_PATH)
 
 

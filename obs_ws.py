@@ -308,6 +308,127 @@ def create_player_scene(scene_name, source_name, url, timeout=5):
     return scene_name, source_name, warnings
 
 
+# ── scene items (the party scene) ─────────────────────────────────────────────
+# One camera = one INPUT, referenced into the party scene as a scene item.
+# obs-websocket lets a single input appear in many scenes with independent
+# transforms, so featuring a player is a transform change — never a re-create,
+# and never a program cut.
+
+def ensure_scene(scene_name, timeout=3):
+    """Create the scene unless it already exists. Returns True if created."""
+    try:
+        request('CreateScene', {'sceneName': scene_name}, timeout=timeout)
+        return True
+    except ObsRejected as exc:
+        if exc.code == 601:            # already exists — that's the happy path
+            return False
+        raise
+
+
+def scene_items(scene_name, timeout=3):
+    """{source_name: sceneItemId} for everything currently in the scene."""
+    data = request('GetSceneItemList', {'sceneName': scene_name}, timeout=timeout)
+    out = {}
+    for item in data.get('sceneItems') or []:
+        name = item.get('sourceName')
+        if name:
+            out[name] = item.get('sceneItemId')
+    return out
+
+
+def ensure_browser_input(scene_name, source_name, url, width, height, timeout=5):
+    """Make sure a browser source exists AND is in this scene.
+
+    Three cases, all idempotent: brand new; input exists elsewhere (add it to
+    this scene without duplicating the input); already here (just repoint the
+    URL). Returns (sceneItemId, warnings)."""
+    warnings = []
+    kind = browser_kind()
+    if not kind:
+        raise ObsRejected(605, 'This OBS build has no browser source input')
+
+    settings = {'url': url, 'width': int(width), 'height': int(height),
+                'reroute_audio': True, 'restart_when_active': True}
+    try:
+        res = request('CreateInput', {
+            'sceneName': scene_name, 'inputName': source_name,
+            'inputKind': kind, 'inputSettings': settings,
+            'sceneItemEnabled': True}, timeout=timeout)
+        return res.get('sceneItemId'), warnings
+    except ObsRejected as exc:
+        if exc.code != 601:
+            if 'reroute' in (exc.comment or '').lower():
+                settings.pop('reroute_audio', None)
+                res = request('CreateInput', {
+                    'sceneName': scene_name, 'inputName': source_name,
+                    'inputKind': kind, 'inputSettings': settings,
+                    'sceneItemEnabled': True}, timeout=timeout)
+                warnings.append("This OBS build would not route browser audio "
+                                "into OBS — mics may need routing by hand.")
+                return res.get('sceneItemId'), warnings
+            raise
+
+    # The input already exists somewhere. Point it at the current URL, RESIZE
+    # it, and make sure THIS scene holds a reference to it.
+    #
+    # The resize matters: a browser input keeps the resolution it was created
+    # with, and place_item uses SCALE_INNER bounds — which preserve aspect
+    # ratio. So an input still rendering at its old size gets letterboxed
+    # inside its new box instead of filling it, and the item ends up visibly
+    # shorter (or narrower) than asked for. Only re-rendering it at the right
+    # resolution makes the bounds an exact fit.
+    request('SetInputSettings',
+            {'inputName': source_name,
+             'inputSettings': {'url': url, 'width': int(width),
+                               'height': int(height)},
+             'overlay': True}, timeout=timeout)
+    try:
+        item_id = scene_items(scene_name, timeout=timeout).get(source_name)
+    except ObsRejected:
+        item_id = None
+    if item_id is None:
+        res = request('CreateSceneItem', {
+            'sceneName': scene_name, 'sourceName': source_name,
+            'sceneItemEnabled': True}, timeout=timeout)
+        item_id = res.get('sceneItemId')
+    return item_id, warnings
+
+
+def place_item(scene_name, item_id, rect, timeout=3):
+    """Position/size one tile. Bounds (not scale) so the source fills its cell
+    regardless of the camera's own resolution."""
+    request('SetSceneItemTransform', {
+        'sceneName': scene_name, 'sceneItemId': item_id,
+        'sceneItemTransform': {
+            'positionX': float(rect['x']), 'positionY': float(rect['y']),
+            'boundsType': 'OBS_BOUNDS_SCALE_INNER',
+            'boundsAlignment': 0,
+            'boundsWidth': float(rect['w']), 'boundsHeight': float(rect['h']),
+            'alignment': 5,                 # top-left, so position == the rect
+            'cropLeft': 0, 'cropRight': 0, 'cropTop': 0, 'cropBottom': 0,
+            'rotation': 0.0,
+        }}, timeout=timeout)
+
+
+def set_item_enabled(scene_name, item_id, enabled, timeout=3):
+    request('SetSceneItemEnabled', {
+        'sceneName': scene_name, 'sceneItemId': item_id,
+        'sceneItemEnabled': bool(enabled)}, timeout=timeout)
+
+
+def set_item_index(scene_name, item_id, index, timeout=3):
+    """Z-order. The featured tile is raised so its scale-up draws OVER its
+    neighbours instead of being clipped by them."""
+    request('SetSceneItemIndex', {
+        'sceneName': scene_name, 'sceneItemId': item_id,
+        'sceneItemIndex': int(index)}, timeout=timeout)
+
+
+def remove_item(scene_name, item_id, timeout=3):
+    request('RemoveSceneItem', {'sceneName': scene_name,
+                                'sceneItemId': item_id}, timeout=timeout)
+
+
 def set_browser_url(source_name, url, timeout=3):
     """Repoint an existing browser source (the player changed their feed)."""
     request('SetInputSettings', {'inputName': source_name,

@@ -1,0 +1,311 @@
+<!-- The party scene's frame, as ONE browser source: background art, title
+     strip and the information panel.
+
+     Modes off the same page, so the look can never drift between them:
+       bg    - background art only, sits at the back of EVERY ScenePlay scene
+       title - the title strip, shared by the Party and Map scenes
+       info  - the information panel (notes, else the dice feed)
+       dice  - the roll feed on its own, for the battle map scene
+       pre/post - the show's top and tail: one image at 75% of the canvas
+               with a placeable title, over the shared background
+
+     Every mode except bg and pre/post FILLS ITS OWN SOURCE. OBS already knows
+     where each box goes, so the page never positions itself against canvas
+     coordinates it cannot see — doing that once shrank the dice feed to a
+     sliver, and made "same size in both scenes" a coincidence rather than a
+     guarantee.
+
+     One source rather than three because these three things share a look and
+     have to line up exactly. Splitting them would mean three CEF instances on
+     the streaming box and three transforms to keep in sync; here the layout is
+     CSS and the player tiles simply sit on top of the region left for them.
+
+     The panel shows the DM's notes when there are any, and otherwise streams
+     the dice as they are rolled — so it is never an empty box on stream. -->
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: transparent;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #f2efe6;
+  }
+  #bg { position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; }
+  /* Without art the scene would key onto whatever OBS has underneath, which
+     is rarely what the DM wants — fall back to the table's own dark field. */
+  #bg-fallback { position: absolute; inset: 0;
+                 background: radial-gradient(ellipse at 30% 20%, #1b1d27, #0c0d12 70%); }
+
+  #title {
+    position: absolute; left: 0; right: 0; top: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 2vw; padding: 0 2.2vw; box-sizing: border-box;
+    background: linear-gradient(180deg, rgba(8,9,13,.92), rgba(8,9,13,.62));
+    border-bottom: 2px solid rgba(200,168,110,.55);
+  }
+  #title-main { font-weight: 800; letter-spacing: .02em; color: #e8d7ac;
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #title-sub { font-weight: 600; opacity: .85; white-space: nowrap; }
+  /* Whose turn it is used to be shown by growing their tile. That moved the
+     layout under the audience every turn, so it says it in words instead. */
+  #turn { color: #7fd18a; }
+
+  #panel {
+    position: absolute; box-sizing: border-box;
+    display: flex; flex-direction: column;
+    background: rgba(8,9,13,.72);
+    border-left: 1px solid rgba(200,168,110,.35);
+    /* Both of these are load-bearing, not tidiness: the roll rows animate on
+       arrival, which promotes them to their own compositing layer, and
+       without an explicit clip Chromium paints a ghost copy of the animated
+       text at the far left of the canvas. OBS renders through Chromium too,
+       so that ghost would go out on the stream. */
+    overflow: hidden; contain: paint;
+  }
+  /* Every size in the panel is a share of --u (1% of the panel's OWN width,
+     set from JS once it is positioned). Viewport units were wrong here: the
+     same markup runs full-canvas in the party frame and inside a ~500px
+     source on the map, so 1vw meant 19px in one and 5px in the other. */
+  #panel-head { padding: calc(var(--u, 5px) * 2.4) calc(var(--u, 5px) * 2.6)
+                         calc(var(--u, 5px) * 1.6); font-size: calc(var(--u, 5px) * 4.8);
+                font-weight: 700;
+                letter-spacing: .12em; text-transform: uppercase;
+                color: #c8a86e; border-bottom: 1px solid rgba(200,168,110,.25); }
+  /* The scroll area. It is a real overflow container so long notes can be
+     scrolled programmatically; nothing here waits on a human to drag it. */
+  #scroll { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+            padding: calc(var(--u, 5px) * 1.6) calc(var(--u, 5px) * 1.6)
+                     calc(var(--u, 5px) * 2.4);
+            scrollbar-width: thin;
+            contain: paint;
+            scrollbar-color: rgba(200,168,110,.55) transparent; }
+  #scroll::-webkit-scrollbar { width: 8px; }
+  #scroll::-webkit-scrollbar-thumb { background: rgba(200,168,110,.55);
+                                     border-radius: 99px; }
+
+  .note { font-size: calc(var(--u, 5px) * 5); line-height: 1.5; margin: 0 0 .7vh;
+          text-shadow: 0 1px 3px #000; }
+
+  /* Two lines, not one: on a strip this narrow a single row forced the name,
+     the label and the total to share the width, which capped how big any of
+     them could get. The total spans both rows on the right. */
+  .roll { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+          column-gap: calc(var(--u, 5px) * 3); align-items: center;
+          padding: calc(var(--u, 5px) * 2.2) calc(var(--u, 5px) * 1.5);
+          border-bottom: 1px solid rgba(255,255,255,.07);
+          animation: slide-in .45s ease both; }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .roll-who { grid-column: 1; grid-row: 1;
+              font-weight: 700; color: #e8d7ac; font-size: calc(var(--u, 5px) * 6.6);
+              line-height: 1.15;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .roll-what { grid-column: 1; grid-row: 2;
+               font-size: calc(var(--u, 5px) * 4.2); opacity: .65;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .roll-total { grid-column: 2; grid-row: 1 / span 2;
+                font-weight: 800; font-size: calc(var(--u, 5px) * 10);
+                line-height: 1; }
+  /* A natural 20 and a natural 1 are the two results a table reacts to, so
+     they are the two the audience should be able to spot without reading. */
+  .roll.crit  .roll-total { color: #7fd18a; }
+  .roll.fumble .roll-total { color: #e06666; }
+  /* ── pre / post show card ── */
+  #show { position: absolute; inset: 0; display: none; }
+  #show-img {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    /* 75% of the canvas, contained rather than cropped: the background art is
+       meant to frame it, and object-fit:cover would cut off whatever the DM
+       put at the edges of their card. */
+    width: 75%; height: 75%; object-fit: contain;
+    filter: drop-shadow(0 10px 40px rgba(0,0,0,.65));
+  }
+  #show-title-wrap {
+    position: absolute; inset: 0; display: flex;
+    padding: 5vh 6vw; box-sizing: border-box;
+  }
+  #show-title {
+    font-size: 5.2vw; font-weight: 800; letter-spacing: .01em;
+    color: #e8d7ac; text-shadow: 0 4px 22px rgba(0,0,0,.95);
+    max-width: 100%; line-height: 1.15;
+  }
+  .empty { opacity: .45; font-size: calc(var(--u, 5px) * 4.4);
+           font-style: italic; padding: 1vh 0; }
+</style>
+
+<div id="bg-fallback"></div>
+<img id="bg" alt="" style="display:none;">
+<div id="title">
+  <div id="title-main"></div>
+  <div id="title-sub"><span id="turn"></span></div>
+</div>
+<div id="panel">
+  <div id="panel-head">Information</div>
+  <div id="scroll"></div>
+</div>
+<div id="show">
+  <img id="show-img" alt="">
+  <div id="show-title-wrap"><div id="show-title"></div></div>
+</div>
+
+<script>
+const STATE_URL = "{{ state_url }}";
+const MODE = "{{ mode | default('frame') }}";
+const POLL_MS = {{ (poll_s | default(5)) * 1000 }};
+
+function el(id) { return document.getElementById(id); }
+
+// The frame's geometry comes from the server so it matches EXACTLY the area
+// the party tiles were laid out around — duplicating the maths here would let
+// the two drift and put a tile under the panel.
+const SHOW_BG = MODE === 'bg';
+const SHOW_TITLE = MODE === 'title';
+const SHOW_PANEL = MODE === 'info' || MODE === 'dice';
+const SHOW_CARD = MODE === 'pre' || MODE === 'post';
+
+// A nine-way placement maps cleanly onto flexbox, so "where does the title
+// go" needs no coordinates and can never land off-canvas.
+const ALIGN = {top: 'flex-start', middle: 'center', bottom: 'flex-end',
+               left: 'flex-start', center: 'center', right: 'flex-end'};
+
+function paintShow(d) {
+  const cfg = d[MODE] || {};
+  document.getElementById('show').style.display = 'block';
+  const img = document.getElementById('show-img');
+  if (cfg.image_url) {
+    if (img.getAttribute('src') !== cfg.image_url) img.src = cfg.image_url;
+    img.style.display = '';
+    const f = (d.image_fraction || 0.75) * 100;
+    img.style.width = f + '%';
+    img.style.height = f + '%';
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+  }
+  const t = document.getElementById('show-title');
+  t.textContent = cfg.title || '';
+  const [v, hz] = (cfg.pos || 'bottom-center').split('-');
+  const wrap = document.getElementById('show-title-wrap');
+  wrap.style.alignItems = ALIGN[v] || 'flex-end';
+  wrap.style.justifyContent = ALIGN[hz] || 'center';
+  t.style.textAlign = hz === 'right' ? 'right' : hz === 'left' ? 'left' : 'center';
+}
+// Hide everything this mode does not own BEFORE the first state arrives.
+// Doing it in layout() left the panel and title strip painted on the show
+// cards, and flashed them for one poll in the bg and dice sources.
+if (!SHOW_BG) document.getElementById('bg-fallback').style.display = 'none';
+if (!SHOW_TITLE) document.getElementById('title').style.display = 'none';
+if (!SHOW_PANEL) document.getElementById('panel').style.display = 'none';
+
+function layout() {
+  if (SHOW_TITLE) {
+    const title = el('title');
+    title.style.display = '';
+    title.style.height = '100%';
+    // Sized off the strip's OWN height, which is exactly the box OBS gave us.
+    const h = title.getBoundingClientRect().height;
+    el('title-main').style.fontSize = Math.round(h * 0.42) + 'px';
+    el('title-sub').style.fontSize = Math.round(h * 0.26) + 'px';
+  }
+  if (SHOW_PANEL) {
+    const panel = el('panel');
+    panel.style.display = '';
+    panel.style.left = panel.style.top = '0';
+    panel.style.width = panel.style.height = '100%';
+    // Text scales with the panel, so it reads identically wherever it lands.
+    const px = panel.getBoundingClientRect().width / 100;
+    if (px > 0) panel.style.setProperty('--u', px + 'px');
+  }
+}
+
+let lastBg = null;
+function paintBg(url) {
+  if (!SHOW_BG) return;
+  if (url === lastBg) return;
+  lastBg = url;
+  const img = el('bg');
+  if (url) { img.src = url; img.style.display = ''; }
+  else { img.removeAttribute('src'); img.style.display = 'none'; }
+}
+
+function rollRow(r) {
+  const row = document.createElement('div');
+  row.className = 'roll' + (r.crit ? ' crit' : r.fumble ? ' fumble' : '');
+  const who = document.createElement('div');
+  who.className = 'roll-who'; who.textContent = r.who || '—';
+  const what = document.createElement('div');
+  what.className = 'roll-what';
+  what.textContent = [r.label, r.expression].filter(Boolean).join(' · ');
+  const total = document.createElement('div');
+  total.className = 'roll-total'; total.textContent = r.total;
+  row.append(who, what, total);
+  return row;
+}
+
+let shownRolls = [], mode = null;
+
+function paintNotes(lines) {
+  const host = el('scroll');
+  host.innerHTML = '';
+  lines.forEach(line => {
+    const p = document.createElement('div');
+    p.className = 'note'; p.textContent = line;
+    host.appendChild(p);
+  });
+  el('panel-head').textContent = 'Information';
+}
+
+function paintRolls(rolls) {
+  const host = el('scroll');
+  // Only APPEND what's new. Rebuilding the list would replay the slide-in
+  // animation on every row every poll, which reads as the whole panel
+  // flickering rather than one roll arriving.
+  const known = new Set(shownRolls);
+  const fresh = rolls.filter(r => !known.has(r.id));
+  if (mode !== 'rolls') { host.innerHTML = ''; shownRolls = []; known.clear(); }
+  if (!rolls.length) {
+    host.innerHTML = '<div class="empty">Waiting for the first roll…</div>';
+  } else {
+    if (host.querySelector('.empty')) host.innerHTML = '';
+    fresh.forEach(r => host.appendChild(rollRow(r)));
+  }
+  shownRolls = rolls.map(r => r.id);
+  // Trim to what the panel can hold, oldest first.
+  while (host.children.length > 40) host.removeChild(host.firstChild);
+  host.scrollTop = host.scrollHeight;   // newest stays in view
+  el('panel-head').textContent = 'Dice';
+}
+
+function apply(d) {
+  if (!d) return;
+  if (SHOW_CARD) { paintShow(d); return; }
+  layout();
+  paintBg(d.bg_url);
+  el('title-main').textContent = d.title || '';
+  el('turn').textContent = d.turn ? '▶ ' + d.turn : '';
+
+  if (!SHOW_PANEL) return;
+  // The dice source exists to show dice: notes must not displace them the way
+  // they do on the party panel.
+  const notes = MODE === 'dice' ? [] : (d.info_lines || []).filter(s => s.trim());
+  if (notes.length) {
+    if (mode !== 'notes' || notes.join('\n') !== (window.__notes || '')) {
+      window.__notes = notes.join('\n');
+      paintNotes(notes);
+    }
+    mode = 'notes';
+  } else {
+    paintRolls(d.rolls || []);
+    mode = 'rolls';
+  }
+}
+
+function schedule() {
+  setTimeout(() => {
+    fetch(STATE_URL).then(r => r.json()).then(apply).catch(() => {}).finally(schedule);
+  }, POLL_MS * (0.85 + Math.random() * 0.3));
+}
+fetch(STATE_URL).then(r => r.json()).then(apply).catch(() => {}).finally(schedule);
+</script>

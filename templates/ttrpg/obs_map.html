@@ -1,0 +1,741 @@
+<!-- The battle map as an OBS browser SOURCE.
+
+     Deliberately standalone and chrome-free: no nav, no sidebar, no browser
+     furniture, so the stream carries the map itself rather than a window or
+     display capture. Two states, swapped by the state poll:
+
+       live  -> the map, drawn through the active player's eyes
+       idle  -> the title card (no map running, or between sessions)
+
+     Everything the audience must not see is filtered SERVER-side, so nothing
+     hidden is ever present in this page to be dug out of. -->
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0c0d12;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #f2efe6;
+  }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+
+  /* The map is letterboxed to preserve square grid cells — a stretched grid
+     would misalign every token. */
+  #map-wrap { position: absolute; inset: 0; display: flex;
+              align-items: center; justify-content: center; }
+  #map-box  { position: relative; overflow: hidden;
+              box-shadow: 0 0 60px rgba(0,0,0,.75); }
+  /* The action camera pushes in on the party and eases back out when things
+     settle. Transform-only so it stays on the compositor — no relayout, no
+     redraw of the map, nothing for OBS to stutter on. */
+  #map-inner { position: absolute; inset: 0; transform-origin: 0 0;
+               transition: transform 1100ms cubic-bezier(.22,.61,.36,1); }
+  #map-bg, #map-video { position: absolute; inset: 0;
+              width: 100%; height: 100%; object-fit: fill; }
+  #grid { position: absolute; inset: 0; pointer-events: none; opacity: .3; }
+  #fx, #fog { position: absolute; inset: 0; pointer-events: none; }
+
+  /* The token box IS the cell footprint; the HP bar and nameplate hang below
+     it, absolutely positioned. They used to be flex children, which let the
+     disc's aspect-ratio eat the whole box and squash them to nothing. */
+  .token { position: absolute; transition: left .35s ease, top .35s ease; }
+  .token .disc {
+    width: 100%; height: 100%; border-radius: 50%;
+    background-size: cover; background-position: center;
+    border: 3px solid var(--ring, #4a9eff);
+    box-shadow: 0 3px 10px rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; background-color: #23242c;
+  }
+  /* Labels sit above every disc, not just their own: on a crowded map an
+     adjacent token would otherwise cover its neighbour's nameplate. Tokens
+     don't set z-index themselves, so these compete globally. */
+  .token .disc { z-index: 1; }
+  .token .hp, .token .nm { z-index: 5; }
+  .token .hp { position: absolute; left: 10%; right: 10%; top: 100%;
+               margin-top: 3px; height: 5px; border-radius: 99px;
+               background: rgba(0,0,0,.6); overflow: hidden; }
+  .token .hp > i { display: block; height: 100%; }
+  .token .nm { position: absolute; top: 100%; left: 50%;
+               transform: translateX(-50%); margin-top: 10px;
+               padding: 1px 6px; background: rgba(8,9,13,.78);
+               border-radius: 4px; white-space: nowrap;
+               max-width: 200%; overflow: hidden; text-overflow: ellipsis;
+               text-shadow: 0 1px 3px #000; line-height: 1.25; }
+
+  /* Whose eyes we're using — small, so it never fights the map. */
+  #through { position: absolute; left: 18px; top: 14px; z-index: 5;
+             font-size: 15px; letter-spacing: .04em; padding: 5px 14px;
+             background: rgba(10,12,18,.78); border-radius: 99px;
+             border: 1px solid rgba(200,168,110,.55); color: #e8d7ac;
+             display: none; }
+
+  /* Idle: the title card. */
+  #title { position: absolute; inset: 0; display: none;
+           align-items: center; justify-content: center; flex-direction: column;
+           gap: 14px; background: #0c0d12; }
+  #title-img { position: absolute; inset: 0; width: 100%; height: 100%;
+               object-fit: cover; }
+  #title-text { position: relative; text-align: center;
+                text-shadow: 0 3px 14px rgba(0,0,0,.9); }
+  #title-campaign { font-size: 4.2vw; font-weight: 800; color: #e8d7ac;
+                    letter-spacing: .02em; }
+  #title-session { font-size: 1.9vw; opacity: .82; margin-top: .4vw; }
+  .fade { transition: opacity .45s ease; }
+</style>
+
+<div id="stage">
+  <div id="map-wrap" class="fade">
+    <div id="map-box">
+      <div id="map-inner">
+        <img id="map-bg" alt="">
+        <video id="map-video" muted loop playsinline></video>
+        <svg id="grid"></svg>
+        <svg id="fx"></svg>
+        <div id="tokens"></div>
+        <svg id="fog"></svg>
+      </div>
+    </div>
+  </div>
+  <!-- 3D branch: the same viewer the table uses, standing in the active
+       player's shoes. isDM:false is deliberate — it makes the viewer use
+       PLAYER fog (solid), not the DM's see-through peek, so nothing the
+       party hasn't uncovered ends up on stream. -->
+  <div id="bm3d-overlay" style="position:absolute;inset:0;display:none;">
+    <canvas id="bm3d-canvas" style="width:100%;height:100%;display:block;"></canvas>
+  </div>
+  <div id="through"></div>
+  <div id="title" class="fade">
+    <img id="title-img" alt="">
+    <div id="title-text">
+      <div id="title-campaign"></div>
+      <div id="title-session"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STATE_URL = "{{ state_url }}";
+const NS = 'http://www.w3.org/2000/svg';
+let lastSig = '';
+
+function el(id) { return document.getElementById(id); }
+function svg(tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+function hpColor(p) { return p > 50 ? '#3fa14a' : p > 20 ? '#c9a227' : '#c0392b'; }
+
+// Square cells matter more than filling the frame: a stretched grid puts
+// every token slightly off its square.
+function fitBox(cols, rows) {
+  const cell = Math.min(window.innerWidth / cols, window.innerHeight / rows);
+  return { cell, w: cell * cols, h: cell * rows };
+}
+
+function drawGrid(g, cols, rows, cell) {
+  g.innerHTML = '';
+  g.setAttribute('width', cell * cols);
+  g.setAttribute('height', cell * rows);
+  for (let x = 1; x < cols; x++) {
+    g.appendChild(svg('line', {x1: x * cell, y1: 0, x2: x * cell, y2: cell * rows,
+                               stroke: '#000', 'stroke-width': 1}));
+  }
+  for (let y = 1; y < rows; y++) {
+    g.appendChild(svg('line', {x1: 0, y1: y * cell, x2: cell * cols, y2: y * cell,
+                               stroke: '#000', 'stroke-width': 1}));
+  }
+}
+
+function drawEffects(host, effects, cell) {
+  host.innerHTML = '';
+  host.setAttribute('width', host.parentNode.clientWidth);
+  host.setAttribute('height', host.parentNode.clientHeight);
+  (effects || []).forEach(e => {
+    const px = e.anchor_x * cell, py = e.anchor_y * cell;
+    const dim = (e.size_ft / 5) * cell;
+    let shape = null;
+    if (e.shape === 'circle') {
+      shape = svg('circle', {cx: px, cy: py, r: dim});
+    } else if (e.shape === 'square') {
+      shape = svg('rect', {x: px - dim, y: py - dim, width: dim * 2, height: dim * 2});
+    } else if (e.shape === 'line') {
+      const th = (e.angle || 0) * Math.PI / 180;
+      shape = svg('rect', {x: px, y: py - cell / 4, width: dim, height: cell / 2,
+                           transform: `rotate(${e.angle || 0} ${px} ${py})`});
+      void th;
+    } else if (e.shape === 'cone') {
+      const th = (e.angle || 0) * Math.PI / 180, spread = Math.PI / 6;
+      const p1 = [px + dim * Math.cos(th - spread), py + dim * Math.sin(th - spread)];
+      const p2 = [px + dim * Math.cos(th + spread), py + dim * Math.sin(th + spread)];
+      shape = svg('polygon', {points: `${px},${py} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}`});
+    }
+    if (!shape) return;
+    shape.setAttribute('fill', e.fill_color || '#ff4400');
+    shape.setAttribute('fill-opacity', e.fill_opacity != null ? e.fill_opacity : .35);
+    shape.setAttribute('stroke', e.border_color || '#ff8800');
+    host.appendChild(shape);
+  });
+}
+
+// Solid, never translucent: this is the audience's view, and the DM's
+// see-through peek would give away what the party hasn't uncovered.
+//
+// Soft edges exactly like the table's map: every rect goes into ONE group
+// that is blurred as a whole. Blurring rects individually would leave
+// lighter seams wherever two boxes touch — the union has to be blurred, not
+// its parts. The table uses an 80px fade at a 64px cell, so the sigma is
+// kept proportional to cell size and reads the same at any canvas size.
+const FOG_FADE_CELLS = 80 / 3 / 64;      // sigma as a fraction of one cell
+
+function drawFog(host, fog, cell) {
+  host.innerHTML = '';
+  host.setAttribute('width', host.parentNode.clientWidth);
+  host.setAttribute('height', host.parentNode.clientHeight);
+  if (!fog || !fog.length) return;
+  const g = svg('g', {});
+  // A gaussian blur's visible transition spans ~3 sigma, so this reads as a
+  // fade centred on each box edge rather than a hard cut.
+  g.style.filter = `blur(${(cell * FOG_FADE_CELLS).toFixed(2)}px)`;
+  fog.forEach(r => {
+    g.appendChild(svg('rect', {
+      x: r.x1 * cell, y: r.y1 * cell,
+      width: (r.x2 - r.x1) * cell, height: (r.y2 - r.y1) * cell,
+      fill: '#05060a'}));
+  });
+  host.appendChild(g);
+}
+
+function drawTokens(host, tokens, cell) {
+  host.innerHTML = '';
+  (tokens || []).forEach(t => {
+    const span = Math.max(1, t.size_squares || 1);
+    const d = document.createElement('div');
+    d.className = 'token';
+    d.style.left = (t.col * cell) + 'px';
+    d.style.top = (t.row * cell) + 'px';
+    d.style.width = (span * cell) + 'px';
+    d.style.height = (span * cell) + 'px';
+
+    const disc = document.createElement('div');
+    disc.className = 'disc';
+    disc.style.setProperty('--ring', t.color || '#4a9eff');
+    if (t.image_url) disc.style.backgroundImage = `url("${t.image_url}")`;
+    else disc.textContent = (t.name || '?').slice(0, 2).toUpperCase();
+    disc.style.fontSize = Math.max(11, cell * span * 0.3) + 'px';
+    d.appendChild(disc);
+
+    const hp = document.createElement('div');
+    hp.className = 'hp';
+    const bar = document.createElement('i');
+    bar.style.width = Math.max(0, Math.min(100, t.hp_pct)) + '%';
+    bar.style.background = hpColor(t.hp_pct);
+    hp.appendChild(bar);
+    d.appendChild(hp);
+
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = t.name || '';
+    nm.style.fontSize = Math.max(10, cell * 0.22) + 'px';
+    d.appendChild(nm);
+
+    host.appendChild(d);
+  });
+}
+
+function showTitle(t) {
+  el('map-wrap').style.opacity = '0';
+  el('title').style.display = 'flex';
+  el('title').style.opacity = '1';
+  const img = el('title-img');
+  if (t && t.image_url) { img.src = t.image_url; img.style.display = ''; }
+  else { img.removeAttribute('src'); img.style.display = 'none'; }
+  el('title-campaign').textContent = (t && t.campaign) || '';
+  el('title-session').textContent = (t && t.session) || '';
+  el('through').style.display = 'none';
+}
+
+function showMap(d) {
+  el('title').style.opacity = '0';
+  el('title').style.display = 'none';
+  el('map-wrap').style.opacity = '1';
+
+  const fit = fitBox(d.cols, d.rows);
+  const box = el('map-box');
+  box.style.width = fit.w + 'px';
+  box.style.height = fit.h + 'px';
+
+  const img = el('map-bg'), vid = el('map-video');
+  if (d.is_video) {
+    img.style.display = 'none';
+    vid.style.display = '';
+    if (vid.getAttribute('src') !== d.bg_url) { vid.src = d.bg_url; vid.play().catch(() => {}); }
+  } else {
+    vid.style.display = 'none';
+    vid.removeAttribute('src');
+    img.style.display = '';
+    if (img.getAttribute('src') !== d.bg_url) img.src = d.bg_url;
+  }
+
+  drawGrid(el('grid'), d.cols, d.rows, fit.cell);
+  drawEffects(el('fx'), d.effects, fit.cell);
+  drawTokens(el('tokens'), d.tokens, fit.cell);
+  drawFog(el('fog'), d.fog, fit.cell);
+
+  const thr = el('through');
+  if (d.through) { thr.textContent = '\u{1F441} ' + d.through; thr.style.display = ''; }
+  else thr.style.display = 'none';
+}
+
+// ── action camera ─────────────────────────────────────────────────────────────
+// Push in on wherever the party actually is, then ease back out once nobody
+// has moved for a while. Framing is driven by token POSITIONS only: a health
+// change or a new effect must not yank the camera around mid-sentence.
+
+let lastPosSig = '';
+let lastMoveAt = 0;
+let zoomState = null;      // last transform applied, so we don't re-set it
+
+function posSignature(tokens) {
+  return (tokens || []).map(t => `${t.col},${t.row},${t.size_squares || 1}`).join(';');
+}
+
+// A close-up on one character: how much room to leave around them, and how
+// far in it may push. Its own ceiling because the action camera's max is
+// tuned for framing the whole party, which is far too wide for one person.
+const CLOSEUP_PAD_CELLS = 4;
+const CLOSEUP_MAX = 4;
+
+function frameFor(d, fit) {
+  const cfg = d.zoom || {};
+  const boxW = fit.w, boxH = fit.h;
+  if (!d.tokens || !d.tokens.length) return {s: 1, x: 0, y: 0};
+
+  // An explicit close-up outranks the action camera and does NOT time out:
+  // the DM asked for this character, so it holds until they ask for
+  // something else, however long everyone stands still.
+  const focus = d.focus_token_id != null
+    ? d.tokens.find(t => String(t.token_id) === String(d.focus_token_id))
+    : null;
+
+  let x1, y1, x2, y2, ceiling;
+  if (focus) {
+    const span = Math.max(1, focus.size_squares || 1);
+    x1 = focus.col - CLOSEUP_PAD_CELLS;
+    y1 = focus.row - CLOSEUP_PAD_CELLS;
+    x2 = focus.col + span + CLOSEUP_PAD_CELLS;
+    y2 = focus.row + span + CLOSEUP_PAD_CELLS;
+    ceiling = Math.max(cfg.max || 2.2, CLOSEUP_MAX);
+  } else {
+    if (!cfg.on) return {s: 1, x: 0, y: 0};
+    const idleFor = Date.now() - lastMoveAt;
+    if (idleFor > (cfg.hold_s || 6) * 1000) return {s: 1, x: 0, y: 0};
+
+    // Bounding box of everyone visible, in cells, with breathing room.
+    x1 = Infinity; y1 = Infinity; x2 = -Infinity; y2 = -Infinity;
+    d.tokens.forEach(t => {
+      const span = Math.max(1, t.size_squares || 1);
+      x1 = Math.min(x1, t.col); y1 = Math.min(y1, t.row);
+      x2 = Math.max(x2, t.col + span); y2 = Math.max(y2, t.row + span);
+    });
+    const pad = 2.0;
+    x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
+    ceiling = cfg.max || 2.2;
+  }
+  const wPx = (x2 - x1) * fit.cell, hPx = (y2 - y1) * fit.cell;
+  if (wPx <= 0 || hPx <= 0) return {s: 1, x: 0, y: 0};
+
+  // Never zoom OUT past the full map, and never past the ceiling.
+  let s = Math.min(boxW / wPx, boxH / hPx);
+  s = Math.max(1, Math.min(s, ceiling));
+  if (!focus && s < 1.06) return {s: 1, x: 0, y: 0};   // barely worth moving
+
+  const cx = ((x1 + x2) / 2) * fit.cell, cy = ((y1 + y2) / 2) * fit.cell;
+  // Keep the frame on the map: no empty gutters at the edges.
+  const tx = Math.min(0, Math.max(boxW - boxW * s, boxW / 2 - cx * s));
+  const ty = Math.min(0, Math.max(boxH - boxH * s, boxH / 2 - cy * s));
+  return {s, x: tx, y: ty};
+}
+
+function applyZoom(d, fit) {
+  const f = frameFor(d, fit);
+  const css = `translate(${f.x.toFixed(1)}px, ${f.y.toFixed(1)}px) scale(${f.s.toFixed(3)})`;
+  if (css === zoomState) return;
+  zoomState = css;
+  el('map-inner').style.transform = css;
+}
+
+// ── 3D branch ─────────────────────────────────────────────────────────────────
+// three.js + the viewer load lazily, only when the source is actually in 3D
+// mode — a 2D-only rig never pays for a WebGL context.
+
+const FLOORPLAN_URL = "{{ floorplan_url }}";
+const THREE_URL = "{{ three_url }}";
+const BM3D_URL = "{{ bm3d_url }}";
+let bm3dLoading = false, bm3dReady = false, bm3dState = null, bm3dWantToken = null;
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+// BM3D builds its fog volumes from cloud EFFECTS, but the server sends fog as
+// plain rects (with the hidden tokens already stripped). Rebuild the cloud
+// shape it expects — the geometry is the same either way.
+function cloudsFromFog(fog) {
+  return (fog || []).map((r, i) => ({
+    effect_id: 'fog' + i, shape: 'cloud',
+    anchor_x: r.x1, anchor_y: r.y1,
+    size_ft: (r.x2 - r.x1) * 5, angle: (r.y2 - r.y1),
+    fill_color: '#000000', fill_opacity: 1,
+  }));
+}
+
+function bm3dPayload(d) {
+  return {
+    tokens: d.tokens || [],
+    effects: (d.effects || []).concat(cloudsFromFog(d.fog)),
+    doors: d.doors || {},
+    floorplan_version: d.floorplan_version || null,
+  };
+}
+
+let bm3dCfg = null;
+
+function ensure3d(d) {
+  if (bm3dLoading) return;
+  if (bm3dReady) {                 // loaded already — just re-open after a toggle
+    if (!BM3D.isOpen() && bm3dCfg) { BM3D.open(bm3dCfg); bm3dWantToken = null; }
+    return;
+  }
+  bm3dLoading = true;
+  loadScript(THREE_URL).then(() => loadScript(BM3D_URL)).then(() => {
+    bm3dCfg = {
+      overlayEl: document.getElementById('bm3d-overlay'),
+      gridCols: d.cols, gridRows: d.rows,
+      bgUrl: d.is_video ? '' : d.bg_url,
+      bgVideoEl: d.is_video ? el('map-video') : null,
+      floorplanUrl: FLOORPLAN_URL + '&map_id=' + d.map_id,
+      isDM: false,                    // -> solid player fog, never the peek
+      isMyToken: () => false,         // nothing here is "ours" to hide
+      onDoorToggle: null,
+      getState: () => bm3dState,
+    };
+    BM3D.open(bm3dCfg);
+    bm3dReady = true;
+    bm3dLoading = false;    // MUST clear: the reopen path guards on this, so
+                            // leaving it set blocks every later toggle back
+                            // into 3D.
+  }).catch(() => { bm3dLoading = false; });
+}
+
+function show3d(d, moved) {
+  el('title').style.display = 'none';
+  el('map-wrap').style.opacity = '0';
+  const ov = document.getElementById('bm3d-overlay');
+  ov.style.display = 'block';
+  // A video background is textured onto the 3D floor from this element, so
+  // it has to keep playing even though the 2D layer is hidden.
+  if (d.is_video) {
+    const v = el('map-video');
+    if (v.getAttribute('src') !== d.bg_url) { v.src = d.bg_url; v.play().catch(() => {}); }
+  }
+  bm3dState = bm3dPayload(d);
+  ensure3d(d);
+  if (!bm3dReady) return;
+  BM3D.onState(bm3dState);
+  // Stand in the shoes of whoever moved last (the server picks; see
+  // _last_moved_token_id). There is no overview fallback: with nobody to
+  // stand in, apply() shows the 2D map instead of a camera floating in a
+  // room belonging to no one.
+  const want = d.through_token_id;
+  if (want !== bm3dWantToken) {
+    if (BM3D.setViewpoint('first', want)) {
+      bm3dWantToken = want;
+      // Aim on the frame the shot opens. Without this the camera holds
+      // whatever direction the viewer defaulted to for a full 5s hold before
+      // the first tick fires — the most visible moment of the cut, spent
+      // pointing the wrong way.
+      applyLookStep(camPlan[camStep] || {kind: 'forward'});
+    }
+  } else if (moved && (camPlan[camStep] || {}).kind !== 'at') {
+    // Re-aim on the new heading WITHOUT restarting: the look-around keeps its
+    // progress so the visit still ends after one loop. Skipped mid-glance —
+    // that beat is about to end anyway, and the next forward step picks the
+    // new heading up.
+    BM3D.setFacing(camHeading.dx, camHeading.dz);
+  }
+  const thr = el('through');
+  if (d.through) { thr.textContent = '\u{1F441} ' + d.through; thr.style.display = ''; }
+  else thr.style.display = 'none';
+}
+
+// ── where the character looks ────────────────────────────────────────────────
+// A token stores only col/row — there is no FACING on it — so the heading has
+// to be inferred from movement. On top of that the camera runs a repeating
+// look-around, otherwise a stationary character stares at one wall for the
+// whole turn and the shot goes dead:
+//
+//   move           -> snap to the way they went, hold 5s (this is "forward")
+//   then, looping: each character within 30 ft, a beat each
+//                  forward, 5s
+//                  every character on the map, a beat each
+//                  forward, 5s
+//
+// Moving at any point restarts the cycle from "forward".
+
+const LOOK_FORWARD_MS = 5000;   // dwell on the direction of travel
+const LOOK_AT_MS = 1000;        // beat spent on each character
+const NEAR_FEET = 30;           // "in range" for the first sweep
+const CAM_TICK_MS = 200;        // finer than the 2s state poll the plan needs
+const AUTO_CYCLES = 1;          // look-arounds to run before auto returns to 2D
+const AUTO_COOLDOWN_MS = 8000;  // 2D breathing room before auto may cut back
+
+let lastSeenPos = {};
+let camTokens = [], camMeId = null, camHeading = null;
+let camPlan = [], camStep = 0, camStepEndsAt = 0, camNearCells = 6;
+// A "cycle" is one full pass of buildLookPlan. The single forward hold that
+// restartLookCycle drops in is deliberately NOT one, so a character who keeps
+// moving keeps the 3D shot alive instead of being cut off mid-move.
+let camPlanIsCycle = false, camCycles = 0;
+let auto3d = false;             // auto mode: is the 3D shot currently up?
+let autoBlockedUntil = 0;       // don't re-cut before this — see autoReturn2d
+let autoPending = false;        // movement seen during the cooldown, owed a cut
+
+function sameId(a, b) { return String(a) === String(b); }
+
+function camMe() {
+  return camTokens.find(t => sameId(t.token_id, camMeId));
+}
+
+function restartLookCycle(now) {
+  // Always re-enter on "forward": whatever just happened, the shot returns to
+  // where the character is heading before it starts glancing around again.
+  camPlan = [{kind: 'forward', ms: LOOK_FORWARD_MS}];
+  camPlanIsCycle = false;
+  camStep = 0;
+  camCycles = 0;
+  camStepEndsAt = now + LOOK_FORWARD_MS;
+}
+
+function buildLookPlan() {
+  const me = camMe();
+  if (!me) return [];
+  const near = [], all = [];
+  camTokens.forEach(t => {
+    if (sameId(t.token_id, camMeId)) return;
+    const dx = t.col - me.col, dz = t.row - me.row;
+    // Someone standing on the same square gives no direction to face — the
+    // beat would be a silent no-op, so skip them rather than stall the cycle.
+    if (!dx && !dz) return;
+    all.push(t.token_id);
+    if (Math.sqrt(dx * dx + dz * dz) <= camNearCells) near.push(t.token_id);
+  });
+  const plan = [];
+  near.forEach(id => plan.push({kind: 'at', id, ms: LOOK_AT_MS}));
+  plan.push({kind: 'forward', ms: LOOK_FORWARD_MS});
+  all.forEach(id => plan.push({kind: 'at', id, ms: LOOK_AT_MS}));
+  plan.push({kind: 'forward', ms: LOOK_FORWARD_MS});
+  return plan;
+}
+
+function applyLookStep(step) {
+  const me = camMe();
+  if (!me) return;
+  if (step.kind === 'at') {
+    const t = camTokens.find(x => sameId(x.token_id, step.id));
+    if (t) {
+      const dx = t.col - me.col, dz = t.row - me.row;
+      // Zero offset = the target is on our square, or IS us because the
+      // viewpoint switched mid-plan. Either way there is no direction to
+      // face, so fall through to the heading rather than hold a no-op.
+      if (dx || dz) { BM3D.setFacing(dx, dz); return; }
+    }
+  }
+  if (camHeading) { BM3D.setFacing(camHeading.dx, camHeading.dz); return; }
+  // Never moved yet, so there's no heading — face the nearest creature rather
+  // than an arbitrary compass direction.
+  let best = null, bestD = Infinity;
+  camTokens.forEach(t => {
+    if (sameId(t.token_id, camMeId)) return;
+    const dx = t.col - me.col, dz = t.row - me.row;
+    if (!dx && !dz) return;          // same square gives no direction to face
+    const d = dx * dx + dz * dz;
+    if (d < bestD) { bestD = d; best = t; }
+  });
+  if (best) BM3D.setFacing(best.col - me.col, best.row - me.row);
+}
+
+function camTick() {
+  if (!bm3dReady || !window.BM3D || !BM3D.isOpen() || camMeId == null) return;
+  if (!camMe()) return;
+  const now = Date.now();
+  if (now < camStepEndsAt && camPlan.length) return;
+  if (!camPlan.length || camStep + 1 >= camPlan.length) {
+    if (camPlanIsCycle) camCycles++;
+    // The look-around is the whole of the auto shot. Cut back BEFORE
+    // building the next plan, otherwise the camera starts a sweep it will be
+    // yanked out of a moment later.
+    if (auto3d && camCycles >= AUTO_CYCLES) { autoReturn2d(); return; }
+    camPlan = buildLookPlan();
+    camPlanIsCycle = true;
+    camStep = 0;
+  } else {
+    camStep++;
+  }
+  if (!camPlan.length) return;
+  camStepEndsAt = now + camPlan[camStep].ms;
+  applyLookStep(camPlan[camStep]);
+}
+setInterval(camTick, CAM_TICK_MS);
+
+function autoReturn2d() {
+  auto3d = false;
+  // A turn is several drags, so the player is often STILL moving when the
+  // look-around ends. Without this the very next drag would cut straight back
+  // to 3D and the stream would flap between the two views.
+  autoBlockedUntil = Date.now() + AUTO_COOLDOWN_MS;
+  // Repaint straight away rather than waiting on the next state poll: the cut
+  // should land on the beat the second cycle ends, not up to 2s later.
+  if (lastState) apply(lastState);
+}
+
+// Position tracking has to run in BOTH modes, not just while 3D is up: in auto
+// mode a move made during the 2D shot is the very thing that triggers 3D, and
+// if it were only noticed after the cut the first heading would be missed.
+//
+// Returns {any, me}: ANY token moving is what earns the cut to 3D, because on
+// a real table the DM drags monsters and NPCs too and a shot that only woke up
+// for one character would sit dead through most of a fight. The heading is a
+// separate question — only the featured character's own movement can say which
+// way they are facing.
+function trackHeading(d) {
+  camTokens = d.tokens || [];
+  const want = d.through_token_id;
+  if (!sameId(want, camMeId)) {
+    // The viewpoint moved to another character (they moved more recently).
+    // Only the heading is theirs to lose — auto3d and the cycle count carry
+    // over, so a round where three players move is still ONE look-around
+    // rather than one per character.
+    camMeId = want;
+    camHeading = null;
+  }
+  const scale = d.movement_scale || 1;
+  camNearCells = NEAR_FEET / (5 * scale);
+
+  let any = false, me = false;
+  const seen = {};
+  camTokens.forEach(t => {
+    const pos = {col: t.col, row: t.row};
+    seen[t.token_id] = pos;
+    const prev = lastSeenPos[t.token_id];
+    // A token appearing for the first time is not movement: on the very first
+    // poll every token is new, and out of fog a token can pop in without
+    // anyone having touched it.
+    if (!prev || (prev.col === pos.col && prev.row === pos.row)) return;
+    any = true;
+    if (sameId(t.token_id, camMeId)) {
+      me = true;
+      camHeading = {dx: pos.col - prev.col, dz: pos.row - prev.row};
+    }
+  });
+  // Replace rather than merge, so a token that leaves the map (or slips into
+  // fog) and later returns counts as new instead of as a huge jump.
+  lastSeenPos = seen;
+  return {any, me};
+}
+
+function hide3d() {
+  const ov = document.getElementById('bm3d-overlay');
+  if (ov) ov.style.display = 'none';
+  // Close, don't just hide: a hidden viewer keeps its rAF loop running and
+  // goes on rendering frames nobody sees — real GPU on the streaming box.
+  if (bm3dReady && window.BM3D && BM3D.isOpen()) {
+    BM3D.close();
+    bm3dWantToken = null;
+    // Force the 2D layer to repaint itself back in. While 3D was up, apply()
+    // returned early and never recomputed lastSig, so the incoming state
+    // still matches the last 2D one and the redraw would be skipped —
+    // leaving the faded-out map on stream as a black frame.
+    lastSig = '';
+  }
+}
+
+function apply(d) {
+  if (!d || !d.live) {
+    showTitle(d && d.title); lastSig = 'idle';
+    auto3d = false; autoPending = false; hide3d(); return;
+  }
+
+  const moved = trackHeading(d);
+  // Auto: the 2D map is the resting shot and movement is what earns the cut to
+  // 3D. Triggering on anything less (a turn change, a poll) would leave the
+  // stream in a first-person view of someone standing still.
+  const nowMs = Date.now();
+  // A pin (or a manually pinned mode) overrides auto while it lasts. Clear
+  // the auto state so releasing the pin starts from the map again instead of
+  // resuming a half-finished look-around from before it.
+  if (d.mode !== 'auto') { auto3d = false; autoPending = false; }
+  // Movement during the cooldown is REMEMBERED, not dropped. Dropping it lost
+  // the shot outright for a player who moved once inside the window and then
+  // stopped — the cut simply never came. Only movement seen while the map is
+  // up counts: movement during the 3D visit is already on screen.
+  if (moved.any && d.mode === 'auto' && d.three_d_ready && !auto3d) autoPending = true;
+  if (autoPending && nowMs >= autoBlockedUntil) {
+    autoPending = false;
+    // The budget is per VISIT, not per move: this is the only place it
+    // resets. Resetting on every move meant a turn dragged out in three steps
+    // produced three look-arounds and held the shot for 40s instead of 23.
+    if (!auto3d) restartLookCycle(nowMs);
+    auto3d = true;
+  }
+
+  // 3D needs somewhere to stand and something to stand in. Without a
+  // floorplan there are no walls to render, and with the active player off
+  // the map there is no point of view to adopt — either way, show the 2D map
+  // rather than a camera floating in an empty room.
+  const want3d = d.mode === '3d' || (d.mode === 'auto' && auto3d);
+  const canBe3d = want3d && d.three_d_ready && d.through_token_id != null;
+  if (canBe3d) { show3d(d, moved.me); lastState = d; return; }
+  auto3d = false;
+  hide3d();
+
+  // Track movement separately from the redraw check so the camera can ease
+  // out on its own clock even when nothing else about the map changed.
+  const ps = posSignature(d.tokens);
+  if (ps !== lastPosSig) { lastPosSig = ps; lastMoveAt = Date.now(); }
+
+  const fit = fitBox(d.cols, d.rows);
+  // Only redraw on a real change: a browser source repainting every 2s for
+  // nothing is wasted GPU on the streaming box.
+  // d.mode belongs in here: coming back from 3D, nothing else about the map
+  // has changed, so without it the redraw is skipped and the 2D layer stays
+  // faded out — a black frame on stream until someone happens to move.
+  const sig = JSON.stringify([d.mode, d.bg_url, d.cols, d.rows, d.tokens, d.effects,
+                              d.fog, d.through, d.focus_token_id,
+                              window.innerWidth, window.innerHeight]);
+  if (sig !== lastSig) {
+    lastSig = sig;
+    showMap(d);
+  }
+  applyZoom(d, fit);
+  lastState = d;
+}
+
+// The pull-back has to happen on a timer, not on a state change: the whole
+// point is that nothing is happening.
+let lastState = null;
+setInterval(() => {
+  if (lastState && lastState.live) applyZoom(lastState, fitBox(lastState.cols, lastState.rows));
+}, 1000);
+
+function poll() {
+  fetch(STATE_URL).then(r => r.json()).then(apply).catch(() => {});
+}
+poll();
+setInterval(poll, 2000);
+window.addEventListener('resize', () => { lastSig = ''; poll(); });
+</script>

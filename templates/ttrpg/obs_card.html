@@ -1,0 +1,140 @@
+<!-- Player tile for the OBS party scene: shown for anyone without a camera,
+     so the whole table is always represented and tiles never shuffle when
+     somebody connects mid-session.
+
+     Deliberately standalone (no base template): this renders inside an OBS
+     browser source, where a nav bar or page chrome would be broadcast. The
+     background is transparent so it composites over the scene behind it. -->
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: transparent;        /* OBS composites over whatever is behind */
+    overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #f2efe6;
+  }
+  .card {
+    box-sizing: border-box;
+    height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    /* vh/vw, not %: percentage padding and gap resolve against the WIDTH,
+       and these tiles are about 2.2:1, so a "4%" gap ate a quarter of the
+       height and squeezed the name down to nothing. */
+    gap: 2.5vh;
+    padding: 4vh 4vw;
+    background: linear-gradient(160deg, rgba(24,26,34,.92), rgba(14,15,20,.92));
+    border: 2px solid rgba(200,168,110,.55);
+    border-radius: 14px;
+    text-shadow: 0 2px 6px rgba(0,0,0,.8);
+  }
+  .portrait {
+    /* Driven by HEIGHT so a short tile can't let the portrait crowd out the
+       name; width follows to keep it circular. */
+    height: 40%; width: auto; max-width: 38%; aspect-ratio: 1;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid rgba(200,168,110,.75);
+    box-shadow: 0 6px 18px rgba(0,0,0,.55);
+  }
+  .portrait.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    background: #23242c; font-size: min(3.4vw, 9vh); color: #c8a86e;
+  }
+  .name {
+    /* Readable from the couch: sized off whichever tile dimension is tighter
+       so it scales with the party size instead of being fixed to the width. */
+    font-size: min(7vw, 15vh); font-weight: 700; letter-spacing: .01em;
+    color: #e8d7ac; text-align: center;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hp-row { width: 86%; }
+  .hp-bar {
+    height: min(1.1vw, 3vh); min-height: 7px; border-radius: 99px;
+    background: rgba(255,255,255,.14); overflow: hidden;
+  }
+  .hp-fill { height: 100%; border-radius: 99px; transition: width .4s ease, background .4s ease; }
+  .hp-text { font-size: min(2.6vw, 6vh); text-align: center;
+             margin-top: .6vh; opacity: .92; }
+  .conds { display: flex; flex-wrap: wrap; gap: .5vw; justify-content: center;
+           overflow: hidden; }
+  .cond {
+    font-size: min(1.8vw, 4.5vh); padding: .4vh .8vw; border-radius: 99px;
+    background: rgba(192,57,43,.28); border: 1px solid rgba(224,120,110,.65);
+    color: #f0c8c2;
+  }
+  /* "No camera" is a quiet hint, not an error — most tables have a few
+     players who never turn a camera on. */
+  .nocam { font-size: min(1.6vw, 4vh); opacity: .5; }
+</style>
+
+<div class="card">
+  {% if char.portrait_path %}
+  <img class="portrait" id="pc-portrait" alt=""
+       src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}">
+  {% else %}
+  <div class="portrait placeholder">&#9876;</div>
+  {% endif %}
+
+  <div class="name" id="pc-name">{{ char.name }}</div>
+
+  {% if not is_dm %}
+  <div class="hp-row">
+    <div class="hp-bar"><div class="hp-fill" id="pc-hp-fill"></div></div>
+    <div class="hp-text" id="pc-hp-text">{{ char.hp_current }} / {{ char.hp_max }}</div>
+  </div>
+  <div class="conds" id="pc-conds"></div>
+  {% else %}
+  <div class="hp-text" style="opacity:.75;">Dungeon Master</div>
+  {% endif %}
+  <div class="nocam">no camera</div>
+</div>
+
+<script>
+const POLL_URL = "{{ poll_url }}";
+
+function hpColor(pct) {
+  return pct > 50 ? '#3fa14a' : pct > 20 ? '#c9a227' : '#c0392b';
+}
+
+function apply(d) {
+  document.getElementById('pc-name').textContent = d.name;
+  const fill = document.getElementById('pc-hp-fill');
+  if (!fill) return;               // DM card has no HP block
+  const pct = Math.max(0, Math.min(100, d.hp_pct));
+  fill.style.width = pct + '%';
+  fill.style.background = hpColor(pct);
+  document.getElementById('pc-hp-text').textContent = d.hp_current + ' / ' + d.hp_max;
+  const host = document.getElementById('pc-conds');
+  if (!host) return;
+  host.innerHTML = '';
+  (d.conditions || []).forEach(c => {
+    const el = document.createElement('span');
+    el.className = 'cond'; el.textContent = c;
+    host.appendChild(el);
+  });
+}
+
+apply({ name: {{ char.name | tojson }},
+        hp_current: {{ char.hp_current or 0 }}, hp_max: {{ char.hp_max or 0 }},
+        hp_pct: {{ char.hp_pct() }}, conditions: {{ conditions | tojson }} });
+
+// Track play without the DM touching anything. Errors are ignored — a card
+// that briefly goes stale beats one that blanks.
+//
+// The interval is a setting because it is paid per card: every player in the
+// party scene is a separate browser source running this same loop, so the real
+// request rate is this divided by the size of the table. HP and conditions
+// change at the pace of a turn, so seconds of lag cost nothing.
+const POLL_MS = {{ (poll_s | default(10)) * 1000 }};
+
+function schedule() {
+  // Spread the cards out instead of letting the whole party fire on the same
+  // tick — they all load together when the scene is built, so without jitter
+  // they stay in lockstep for the rest of the session.
+  setTimeout(() => {
+    fetch(POLL_URL).then(r => r.json()).then(apply).catch(() => {}).finally(schedule);
+  }, POLL_MS * (0.85 + Math.random() * 0.3));
+}
+schedule();
+</script>

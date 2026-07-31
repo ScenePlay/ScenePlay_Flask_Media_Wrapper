@@ -2132,28 +2132,6 @@ function mapVolChange(val) {
 // the 2 s state poll corrects from OBS's own event feed (_obsSync) — so a
 // scene the DM switches inside OBS also lands here.
 
-function obsGoLive(ev, btn) {
-  ev.stopPropagation();          // the row itself has no click, but be safe
-  if (btn.disabled) return;
-  btn.disabled = true;
-  fetch('/ttrpg/obs/api/switch', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character_id: btn.dataset.characterId }),
-  })
-    .then(r => r.json().then(d => ({ ok: r.ok, d })))
-    .then(({ ok, d }) => {
-      btn.disabled = false;
-      if (!ok || !d.ok) {
-        alert(d.need_map
-          ? 'No OBS scene is mapped to this player yet — set it on the Broadcast page.'
-          : (d.error || 'OBS switch failed.'));
-        return;
-      }
-      _obsSync({ connected: true, current_scene: d.current_scene });
-    })
-    .catch(() => { btn.disabled = false; alert('OBS switch failed (network).'); });
-}
-
 function obsStep(direction) {
   fetch('/ttrpg/obs/api/next', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2176,6 +2154,74 @@ function obsJump(position) {
     .then(({ ok, d }) => {
       if (!ok || !d.ok) { alert(d.error || 'Could not switch.'); return; }
       _obsSync({ connected: true, current_scene: d.current_scene });
+    })
+    .catch(() => {});
+}
+
+// Step the stream's map through auto -> 2D -> 3D. A shot call during play, so
+// it takes effect on its own — no page, no saving. The server picks the next
+// mode so this stays right even if the DM changed it from the Broadcast page.
+function obsToggleMapMode() {
+  fetch('/ttrpg/obs/api/map-mode', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch the map view.'); return; }
+      _obsPaintMapMode(d.mode);
+    })
+    .catch(() => {});
+}
+
+function _obsPaintMapMode(mode) {
+  const btn = document.getElementById('obs-mapmode-btn');
+  if (!btn || !mode) return;
+  btn.textContent = mode === 'auto' ? 'AUTO' : mode.toUpperCase();
+  // Auto and 3D both get the live colour: in either one the stream can be in
+  // the player's view, so a glance at the button says "not just the flat map".
+  const hot = mode === '3d' || mode === 'auto';
+  btn.classList.toggle('btn-outline-success', hot);
+  btn.classList.toggle('btn-outline-secondary', !hot);
+}
+
+// Show the map through one character: 3D when the map has the geometry for
+// it, otherwise a held close-up on them in 2D. The server decides which,
+// because it is the thing that knows whether the map has a floorplan.
+function obsViewPlayer(ev, btn) {
+  ev.stopPropagation();
+  fetch('/ttrpg/obs/api/view-player', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: btn.dataset.characterId }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch the view.'); return; }
+      document.querySelectorAll('.obs-view-btn').forEach(b => {
+        b.classList.remove('btn-outline-success');
+        b.classList.add('btn-outline-secondary');
+      });
+      btn.classList.add('btn-outline-success');
+      btn.classList.remove('btn-outline-secondary');
+      // The AUTO/2D/3D button is deliberately NOT repainted: the pin is an
+      // override for the moment and the configured mode has not changed.
+    })
+    .catch(() => {});
+}
+
+// Cut OBS to the battle map. Same optimistic-then-corrected shape as
+// obsViewPlayer: the 2s poll is the authority, this just avoids a dead-feeling
+// button while the request is in flight.
+function obsCutMap(btn) {
+  fetch('/ttrpg/obs/api/cut-map', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not cut to the map.'); return; }
+      if (btn) {
+        btn.classList.add('btn-outline-success');
+        btn.classList.remove('btn-outline-secondary');
+      }
     })
     .catch(() => {});
 }
@@ -2203,32 +2249,40 @@ function obsGroupShot() {
               t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (e.key >= '1' && e.key <= '9') { e.preventDefault(); obsJump(parseInt(e.key)); }
     else if (e.key === '0' || e.key.toLowerCase() === 'g') { e.preventDefault(); obsGroupShot(); }
+    else if (e.key.toLowerCase() === 'v') { e.preventDefault(); obsToggleMapMode(); }
+    else if (e.key.toLowerCase() === 'm') { e.preventDefault(); obsCutMap(document.getElementById('obs-cutmap-btn')); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); obsStep(1); }
     else if (e.key === 'ArrowLeft')  { e.preventDefault(); obsStep(-1); }
   });
 })();
 
 function _obsSync(obs) {
-  const btns = document.querySelectorAll('.obs-live-btn');
+  const btns = document.querySelectorAll('.obs-view-btn');
   if (!btns.length) return;
   if (!obs) return;                       // OBS disabled server-side
+  const onMap = !!obs.current_scene && obs.current_scene === obs.map_scene;
   btns.forEach(b => {
-    const live = !!obs.current_scene && b.dataset.obsScene === obs.current_scene;
+    // Lit only when this character is BOTH the pinned viewpoint and the map
+    // is what OBS is actually showing — being pinned while the stream is on
+    // the party scene is not "on screen".
+    const live = onMap && String(obs.view_char || '') === b.dataset.characterId;
     b.classList.toggle('btn-outline-success', live);
     b.classList.toggle('btn-outline-secondary', !live);
     b.style.opacity = obs.connected ? '' : '.45';
     b.title = !obs.connected ? 'OBS is not connected'
-            : live ? 'On screen in OBS now'
-            : 'Put this player on screen in OBS';
+            : live ? 'The map is being shown through this character now'
+            : 'Show the map through this character (3D if the map supports it)';
   });
-  const pill = document.getElementById('obs-sidebar-pill');
-  if (pill) {
-    const bits = [];
-    if (obs.recording) bits.push('● REC');
-    if (obs.streaming) bits.push('LIVE');
-    const scene = obs.connected ? (obs.current_scene || '—') : 'offline';
-    pill.textContent = 'OBS: ' + scene + (bits.length ? ' · ' + bits.join(' ') : '');
-    pill.style.display = '';
+  _obsPaintMapMode(obs.map_mode);
+  const mapBtn = document.getElementById('obs-cutmap-btn');
+  if (mapBtn) {
+    const live = !!obs.current_scene && obs.current_scene === obs.map_scene;
+    mapBtn.classList.toggle('btn-outline-success', live);
+    mapBtn.classList.toggle('btn-outline-secondary', !live);
+    mapBtn.style.opacity = obs.connected ? '' : '.45';
+    mapBtn.title = !obs.connected ? 'OBS is not connected'
+                 : live ? 'The battle map is on screen now'
+                 : 'Put the battle map on screen in OBS (M)';
   }
 }
 

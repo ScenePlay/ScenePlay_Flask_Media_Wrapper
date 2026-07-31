@@ -9,13 +9,18 @@ from models.ttrpg import tblCharacters, _vdo_url
 
 @pytest.fixture()
 def settings(app, monkeypatch):
-    """appsettingGet talks to the real sqlite file — stub it per test."""
+    """appsettingGet talks to the real sqlite file — stub it per test.
+
+    Both bindings have to be patched: models.ttrpg imports it lazily inside
+    the function (so patching sql is enough there), but routes.obs did
+    `from sql import appsettingGet` at module load and holds its own
+    reference, which would otherwise keep reading the live database."""
     store = {}
-    import models.ttrpg as mt
+    import routes.obs as ro
     import sql
-    monkeypatch.setattr(sql, 'appsettingGet',
-                        lambda name, default=None: store.get(name, default))
-    assert mt._vdo_url is _vdo_url        # imported lazily inside, so this works
+    fake = lambda name, default=None: store.get(name, default)   # noqa: E731
+    monkeypatch.setattr(sql, 'appsettingGet', fake)
+    monkeypatch.setattr(ro, 'appsettingGet', fake)
     return store
 
 
@@ -140,7 +145,7 @@ class TestSceneNaming:
 
 
 class TestRotationAndFeedPersistence:
-    def test_rotation_skips_unmapped_and_follows_sort_order(self, app):
+    def test_rotation_follows_saved_order_then_newcomers(self, app, monkeypatch):
         from models.ttrpg import (tblObsSceneMap, tblSessions, tblSessionParty)
         from models.user import tblUsers
         import routes.obs as ro
@@ -162,15 +167,22 @@ class TestRotationAndFeedPersistence:
             db.session.add(tblSessionParty(session_id=sess.session_id,
                                            character_id=c.character_id,
                                            is_active=1, joined_at='t'))
-        # B first, then A. C is deliberately left unmapped.
+        # B first, then A. C has no row yet — a character added to the party
+        # after the scene was built.
         db.session.add(tblObsSceneMap(entity_type='player', entity_id=chars[1].character_id,
-                                      entity_key='', scene_name='B Cam', sort_order=0))
+                                      entity_key='', scene_name='Party', sort_order=0))
         db.session.add(tblObsSceneMap(entity_type='player', entity_id=chars[0].character_id,
-                                      entity_key='', scene_name='A Cam', sort_order=1))
+                                      entity_key='', scene_name='Party', sort_order=1))
         db.session.commit()
 
-        assert ro._rotation_order() == [chars[1].character_id, chars[0].character_id]
-        assert chars[2].character_id not in ro._rotation_order()
+        # Exclude the DM tile here; its ordering has its own tests below.
+        monkeypatch.setattr(ro, 'dm_tile_enabled', lambda: False)
+        order = ro._rotation_order()
+        # Saved order wins, so nobody's tile moves when the party changes...
+        assert order[:2] == [chars[1].character_id, chars[0].character_id]
+        # ...and a newcomer is appended rather than renumbering everyone. They
+        # still get a tile (a stat card) even with no camera set up.
+        assert order[2] == chars[2].character_id
 
     def test_special_and_scene_maps_are_independent(self, app):
         from models.ttrpg import tblObsSceneMap
@@ -296,3 +308,168 @@ class TestFeedMutation:
         db.session.commit()
         self._apply(c, {'feed_url': bad})
         assert c.video_feed_url == 'https://good/existing'
+
+
+class TestTileFallback:
+    """A dropped camera must give way to that player's stat card — and give it
+    back when they return. The tile's cell never changes, only its URL."""
+
+    def _char(self, app, **over):
+        c = _char(**over)
+        db.session.add(c)
+        db.session.commit()
+        return c
+
+    def test_no_feed_uses_the_card(self, app, settings):
+        import routes.obs as ro
+        c = self._char(app)
+        with app.test_request_context():
+            assert '/ttrpg/obs/card/' in ro._tile_url(c, {}, set())
+
+    def test_healthy_camera_is_used(self, app, settings):
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            url = ro._tile_url(c, {'Kara': 5}, set())
+        assert 'abc123' in url and '/card/' not in url
+
+    def test_unknown_presence_keeps_the_camera(self, app, settings):
+        """A LAN player never reports presence — that must not be read as a
+        drop, or their camera would be replaced the moment it works."""
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            assert 'abc123' in ro._tile_url(c, {}, set())
+
+    def test_stale_presence_falls_back_to_the_card(self, app, settings):
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            url = ro._tile_url(c, {'Kara': 999}, set())
+        assert '/ttrpg/obs/card/' in url
+
+    def test_camera_returns_when_presence_recovers(self, app, settings):
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            assert '/card/' in ro._tile_url(c, {'Kara': 999}, set())
+            assert 'abc123' in ro._tile_url(c, {'Kara': 3}, set())
+
+    def test_manual_pin_wins_over_a_healthy_camera(self, app, settings):
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            url = ro._tile_url(c, {'Kara': 1}, {c.character_id})
+        assert '/ttrpg/obs/card/' in url
+
+    def test_override_set_round_trips(self, app, settings, monkeypatch):
+        """monkeypatch, never bare assignment: routes.obs imported these names
+        directly, so a hand-rolled swap leaks into every later test in the
+        session (it broke the password-recovery suite once)."""
+        import routes.obs as ro
+        store = {'obs_card_override': ''}
+        monkeypatch.setattr(ro, 'appsettingGet',
+                            lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet',
+                            lambda n, v, typevalue='text': store.__setitem__(n, v))
+
+        ro._set_card_override(7, True)
+        assert ro._card_overrides() == {7}
+        ro._set_card_override(9, True)
+        assert ro._card_overrides() == {7, 9}
+        ro._set_card_override(7, False)
+        assert ro._card_overrides() == {9}
+
+
+class TestDmTile:
+    """The DM narrates and plays every NPC, so they get a tile like anyone
+    else — with no character row behind it."""
+
+    def _party_of_one(self):
+        from models.ttrpg import tblSessions, tblSessionParty
+        from models.user import tblUsers
+        dm = tblUsers(username='thegm', display_name='Game Master', password_hash='x',
+                      role='dm', active=1, created_at='t')
+        pl = tblUsers(username='pp', display_name='P', password_hash='x',
+                      role='player', active=1, created_at='t')
+        db.session.add_all([dm, pl]); db.session.flush()
+        c = _char(user_id=pl.user_id, name='Kara')
+        db.session.add(c); db.session.flush()
+        sess = tblSessions(title='S', status='active', created_at='t')
+        db.session.add(sess); db.session.flush()
+        db.session.add(tblSessionParty(session_id=sess.session_id,
+                                       character_id=c.character_id,
+                                       is_active=1, joined_at='t'))
+        db.session.commit()
+        return c
+
+    def test_dm_leads_the_rotation_and_is_featurable(self, app, settings):
+        import routes.obs as ro
+        c = self._party_of_one()
+        settings['obs_dm_enabled'] = '1'
+        order = ro._rotation_order()
+        assert order == [ro.DM_TILE_ID, c.character_id], order
+
+    def test_dm_can_be_turned_off(self, app, settings):
+        import routes.obs as ro
+        c = self._party_of_one()
+        settings['obs_dm_enabled'] = '0'
+        assert ro._rotation_order() == [c.character_id]
+
+    def test_dm_is_on_by_default(self, app, settings):
+        import routes.obs as ro
+        self._party_of_one()
+        assert ro.dm_tile_enabled() is True         # absent setting -> on
+
+    def test_dm_name_comes_from_the_dm_account(self, app, settings):
+        import routes.obs as ro
+        self._party_of_one()
+        assert ro.dm_name() == 'Game Master'
+
+    def test_dm_name_falls_back_without_a_dm_account(self, app, settings):
+        import routes.obs as ro
+        assert ro.dm_name() == 'Dungeon Master'
+
+    def test_dm_source_name_is_distinct_from_players(self, app, settings):
+        """Pruning only removes tiles ScenePlay manages, so the DM prefix has
+        to be one of the recognised ones."""
+        import routes.obs as ro
+        name = ro._scene_name_for(ro.dm_tile())
+        assert name.startswith('DM - ')
+        assert name.startswith(ro._MANAGED_PREFIXES)
+        assert ro._scene_name_for(_char(name='Kara')).startswith('Player - ')
+
+    def test_dm_feed_urls_use_the_shared_vdo_settings(self, app, settings):
+        import routes.obs as ro
+        settings['obs_dm_stream_id'] = 'dmstream'
+        settings['obs_vdo_password'] = 'tablepw'
+        tile = ro.dm_tile()
+        assert tile.has_feed() is True
+        assert 'dmstream' in tile.video_view_url()
+        assert '&password=tablepw' in tile.video_push_url()
+
+    def test_dm_custom_url_wins(self, app, settings):
+        import routes.obs as ro
+        settings['obs_dm_stream_id'] = 'dmstream'
+        settings['obs_dm_feed_url'] = 'https://example.com/dm'
+        tile = ro.dm_tile()
+        assert tile.video_view_url() == 'https://example.com/dm'
+        assert tile.video_push_url() == ''
+
+    def test_dm_with_no_camera_gets_a_card(self, app, settings):
+        import routes.obs as ro
+        with app.test_request_context():
+            url = ro._tile_url(ro.dm_tile(), {}, set())
+        # negative ids can't ride an <int:> route, so the DM card has its own
+        assert url.endswith('/card/dm?t=' + ro._card_token(ro.DM_TILE_ID))
+
+    def test_dm_card_override_id_survives_the_parser(self, app, settings, monkeypatch):
+        """The override list is parsed from a CSV of ids — a naive isdigit()
+        check would silently drop the DM's negative id."""
+        import routes.obs as ro
+        store = {'obs_card_override': ''}
+        monkeypatch.setattr(ro, 'appsettingGet', lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet',
+                            lambda n, v, typevalue='text': store.__setitem__(n, v))
+        ro._set_card_override(ro.DM_TILE_ID, True)
+        assert ro.DM_TILE_ID in ro._card_overrides()

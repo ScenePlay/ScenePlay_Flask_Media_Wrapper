@@ -1,19 +1,21 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
-{% block title %}My Camera — {{ char.name }}{% endblock %}
+{% block title %}{% if is_dm_tile %}DM Camera{% else %}My Camera{% endif %} — {{ char.name }}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-lg-7">
 
     <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-      <h4 style="color:var(--ttrpg-accent);" class="mb-0">&#128247; My Camera &mdash; {{ char.name }}</h4>
-      <a href="{{ url_for('ttrpg.my_character') }}" class="btn btn-sm btn-outline-secondary">Back</a>
+      <h4 style="color:var(--ttrpg-accent);" class="mb-0">
+        &#128247; {% if is_dm_tile %}DM Camera{% else %}My Camera{% endif %} &mdash; {{ char.name }}</h4>
+      <a href="{% if is_dm_tile %}{{ url_for('obs_bp.broadcast') }}{% else %}{{ url_for('ttrpg.my_character') }}{% endif %}"
+         class="btn btn-sm btn-outline-secondary">Back</a>
     </div>
 
     {% if push_url %}
     <div class="ttrpg-card p-3 mb-3">
       <p class="small text-muted mb-3">
-        Start your camera and you'll appear on the stream when the GM puts you on screen.
+        Start your camera and you'll appear on the stream{% if not is_dm_tile %} when the GM puts you on screen{% endif %}.
         Nothing to install &mdash; it runs in your browser.
         <b>Phone camera?</b> Scan the code below instead of typing the link.
       </p>
@@ -57,7 +59,7 @@
         Paste the <b>view</b> link here and the GM's OBS will use it instead.
         Leave it blank to go back to the ScenePlay link above.
       </p>
-      <form method="post" action="{{ url_for('obs_bp.save_feed', character_id=char.character_id) }}">
+      <form method="post" action="{{ save_url }}">
         <input type="hidden" name="action" value="save">
         <div class="d-flex gap-2 mb-2">
           <input type="url" name="video_feed_url" class="form-control form-control-sm"
@@ -76,7 +78,7 @@
 
     <div class="ttrpg-card p-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-2">Trouble?</h6>
-      <form method="post" action="{{ url_for('obs_bp.save_feed', character_id=char.character_id) }}"
+      <form method="post" action="{{ save_url }}"
             onsubmit="return confirm('Generate a new camera link? Your current one stops working immediately.');">
         <input type="hidden" name="action" value="regenerate">
         <button class="btn btn-sm btn-outline-danger">Generate a new link</button>

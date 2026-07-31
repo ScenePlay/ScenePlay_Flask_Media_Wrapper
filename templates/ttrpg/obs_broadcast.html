@@ -55,16 +55,23 @@
     <!-- Scene mapping: the point of the page -->
     <div class="ttrpg-card p-3 mb-3">
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <h6 style="color:var(--ttrpg-accent);" class="mb-0">Player Scenes</h6>
-        <button class="btn btn-sm btn-outline-secondary" onclick="obsRefreshScenes(this)">
-          &#8635; Re-read scenes from OBS</button>
+        <h6 style="color:var(--ttrpg-accent);" class="mb-0">Party Scene</h6>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-ttrpg" onclick="obsBuildParty(this)"
+                  title="Create or refresh the OBS scene holding every player">
+            &#9635; Build / refresh party scene</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="obsRefreshScenes(this)">
+            &#8635; Re-read from OBS</button>
+        </div>
       </div>
       <p class="small text-muted">
-        Map each player to the OBS scene showing their camera, then hit <b>Go Live</b>
-        when it's their turn. The same buttons appear on the battle map sidebar.
+        Everyone lives in one OBS scene as a tile. Giving a player the turn makes
+        their tile <b>bigger in place</b> &mdash; the table stays on screen and
+        nobody's tile moves. Players with no camera get a stat card instead, so
+        the grid never reshuffles when someone connects.
       </p>
       {% if not has_party %}
-      <p class="small text-muted mb-0">No active session &mdash; start a session and add a party to map players.</p>
+      <p class="small text-muted mb-0">No active session &mdash; start a session and add a party first.</p>
       {% else %}
       <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
         <button class="btn btn-sm btn-outline-secondary" onclick="obsStep(-1)">&#9664; Previous</button>
@@ -83,23 +90,27 @@
                                                 'nofeed': 'No camera feed yet'}[r.feed] }}"
                 style="width:.6rem;height:.6rem;border-radius:50%;flex:0 0 auto;
                        background:{{ {'live':'#28a745','ready':'#b8a24a','stale':'#c0392b','nofeed':'#555'}[r.feed] }};"></span>
-          <span style="min-width:8rem;">{{ r.name }}</span>
-          <select class="form-select form-select-sm obs-row-scene" style="max-width:15rem;"
-                  onchange="obsSaveMap(this)">
-            <option value="">— not mapped —</option>
-            {% for s in snap.scenes %}
-            <option value="{{ s }}"{% if s == r.scene %} selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-            {% if r.missing %}
-            <option value="{{ r.scene }}" selected>{{ r.scene }} (missing in OBS)</option>
-            {% endif %}
-          </select>
-          <button class="btn btn-sm btn-ttrpg obs-row-live" onclick="obsGoLiveRow(this)">Go Live</button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="obsCreateScene(this)"
-                  title="Build an OBS scene showing this player's camera">&#10010; Scene</button>
+          <span style="min-width:9rem;">{{ r.name }}
+            {%- if r.character_id == dm_id %}
+            <span class="badge ms-1" style="background:var(--ttrpg-accent);
+                  color:var(--sp-on-accent);font-size:.6rem;vertical-align:middle;">DM</span>
+            {%- endif %}</span>
+          <span class="small text-muted flex-grow-1">
+            {% if r.showing == 'card' %}
+              showing stat card{% if r.feed == 'stale' %} <span class="text-warning">(camera dropped)</span>{% endif %}
+            {% else %}showing camera{% endif %}
+          </span>
+          <label class="small text-muted mb-0 d-flex align-items-center gap-1"
+                 title="Pin this player to their stat card — use it when their camera drops and they aren't on the portal">
+            <input type="checkbox" class="obs-card-chk" onchange="obsCardOverride(this)"
+                   {% if r.show_card %}checked{% endif %}> card
+          </label>
+          <button class="btn btn-sm btn-ttrpg obs-row-live" onclick="obsGoLiveRow(this)"
+                  title="Give this player the turn — their tile grows in place">Turn</button>
           <a class="btn btn-sm btn-outline-secondary"
-             href="{{ url_for('obs_bp.my_feed', character_id=r.character_id) }}"
-             title="Their camera link / QR code">&#128247;</a>
+             href="{% if r.character_id == dm_id %}{{ url_for('obs_bp.dm_feed') }}
+                   {%- else %}{{ url_for('obs_bp.my_feed', character_id=r.character_id) }}{% endif %}"
+             title="Camera link / QR code">&#128247;</a>
           <span class="text-muted" style="cursor:pointer;user-select:none;"
                 onclick="obsReorder({{ r.character_id }}, -1)" title="Earlier in the rotation">&#9650;</span>
           <span class="text-muted" style="cursor:pointer;user-select:none;"
@@ -111,9 +122,113 @@
       </div>
       <p class="small text-muted mt-2 mb-0">
         The dot shows whether a player has a camera feed set (and, for remote
-        players, whether they're online). &#10010; Scene builds the OBS scene for you.
+        players, whether they're online). Use &#9650;&#9660; to set the turn order &mdash;
+        that's also the order the number keys and Next/Previous follow.
       </p>
       {% endif %}
+    </div>
+
+    <!-- Battle map source -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">Battle Map on Stream</h6>
+      <p class="small text-muted">
+        The map is a <b>browser source</b> &mdash; just the map, not your screen or a
+        browser window. It follows the live map, shows it through the active
+        player's eyes (fog and all), and falls back to your title card when no
+        map is running. <b>Build / refresh party scene</b> creates the
+        <code>{{ cfg.map_scene }}</code> scene for you to cut to.
+      </p>
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-sm-7">
+          <label class="form-label small">Render the map as</label>
+          <div class="d-flex gap-2">
+            <button type="button" id="obs-mode-auto" class="btn btn-sm flex-grow-1"
+                    onclick="obsSetMapMode('auto')">&#127916; Auto</button>
+            <button type="button" id="obs-mode-2d" class="btn btn-sm flex-grow-1"
+                    onclick="obsSetMapMode('2d')">&#128506; 2D top-down</button>
+            <button type="button" id="obs-mode-3d" class="btn btn-sm flex-grow-1"
+                    onclick="obsSetMapMode('3d')">&#127760; 3D through the player</button>
+          </div>
+          <div class="form-text">
+            Takes effect on the stream within a couple of seconds &mdash; no saving,
+            no reload. <b>Auto</b> holds the 2D map and cuts to 3D only when the
+            featured player moves, runs one look-around, then cuts back. 3D needs
+            a floorplan and a player on the map; without either it shows 2D.
+          </div>
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label small">Map source in OBS</label>
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100"
+                  onclick="obsReloadMap(this)">&#8635; Reload map source</button>
+          <div class="form-text">
+            OBS keeps a browser source's page loaded until you reload it, so
+            after a ScenePlay update the stream can still be running the old
+            map page. Use this if the map ignores a setting you just changed.
+          </div>
+        </div>
+      </div>
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-sm-5">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="obs-map-zoom"
+                   name="obs_map_zoom" value="1" form="obs-cfg-form"
+                   {% if cfg.map_zoom == '1' %}checked{% endif %}>
+            <label class="form-check-label small" for="obs-map-zoom">
+              Action camera
+              <span class="text-muted">&mdash; push in on the party, ease back out when
+              nobody has moved</span>
+            </label>
+          </div>
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label small">Max zoom</label>
+          <input type="number" name="obs_map_zoom_max" form="obs-cfg-form"
+                 class="form-control form-control-sm" min="1" max="6" step="0.1"
+                 value="{{ cfg.map_zoom_max }}">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label small">Pull back after (s)</label>
+          <input type="number" name="obs_map_zoom_hold_s" form="obs-cfg-form"
+                 class="form-control form-control-sm" min="1" max="120" step="1"
+                 value="{{ cfg.map_zoom_hold }}">
+          <div class="form-text">Saved with Connection Settings below.</div>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label small">Stat card refresh (s)</label>
+          <input type="number" name="obs_card_poll_s" form="obs-cfg-form"
+                 class="form-control form-control-sm" min="2" max="120" step="1"
+                 value="{{ cfg.card_poll }}">
+          <div class="form-text">
+            Paid once per player card, so the request rate is this divided by
+            the size of the party. Raise it if the log is noisy.
+          </div>
+        </div>
+      </div>
+      <div class="row g-2 align-items-end mb-2">
+        <div class="col-sm-5">
+          <form method="post" action="{{ url_for('obs_bp.upload_title_image') }}"
+                enctype="multipart/form-data">
+            <label class="form-label small">Title card image</label>
+            <div class="d-flex gap-2">
+              <input type="file" name="title_image" accept="image/*"
+                     class="form-control form-control-sm">
+              <button class="btn btn-ttrpg btn-sm flex-shrink-0">Upload</button>
+            </div>
+            {% if cfg.title_image %}
+            <div class="small text-muted mt-1">
+              Using <code>{{ cfg.title_image }}</code>
+              <button name="clear" value="1" class="btn btn-link btn-sm p-0 ms-1"
+                      style="font-size:.75rem;">clear</button>
+            </div>
+            {% endif %}
+          </form>
+        </div>
+        <div class="col-sm-7">
+          <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
+             href="{{ url_for('obs_bp.map_view', t=map_token) }}">Preview the map source</a>
+          <span class="small text-muted ms-2">Opens exactly what OBS renders.</span>
+        </div>
+      </div>
     </div>
 
     <!-- ScenePlay scene -> OBS scene -->
@@ -159,7 +274,11 @@
     <!-- Connection settings -->
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
-      <form method="post" action="{{ url_for('obs_bp.save_config') }}">
+      <form method="post" action="{{ url_for('obs_bp.upload_party_bg') }}"
+            id="obs-bg-form" enctype="multipart/form-data"></form>
+      <form method="post" action="{{ url_for('obs_bp.upload_post_image') }}"
+            id="obs-post-form" enctype="multipart/form-data"></form>
+      <form method="post" action="{{ url_for('obs_bp.save_config') }}" id="obs-cfg-form">
         <div class="row g-2 mb-2">
           <div class="col-sm-8">
             <label class="form-label small">OBS host</label>
@@ -198,6 +317,136 @@
                    min="0" max="3600" step="5" value="{{ cfg.auto_return_s }}">
             <div class="form-text">0 = stay put.</div>
           </div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-panel-on"
+                 name="obs_panel_on" value="1"
+                 {% if cfg.panel_on == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-panel-on">
+            Show the information panel
+            <span class="text-muted">(falls back to the dice roll feed when there are no notes)</span>
+          </label>
+        </div>
+        <div class="row g-2 mb-2 ms-3" style="max-width:38rem;">
+          <div class="col-4">
+            <label class="form-label small">Panel sits on the</label>
+            <select name="obs_panel_side" class="form-select form-select-sm">
+              {% for sd in ['right', 'left', 'top', 'bottom'] %}
+              <option value="{{ sd }}"{% if cfg.panel_side == sd %} selected{% endif %}>{{ sd }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Share of the canvas</label>
+            <input type="number" name="obs_panel_fraction" class="form-control form-control-sm"
+                   min="0.12" max="0.6" step="0.02" value="{{ cfg.panel_fraction }}">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Panel refresh (s)</label>
+            <input type="number" name="obs_panel_poll_s" class="form-control form-control-sm"
+                   min="1" max="60" step="1" value="{{ cfg.panel_poll }}">
+          </div>
+        </div>
+        <div class="row g-2 mb-2 ms-3" style="max-width:38rem;">
+          <div class="col-8">
+            <label class="form-label small">Title</label>
+            <input type="text" name="obs_panel_title" class="form-control form-control-sm"
+                   maxlength="120" value="{{ cfg.panel_title }}"
+                   placeholder="(campaign name)">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Title strip height (px)</label>
+            <input type="number" name="obs_title_h" class="form-control form-control-sm"
+                   min="0" max="400" step="4" value="{{ cfg.title_h }}">
+            <div class="form-text">0 hides it.</div>
+          </div>
+        </div>
+        <div class="mb-3 ms-3" style="max-width:38rem;">
+          <label class="form-label small">Panel information &mdash; one line each</label>
+          <textarea name="obs_info_text" rows="4" class="form-control form-control-sm"
+                    placeholder="Leave empty to stream the dice rolls instead."
+                    >{{ cfg.info_text }}</textarea>
+          <div class="form-text">
+            Shown on stream, so keep secrets in the session's DM notes instead.
+            Empty means the panel scrolls dice rolls as they land.
+          </div>
+        </div>
+        <div class="mb-3 ms-3" style="max-width:38rem;">
+          <label class="form-label small">Pre-show &amp; post-show cards</label>
+          <div class="form-text mb-2">
+            Two scenes to top and tail the stream. Each shows its image at 75% of
+            the canvas over the shared background, with a title you can place.
+            The <b>pre-show</b> card reuses the Title card image above, so you
+            only upload it once.
+          </div>
+          {% for kind, label in [('pre', 'Pre-show'), ('post', 'Post-show')] %}
+          {% set c = cfg[kind] %}
+          <div class="row g-2 mb-2 align-items-end">
+            <div class="col-5">
+              <label class="form-label small">{{ label }} title</label>
+              <input type="text" name="obs_{{ kind }}_title" form="obs-cfg-form"
+                     class="form-control form-control-sm" maxlength="120"
+                     value="{{ c.title }}" placeholder="(no title)">
+            </div>
+            <div class="col-4">
+              <label class="form-label small">Placed</label>
+              <select name="obs_{{ kind }}_title_pos" form="obs-cfg-form"
+                      class="form-select form-select-sm">
+                {% for p in cfg.title_positions %}
+                <option value="{{ p }}"{% if c.pos == p %} selected{% endif %}>
+                  {{ p.replace('-', ' ') }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-3">
+              {% if kind == 'post' %}
+              <label class="form-label small">Image</label>
+              <div class="d-flex gap-1">
+                <input type="file" name="post_image" accept="image/*"
+                       form="obs-post-form" class="form-control form-control-sm">
+                <button class="btn btn-sm btn-ttrpg flex-shrink-0"
+                        form="obs-post-form">Up</button>
+              </div>
+              {% else %}
+              <div class="form-text mb-1">uses the Title card image</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+          <div class="form-text">
+            {% if cfg.post.image %}Post-show image: <code>{{ cfg.post.image }}</code>
+            <button class="btn btn-link btn-sm p-0 ms-1" style="font-size:.75rem;"
+                    form="obs-post-form" name="clear" value="1">clear</button>
+            {% else %}No post-show image yet &mdash; the card shows the title over the
+            background.{% endif %}
+            Titles are saved with Connection Settings; images save on upload.
+          </div>
+        </div>
+        <div class="mb-3 ms-3" style="max-width:38rem;">
+          <label class="form-label small">Party scene background</label>
+          <div class="d-flex align-items-center gap-2">
+            <input type="file" name="party_bg" accept="image/*" form="obs-bg-form"
+                   class="form-control form-control-sm">
+            <button class="btn btn-sm btn-ttrpg" form="obs-bg-form">Upload</button>
+            {% if cfg.party_bg %}
+            <button class="btn btn-sm btn-outline-danger" form="obs-bg-form"
+                    name="clear" value="1">Clear</button>
+            {% endif %}
+          </div>
+          <div class="form-text">
+            {% if cfg.party_bg %}Currently: <code>{{ cfg.party_bg }}</code>.
+            {% else %}No image &mdash; the scene uses a plain dark field.{% endif %}
+            Sits behind every tile; saved on upload, not with the form below.
+          </div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-dm-enabled"
+                 name="obs_dm_enabled" value="1"
+                 {% if dm_enabled %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-dm-enabled">
+            Give the DM a tile in the party scene
+            <span class="text-muted">(you narrate too &mdash; turn it off to stay off camera)</span>
+          </label>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="obs-scene-link"
@@ -255,25 +504,20 @@
 <script>
 const OBS_STATE_URL   = "{{ url_for('obs_bp.api_state') }}";
 const OBS_SWITCH_URL  = "{{ url_for('obs_bp.api_switch') }}";
-const OBS_MAP_URL     = "{{ url_for('obs_bp.api_map') }}";
 const OBS_REFRESH_URL = "{{ url_for('obs_bp.api_refresh') }}";
 const OBS_NEXT_URL    = "{{ url_for('obs_bp.api_next') }}";
 const OBS_GROUP_URL   = "{{ url_for('obs_bp.api_group') }}";
-const OBS_CREATE_URL  = "{{ url_for('obs_bp.api_create_scene') }}";
+const OBS_BUILD_URL   = "{{ url_for('obs_bp.api_build_party') }}";
 const OBS_REORDER_URL = "{{ url_for('obs_bp.api_reorder') }}";
+const OBS_CARDOVR_URL = "{{ url_for('obs_bp.api_card_override') }}";
+const OBS_MAPMODE_URL = "{{ url_for('obs_bp.api_map_mode') }}";
+const OBS_MAPRELOAD_URL = "{{ url_for('obs_bp.api_map_reload') }}";
 const OBS_MAPSCENE_URL = "{{ url_for('obs_bp.api_map_scene') }}";
 
 function _obsPost(url, body) {
   return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
                      body: JSON.stringify(body || {})})
     .then(r => r.json().then(d => ({ok: r.ok, d})));
-}
-
-function obsSaveMap(sel) {
-  const row = sel.closest('.obs-row');
-  _obsPost(OBS_MAP_URL, {character_id: row.dataset.characterId,
-                         scene_name: sel.value})
-    .then(({ok, d}) => { if (!ok || !d.ok) alert(d.error || 'Could not save the mapping.'); });
 }
 
 function obsGoLiveRow(btn) {
@@ -321,18 +565,61 @@ function obsGroup() {
     });
 }
 
-function obsCreateScene(btn) {
-  const row = btn.closest('.obs-row');
+function obsBuildParty(btn) {
   const orig = btn.innerHTML;
-  btn.disabled = true; btn.textContent = '…';
-  _obsPost(OBS_CREATE_URL, {character_id: row.dataset.characterId})
+  btn.disabled = true; btn.textContent = 'Building…';
+  _obsPost(OBS_BUILD_URL, {})
     .then(({ok, d}) => {
       btn.disabled = false; btn.innerHTML = orig;
-      if (!ok || !d.ok) { alert(d.error || 'Could not build the scene.'); return; }
+      if (!ok || !d.ok) { alert(d.error || 'Could not build the party scene.'); return; }
       if (d.warnings && d.warnings.length) alert(d.warnings.join('\n'));
-      location.reload();          // dropdowns + mapping now include the new scene
+      location.reload();
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+function obsSetMapMode(mode) {
+  _obsPost(OBS_MAPMODE_URL, {mode})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch the map view.'); return; }
+      _paintMapMode(d.mode);
+    });
+}
+
+function obsReloadMap(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Reloading\u2026';
+  _obsPost(OBS_MAPRELOAD_URL, {})
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      if (!ok || !d.ok) { btn.innerHTML = orig; alert(d.error || 'Could not reload the map source.'); return; }
+      btn.innerHTML = '\u2713 Reloaded';
+      setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+function _paintMapMode(mode) {
+  [['obs-mode-auto', 'auto'], ['obs-mode-2d', '2d'],
+   ['obs-mode-3d', '3d']].forEach(([id, m]) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    const on = m === mode;
+    b.style.background = on ? 'var(--ttrpg-accent)' : 'var(--ttrpg-surface)';
+    b.style.color = on ? 'var(--sp-on-accent)' : 'var(--ttrpg-text)';
+    b.style.border = on ? 'none' : '1px solid var(--sp-border)';
+  });
+}
+_paintMapMode({{ cfg.map_mode | tojson }});
+
+function obsCardOverride(chk) {
+  const row = chk.closest('.obs-row');
+  _obsPost(OBS_CARDOVR_URL, {character_id: row.dataset.characterId,
+                             show_card: chk.checked})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not switch that tile.'); chk.checked = !chk.checked; }
+      else obsPoll();
+    });
 }
 
 function obsReorder(characterId, delta) {

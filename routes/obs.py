@@ -9,6 +9,7 @@ either answers immediately or fails fast on an in-memory `connected()` check.
 No queueing: the DM needs to know whether the cut happened.
 """
 import logging
+import os
 import re
 import secrets
 import string
@@ -24,10 +25,25 @@ from models.ttrpg import tblObsSceneMap, tblSessions, tblCharacters
 from models.scenes import tblscenes
 from routes.auth import dm_required
 from sql import appsettingGet, appsettingSet
+import obs_layout
 
 log = logging.getLogger(__name__)
 
 obs_bp = Blueprint('obs_bp', __name__, url_prefix='/ttrpg/obs')
+
+@obs_bp.after_request
+def _no_store(resp):
+    """Nothing this blueprint serves may be cached.
+
+    The map and card sources poll for live state, and OBS's browser source is
+    a plain Chromium: with no cache headers a browser may heuristically cache
+    a JSON response and go on serving it, freezing the map on stream while the
+    table plays on. Everything here is either live state or a token-gated
+    render, so no-store is right across the board."""
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
 
 _TRANSITION_MS_MIN = 0
 _TRANSITION_MS_MAX = 20000
@@ -58,10 +74,90 @@ def _obs_cfg():
         'auto_return_s': (appsettingGet('obs_auto_return_s', '') or '').strip() or '0',
         'scene_link':    appsettingGet('obs_scene_link', '0') or '0',
         'has_vdo_password': bool(appsettingGet('obs_vdo_password', '')),
+        'map_scene':     map_scene_name(),
+        'panel_on':      '1' if panel_on() else '0',
+        'panel_side':     panel_side(),
+        'panel_fraction': str(panel_fraction()),
+        'title_h':       ('%g' % title_height()),
+        'panel_title':   (appsettingGet('obs_panel_title', '') or ''),
+        'info_text':     (appsettingGet('obs_info_text', '') or ''),
+        'party_bg':      (appsettingGet('obs_party_bg', '') or ''),
+        'panel_poll':    ('%g' % panel_poll_s()),
+        'pre':           show_cfg('pre'),
+        'post':          show_cfg('post'),
+        'title_positions': TITLE_POSITIONS,
+        'title_image':   (appsettingGet('obs_title_image', '') or '').strip(),
+        'map_mode':      map_mode(),
+        'map_zoom':      appsettingGet('obs_map_zoom', '1') or '1',
+        'map_zoom_max':  (appsettingGet('obs_map_zoom_max', '') or '').strip() or '2.2',
+        'map_zoom_hold': (appsettingGet('obs_map_zoom_hold_s', '') or '').strip() or '6',
+        'card_poll': ('%g' % card_poll_s()),
         # set by app.py's boot guard when a start crashed during OBS bring-up
         'boot_tripped':  appsettingGet('obs_boot_tripped', ''),
         'last_error':    appsettingGet('obs_last_error', ''),
     }
+
+
+# ── the DM's own tile ─────────────────────────────────────────────────────────
+# The DM narrates, plays every NPC and does most of the talking, so they get a
+# tile like anyone else. They have no tblCharacters row, so this shim quacks
+# like one: a negative id keeps it distinct from any real character while
+# flowing through the same layout, rotation, fallback and card code unchanged.
+
+DM_TILE_ID = -1
+_MANAGED_PREFIXES = ('Player - ', 'DM - ')
+# Order matters: the no-argument /api/map-mode call steps through this list, so
+# this is the order the sidebar button and the V hotkey cycle in.
+MAP_MODES = ('auto', '2d', '3d')
+CARD_POLL_DEFAULT = 10.0
+
+
+class _DmTile:
+    """Character-shaped stand-in for the DM. Feed identity lives in app
+    settings rather than a character row."""
+    character_id = DM_TILE_ID
+    portrait_path = ''
+    hp_current = 0
+    hp_max = 0
+    ac = 0
+    conditions = ()
+
+    def __init__(self, name):
+        self.name = name
+        self.video_stream_id = (appsettingGet('obs_dm_stream_id', '') or '').strip()
+        self.video_feed_url = (appsettingGet('obs_dm_feed_url', '') or '').strip()
+
+    def has_feed(self):
+        return bool(self.video_feed_url or self.video_stream_id)
+
+    def video_view_url(self):
+        from models.ttrpg import _vdo_url
+        if self.video_feed_url:
+            return self.video_feed_url
+        return _vdo_url('view', self.video_stream_id) if self.video_stream_id else ''
+
+    def video_push_url(self):
+        from models.ttrpg import _vdo_url
+        if self.video_feed_url or not self.video_stream_id:
+            return ''
+        return _vdo_url('push', self.video_stream_id)
+
+    def hp_pct(self):
+        return 0
+
+
+def dm_tile_enabled():
+    return (appsettingGet('obs_dm_enabled', '1') or '1') == '1'
+
+
+def dm_name():
+    from models.user import tblUsers
+    row = tblUsers.query.filter_by(role='dm', active=1).first()
+    return (row.display_name if row and row.display_name else 'Dungeon Master')
+
+
+def dm_tile():
+    return _DmTile(dm_name())
 
 
 def _active_party():
@@ -124,6 +220,7 @@ def _mapping_rows(party, snap):
     order = _rotation_order()
     known = set(snap.get('scenes') or [])
     presence = _presence()
+    overrides = _card_overrides()
     rows = []
     for char in party:
         scene = mapped.get(char.character_id, '')
@@ -135,6 +232,9 @@ def _mapping_rows(party, snap):
             'live': bool(scene) and scene == snap.get('current_scene'),
             'feed': _feed_state(char, presence),
             'has_custom_url': bool(char.video_feed_url),
+            'show_card': char.character_id in overrides,
+            'showing': 'card' if _tile_url(char, presence, overrides).startswith(
+                _card_base()) else 'camera',
             'pos': order.index(char.character_id) + 1 if char.character_id in order else 0,
         })
     rows.sort(key=lambda r: (r['pos'] == 0, r['pos'], r['name'].lower()))
@@ -142,20 +242,117 @@ def _mapping_rows(party, snap):
 
 
 def _rotation_order():
-    """Character ids in camera-rotation order — what Next/Prev and the number
-    keys walk. Only mapped players are in it: cutting to someone with no scene
-    would just error. tblObsSceneMap.sort_order is rig config, which is
-    exactly what a camera rotation is, so it lives there."""
-    rows = (tblObsSceneMap.query
-            .filter_by(entity_type='player')
-            .order_by(tblObsSceneMap.sort_order, tblObsSceneMap.obs_map_id)
-            .all())
-    party_ids = {c.character_id for c in _active_party()}
-    return [r.entity_id for r in rows
-            if r.scene_name and r.entity_id in party_ids]
+    """Character ids in turn order — what Next/Prev and the number keys walk.
+
+    This is the party scene's tile order, so pressing 3 always features the
+    third tile on screen. Everyone in the party is included: a player with no
+    camera still has a stat-card tile to feature."""
+    return [c.character_id for c in _ordered_party()]
 
 
-# ── auto-return to the group shot ─────────────────────────────────────────────
+# ── camera drop-out watch ─────────────────────────────────────────────────────
+# OBS can't tell us a browser source has no VIDEO — it is rendering a page
+# either way — so a dropped camera would otherwise sit on stream as a black
+# tile. This watches the signals we do have (relay presence, plus the DM's
+# manual pin) and swaps that player's tile to their stat card, then back when
+# they return. Only the tile's URL changes: its cell, size and turn position
+# all stay put, so the grid never moves.
+#
+# Presence only covers players logged into the remote portal. Someone sitting
+# at the table with no portal login reads as 'ready', never 'stale', and is
+# never swapped automatically — that is what the manual pin is for.
+
+_tile_urls = {}                  # character_id -> URL last pushed to OBS
+_watch_timer = None
+_watch_lock = threading.Lock()
+DEFAULT_WATCH_S = 20
+
+
+def _watch_seconds():
+    try:
+        return int((appsettingGet('obs_feed_watch_s', '') or DEFAULT_WATCH_S))
+    except (TypeError, ValueError):
+        return DEFAULT_WATCH_S
+
+
+def refresh_tiles():
+    """Re-point any tile whose source should have changed. Cheap: it only
+    talks to OBS for tiles that actually differ, so the usual pass is a dict
+    comparison and no traffic at all. Returns the list of swapped names."""
+    import obs_ws
+    if not obs_ws.connected():
+        return []
+    presence = _presence()
+    overrides = _card_overrides()
+    swapped = []
+    for char in _ordered_party():
+        want = _tile_url(char, presence, overrides)
+        if _tile_urls.get(char.character_id) == want:
+            continue
+        try:
+            obs_ws.set_browser_url(_source_name_for(char), want)
+            _tile_urls[char.character_id] = want
+            swapped.append(char.name)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            # The scene may not be built yet — not worth a stack trace.
+            log.info('Tile refresh skipped for %s: %s', char.name, exc)
+    if swapped:
+        log.info('OBS tiles swapped for: %s', ', '.join(swapped))
+    return swapped
+
+
+def start_feed_watch(app_obj):
+    """Idempotent repeating check. Runs only while OBS is enabled — it
+    reschedules itself and simply does nothing when the feature is off."""
+    global _watch_timer
+    seconds = _watch_seconds()
+    if seconds <= 0:
+        return
+
+    def _tick():
+        try:
+            with app_obj.app_context():
+                if appsettingGet('obs_enabled', '0') == '1':
+                    refresh_tiles()
+        except Exception as exc:          # a watchdog must never die loudly
+            log.info('OBS feed watch failed: %s', exc)
+        finally:
+            start_feed_watch(app_obj)     # reschedule regardless
+
+    with _watch_lock:
+        if _watch_timer is not None:
+            _watch_timer.cancel()
+        _watch_timer = threading.Timer(seconds, _tick)
+        _watch_timer.daemon = True
+        _watch_timer.start()
+
+
+def stop_feed_watch():
+    global _watch_timer
+    with _watch_lock:
+        if _watch_timer is not None:
+            _watch_timer.cancel()
+            _watch_timer = None
+
+
+# ── who currently has the turn ────────────────────────────────────────────────
+# The party scene never changes, so "who is featured" can't be read back from
+# OBS's current scene the way a cut-based setup would. Persist it instead, so
+# Next/Previous still work after an app restart or from a second browser tab.
+
+def featured_id():
+    raw = (appsettingGet('obs_featured_id', '') or '').strip()
+    try:
+        return int(raw) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _set_featured(character_id):
+    appsettingSet('obs_featured_id', str(character_id or ''))
+
+
+# ── auto-return: drift back to an even table ──────────────────────────────────
 
 def _cancel_return():
     global _return_timer
@@ -165,15 +362,18 @@ def _cancel_return():
             _return_timer = None
 
 
-def _schedule_return(group_scene, seconds):
-    """Drift back to the group shot unless another switch resets the clock."""
+def _schedule_return(app_obj, seconds):
+    """Un-feature after a quiet spell, so a session never sits stranded on one
+    enlarged face. Needs the real app object: this fires on a timer thread,
+    which has no request context of its own."""
     global _return_timer
-    import obs_ws
 
     def _fire():
         try:
-            if obs_ws.connected():
-                obs_ws.switch_scene(group_scene)
+            with app_obj.app_context():
+                import obs_ws
+                if obs_ws.connected():
+                    _unfeature()
         except Exception as exc:            # never let a timer thread die loud
             log.info('OBS auto-return failed: %s', exc)
 
@@ -184,17 +384,33 @@ def _schedule_return(group_scene, seconds):
         _return_timer.start()
 
 
+def _unfeature():
+    """Back to an even table (or the DM's dedicated wide shot, if they set
+    one). Safe to call from a timer thread."""
+    import obs_ws
+    group = _special_scene('group')
+    if group:
+        obs_ws.switch_scene(group)
+    else:
+        _sync_party_scene(featured_id=None)
+    _set_featured(None)
+    _cancel_return()
+
+
 def _after_switch(scene):
-    """Arm or cancel the auto-return depending on where we just cut."""
+    """Arm or cancel the auto-return. `scene` is '' when we just featured a
+    player (nothing was cut), which is exactly when the clock should run."""
     try:
         seconds = int((appsettingGet('obs_auto_return_s', '') or '0').strip() or 0)
     except (TypeError, ValueError):
         seconds = 0
     group = _special_scene('group')
-    if seconds <= 0 or not group or scene == group:
-        _cancel_return()                    # already home, or feature off
+    # Already home: on the wide shot, or on the party scene with nobody
+    # featured. Nothing to drift back to.
+    if seconds <= 0 or (scene and scene == group) or (scene and not group):
+        _cancel_return()
         return
-    _schedule_return(group, seconds)
+    _schedule_return(current_app._get_current_object(), seconds)
 
 
 def _problems(cfg, snap):
@@ -220,9 +436,14 @@ def _problems(cfg, snap):
 @dm_required
 def broadcast():
     import obs_ws
+    # First visit auto-configures where OBS fetches stat cards from: whatever
+    # address the DM is reaching ScenePlay on is one OBS can reach too, in the
+    # normal same-machine / same-LAN setup.
+    if not (appsettingGet('obs_card_base', '') or '').strip():
+        appsettingSet('obs_card_base', request.host_url.rstrip('/'))
     cfg = _obs_cfg()
     snap = obs_ws.current_state()
-    party = _active_party()
+    party = _ordered_party()
     # ScenePlay scene -> OBS scene: activating an ambience/battle scene can
     # also cut OBS (to the map view, a title card...). Scoped to the active
     # session's campaign, same as the battle map's scene buttons.
@@ -241,6 +462,9 @@ def broadcast():
                            rows=_mapping_rows(party, snap),
                            scene_rows=scene_rows,
                            problems=_problems(cfg, snap),
+                           dm_enabled=dm_tile_enabled(),
+                           dm_id=DM_TILE_ID,
+                           map_token=_map_token(),
                            has_party=bool(party))
 
 
@@ -307,10 +531,13 @@ def toggle():
         appsettingSet('obs_boot_tripped', '')
         relay_guard.arm(relay_guard.OBS_GUARD_PATH)
         obs_ws.start(current_app._get_current_object())
+        start_feed_watch(current_app._get_current_object())
         relay_guard.disarm_after_grace(relay_guard.OBS_GUARD_PATH)
         flash('OBS control enabled — connecting.')
     else:
         obs_ws.stop()
+        stop_feed_watch()
+        _cancel_return()
         flash('OBS control disabled.')
     return redirect(url_for('obs_bp.broadcast'))
 
@@ -360,7 +587,44 @@ def save_config():
 
     appsettingSet('obs_scene_link',
                   '1' if request.form.get('obs_scene_link') else '0')
-
+    appsettingSet('obs_dm_enabled',
+                  '1' if request.form.get('obs_dm_enabled') else '0')
+    appsettingSet('obs_panel_on',
+                  '1' if request.form.get('obs_panel_on') else '0')
+    side = (request.form.get('obs_panel_side', '') or 'right').strip().lower()
+    appsettingSet('obs_panel_side',
+                  side if side in ('left', 'right', 'top', 'bottom') else 'right')
+    appsettingSet('obs_panel_title',
+                  (request.form.get('obs_panel_title', '') or '').strip()[:120])
+    for kind in ('pre', 'post'):
+        appsettingSet(f'obs_{kind}_title',
+                      (request.form.get(f'obs_{kind}_title', '') or '').strip()[:120])
+        pos = (request.form.get(f'obs_{kind}_title_pos', '') or '').strip().lower()
+        appsettingSet(f'obs_{kind}_title_pos',
+                      pos if pos in TITLE_POSITIONS else 'bottom-center')
+    # Kept verbatim, newlines and all: each line is one row in the panel.
+    appsettingSet('obs_info_text',
+                  (request.form.get('obs_info_text', '') or '')[:4000])
+    # Only when the form actually carries it. The mode is a live shot call made
+    # from the mode buttons, and this form does not post it — writing a default
+    # here would silently snap the stream back every time the DM saved an
+    # unrelated map setting.
+    if 'obs_map_mode' in request.form:
+        mode = (request.form.get('obs_map_mode', '') or 'auto').strip().lower()
+        appsettingSet('obs_map_mode', mode if mode in MAP_MODES else 'auto')
+    appsettingSet('obs_map_zoom',
+                  '1' if request.form.get('obs_map_zoom') else '0')
+    for field, lo, hi in (('obs_map_zoom_max', 1.0, 6.0),
+                          ('obs_map_zoom_hold_s', 1, 120),
+                          ('obs_card_poll_s', 2, 120),
+                          ('obs_panel_poll_s', 1, 60),
+                          ('obs_title_h', 0, 400),
+                          ('obs_panel_fraction', 0.12, 0.6)):
+        raw = (request.form.get(field, '') or '').strip()
+        try:
+            appsettingSet(field, str(min(max(float(raw), lo), hi)))
+        except (TypeError, ValueError):
+            pass
     # Shared feed password — same blank-means-keep rule as the OBS password.
     vdo_pw = request.form.get('obs_vdo_password', '')
     if vdo_pw:
@@ -395,7 +659,7 @@ def api_state():
         'recording': snap['recording'],
         'streaming': snap['streaming'],
         'obs_version': snap['obs_version'],
-        'rows': _mapping_rows(_active_party(), snap),
+        'rows': _mapping_rows(_ordered_party(), snap),
         'group_scene': _special_scene('group'),
         'last_error': appsettingGet('obs_last_error', ''),
     })
@@ -465,46 +729,46 @@ def api_map():
 @login_required
 @dm_required
 def api_switch():
-    """Put someone on screen. Accepts {character_id} (the sidebar button) or
-    {scene} (the manual scene buttons)."""
+    """Give a player the turn — {character_id} enlarges their tile in the
+    party scene without cutting. {scene} still cuts program to a named scene,
+    which is what the manual scene buttons use."""
     import obs_ws
     data = request.get_json(silent=True) or {}
     scene = (data.get('scene') or '').strip()
     character_id = data.get('character_id')
+
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.',
+                        'state': obs_ws.state()}), 503
 
     if not scene and character_id:
         try:
             character_id = int(character_id)
         except (TypeError, ValueError):
             return jsonify({'ok': False, 'error': 'bad character_id'}), 400
-        row = tblObsSceneMap.query.filter_by(entity_type='player',
-                                             entity_id=character_id,
-                                             entity_key='').first()
-        if not row or not row.scene_name:
-            return jsonify({'ok': False, 'need_map': True,
-                            'error': 'No OBS scene is mapped to this player yet.'}), 409
-        scene = row.scene_name
+        if character_id not in _rotation_order():
+            return jsonify({'ok': False, 'need_build': True, 'error':
+                            'That player is not in the party scene — build it '
+                            'from the Broadcast page first.'}), 409
+        payload, err = _do_feature(character_id)
+        if err:
+            return err
+        _set_featured(character_id)
+        return jsonify({'ok': True, 'character_id': character_id, **payload})
+
     if not scene:
         return jsonify({'ok': False, 'error': 'scene or character_id required'}), 400
-
-    if not obs_ws.connected():
-        return jsonify({'ok': False, 'error': 'OBS is not connected.',
-                        'state': obs_ws.state()}), 503
-
-    transition = appsettingGet('obs_transition', '') or None
-    try:
-        ms = int(appsettingGet('obs_transition_ms', '300') or 300)
-    except (TypeError, ValueError):
-        ms = 300
     err = _do_switch(scene)
     if err:
         return err
-    return jsonify({'ok': True, 'current_scene': scene,
-                    'character_id': character_id or None})
+    _set_featured(None)
+    return jsonify({'ok': True, 'current_scene': scene, 'character_id': None})
 
 
 def _do_switch(scene):
-    """Switch + arm the auto-return. Returns a Flask error response, or None."""
+    """Cut program to a named scene. Still used for the manual scene buttons
+    and the ScenePlay-scene link; featuring a PLAYER goes through _do_feature
+    instead, which never cuts."""
     import obs_ws
     transition = appsettingGet('obs_transition', '') or None
     try:
@@ -527,24 +791,46 @@ def _do_switch(scene):
     return None
 
 
+def _do_feature(character_id):
+    """Give a player the turn: re-lay-out the party scene with their tile
+    enlarged. No program cut — the whole table stays on screen.
+
+    Returns (payload, error_response). Also makes sure program is ON the
+    party scene, so the first turn of the night puts it up."""
+    import obs_ws
+    scene = party_scene_name()
+    try:
+        result = _sync_party_scene(featured_id=character_id)
+        if obs_ws.current_state().get('current_scene') != scene:
+            obs_ws.switch_scene(scene)
+    except obs_ws.ObsRejected as exc:
+        obs_ws._record_error('feature', exc)
+        return None, (jsonify({'ok': False,
+                               'error': f'OBS refused: {exc.comment or exc}'}), 502)
+    except obs_ws.ObsUnavailable as exc:
+        obs_ws._record_error('feature', exc)
+        return None, (jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503)
+    _after_switch(scene if character_id is None else '')
+    return {'scene': scene, 'featured_id': character_id,
+            'warnings': result['warnings']}, None
+
+
 @obs_bp.route('/api/next', methods=['POST'])
 @login_required
 @dm_required
 def api_next():
-    """Walk the camera rotation. {direction: 1|-1} steps relative to whoever
-    is on screen NOW (read from OBS's own state, so switching inside OBS keeps
-    the rotation in sync); {position: N} jumps straight to the Nth player,
-    which is what the number keys use."""
+    """Walk the turn order. {direction: 1|-1} steps from whoever holds the
+    turn now; {position: N} jumps straight to the Nth tile, which is what the
+    number keys use."""
     import obs_ws
     data = request.get_json(silent=True) or {}
     order = _rotation_order()
     if not order:
         return jsonify({'ok': False, 'error':
-                        'No players are mapped to OBS scenes yet.'}), 409
+                        'No party members yet — start a session with a party.'}), 409
     if not obs_ws.connected():
         return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
 
-    mapped = _scene_map()
     position = data.get('position')
     if position is not None:
         try:
@@ -553,40 +839,221 @@ def api_next():
             return jsonify({'ok': False, 'error': 'bad position'}), 400
         if not 0 <= idx < len(order):
             return jsonify({'ok': False,
-                            'error': f'Only {len(order)} players are mapped.'}), 409
+                            'error': f'Only {len(order)} players on screen.'}), 409
     else:
         try:
             step = int(data.get('direction', 1)) or 1
         except (TypeError, ValueError):
             step = 1
-        current = obs_ws.current_state().get('current_scene', '')
-        here = next((i for i, cid in enumerate(order)
-                     if mapped.get(cid) == current), None)
-        # Not on anyone's camera (group shot, a title card, OBS switched by
-        # hand): Next starts at the top of the rotation rather than jumping.
+        current = featured_id()
+        here = order.index(current) if current in order else None
+        # Nobody featured (even table, or a fresh session): Next starts at the
+        # top of the order rather than jumping into the middle.
         idx = 0 if here is None else (here + step) % len(order)
 
     character_id = order[idx]
-    err = _do_switch(mapped[character_id])
+    payload, err = _do_feature(character_id)
     if err:
         return err
-    return jsonify({'ok': True, 'current_scene': mapped[character_id],
-                    'character_id': character_id, 'position': idx + 1})
+    _set_featured(character_id)
+    return jsonify({'ok': True, 'character_id': character_id,
+                    'position': idx + 1, **payload})
 
 
 @obs_bp.route('/api/group', methods=['POST'])
 @login_required
 @dm_required
 def api_group():
-    """Back to the group shot — the 'everyone on screen' escape hatch."""
-    group = _special_scene('group')
-    if not group:
-        return jsonify({'ok': False, 'error':
-                        'No group scene is set on the Broadcast page.'}), 409
-    err = _do_switch(group)
-    if err:
-        return err
-    return jsonify({'ok': True, 'current_scene': group})
+    """Even the table out again — nobody enlarged. Cuts to a dedicated wide
+    shot instead if the DM configured one."""
+    import obs_ws
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    # Releasing the pin is part of "even the table out again": otherwise the
+    # map would stay locked to whoever was last looked through.
+    _set_viewed_character(None)
+    try:
+        _unfeature()
+    except obs_ws.ObsRejected as exc:
+        obs_ws._record_error('group', exc)
+        return jsonify({'ok': False, 'error': f'OBS refused: {exc.comment or exc}'}), 502
+    except obs_ws.ObsUnavailable:
+        return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
+    return jsonify({'ok': True, 'current_scene': _special_scene('group')
+                    or party_scene_name(), 'character_id': None})
+
+
+@obs_bp.route('/api/view-player', methods=['POST'])
+@login_required
+@dm_required
+def api_view_player():
+    """Show the map through one character's eyes.
+
+    3D when the map can do it (it needs a floorplan AND background art), and
+    a held close-up on that character in 2D when it cannot — so the button
+    always does something useful rather than being dead on a flat map.
+
+    The render mode it implies is an OVERRIDE that lives with the pin; the
+    configured mode is left alone and takes over again on release."""
+    import obs_ws
+    from models.ttrpg import tblBattleMaps
+    data = request.get_json(silent=True) or {}
+    try:
+        character_id = int(data.get('character_id') or 0)
+    except (TypeError, ValueError):
+        character_id = 0
+    if not character_id:
+        return jsonify({'ok': False, 'error': 'character_id required'}), 400
+    char = db.session.get(tblCharacters, character_id)
+    if not char:
+        return jsonify({'ok': False, 'error': 'No such character.'}), 404
+
+    sess = tblSessions.query.filter_by(status='active').first()
+    bm = (tblBattleMaps.query.filter_by(session_id=sess.session_id, is_active=1).first()
+          if sess else None)
+    if bm is None:
+        return jsonify({'ok': False, 'error': 'No live battle map.'}), 409
+    on_map = any(t.entity_type == 'player' and t.entity_id == character_id
+                 for t in bm.tokens)
+    if not on_map:
+        return jsonify({'ok': False,
+                        'error': f'{char.name} has no token on this map.'}), 409
+
+    _set_viewed_character(character_id)
+    mode = effective_map_mode(bm, True)
+    three_d = mode == '3d'
+    # Deliberately NOT written to obs_map_mode. This is a shot call for the
+    # moment, not a change of setting: the DM's configured mode (usually
+    # auto) has to be exactly what it was once the pin is released.
+
+    scene = None
+    if obs_ws.connected():
+        scene = _special_scene('map') or map_scene_name()
+        try:
+            known, _cur = obs_ws.scene_list()
+            if scene not in (known or []):
+                scene, _warn = ensure_map_scene()
+            obs_ws.switch_scene(scene)
+        except obs_ws.ObsRejected as exc:
+            obs_ws._record_error('view-player', exc)
+            scene = None
+        except obs_ws.ObsUnavailable:
+            scene = None
+    return jsonify({'ok': True, 'character_id': character_id,
+                    'name': char.name, 'mode': mode,
+                    'three_d': three_d, 'current_scene': scene})
+
+
+@obs_bp.route('/api/cut-map', methods=['POST'])
+@login_required
+@dm_required
+def api_cut_map():
+    """Put the battle map on screen.
+
+    Ensures the scene first: a DM who has never run Build / refresh party
+    scene would otherwise get "no such scene" for a button that looks like it
+    should just work."""
+    import obs_ws
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    scene = _special_scene('map') or map_scene_name()
+    try:
+        known, _current = obs_ws.scene_list()
+        if scene not in (known or []):
+            scene, _warn = ensure_map_scene()
+        obs_ws.switch_scene(scene)
+    except obs_ws.ObsRejected as exc:
+        obs_ws._record_error('cut-map', exc)
+        if exc.code == 600:
+            return jsonify({'ok': False,
+                            'error': 'No map scene in OBS yet — run '
+                                     'Build / refresh party scene.'}), 404
+        return jsonify({'ok': False, 'error': f'OBS refused: {exc.comment or exc}'}), 502
+    except obs_ws.ObsUnavailable:
+        return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
+    return jsonify({'ok': True, 'current_scene': scene})
+
+
+@obs_bp.route('/api/card-override', methods=['POST'])
+@login_required
+@dm_required
+def api_card_override():
+    """Pin a player to their stat card (or release them back to their camera).
+
+    The manual answer to a dropped feed: presence only sees portal players, so
+    for anyone at the table this is what the DM reaches for."""
+    data = request.get_json(silent=True) or {}
+    try:
+        character_id = int(data.get('character_id') or 0)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'bad character_id'}), 400
+    if not character_id:
+        return jsonify({'ok': False, 'error': 'character_id required'}), 400
+    on = bool(data.get('show_card'))
+    _set_card_override(character_id, on)
+    swapped = refresh_tiles()
+    return jsonify({'ok': True, 'character_id': character_id,
+                    'show_card': on, 'swapped': swapped})
+
+
+@obs_bp.route('/api/map-mode', methods=['POST'])
+@login_required
+@dm_required
+def api_map_mode():
+    """Flip the map source between auto, 2D and 3D mid-play.
+
+    Instant on purpose: this is a shot call made during a session, not a
+    setting to fill in and save. The source picks it up on its next state
+    poll (~2 s) with no reload, because the mode rides in the state rather
+    than the page."""
+    data = request.get_json(silent=True) or {}
+    want = (data.get('mode') or '').strip().lower()
+    if want not in MAP_MODES:
+        # No mode given = step to the next one, so the sidebar button and the
+        # V hotkey can cycle without knowing the current state.
+        cur = map_mode()
+        want = MAP_MODES[(MAP_MODES.index(cur) + 1) % len(MAP_MODES)]
+    appsettingSet('obs_map_mode', want)
+    return jsonify({'ok': True, 'mode': want})
+
+
+@obs_bp.route('/api/map-reload', methods=['POST'])
+@login_required
+@dm_required
+def api_map_reload():
+    """Make OBS re-fetch the map page.
+
+    A browser source loads its page once and keeps it running for as long as
+    OBS is open, so a ScenePlay update lands on the server but not on the
+    stream: the state keeps polling and looks healthy while the page running
+    it is weeks old. Everything else here is state-driven and needs no
+    reload, which is exactly what makes this case confusing enough to be
+    worth a button."""
+    import obs_ws
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS not connected'}), 503
+    try:
+        obs_ws.refresh_browser_source(MAP_SOURCE_NAME)
+    except obs_ws.ObsRejected as e:
+        if e.code == 600:
+            return jsonify({'ok': False,
+                            'error': f'No "{MAP_SOURCE_NAME}" source in OBS yet '
+                                     '— add the map to a scene first.'}), 404
+        return jsonify({'ok': False, 'error': str(e)}), 502
+    except obs_ws.ObsUnavailable as e:
+        return jsonify({'ok': False, 'error': str(e)}), 503
+    return jsonify({'ok': True, 'source': MAP_SOURCE_NAME})
+
+
+@obs_bp.route('/api/refresh-tiles', methods=['POST'])
+@login_required
+@dm_required
+def api_refresh_tiles():
+    """Force the drop-out check now instead of waiting for the next tick."""
+    import obs_ws
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    return jsonify({'ok': True, 'swapped': refresh_tiles()})
 
 
 @obs_bp.route('/api/reorder', methods=['POST'])
@@ -617,48 +1084,408 @@ def api_reorder():
     return jsonify({'ok': True, 'order': order})
 
 
-@obs_bp.route('/api/create-scene', methods=['POST'])
+# ── the party scene ───────────────────────────────────────────────────────────
+# One scene holds every player as a tile. Giving someone the turn is a
+# TRANSFORM change, not a program cut: the table stays on screen and the
+# active player just grows in place, so the audience never loses track of who
+# sits where.
+
+def party_scene_name():
+    return ((appsettingGet('obs_party_scene', '') or '').strip()
+            or 'ScenePlay Party')
+
+
+def map_scene_name():
+    return ((appsettingGet('obs_map_scene', '') or '').strip()
+            or 'ScenePlay Map')
+
+
+def pre_scene_name():
+    return ((appsettingGet('obs_pre_scene', '') or '').strip()
+            or 'ScenePlay Pre')
+
+
+def post_scene_name():
+    return ((appsettingGet('obs_post_scene', '') or '').strip()
+            or 'ScenePlay Post')
+
+
+# Where a show card's title sits. Nine positions rather than free coordinates:
+# the DM is placing one line of text over one image, and a dropdown they can
+# get right first time beats an x/y pair they have to nudge on a live stream.
+TITLE_POSITIONS = ('top-left', 'top-center', 'top-right',
+                   'middle-left', 'middle-center', 'middle-right',
+                   'bottom-left', 'bottom-center', 'bottom-right')
+SHOW_IMAGE_FRACTION = 0.75      # of the canvas, so the background frames it
+
+
+def show_cfg(kind):
+    """Image, title and title placement for the pre- or post-show card.
+
+    'pre' deliberately shares obs_title_image with the map's idle card: it is
+    the same "we're about to start" art, and keeping one setting means the DM
+    uploads it once instead of keeping two copies in step."""
+    key = 'obs_title_image' if kind == 'pre' else 'obs_post_image'
+    img = (appsettingGet(key, '') or '').strip()
+    pos = (appsettingGet(f'obs_{kind}_title_pos', '') or '').strip().lower()
+    return {
+        'image': img,
+        'image_url': (f'{_card_base()}/static/uploads/obs/{img}' if img else ''),
+        'title': (appsettingGet(f'obs_{kind}_title', '') or '').strip(),
+        'pos': pos if pos in TITLE_POSITIONS else 'bottom-center',
+    }
+
+
+MAP_SOURCE_NAME = 'ScenePlay Battle Map'
+
+
+PANEL_TOKEN_KEY = 'obs-panel'
+BG_DIR = os.path.join('static', 'uploads', 'obs')
+
+
+def panel_on():
+    """The information panel is on by default: an empty strip is easy to spot
+    and turn off, whereas a missing one just looks like the layout is wrong."""
+    return (appsettingGet('obs_panel_on', '1') or '1') == '1'
+
+
+def panel_side():
+    side = (appsettingGet('obs_panel_side', 'right') or 'right').strip().lower()
+    return side if side in ('left', 'right', 'top', 'bottom') else 'right'
+
+
+def panel_fraction():
+    try:
+        return min(max(float((appsettingGet('obs_panel_fraction', '') or '').strip()
+                             or obs_layout.DEFAULT_PANEL_FRACTION), 0.12), 0.6)
+    except (TypeError, ValueError):
+        return obs_layout.DEFAULT_PANEL_FRACTION
+
+
+def title_height():
+    try:
+        return min(max(float((appsettingGet('obs_title_h', '') or '').strip()
+                             or obs_layout.DEFAULT_TITLE_H), 0), 400)
+    except (TypeError, ValueError):
+        return obs_layout.DEFAULT_TITLE_H
+
+
+def _frame_areas(canvas_w, canvas_h):
+    return obs_layout.frame_areas(canvas_w, canvas_h, panel_side(),
+                                  panel_fraction(), title_height(), panel_on())
+
+
+def _panel_token():
+    import hashlib
+    import hmac
+    key = (current_app.secret_key or '').encode() or b'sceneplay'
+    return hmac.new(key, PANEL_TOKEN_KEY.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def panel_url(mode='info'):
+    return (f'{_card_base()}{obs_bp.url_prefix}/panel'
+            f'?t={_panel_token()}&mode={mode}')
+
+
+def ensure_map_scene():
+    """A dedicated full-canvas Map scene to cut to. The SAME source is reused
+    in the party scene when the panel is on — obs-websocket lets one input
+    live in several scenes with independent transforms."""
+    import obs_ws
+    scene = map_scene_name()
+    obs_ws.ensure_scene(scene)
+    snap = obs_ws.current_state()
+    w = snap.get('base_width') or 1920
+    h = snap.get('base_height') or 1080
+    # Map and dice SHARE the canvas rather than the dice covering a corner of
+    # the map. The SAME frame_areas call the party scene uses, title strip
+    # included, so the roll feed is the identical size and position in both
+    # scenes and cutting between them doesn't shift it.
+    areas = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
+                                   title_h=title_height(), panel_on=True)
+    mrect, drect = areas['tiles'], areas['panel']
+
+    item_id, warnings = obs_ws.ensure_browser_input(
+        scene, MAP_SOURCE_NAME, map_url(), int(mrect[2]), int(mrect[3]))
+    if item_id is not None:
+        obs_ws.place_item(scene, item_id, {'x': mrect[0], 'y': mrect[1],
+                                           'w': mrect[2], 'h': mrect[3]})
+        obs_ws.set_item_enabled(scene, item_id, True)
+
+    # The roll feed takes the SAME rect the party's info panel uses, and the
+    # title strip is the same input as the party's — so cutting between the
+    # two scenes moves neither.
+    for src, rect, mode, label in (
+            (TITLE_SOURCE_NAME, areas['title'], 'title', 'title strip'),
+            (DICE_SOURCE_NAME, drect, 'dice', 'dice feed')):
+        if rect is None:
+            continue
+        try:
+            sid, warn = obs_ws.ensure_browser_input(
+                scene, src, panel_url(mode), int(rect[2]), int(rect[3]))
+            warnings.extend(warn)
+            if sid is not None:
+                obs_ws.place_item(scene, sid, {'x': rect[0], 'y': rect[1],
+                                               'w': rect[2], 'h': rect[3]})
+                obs_ws.set_item_enabled(scene, sid, True)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not place the {label} ({exc}).')
+
+    _place_background(scene, w, h, warnings)
+    _upsert_special_map('map', scene)
+    obs_ws.scene_list(refresh=True)
+    return scene, warnings
+
+
+SHOW_SOURCE = {'pre': 'ScenePlay Pre-Show', 'post': 'ScenePlay Post-Show'}
+
+
+def ensure_show_scenes():
+    """The pre-show and post-show cards, one scene each.
+
+    Each is just the shared background with a card over it, so the art the
+    rest of the stream uses carries through the top and tail instead of the
+    show opening on an unrelated screen."""
+    import obs_ws
+    warnings = []
+    snap = obs_ws.current_state()
+    w = snap.get('base_width') or 1920
+    h = snap.get('base_height') or 1080
+    scenes = {}
+    for kind, name_fn in (('pre', pre_scene_name), ('post', post_scene_name)):
+        scene = name_fn()
+        obs_ws.ensure_scene(scene)
+        try:
+            item_id, warn = obs_ws.ensure_browser_input(
+                scene, SHOW_SOURCE[kind], panel_url(kind), w, h)
+            warnings.extend(warn)
+            if item_id is not None:
+                obs_ws.place_item(scene, item_id,
+                                  {'x': 0, 'y': 0, 'w': w, 'h': h})
+                obs_ws.set_item_enabled(scene, item_id, True)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not place the {kind}-show card ({exc}).')
+        _place_background(scene, w, h, warnings)
+        _upsert_special_map(kind, scene)
+        scenes[kind] = scene
+    obs_ws.scene_list(refresh=True)
+    return scenes, warnings
+
+
+def _source_name_for(char):
+    return f'{_scene_name_for(char)} Cam'
+
+
+def _card_overrides():
+    """Character ids the DM has pinned to their stat card. Kept in settings
+    rather than a new column so existing installs need no migration."""
+    raw = (appsettingGet('obs_card_override', '') or '').strip()
+    out = set()
+    for part in raw.split(','):
+        part = part.strip()
+        # lstrip('-'): the DM tile's id is negative
+        if part.lstrip('-').isdigit():
+            out.add(int(part))
+    return out
+
+
+def _set_card_override(character_id, on):
+    ids = _card_overrides()
+    ids.add(character_id) if on else ids.discard(character_id)
+    appsettingSet('obs_card_override', ','.join(str(i) for i in sorted(ids)))
+
+
+def _tile_url(char, presence=None, overrides=None):
+    """What this player's tile should be showing right now.
+
+    Their stat card stands in whenever the camera isn't going to show
+    anything: no feed configured, the DM pinned the card, or the relay says
+    they dropped. A tile is never an empty black box, and because the card
+    occupies the SAME cell, nothing on the grid moves when it swaps."""
+    if overrides is None:
+        overrides = _card_overrides()
+    if char.character_id in overrides:
+        return card_url(char.character_id)
+    if not char.video_view_url():
+        return card_url(char.character_id)
+    if presence is None:
+        presence = _presence()
+    if _feed_state(char, presence) == 'stale':
+        # They had a camera and the relay stopped hearing from them.
+        return card_url(char.character_id)
+    return char.video_view_url()
+
+
+@obs_bp.route('/api/build-party', methods=['POST'])
 @login_required
 @dm_required
-def api_create_scene():
-    """Build an OBS scene showing this player's feed, and map them to it."""
+def api_build_party():
+    """Create/refresh the party scene: every party member gets a tile, laid
+    out on the grid. Idempotent — run it again after the party changes."""
     import obs_ws
-    data = request.get_json(silent=True) or {}
-    try:
-        character_id = int(data.get('character_id') or 0)
-    except (TypeError, ValueError):
-        character_id = 0
-    char = db.session.get(tblCharacters, character_id) if character_id else None
-    if not char:
-        return jsonify({'ok': False, 'error': 'unknown character'}), 404
-    url = char.video_view_url()
-    if not url:
-        return jsonify({'ok': False, 'need_feed': True, 'error':
-                        f'{char.name} has no camera feed yet — send them the '
-                        f'link from the Camera column first.'}), 409
     if not obs_ws.connected():
         return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
-
-    scene_name = _scene_name_for(char)
-    source_name = f'{scene_name} Feed'
     try:
-        scene_name, source_name, warnings = obs_ws.create_player_scene(
-            scene_name, source_name, url)
+        result = _sync_party_scene()
+        map_scene, map_warn = ensure_map_scene()
+        result['warnings'].extend(map_warn)
+        result['map_scene'] = map_scene
+        show_scenes, show_warn = ensure_show_scenes()
+        result['warnings'].extend(show_warn)
+        result['show_scenes'] = show_scenes
     except obs_ws.ObsRejected as exc:
-        obs_ws._record_error('create-scene', exc)
+        obs_ws._record_error('build-party', exc)
         return jsonify({'ok': False, 'error': f'OBS refused: {exc.comment or exc}'}), 502
     except obs_ws.ObsUnavailable as exc:
-        obs_ws._record_error('create-scene', exc)
+        obs_ws._record_error('build-party', exc)
         return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
+    start_feed_watch(current_app._get_current_object())
+    return jsonify({'ok': True, **result})
 
-    _upsert_player_map(character_id, scene_name, source_name, auto_created=1)
+
+def _sync_party_scene(featured_id=None):
+    """Make OBS match the party: one tile per member, positioned on the grid.
+
+    Tile ORDER is the rotation order, so a player's cell is stable for the
+    whole session — that is what lets the featured tile grow without the rest
+    of the table shuffling underneath it."""
+    import obs_ws
+    scene = party_scene_name()
+    obs_ws.ensure_scene(scene)
+
+    members = _ordered_party()
+    snap = obs_ws.current_state()
+    canvas_w = snap.get('base_width') or 1920
+    canvas_h = snap.get('base_height') or 1080
+    try:
+        gutter = int(appsettingGet('obs_tile_gutter', '') or obs_layout.DEFAULT_GUTTER)
+    except (TypeError, ValueError):
+        gutter = obs_layout.DEFAULT_GUTTER
+    featured_idx = None
+    if featured_id is not None:
+        for i, c in enumerate(members):
+            if c.character_id == featured_id:
+                featured_idx = i
+                break
+
+    # The frame owns the title strip and the info panel, so the tiles get
+    # whatever it leaves. Tiles are all one size now — see grid_layout.
+    areas = _frame_areas(canvas_w, canvas_h)
+    rects = obs_layout.grid_layout(len(members), canvas_w, canvas_h,
+                                   featured=featured_idx, gutter=gutter,
+                                   area=areas['tiles'])
+    warnings = []
+    placed = []
+    presence = _presence()
+    overrides = _card_overrides()
+    for char, rect in zip(members, rects):
+        source = _source_name_for(char)
+        url = _tile_url(char, presence, overrides)
+        _tile_urls[char.character_id] = url
+        item_id, warn = obs_ws.ensure_browser_input(
+            scene, source, url, rect['w'], rect['h'])
+        warnings.extend(warn)
+        if item_id is None:
+            warnings.append(f'Could not place {char.name} in the scene.')
+            continue
+        obs_ws.place_item(scene, item_id, rect)
+        obs_ws.set_item_enabled(scene, item_id, True)
+        _upsert_player_map(char.character_id, scene, source, auto_created=1)
+        placed.append({'character_id': char.character_id, 'name': char.name,
+                       'source': source, 'item_id': item_id,
+                       'featured': rect['featured']})
+
+    keep = {p['source'] for p in placed}
+
+    # Title strip and info panel, each in its own box.
+    for src, rect, mode, label in (
+            (TITLE_SOURCE_NAME, areas['title'], 'title', 'title strip'),
+            (PANEL_SOURCE_NAME, areas['panel'], 'info', 'information panel')):
+        if rect is None:
+            continue        # switched off — _prune_party_scene drops it
+        try:
+            item_id, warn = obs_ws.ensure_browser_input(
+                scene, src, panel_url(mode), int(rect[2]), int(rect[3]))
+            warnings.extend(warn)
+            if item_id is not None:
+                obs_ws.place_item(scene, item_id, {'x': rect[0], 'y': rect[1],
+                                                   'w': rect[2], 'h': rect[3]})
+                obs_ws.set_item_enabled(scene, item_id, True)
+                keep.add(src)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not place the {label} ({exc}).')
+
+    # Art goes in last so its index-0 move lands after every other item is
+    # present — otherwise a later insert would push it back up the stack.
+    if _place_background(scene, canvas_w, canvas_h, warnings) is not None:
+        keep.add(BG_SOURCE_NAME)
+
+    # The battle map no longer shares this scene — it has its own. Drop it if
+    # an older build left it here, otherwise it would sit on top of the frame.
+    try:
+        present = obs_ws.scene_items(scene)
+        if MAP_SOURCE_NAME in present:
+            obs_ws.remove_item(scene, present[MAP_SOURCE_NAME])
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        pass
+
+    _prune_party_scene(scene, keep, warnings)
     obs_ws.scene_list(refresh=True)
-    return jsonify({'ok': True, 'scene_name': scene_name, 'warnings': warnings})
+    return {'scene': scene, 'tiles': placed, 'warnings': warnings,
+            'featured_id': featured_id}
+
+
+def _prune_party_scene(scene, keep_sources, warnings):
+    """Drop tiles for players who left the party, so an old member's camera
+    doesn't linger on stream."""
+    import obs_ws
+    try:
+        present = obs_ws.scene_items(scene)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        return
+    for source, item_id in present.items():
+        if source in keep_sources:
+            continue
+        # Only remove tiles WE created — never touch the DM's own overlays,
+        # lower thirds or backgrounds that share this scene.
+        if not source.startswith(_MANAGED_PREFIXES):
+            continue
+        try:
+            obs_ws.remove_item(scene, item_id)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not remove the old tile "{source}" ({exc}).')
+
+
+def _ordered_party():
+    """Everyone with a tile, in turn order: saved order first, then anyone
+    new, so adding a character never renumbers the rest.
+
+    The DM rides along as a normal entry — they take turns narrating too —
+    and lands at the front until the DM reorders themselves elsewhere."""
+    party = {c.character_id: c for c in _active_party()}
+    if dm_tile_enabled():
+        party[DM_TILE_ID] = dm_tile()
+    ordered = []
+    rows = (tblObsSceneMap.query
+            .filter_by(entity_type='player')
+            .order_by(tblObsSceneMap.sort_order, tblObsSceneMap.obs_map_id)
+            .all())
+    for row in rows:
+        if row.entity_id in party:
+            ordered.append(party.pop(row.entity_id))
+    # A DM with no saved position leads; new players follow by name.
+    dm = party.pop(DM_TILE_ID, None)
+    rest = sorted(party.values(), key=lambda c: c.name.lower())
+    if dm is not None:
+        ordered.insert(0, dm)
+    ordered.extend(rest)
+    return ordered
 
 
 def _scene_name_for(char):
     clean = re.sub(r'[\x00-\x1f]', '', char.name or '').strip() or f'Player {char.character_id}'
-    return f'Player - {clean}'[:200]
+    prefix = 'DM - ' if char.character_id == DM_TILE_ID else 'Player - '
+    return f'{prefix}{clean}'[:200]
 
 
 def _upsert_player_map(character_id, scene_name, source_name=None, auto_created=None):
@@ -739,6 +1566,44 @@ def _own_character(character_id):
     return char
 
 
+@obs_bp.route('/feed/dm', methods=['GET', 'POST'])
+@login_required
+@dm_required
+def dm_feed():
+    """The DM's own camera link. Same self-service page as a player's, but
+    the identity lives in settings rather than on a character."""
+    if request.method == 'POST':
+        action = request.form.get('action', 'save')
+        if action == 'regenerate':
+            appsettingSet('obs_dm_stream_id', _new_stream_id())
+            appsettingSet('obs_dm_feed_url', '')
+            flash('New camera link generated — the old one no longer works.')
+        else:
+            try:
+                appsettingSet('obs_dm_feed_url',
+                              _normalize_feed_url(request.form.get('video_feed_url')))
+            except ValueError as exc:
+                flash(str(exc))
+                return redirect(url_for('obs_bp.dm_feed'))
+            if not (appsettingGet('obs_dm_feed_url', '')
+                    or appsettingGet('obs_dm_stream_id', '')):
+                appsettingSet('obs_dm_stream_id', _new_stream_id())
+            flash('Camera settings saved.')
+        refresh_tiles()
+        return redirect(url_for('obs_bp.dm_feed'))
+
+    if not (appsettingGet('obs_dm_stream_id', '')
+            or appsettingGet('obs_dm_feed_url', '')):
+        appsettingSet('obs_dm_stream_id', _new_stream_id())
+    tile = dm_tile()
+    return render_template('ttrpg/obs_my_feed.html', char=tile,
+                           push_url=tile.video_push_url(),
+                           view_url=tile.video_view_url(),
+                           qr_svg=_qr_svg(tile.video_push_url()),
+                           is_dm=True, is_dm_tile=True,
+                           save_url=url_for('obs_bp.dm_feed'))
+
+
 @obs_bp.route('/feed/<int:character_id>')
 @login_required
 def my_feed(character_id):
@@ -753,7 +1618,9 @@ def my_feed(character_id):
                            push_url=push_url,
                            view_url=char.video_view_url(),
                            qr_svg=_qr_svg(push_url),
-                           is_dm=current_user.is_dm())
+                           is_dm=current_user.is_dm(), is_dm_tile=False,
+                           save_url=url_for('obs_bp.save_feed',
+                                            character_id=character_id))
 
 
 @obs_bp.route('/feed/<int:character_id>', methods=['POST'])
@@ -797,6 +1664,675 @@ def _repoint_obs_source(char):
             obs_ws.set_browser_url(row.source_name, char.video_view_url())
     except Exception as exc:                # never block the player's save
         log.info('Could not repoint OBS source for %s: %s', char.name, exc)
+
+
+# ── player card (the tile for someone with no camera) ────────────────────────
+# OBS's browser source has no ScenePlay login, so the card is gated by a
+# per-character token instead — the same capability model as a camera link.
+# Derived from the app secret, so it needs no storage and rotating the secret
+# revokes every card at once.
+
+def _card_token(character_id):
+    import hashlib
+    import hmac
+    key = (current_app.secret_key or '').encode() or b'sceneplay'
+    return hmac.new(key, f'obs-card:{character_id}'.encode(),
+                    hashlib.sha256).hexdigest()[:32]
+
+
+DEFAULT_CARD_PORT = 8086          # the port ws.py serves ScenePlay on
+
+
+def _card_base():
+    """Where OBS should fetch cards from.
+
+    Must be ABSOLUTE — a browser source has no page to be relative to — and
+    built without url_for, which needs a request context this can't rely on
+    (the auto-return timer calls it from a plain thread). Auto-filled from the
+    DM's own address when they open the Broadcast page; override it when OBS
+    runs on a different machine from ScenePlay."""
+    base = (appsettingGet('obs_card_base', '') or '').strip()
+    return base.rstrip('/') if base else f'http://127.0.0.1:{DEFAULT_CARD_PORT}'
+
+
+def card_url(character_id):
+    # Flask's <int:> converter never matches a negative number, so the DM's
+    # card gets its own path rather than /card/-1.
+    leaf = 'dm' if character_id == DM_TILE_ID else str(character_id)
+    return (f'{_card_base()}{obs_bp.url_prefix}/card/{leaf}'
+            f'?t={_card_token(character_id)}')
+
+
+@obs_bp.route('/card/dm')
+def dm_card():
+    """The DM's tile when they have no camera. Same token gate as a player
+    card; a separate path because <int:> never matches a negative id."""
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _card_token(DM_TILE_ID)):
+        abort(403)
+    tile = dm_tile()
+    return render_template('ttrpg/obs_card.html', char=tile, conditions=[],
+                           is_dm=True, poll_s=card_poll_s(),
+                           poll_url=url_for('obs_bp.dm_card_state',
+                                            t=request.args.get('t', '')))
+
+
+@obs_bp.route('/card/dm/state')
+def dm_card_state():
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _card_token(DM_TILE_ID)):
+        abort(403)
+    tile = dm_tile()
+    return jsonify({'name': tile.name, 'hp_current': 0, 'hp_max': 0,
+                    'hp_pct': 0, 'ac': 0, 'conditions': []})
+
+
+@obs_bp.route('/card/<int:character_id>')
+def player_card(character_id):
+    """Transparent stat card for OBS. No login: OBS can't hold a session, so
+    the URL carries a token. compare_digest to keep it constant-time."""
+    import hmac
+    token = request.args.get('t', '')
+    if not hmac.compare_digest(token, _card_token(character_id)):
+        abort(403)
+    char = db.session.get(tblCharacters, character_id)
+    if not char:
+        abort(404)
+    conditions = [c.condition_name for c in char.conditions] if char.conditions else []
+    return render_template('ttrpg/obs_card.html', char=char,
+                           conditions=conditions, is_dm=False,
+                           poll_s=card_poll_s(),
+                           poll_url=url_for('obs_bp.card_state',
+                                            character_id=character_id,
+                                            t=token))
+
+
+@obs_bp.route('/card/<int:character_id>/state')
+def card_state(character_id):
+    """Live values for the card — it polls this so HP/conditions track play
+    without the DM touching anything."""
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _card_token(character_id)):
+        abort(403)
+    char = db.session.get(tblCharacters, character_id)
+    if not char:
+        abort(404)
+    return jsonify({
+        'name': char.name,
+        'hp_current': char.hp_current, 'hp_max': char.hp_max,
+        'hp_pct': char.hp_pct(), 'ac': char.ac,
+        'conditions': [c.condition_name for c in char.conditions] if char.conditions else [],
+    })
+
+
+# ── the shared battle map ─────────────────────────────────────────────────────
+# A chrome-free render of the live map for OBS: no nav bar, no sidebar, no
+# browser furniture — so it can be a browser SOURCE rather than a window or
+# display capture. Token-gated like the player cards.
+#
+# Visibility is resolved SERVER-SIDE. The map is drawn through the eyes of
+# whoever moved last, and anything their character cannot see never reaches
+# the browser at all — a hidden monster must not be sitting in the page source
+# of something being broadcast.
+
+MAP_TOKEN_KEY = 'obs-map'
+TITLE_DIR = os.path.join('static', 'uploads', 'obs')
+TITLE_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
+
+
+@obs_bp.route('/title-image', methods=['POST'])
+@login_required
+@dm_required
+def upload_title_image():
+    """The card the map source falls back to when no map is live."""
+    f = request.files.get('title_image')
+    if request.form.get('clear'):
+        appsettingSet('obs_title_image', '')
+        flash('Title image cleared.')
+        return redirect(url_for('obs_bp.broadcast'))
+    if not f or not f.filename:
+        flash('No image chosen.')
+        return redirect(url_for('obs_bp.broadcast'))
+    ext = f.filename.rsplit('.', 1)[-1].lower()
+    if ext not in TITLE_EXT:
+        flash('Use a PNG, JPG, WEBP or GIF.')
+        return redirect(url_for('obs_bp.broadcast'))
+    os.makedirs(TITLE_DIR, exist_ok=True)
+    name = f'title-{secrets.token_hex(6)}.{ext}'
+    f.save(os.path.join(TITLE_DIR, name))
+    old = (appsettingGet('obs_title_image', '') or '').strip()
+    appsettingSet('obs_title_image', name)
+    if old:
+        try:
+            os.remove(os.path.join(TITLE_DIR, old))
+        except OSError:
+            pass
+    flash('Title image saved.')
+    return redirect(url_for('obs_bp.broadcast'))
+
+
+def _map_token():
+    import hashlib
+    import hmac
+    key = (current_app.secret_key or '').encode() or b'sceneplay'
+    return hmac.new(key, MAP_TOKEN_KEY.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def map_url():
+    return f'{_card_base()}{obs_bp.url_prefix}/map?t={_map_token()}'
+
+
+def _check_map_token():
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _map_token()):
+        abort(403)
+
+
+def _fog_rects(effects):
+    """Cloud effects as (x1, y1, x2, y2) cell rects — the same geometry the
+    2D page and the 3D viewer use."""
+    out = []
+    for e in effects:
+        if e.get('shape') != 'cloud':
+            continue
+        w = max(1.0, (e.get('size_ft') or 5) / 5.0)
+        h = e.get('angle') if (e.get('angle') or 0) > 0 else w
+        x1, y1 = e.get('anchor_x') or 0, e.get('anchor_y') or 0
+        out.append((x1, y1, x1 + w, y1 + h))
+    return out
+
+
+def _hidden_by_fog(token, fog):
+    span = max(1, token.get('size_squares') or 1)
+    cx = (token.get('col') or 0) + span / 2.0
+    cy = (token.get('row') or 0) + span / 2.0
+    return any(x1 <= cx < x2 and y1 <= cy < y2 for x1, y1, x2, y2 in fog)
+
+
+# One source per box. The title input is shared by the Party and Map scenes,
+# and the Info panel and the Map's Dice feed are placed with the SAME rect —
+# which is what makes "identical in both scenes" structural instead of two
+# separate calculations that have to agree.
+PANEL_SOURCE_NAME = 'ScenePlay Info'
+TITLE_SOURCE_NAME = 'ScenePlay Title'
+BG_SOURCE_NAME = 'ScenePlay Background'
+DICE_SOURCE_NAME = 'ScenePlay Dice'
+ROLL_LIMIT = 25
+
+
+def _place_background(scene, canvas_w, canvas_h, warnings):
+    """Put the art at the very back of `scene`.
+
+    One input shared by every ScenePlay scene rather than a copy each:
+    obs-websocket lets a single input live in several scenes with independent
+    transforms, so changing the image updates all of them at once and the
+    streaming box pays for one browser source instead of three."""
+    import obs_ws
+    try:
+        item_id, warn = obs_ws.ensure_browser_input(
+            scene, BG_SOURCE_NAME, panel_url('bg'), canvas_w, canvas_h)
+        warnings.extend(warn)
+        if item_id is None:
+            return None
+        obs_ws.place_item(scene, item_id,
+                          {'x': 0, 'y': 0, 'w': canvas_w, 'h': canvas_h})
+        obs_ws.set_item_enabled(scene, item_id, True)
+        try:
+            # Index 0 is the BOTTOM of the stack — anything else and the art
+            # covers the cameras it is supposed to sit behind.
+            obs_ws.set_item_index(scene, item_id, 0)
+        except obs_ws.ObsRejected as exc:
+            warnings.append(f'Could not send the background to the back ({exc}).')
+        return item_id
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        warnings.append(f'Could not place the background ({exc}).')
+        return None
+
+
+@obs_bp.route('/post-image', methods=['POST'])
+@login_required
+@dm_required
+def upload_post_image():
+    """Art for the post-show card. The pre-show card reuses the title-card
+    image, so it needs no uploader of its own."""
+    if request.form.get('clear'):
+        appsettingSet('obs_post_image', '')
+        flash('Post-show image cleared.')
+        return redirect(url_for('obs_bp.broadcast'))
+    f = request.files.get('post_image')
+    if not f or not f.filename:
+        flash('No image chosen.')
+        return redirect(url_for('obs_bp.broadcast'))
+    ext = f.filename.rsplit('.', 1)[-1].lower()
+    if ext not in TITLE_EXT:
+        flash('Use a PNG, JPG, WEBP or GIF.')
+        return redirect(url_for('obs_bp.broadcast'))
+    os.makedirs(BG_DIR, exist_ok=True)
+    name = f'post-show.{ext}'
+    f.save(os.path.join(BG_DIR, name))
+    appsettingSet('obs_post_image', name)
+    flash('Post-show image updated. Refresh the card source in OBS to see it.')
+    return redirect(url_for('obs_bp.broadcast'))
+
+
+@obs_bp.route('/party-bg', methods=['POST'])
+@login_required
+@dm_required
+def upload_party_bg():
+    """Background art for the party scene — it sits behind every tile."""
+    if request.form.get('clear'):
+        appsettingSet('obs_party_bg', '')
+        flash('Party background cleared.')
+        return redirect(url_for('obs_bp.broadcast'))
+    f = request.files.get('party_bg')
+    if not f or not f.filename:
+        flash('No image chosen.')
+        return redirect(url_for('obs_bp.broadcast'))
+    ext = f.filename.rsplit('.', 1)[-1].lower()
+    if ext not in TITLE_EXT:
+        flash('Use a PNG, JPG, WEBP or GIF.')
+        return redirect(url_for('obs_bp.broadcast'))
+    os.makedirs(BG_DIR, exist_ok=True)
+    name = f'party-bg.{ext}'
+    f.save(os.path.join(BG_DIR, name))
+    appsettingSet('obs_party_bg', name)
+    flash('Party background updated. Refresh the frame source in OBS to see it.')
+    return redirect(url_for('obs_bp.broadcast'))
+
+
+PANEL_MODES = ('bg', 'title', 'info', 'dice', 'pre', 'post')
+
+
+@obs_bp.route('/panel')
+def panel_view():
+    """One page, three modes — see the template header."""
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _panel_token()):
+        abort(403)
+    mode = (request.args.get('mode') or 'info').strip().lower()
+    return render_template('ttrpg/obs_panel.html',
+                           mode=mode if mode in PANEL_MODES else 'info',
+                           state_url=url_for('obs_bp.panel_state',
+                                             t=_panel_token()),
+                           poll_s=panel_poll_s())
+
+
+def panel_poll_s():
+    """Faster than the stat cards: a roll landing on stream 10s after it was
+    made has already stopped being news at the table."""
+    try:
+        return min(max(float((appsettingGet('obs_panel_poll_s', '') or '').strip()
+                             or 4), 1), 60)
+    except (TypeError, ValueError):
+        return 4.0
+
+
+def _info_lines():
+    raw = appsettingGet('obs_info_text', '') or ''
+    return [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
+
+
+def _recent_rolls(limit=ROLL_LIMIT):
+    """Newest LAST, so the panel reads top-to-bottom like a log."""
+    import json as _json
+    from models.ttrpg import tblDiceRolls
+    rows = (tblDiceRolls.query.order_by(tblDiceRolls.roll_id.desc())
+            .limit(limit).all())
+    out = []
+    for r in reversed(rows):
+        try:
+            dice = _json.loads(r.dice_json or '[]')
+        except (TypeError, ValueError):
+            dice = []
+        # Crit/fumble only mean anything on a single d20: flagging the natural
+        # 20 inside a handful of d6 damage dice would light up constantly.
+        nat = dice[0] if len(dice) == 1 else None
+        d20 = 'd20' in (r.expression or '').lower()
+        out.append({
+            'id': r.roll_id,
+            'who': r.char_name or '',
+            'label': r.label or '',
+            'expression': r.expression or '',
+            'total': r.total,
+            'crit': bool(d20 and nat == 20),
+            'fumble': bool(d20 and nat == 1),
+        })
+    return out
+
+
+@obs_bp.route('/panel/state')
+def panel_state():
+    import hmac
+    if not hmac.compare_digest(request.args.get('t', ''), _panel_token()):
+        abort(403)
+    snap = {}
+    try:
+        import obs_ws
+        snap = obs_ws.current_state()
+    except Exception:      # noqa: BLE001 - the panel must render without OBS
+        snap = {}
+    canvas_w = snap.get('base_width') or 1920
+    canvas_h = snap.get('base_height') or 1080
+    areas = _frame_areas(canvas_w, canvas_h)
+
+    sess = tblSessions.query.filter_by(status='active').first()
+    title = (appsettingGet('obs_panel_title', '') or '').strip()
+    if not title:
+        # Same derivation the map's idle card uses, so the two agree.
+        tp = _title_payload(sess)
+        title = tp['campaign'] or tp['session'] or 'ScenePlay'
+    bg = (appsettingGet('obs_party_bg', '') or '').strip()
+
+    turn = ''
+    fid = featured_id()
+    if fid is not None and fid != DM_TILE_ID:
+        ch = db.session.get(tblCharacters, fid)
+        if ch:
+            turn = ch.name
+    elif fid == DM_TILE_ID:
+        turn = dm_tile().name
+
+    lines = _info_lines()
+    return jsonify({
+        'canvas_w': canvas_w, 'canvas_h': canvas_h,
+        'title_rect': areas['title'], 'panel_rect': areas['panel'],
+        'bg_url': (f'{_card_base()}/static/uploads/obs/{bg}' if bg else ''),
+        'title': title,
+        'turn': turn,
+        'info_lines': lines,
+        # Always sent now: the party panel prefers notes over dice, but the
+        # dice source on the battle map wants them regardless of notes.
+        'rolls': _recent_rolls(),
+        # Where a dice-only source sits. Computed with the panel forced on, so
+        # turning the party panel off doesn't leave the map's dice homeless.
+        'dice_rect': obs_layout.frame_areas(canvas_w, canvas_h, panel_side(),
+                                            panel_fraction(), title_height(),
+                                            True)['panel'],
+        'pre': show_cfg('pre'),
+        'post': show_cfg('post'),
+        'image_fraction': SHOW_IMAGE_FRACTION,
+    })
+
+
+@obs_bp.route('/map')
+def map_view():
+    """The map source itself. Static URL: whose eyes it uses is decided by the
+    state poll, so giving someone the turn never reloads the browser source."""
+    _check_map_token()
+    return render_template(
+        'ttrpg/obs_map.html',
+        state_url=url_for('obs_bp.map_state', t=_map_token()),
+        floorplan_url=url_for('obs_bp.map_floorplan', t=_map_token()),
+        three_url=url_for('static', filename='scripts/three.min.js'),
+        bm3d_url=url_for('static', filename='scripts/battlemap3d.js'))
+
+
+@obs_bp.route('/map/state')
+def map_state():
+    """Everything the map source draws, already filtered for what the audience
+    is allowed to see."""
+    _check_map_token()
+    from models.ttrpg import tblBattleMaps
+    from flask import url_for as _url_for
+
+    sess = tblSessions.query.filter_by(status='active').first()
+    bm = (tblBattleMaps.query.filter_by(session_id=sess.session_id, is_active=1).first()
+          if sess else None)
+    if bm is None or not bm.bg_image:
+        # Nothing live: the source shows the title card rather than a stale
+        # map or an empty black rectangle.
+        return jsonify({'live': False, 'title': _title_payload(sess)})
+
+    tokens, effects = _map_payload(bm)
+    fog = _fog_rects(effects)
+    # Fog is opaque for the audience and anything inside it is dropped — the
+    # broadcast never carries what the party has not uncovered.
+    visible = [t for t in tokens if not _hidden_by_fog(t, fog)]
+
+    # Resolved against the VISIBLE list on purpose: the 3D view stands in this
+    # token, so it has to be one we actually sent. A featured player who is
+    # off the map — or inside fog — yields nothing, and the source falls back
+    # to the 2D render rather than adopting a viewpoint that isn't there.
+    # The view follows whoever moved LAST, so the shot goes where the action
+    # is rather than staying with whoever the DM clicked most recently. The
+    # featured player is the fallback, for a map where nothing has moved yet.
+    through = None
+    pinned = viewed_character_id()
+    if pinned is not None:
+        through = next((t for t in visible if t['entity_type'] == 'player'
+                        and t['entity_id'] == pinned), None)
+    if through is None:
+        last_id = _last_moved_token_id(bm)
+        if last_id is not None:
+            through = next((t for t in visible if t['token_id'] == last_id), None)
+    featured = featured_id()
+    if through is None and featured is not None and featured != DM_TILE_ID:
+        through = next((t for t in visible
+                        if t['entity_type'] == 'player' and t['entity_id'] == featured), None)
+    return jsonify({
+        'live': True,
+        'bg_url': _url_for('static', filename=f'uploads/battlemaps/{bm.bg_image}'),
+        'is_video': bm.bg_image.rsplit('.', 1)[-1].lower() in ('mp4', 'webm', 'ogv'),
+        'cols': bm.grid_cols, 'rows': bm.grid_rows,
+        'tokens': visible,
+        'effects': [e for e in effects if e.get('shape') != 'cloud'],
+        'fog': [{'x1': r[0], 'y1': r[1], 'x2': r[2], 'y2': r[3]} for r in fog],
+        'through': (through or {}).get('name', ''),
+        'through_token_id': (through or {}).get('token_id'),
+        # Only set when the DM pinned someone: it tells the 2D render to hold
+        # a close-up on that character instead of framing the whole party.
+        'focus_token_id': ((through or {}).get('token_id')
+                           if pinned is not None and through else None),
+        'map_name': bm.name,
+        'zoom': _zoom_cfg(),
+        # The effective mode: a pin overrides the configured one for as long
+        # as it is held. The Broadcast page and the sidebar button keep
+        # reading map_mode(), so what the DM chose still shows as chosen.
+        'mode': effective_map_mode(bm, pinned is not None and through is not None),
+        # Exactly the rule the map page uses for its own 3D button
+        # (routes/battlemap.py: bm3d_available) — geometry AND art. Without
+        # both, 3D is not available for this map and the source stays 2D.
+        'three_d_ready': _three_d_available(bm),
+        'floorplan_version': _map_floorplan_version(bm.map_id),
+        'doors': _map_door_states(bm.map_id),
+        'map_id': bm.map_id,
+        # feet -> squares for the look-around range; a map can redefine what a
+        # square is worth.
+        'movement_scale': bm.movement_scale or 1.0,
+    })
+
+
+def _three_d_available(bm):
+    """Mirror of bm3d_available on the battle map page: 3D needs a floorplan
+    to build walls from AND background art to texture them with."""
+    return bool(_map_floorplan_version(bm.map_id) and bm.bg_image)
+
+
+def card_poll_s():
+    """How often a stat card re-checks HP and conditions, in seconds.
+
+    Every card in the party scene is its own browser source, so this is
+    multiplied by the size of the party — at the old fixed 3s an eight-player
+    table meant a request every 375ms all session. Cards show HP and
+    conditions, which move at the pace of a turn, not a frame."""
+    try:
+        return min(max(float((appsettingGet('obs_card_poll_s', '') or '').strip()
+                             or CARD_POLL_DEFAULT), 2), 120)
+    except (TypeError, ValueError):
+        return CARD_POLL_DEFAULT
+
+
+def effective_map_mode(bm, pinned):
+    """What the map source should actually render right now.
+
+    Equal to map_mode() unless the DM has pinned the view to a character.
+    A pin overrides AUTO — which would otherwise cut back to the flat map
+    part-way through — but never overrides an explicit 2D: someone who
+    deliberately chose the top-down view should get a close-up of the
+    character, not be argued with. Explicit 3D and auto both give 3D where
+    the map can render it."""
+    if not pinned:
+        return map_mode()
+    if map_mode() == '2d':
+        return '2d'
+    return '3d' if _three_d_available(bm) else '2d'
+
+
+def map_mode():
+    """'auto' | '2d' | '3d'.
+
+    'auto' is the default because it is the only one that needs no attention
+    during play: the source sits on the 2D map and cuts to the featured
+    player's 3D view only when they actually move, then cuts back. '2d' and
+    '3d' pin it for a DM who wants to hold one shot."""
+    mode = (appsettingGet('obs_map_mode', 'auto') or 'auto').strip().lower()
+    return mode if mode in MAP_MODES else 'auto'
+
+
+def _map_floorplan_version(map_id):
+    from models.ttrpg import tblBattleMapFloorplans
+    fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
+    return fp.version if fp else None
+
+
+def _map_door_states(map_id):
+    from models.ttrpg import tblBattleMapDoors
+    return {d.door_key: d.is_open
+            for d in tblBattleMapDoors.query.filter_by(map_id=map_id).all()}
+
+
+@obs_bp.route('/map/floorplan')
+def map_floorplan():
+    """Wall geometry for the 3D branch, in the shape BM3D's floorplanUrl
+    expects. Fetched only when the version changes, never on the 2 s poll."""
+    _check_map_token()
+    from models.ttrpg import tblBattleMapFloorplans
+    try:
+        map_id = int(request.args.get('map_id') or 0)
+    except (TypeError, ValueError):
+        map_id = 0
+    fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
+    if not fp:
+        return jsonify({'ok': True, 'version': None, 'floorplan': None})
+    import json as _json
+    return jsonify({'ok': True, 'version': fp.version,
+                    'floorplan': _json.loads(fp.json_data)})
+
+
+def _zoom_cfg():
+    """Action-camera settings, sent with the state so changing them takes
+    effect without reloading the browser source."""
+    def _num(name, default, lo, hi):
+        try:
+            return min(max(float(appsettingGet(name, '') or default), lo), hi)
+        except (TypeError, ValueError):
+            return default
+    return {
+        'on': (appsettingGet('obs_map_zoom', '1') or '1') == '1',
+        'max': _num('obs_map_zoom_max', 2.2, 1.0, 6.0),
+        'hold_s': _num('obs_map_zoom_hold_s', 6, 1, 120),
+    }
+
+
+def viewed_character_id():
+    """Character the DM pinned the map view to, or None.
+
+    Beats the follow-the-last-mover rule: an explicit click is a shot call and
+    must not be stolen a moment later by whoever happens to shuffle a token.
+    Cleared by the group shot, which is how you hand the camera back."""
+    raw = (appsettingGet('obs_view_char', '') or '').strip()
+    try:
+        return int(raw) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _set_viewed_character(character_id):
+    appsettingSet('obs_view_char', str(character_id or ''))
+
+
+def _last_moved_token_id(bm):
+    """token_id of the player token moved most recently, or None.
+
+    Reads tblBattleMapTokens.updated_at, which BOTH the table's own move
+    endpoint and the relay's portal moves already stamp — so a move made from
+    a handheld counts exactly like one made at the table, with no extra
+    bookkeeping on either path.
+
+    A timestamp shared by more than one token is deliberately not treated as a
+    move: activating a map stamps every token with one activation time, and a
+    grid resize stamps each token it clamps. Only a uniquely-latest stamp is
+    someone actually moving, which stops the camera adopting an arbitrary
+    viewpoint the moment a map goes live.
+
+    Monsters are excluded. "Character" here means a PC, and standing in a
+    monster's shoes would put the camera where the DM has hidden something —
+    the audience would read its position off the viewpoint even though the
+    token itself is filtered out of the payload."""
+    stamps = {}
+    for t in bm.tokens:
+        if t.entity_type != 'player':
+            continue
+        ts = (t.updated_at or '').strip()
+        if ts:
+            stamps.setdefault(ts, []).append(t.token_id)
+    if not stamps:
+        return None
+    newest = stamps[max(stamps)]
+    return newest[0] if len(newest) == 1 else None
+
+
+def _map_payload(bm):
+    """Reuse the battle map's own state builder so the broadcast render can
+    never drift from what the table sees."""
+    from routes.battlemap import _fetch_token_entities, _monster_stats, _size_squares, _monster_img_url
+    from flask import url_for as _url_for
+    monsters, chars = _fetch_token_entities(bm.tokens)
+    tokens = []
+    for t in bm.tokens:
+        if t.entity_type == 'monster':
+            sm = monsters.get(t.entity_id)
+            if not sm or not sm.is_alive:
+                continue
+            stats = _monster_stats(sm)
+            tokens.append({'token_id': t.token_id, 'is_alive': 1,
+                           'entity_type': 'monster', 'entity_id': t.entity_id,
+                           'name': sm.display_name, 'col': t.col, 'row': t.row,
+                           'hp_pct': sm.hp_pct(),
+                           'size_squares': _size_squares(sm.template.size if sm.template else ''),
+                           'image_url': _monster_img_url(stats['image']),
+                           'color': '#cc3333'})
+        else:
+            char = chars.get(t.entity_id)
+            if not char:
+                continue
+            img = (_url_for('static', filename=f'uploads/portraits/{char.portrait_path}')
+                   if char.portrait_path else '')
+            tokens.append({'token_id': t.token_id, 'is_alive': 1,
+                           'entity_type': 'player', 'entity_id': t.entity_id,
+                           'name': char.name, 'col': t.col, 'row': t.row,
+                           'hp_pct': char.hp_pct(), 'size_squares': 1,
+                           'image_url': img, 'color': '#4a9eff'})
+    effects = [{'shape': e.shape, 'label': e.label, 'anchor_x': e.anchor_x,
+                'anchor_y': e.anchor_y, 'size_ft': e.size_ft, 'angle': e.angle,
+                'fill_color': e.fill_color, 'fill_opacity': e.fill_opacity,
+                'border_color': e.border_color} for e in bm.effects]
+    return tokens, effects
+
+
+def _title_payload(sess):
+    from flask import url_for as _url_for
+    img = (appsettingGet('obs_title_image', '') or '').strip()
+    campaign = ''
+    if sess and sess.campaign_id:
+        from models.campaigns import tblcampaigns
+        camp = db.session.get(tblcampaigns, sess.campaign_id)
+        campaign = camp.campaign_name if camp else ''
+    return {
+        'image_url': _url_for('static', filename=f'uploads/obs/{img}') if img else '',
+        'campaign': campaign,
+        'session': (sess.title if sess else ''),
+    }
 
 
 def _qr_svg(url):

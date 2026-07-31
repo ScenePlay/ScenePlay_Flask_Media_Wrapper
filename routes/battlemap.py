@@ -841,10 +841,19 @@ def _obs_poll_state():
         snap = obs_ws.current_state()
     except Exception:
         return None
+    from routes.obs import (map_mode, map_scene_name, _special_scene,
+                            viewed_character_id)
     return {'connected': snap['connected'],
             'current_scene': snap['current_scene'],
             'recording': snap['recording'],
-            'streaming': snap['streaming']}
+            'streaming': snap['streaming'],
+            'map_mode': map_mode(),
+            # So the sidebar's Map button can light up when the map is what's
+            # actually on screen, the same way a player's button does.
+            'map_scene': _special_scene('map') or map_scene_name(),
+            # Which character the map view is pinned to, so their row's eye
+            # button can show that it is the one on screen.
+            'view_char': viewed_character_id()}
 
 
 # ── Token CRUD ────────────────────────────────────────────────────────────────

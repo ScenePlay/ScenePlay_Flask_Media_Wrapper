@@ -36,6 +36,7 @@ window.BM3D = (function () {
   var MERGE_THRESHOLD = 500;      // walls beyond this are merged into one mesh
   var LERP_RATE = 6;              // 1-exp(-rate*dt) position smoothing
   var FLY_SPEED = 4;              // units/sec (×3 with Shift)
+  var YAW_EASE_RATE = 3;          // 1-exp(-rate*dt) turn easing for auto-facing
 
   var WALL_COLORS = [0x8a8578, 0x938e80, 0x827d70, 0x8f8a7c, 0x7d7869];
   var DOOR_COLOR = 0x7a5230;
@@ -62,6 +63,7 @@ window.BM3D = (function () {
   var doorStates = {};
   var open_ = false, rafId = null, lastT = 0;
   var yaw = 0, pitch = 0;
+  var yawTarget = null;           // headless auto-facing target; null = manual
   var fogRects = [];              // cloud footprints in cells: {x1,z1,x2,z2}
   var _fogSig = null;
   var _decalSig = null;
@@ -1261,9 +1263,27 @@ window.BM3D = (function () {
   function onPointerMove(dx, dy) {
     if (view.kind === 'overview') return;
     yaw -= dx * 0.0024;
+    yawTarget = null;          // a human took the wheel; stop auto-facing
     pitch -= dy * 0.0024;
     var lim = Math.PI / 2 - 0.05;
     pitch = Math.max(-lim, Math.min(lim, pitch));
+  }
+
+  // Headless auto-facing. A person at the table aims the camera with the
+  // mouse; a browser SOURCE has nobody to do that, so the host tells it which
+  // way to look and the turn is eased rather than snapped — a hard cut of the
+  // horizon reads as a glitch on a stream.
+  function setFacing(dx, dz) {
+    if (!dx && !dz) return;
+    yawTarget = Math.atan2(-dx, -dz);
+  }
+
+  function _easeYaw(dt) {
+    if (yawTarget === null) return;
+    // Shortest way round, so turning from -179 to +179 is 2 degrees, not 358.
+    var delta = ((yawTarget - yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (Math.abs(delta) < 0.002) { yaw = yawTarget; return; }
+    yaw += delta * (1 - Math.exp(-YAW_EASE_RATE * dt));
   }
 
   function updateCamera(dt) {
@@ -1289,6 +1309,7 @@ window.BM3D = (function () {
       if (keys.q) flyPos.y -= speed;
       camera.position.copy(flyPos);
     }
+    _easeYaw(dt);
     camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
   }
 
@@ -1641,12 +1662,36 @@ window.BM3D = (function () {
     if (open_) setView(defaultView());
   }
 
+  // Headless hosts (the OBS map source) have no viewpoint picker and no token
+  // of their own, so restoreView()'s defaults can't place their camera —
+  // they set it explicitly instead. Returns false when the wanted token
+  // isn't on the map yet, so the caller can retry on the next state.
+  function setViewpoint(kind, tokenId) {
+    if (!open_) return false;
+    if (kind === 'first') {
+      var tid = String(tokenId);
+      if (!tokenRecs[tid]) return false;
+      // Level the horizon. The viewer opens in OVERVIEW, which pitches the
+      // camera steeply down to take in the whole map, and setView keeps
+      // whatever pitch it finds — a mouse-using human just looks back up, but
+      // a headless host would sit there staring at the floor.
+      pitch = 0;
+      yawTarget = null;
+      setView({ kind: 'first', tokenId: tid });
+      return true;
+    }
+    setView({ kind: kind === 'fly' ? 'fly' : 'overview', tokenId: null });
+    return true;
+  }
+
   return {
     open: openViewer,
     close: closeViewer,
     onState: onState,
     setFloorplan: setFloorplan,
     setMap: setMap,
+    setViewpoint: setViewpoint,
+    setFacing: setFacing,
     toggleFogPreview: toggleFogPreview,
     isOpen: function () { return open_; },
   };
