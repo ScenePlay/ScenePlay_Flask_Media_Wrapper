@@ -2068,11 +2068,20 @@ def upload_image(slot):
         flash('Use a PNG, JPG, WEBP or GIF.')
         return redirect(url_for('obs_bp.broadcast'))
     os.makedirs(BG_DIR, exist_ok=True)
+    # Downscale before saving, like every other image intake (portraits,
+    # tokens, map art all go through the same helper). These render at most
+    # 1920px wide on the canvas, so a 9MB AI generation is pure waste — disk,
+    # LAN bandwidth, and a decode stall in OBS's browser source every reload.
+    # Animated GIFs and Pillow failures fall through with the original bytes.
+    from relay_broadcaster import _downscale_image
+    raw = f.read()
+    raw, ext = _downscale_image(raw, ext, max_dim=1920)
     # A stable name per slot: the browser sources cache by URL, so reusing it
     # means a re-upload replaces the art everywhere instead of leaving the old
-    # file referenced. The cache-buster below is what makes OBS re-fetch.
+    # file referenced.
     name = f'{stem}.{ext}'
-    f.save(os.path.join(BG_DIR, name))
+    with open(os.path.join(BG_DIR, name), 'wb') as out:
+        out.write(raw)
     for other in TITLE_EXT:                 # drop a previous different format
         old = os.path.join(BG_DIR, f'{stem}.{other}')
         if other != ext and os.path.exists(old):
