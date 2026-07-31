@@ -2169,6 +2169,9 @@ function obsToggleMapMode() {
     .then(({ ok, d }) => {
       if (!ok || !d.ok) { alert(d.error || 'Could not switch the map view.'); return; }
       _obsPaintMapMode(d.mode);
+      // Picking a mode releases the pinned character server-side, so drop the
+      // lit eye button now rather than waiting for the next poll.
+      if (d.unpinned) _obsClearViewButtons();
     })
     .catch(() => {});
 }
@@ -2179,9 +2182,7 @@ function _obsPaintMapMode(mode) {
   btn.textContent = mode === 'auto' ? 'AUTO' : mode.toUpperCase();
   // Auto and 3D both get the live colour: in either one the stream can be in
   // the player's view, so a glance at the button says "not just the flat map".
-  const hot = mode === '3d' || mode === 'auto';
-  btn.classList.toggle('btn-outline-success', hot);
-  btn.classList.toggle('btn-outline-secondary', !hot);
+  _obsLit(btn, mode === '3d' || mode === 'auto');
 }
 
 // Show the map through one character: 3D when the map has the geometry for
@@ -2208,23 +2209,26 @@ function obsViewPlayer(ev, btn) {
     .catch(() => {});
 }
 
-// Cut OBS to the battle map. Same optimistic-then-corrected shape as
+// Cut OBS to one of the ScenePlay scenes. Optimistic-then-corrected, same as
 // obsViewPlayer: the 2s poll is the authority, this just avoids a dead-feeling
 // button while the request is in flight.
-function obsCutMap(btn) {
-  fetch('/ttrpg/obs/api/cut-map', {
+function obsCut(key, btn) {
+  fetch('/ttrpg/obs/api/cut/' + encodeURIComponent(key), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
   })
     .then(r => r.json().then(d => ({ ok: r.ok, d })))
     .then(({ ok, d }) => {
-      if (!ok || !d.ok) { alert(d.error || 'Could not cut to the map.'); return; }
-      if (btn) {
-        btn.classList.add('btn-outline-success');
-        btn.classList.remove('btn-outline-secondary');
-      }
+      // The pin is released even when the cut itself failed (OBS offline), so
+      // drop the eye highlight on that response too rather than only on 200.
+      if (d && d.unpinned) _obsClearViewButtons();
+      if (!ok || !d.ok) { alert(d.error || 'Could not cut to that scene.'); return; }
+      document.querySelectorAll('.obs-cut-btn').forEach(b => _obsLit(b, b === btn));
     })
     .catch(() => {});
 }
+
+// Kept so an already-loaded page (or the M hotkey) still works.
+function obsCutMap(btn) { obsCut('map', btn); }
 
 function obsGroupShot() {
   fetch('/ttrpg/obs/api/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -2274,16 +2278,38 @@ function _obsSync(obs) {
             : 'Show the map through this character (3D if the map supports it)';
   });
   _obsPaintMapMode(obs.map_mode);
-  const mapBtn = document.getElementById('obs-cutmap-btn');
-  if (mapBtn) {
-    const live = !!obs.current_scene && obs.current_scene === obs.map_scene;
-    mapBtn.classList.toggle('btn-outline-success', live);
-    mapBtn.classList.toggle('btn-outline-secondary', !live);
-    mapBtn.style.opacity = obs.connected ? '' : '.45';
-    mapBtn.title = !obs.connected ? 'OBS is not connected'
-                 : live ? 'The battle map is on screen now'
-                 : 'Put the battle map on screen in OBS (M)';
-  }
+  // Light whichever cut button matches the scene OBS is actually on, so the
+  // strip reflects the rig even when the DM switched scenes inside OBS.
+  const scenes = obs.cut_scenes || {};
+  document.querySelectorAll('.obs-cut-btn').forEach(b => {
+    _obsLit(b, !!obs.current_scene && obs.current_scene === scenes[b.dataset.cut]);
+    b.style.opacity = obs.connected ? '' : '.4';
+  });
+  const mode = document.getElementById('obs-mapmode-btn');
+  if (mode) mode.style.opacity = obs.connected ? '' : '.4';
+}
+
+// Nothing is being viewed through any more — used by every action that
+// releases the pin, so they can't drift on how they clear it.
+function _obsClearViewButtons() {
+  document.querySelectorAll('.obs-view-btn').forEach(b => {
+    b.classList.remove('btn-outline-success');
+    b.classList.add('btn-outline-secondary');
+  });
+}
+
+// The control strip is styled inline, not with Bootstrap classes, so "this is
+// on screen" has to be set on the element rather than toggled as a class.
+function _obsLit(btn, live) {
+  if (!btn) return;
+  // Live is signalled by the BORDER only. The label stays dark: the strip's
+  // button face is --ttrpg-primary, which is a near-white cream on the light
+  // theme, so green-on-cream made the AUTO/2D/3D label unreadable — the very
+  // thing the colour was meant to draw attention to.
+  btn.style.borderColor = live ? '#2f7d38' : '#555';
+  btn.style.color = live ? '#14151b' : 'var(--ttrpg-accent)';
+  btn.style.fontWeight = live ? '900' : '';
+  btn.style.boxShadow = live ? '0 0 0 2px #3fa14a' : '';
 }
 
 // ── Campaign Scenes ───────────────────────────────────────────────────────────

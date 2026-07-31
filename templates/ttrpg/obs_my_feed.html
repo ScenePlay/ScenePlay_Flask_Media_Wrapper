@@ -52,6 +52,59 @@
     </div>
     {% endif %}
 
+    {% if is_dm and portal_url %}
+    <!-- GM-only: a remote player cannot reach this ScenePlay at all, so the
+         camera link above is no use to them on its own. This is the link to
+         send — they log in to the portal and start their camera from there,
+         where the relay hands them their OWN link and nobody else's. -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">
+        &#128279; Send this to {{ char.name }} if they're playing remotely</h6>
+      <p class="small text-muted mb-2">
+        This page is on your machine, so {{ char.name }} can't open it. Send
+        them the player portal instead &mdash; once they log in
+        {%- if player_username %} as <code>{{ player_username }}</code>{% endif %},
+        their camera link is waiting for them under <b>My Camera</b>, and it is
+        the same link shown above.
+      </p>
+      <div class="d-flex align-items-start gap-3 flex-wrap">
+        {% if portal_qr %}
+        <div class="text-center">
+          <div style="width:150px;height:150px;">{{ portal_qr | safe }}</div>
+          <div class="small text-muted mt-1">Scan to open</div>
+        </div>
+        {% endif %}
+        <div class="flex-grow-1" style="min-width:16rem;">
+          <div class="input-group input-group-sm mb-2">
+            <input type="text" class="form-control" id="portal-link" readonly
+                   value="{{ portal_url }}">
+            <button class="btn btn-outline-secondary" type="button"
+                    onclick="copyPortal(this)">Copy</button>
+          </div>
+          <a href="{{ portal_url }}" target="_blank" rel="noopener"
+             class="btn btn-sm btn-outline-secondary">Open the portal &#8599;</a>
+        </div>
+      </div>
+    </div>
+    <script>
+    function copyPortal(btn) {
+      const f = document.getElementById('portal-link');
+      f.select(); f.setSelectionRange(0, 99999);
+      // The clipboard API needs a secure context, and the GM often runs this
+      // over plain http on the LAN — fall back rather than silently fail.
+      const done = () => { const t = btn.textContent; btn.textContent = 'Copied';
+                           setTimeout(() => { btn.textContent = t; }, 1500); };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(f.value).then(done, () => {
+          document.execCommand('copy'); done();
+        });
+      } else {
+        document.execCommand('copy'); done();
+      }
+    }
+    </script>
+    {% endif %}
+
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-2">Using your own setup?</h6>
       <p class="small text-muted">

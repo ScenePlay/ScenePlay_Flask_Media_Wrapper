@@ -475,23 +475,23 @@ function show3d(d, moved) {
 
 // ── where the character looks ────────────────────────────────────────────────
 // A token stores only col/row — there is no FACING on it — so the heading has
-// to be inferred from movement. On top of that the camera runs a repeating
-// look-around, otherwise a stationary character stares at one wall for the
-// whole turn and the shot goes dead:
+// to be inferred from movement. The shot is deliberately short:
 //
-//   move           -> snap to the way they went, hold 5s (this is "forward")
-//   then, looping: each character within 30 ft, a beat each
-//                  forward, 5s
-//                  every character on the map, a beat each
-//                  forward, 5s
+//   move -> snap to the way they went and hold it (this is "forward")
+//        -> two seconds of looking around, ending on the CLOSEST ENEMY
+//        -> auto cuts back to the 2D map; pinned 3D settles there and holds
 //
-// Moving at any point restarts the cycle from "forward".
+// The look-around used to sweep every character in range and then every
+// character on the map, which held first person for over 20 seconds. A short
+// budget spent on what matters beats a complete tour nobody watches.
+// Moving at any point re-aims; it no longer restarts the visit.
 
 const LOOK_FORWARD_MS = 5000;   // dwell on the direction of travel
-const LOOK_AT_MS = 1000;        // beat spent on each character
-const NEAR_FEET = 30;           // "in range" for the first sweep
+const LOOK_AROUND_MS = 2000;    // the whole look-around, however many targets
+const LOOK_BEAT_MS = 1000;      // nominal time per target, so 2s = 2 targets
+const NEAR_FEET = 30;           // only glance at someone actually close by
 const CAM_TICK_MS = 200;        // finer than the 2s state poll the plan needs
-const AUTO_CYCLES = 1;          // look-arounds to run before auto returns to 2D
+const LOOK_CYCLES = 1;          // look-arounds per visit, then settle or cut back
 const AUTO_COOLDOWN_MS = 8000;  // 2D breathing room before auto may cut back
 
 let lastSeenPos = {};
@@ -524,22 +524,35 @@ function restartLookCycle(now) {
 function buildLookPlan() {
   const me = camMe();
   if (!me) return [];
-  const near = [], all = [];
+  const targets = [];
   camTokens.forEach(t => {
     if (sameId(t.token_id, camMeId)) return;
     const dx = t.col - me.col, dz = t.row - me.row;
-    // Someone standing on the same square gives no direction to face — the
-    // beat would be a silent no-op, so skip them rather than stall the cycle.
+    // Someone on the same square gives no direction to face — the beat would
+    // be a silent no-op, so skip them rather than waste part of the shot.
     if (!dx && !dz) return;
-    all.push(t.token_id);
-    if (Math.sqrt(dx * dx + dz * dz) <= camNearCells) near.push(t.token_id);
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d > camNearCells) return;
+    targets.push({id: t.token_id, d, foe: t.entity_type === 'monster'});
   });
-  const plan = [];
-  near.forEach(id => plan.push({kind: 'at', id, ms: LOOK_AT_MS}));
-  plan.push({kind: 'forward', ms: LOOK_FORWARD_MS});
-  all.forEach(id => plan.push({kind: 'at', id, ms: LOOK_AT_MS}));
-  plan.push({kind: 'forward', ms: LOOK_FORWARD_MS});
-  return plan;
+  // Enemies first, then by distance. Through a character's eyes the thing
+  // worth showing is what is trying to kill them, not the ally beside them —
+  // so a monster outranks a closer teammate. Hidden monsters never reach the
+  // page (the server filters them), so this can only pick a visible one.
+  targets.sort((a, b) => (Number(b.foe) - Number(a.foe)) || (a.d - b.d));
+
+  // Pick by that priority, then play them in REVERSE so the shot ENDS on the
+  // closest enemy: the last beat is what the audience is left looking at, and
+  // in pinned 3D it is where the camera rests until someone moves.
+  const picked = targets.slice(0, Math.max(1, Math.round(LOOK_AROUND_MS / LOOK_BEAT_MS)))
+                        .reverse();
+  // Nobody near enough is not a reason to stall: hold the way they were
+  // heading for the whole budget instead.
+  if (!picked.length) return [{kind: 'forward', ms: LOOK_AROUND_MS}];
+  // Split the budget across whatever was found, so the visit runs the same
+  // length whether one enemy is nearby or several.
+  const ms = Math.round(LOOK_AROUND_MS / picked.length);
+  return picked.map(t => ({kind: 'at', id: t.id, ms}));
 }
 
 function applyLookStep(step) {
@@ -576,10 +589,16 @@ function camTick() {
   if (now < camStepEndsAt && camPlan.length) return;
   if (!camPlan.length || camStep + 1 >= camPlan.length) {
     if (camPlanIsCycle) camCycles++;
-    // The look-around is the whole of the auto shot. Cut back BEFORE
-    // building the next plan, otherwise the camera starts a sweep it will be
-    // yanked out of a moment later.
-    if (auto3d && camCycles >= AUTO_CYCLES) { autoReturn2d(); return; }
+    if (camCycles >= LOOK_CYCLES) {
+      // The look-around runs ONCE. In auto that means cut back to the map,
+      // done BEFORE building another plan so the camera never starts a sweep
+      // it will be yanked out of. When the view is pinned to 3D there is
+      // nothing to cut back to, so it settles on the last beat — the closest
+      // enemy — and holds. Movement restarts it via restartLookCycle.
+      if (auto3d) { autoReturn2d(); return; }
+      camStepEndsAt = Infinity;
+      return;
+    }
     camPlan = buildLookPlan();
     camPlanIsCycle = true;
     camStep = 0;

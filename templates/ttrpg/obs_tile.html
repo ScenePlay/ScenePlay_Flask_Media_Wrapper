@@ -1,0 +1,164 @@
+<!-- A player's tile in the OBS party scene: their camera, with the character
+     they are playing laid over the bottom of it.
+
+     One source, not two. The feed is framed here rather than being the source
+     itself, so the video and the character strip resize together as the grid
+     changes and OBS only pays for one browser instance per player.
+
+     Only the VIEW url is ever framed — that is playback and needs no camera
+     permission. The PUSH url cannot be framed from a LAN http:// parent, which
+     is why the player's own page links out to it instead. -->
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #14151b;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #f2efe6;
+  }
+  #tile { position: absolute; inset: 0; overflow: hidden; border-radius: 14px;
+          border: 2px solid rgba(200,168,110,.55); box-sizing: border-box; }
+  /* The feed fills the tile. A camera that never connects leaves the dark
+     field behind it rather than a white flash of an unstyled frame. */
+  #cam { position: absolute; inset: 0; width: 100%; height: 100%;
+         border: 0; display: block; }
+  #nocam { position: absolute; inset: 0; display: flex;
+           align-items: center; justify-content: center;
+           color: #6a6d7a; font-size: min(4vw, 11vh); }
+
+  /* The character strip. Sized off --u (1% of the tile's own width, set from
+     JS) because a tile is ~760px wide in a six-player grid but half that at
+     twelve — viewport units would make the text unreadable at one size or
+     absurd at the other. */
+  #strip {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: flex-end; gap: calc(var(--u, 7px) * 2);
+    padding: calc(var(--u, 7px) * 2.6) calc(var(--u, 7px) * 2.6)
+             calc(var(--u, 7px) * 2.2);
+    /* A gradient, not a solid bar: it keeps the player's face readable while
+       still giving the text something to sit on. */
+    background: linear-gradient(180deg, rgba(8,9,13,0), rgba(8,9,13,.82) 42%,
+                                        rgba(8,9,13,.94));
+    text-shadow: 0 2px 6px rgba(0,0,0,.9);
+  }
+  /* The character's face, so the audience can tie the person on camera to
+     the character without reading. Sized off --u like the text, and pinned
+     flex-basis so a long name can never squeeze it away. */
+  #face {
+    flex: 0 0 auto; width: calc(var(--u, 7px) * 9);
+    height: calc(var(--u, 7px) * 9); border-radius: 50%;
+    object-fit: cover; background: #23242c;
+    border: 2px solid rgba(200,168,110,.8);
+    box-shadow: 0 3px 12px rgba(0,0,0,.6);
+  }
+  #face.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--u, 7px) * 4.5); color: #c8a86e;
+  }
+  #who { min-width: 0; flex: 1 1 auto; }
+  #char-name {
+    font-weight: 800; font-size: calc(var(--u, 7px) * 6.4); line-height: 1.1;
+    color: #e8d7ac; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Who is actually playing them — the point of the second line. */
+  #player-name {
+    font-size: calc(var(--u, 7px) * 3.6); opacity: .78; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #hp-wrap { flex: 0 0 auto; width: 34%; max-width: calc(var(--u, 7px) * 42); }
+  #hp-bar {
+    height: calc(var(--u, 7px) * 2); min-height: 6px; border-radius: 99px;
+    background: rgba(255,255,255,.16); overflow: hidden;
+  }
+  #hp-fill { height: 100%; border-radius: 99px;
+             transition: width .4s ease, background .4s ease; }
+  #hp-text { font-size: calc(var(--u, 7px) * 3.4); text-align: right;
+             margin-top: calc(var(--u, 7px) * .8); opacity: .95;
+             font-variant-numeric: tabular-nums; }
+  #conds { position: absolute; left: calc(var(--u, 7px) * 2.6);
+           top: calc(var(--u, 7px) * 2.6);
+           display: flex; flex-wrap: wrap; gap: calc(var(--u, 7px) * 1.2);
+           max-width: 70%; }
+  .cond { font-size: calc(var(--u, 7px) * 3); padding: calc(var(--u, 7px) * .6)
+          calc(var(--u, 7px) * 1.6); border-radius: 99px;
+          background: rgba(192,57,43,.55); border: 1px solid rgba(224,120,110,.8);
+          color: #ffe9e5; white-space: nowrap; }
+</style>
+
+<div id="tile">
+  {% if feed_url %}
+  <iframe id="cam" src="{{ feed_url }}" allow="autoplay; fullscreen"
+          referrerpolicy="no-referrer" scrolling="no"></iframe>
+  {% else %}
+  <div id="nocam">no camera</div>
+  {% endif %}
+
+  <div id="conds"></div>
+
+  <div id="strip">
+    {% if portrait_url %}
+    <img id="face" src="{{ portrait_url }}" alt="">
+    {% else %}
+    <div id="face" class="placeholder">&#9876;</div>
+    {% endif %}
+    <div id="who">
+      <div id="char-name">{{ char.name }}</div>
+      <div id="player-name">{{ player }}</div>
+    </div>
+    <div id="hp-wrap">
+      <div id="hp-bar"><div id="hp-fill"></div></div>
+      <div id="hp-text"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const POLL_URL = "{{ poll_url }}";
+const POLL_MS = {{ (poll_s | default(10)) * 1000 }};
+
+function el(id) { return document.getElementById(id); }
+function hpColor(p) { return p > 50 ? '#3fa14a' : p > 20 ? '#c9a227' : '#c0392b'; }
+
+// Text scales with the TILE, so a six-player grid and a twelve-player grid
+// both read correctly. Re-measured on resize because OBS changes the source
+// size when the party grows.
+function sizeText() {
+  const w = el('tile').getBoundingClientRect().width / 100;
+  if (w > 0) document.documentElement.style.setProperty('--u', w + 'px');
+}
+sizeText();
+addEventListener('resize', sizeText);
+
+function apply(d) {
+  if (!d) return;
+  el('char-name').textContent = d.name || '';
+  // Only take the player's name from the poll when it has one: a payload
+  // without the field must not wipe what the page rendered.
+  if (d.player !== undefined) el('player-name').textContent = d.player || '';
+  const pct = Math.max(0, Math.min(100, d.hp_pct == null ? 100 : d.hp_pct));
+  el('hp-fill').style.width = pct + '%';
+  el('hp-fill').style.background = hpColor(pct);
+  el('hp-text').textContent = (d.hp_current == null ? '' :
+                               d.hp_current + ' / ' + d.hp_max);
+  const host = el('conds');
+  host.innerHTML = '';
+  (d.conditions || []).forEach(c => {
+    const s = document.createElement('span');
+    s.className = 'cond'; s.textContent = c;
+    host.appendChild(s);
+  });
+}
+
+apply({ name: {{ char.name | tojson }}, player: {{ player | tojson }},
+        hp_current: {{ char.hp_current or 0 }}, hp_max: {{ char.hp_max or 0 }},
+        hp_pct: {{ char.hp_pct() }}, conditions: {{ conditions | tojson }} });
+
+// Same self-scheduling, jittered poll the stat cards use: every tile in the
+// party runs this, so the request rate is this divided by the table size.
+function schedule() {
+  setTimeout(() => {
+    fetch(POLL_URL).then(r => r.json()).then(apply).catch(() => {}).finally(schedule);
+  }, POLL_MS * (0.85 + Math.random() * 0.3));
+}
+schedule();
+</script>

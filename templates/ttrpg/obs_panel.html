@@ -163,7 +163,11 @@ function el(id) { return document.getElementById(id); }
 const SHOW_BG = MODE === 'bg';
 const SHOW_TITLE = MODE === 'title';
 const SHOW_PANEL = MODE === 'info' || MODE === 'dice';
-const SHOW_CARD = MODE === 'pre' || MODE === 'post';
+// Driven by the server's own list of show-card modes, not a hand-written
+// OR chain: adding the intermission card silently missed this line, so the
+// page rendered nothing for it while every other check still passed.
+const CARD_MODES = {{ card_modes | tojson }};
+const SHOW_CARD = CARD_MODES.indexOf(MODE) !== -1;
 
 // A nine-way placement maps cleanly onto flexbox, so "where does the title
 // go" needs no coordinates and can never land off-canvas.
@@ -259,9 +263,9 @@ function paintNotes(lines) {
 
 function paintRolls(rolls) {
   const host = el('scroll');
-  // Only APPEND what's new. Rebuilding the list would replay the slide-in
-  // animation on every row every poll, which reads as the whole panel
-  // flickering rather than one roll arriving.
+  // Newest at the TOP, older ones below it. Only insert what's new: rebuilding
+  // the list would replay the slide-in on every row every poll, which reads as
+  // the whole panel flickering rather than one roll arriving.
   const known = new Set(shownRolls);
   const fresh = rolls.filter(r => !known.has(r.id));
   if (mode !== 'rolls') { host.innerHTML = ''; shownRolls = []; known.clear(); }
@@ -269,12 +273,14 @@ function paintRolls(rolls) {
     host.innerHTML = '<div class="empty">Waiting for the first roll…</div>';
   } else {
     if (host.querySelector('.empty')) host.innerHTML = '';
-    fresh.forEach(r => host.appendChild(rollRow(r)));
+    // The server sends them oldest-first, so prepending in that order leaves
+    // the newest on top: each one pushes the previous down.
+    fresh.forEach(r => host.insertBefore(rollRow(r), host.firstChild));
   }
   shownRolls = rolls.map(r => r.id);
-  // Trim to what the panel can hold, oldest first.
-  while (host.children.length > 40) host.removeChild(host.firstChild);
-  host.scrollTop = host.scrollHeight;   // newest stays in view
+  // Trim from the BOTTOM now — that is where the oldest rolls live.
+  while (host.children.length > 40) host.removeChild(host.lastChild);
+  host.scrollTop = 0;                   // the newest is at the top, so stay there
   el('panel-head').textContent = 'Dice';
 }
 

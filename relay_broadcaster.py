@@ -1051,6 +1051,25 @@ def push_character_feeds():
     sess = tblSessions.query.filter_by(status='active').first()
     if not sess:
         return
+    # Mint a link for anyone who has not got one, BEFORE building the payload.
+    # It used to be created lazily when someone opened the camera page, which
+    # meant a player only had a link once the GM went and looked at it — the
+    # exact intervention the portal is meant to remove. Doing it here makes
+    # every push self-healing: new party members get a link automatically.
+    from extensions import db
+    from routes.obs import _new_stream_id
+    minted = 0
+    for sp in sess.party:
+        char = sp.character
+        if not char or not char.active:
+            continue
+        if not char.video_feed_url and not char.video_stream_id:
+            char.video_stream_id = _new_stream_id()
+            minted += 1
+    if minted:
+        db.session.commit()
+        log.info('push_character_feeds: minted %d new camera link(s)', minted)
+
     feeds = []
     for sp in sess.party:
         char = sp.character

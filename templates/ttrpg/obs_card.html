@@ -48,6 +48,9 @@
     color: #e8d7ac; text-align: center;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .player { font-size: min(3.4vw, 7vh); opacity: .72; margin-top: -.4vh;
+            max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; }
   .hp-row { width: 86%; }
   .hp-bar {
     height: min(1.1vw, 3vh); min-height: 7px; border-radius: 99px;
@@ -77,6 +80,9 @@
   {% endif %}
 
   <div class="name" id="pc-name">{{ char.name }}</div>
+  {# Who is playing them. Same line the camera tile carries, so a player
+     reads the same whether their camera is up or their card is standing in. #}
+  <div class="player" id="pc-player">{{ player | default('') }}</div>
 
   {% if not is_dm %}
   <div class="hp-row">
@@ -99,6 +105,9 @@ function hpColor(pct) {
 
 function apply(d) {
   document.getElementById('pc-name').textContent = d.name;
+  const pl = document.getElementById('pc-player');
+  // Guard the key: a payload without it must not blank the rendered name.
+  if (pl && d.player !== undefined) pl.textContent = d.player || '';
   const fill = document.getElementById('pc-hp-fill');
   if (!fill) return;               // DM card has no HP block
   const pct = Math.max(0, Math.min(100, d.hp_pct));
@@ -115,7 +124,7 @@ function apply(d) {
   });
 }
 
-apply({ name: {{ char.name | tojson }},
+apply({ name: {{ char.name | tojson }}, player: {{ player | default('') | tojson }},
         hp_current: {{ char.hp_current or 0 }}, hp_max: {{ char.hp_max or 0 }},
         hp_pct: {{ char.hp_pct() }}, conditions: {{ conditions | tojson }} });
 

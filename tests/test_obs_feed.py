@@ -327,11 +327,23 @@ class TestTileFallback:
             assert '/ttrpg/obs/card/' in ro._tile_url(c, {}, set())
 
     def test_healthy_camera_is_used(self, app, settings):
+        """The camera case points at the TILE page, which frames the feed and
+        draws the character over it — not at the bare vdo.ninja url."""
         import routes.obs as ro
         c = self._char(app, video_stream_id='abc123')
         with app.test_request_context():
             url = ro._tile_url(c, {'Kara': 5}, set())
-        assert 'abc123' in url and '/card/' not in url
+        assert '/ttrpg/obs/tile/' in url and '/card/' not in url
+
+    def test_the_tile_page_frames_the_view_url_not_the_push_url(self, app, settings):
+        """Framing the PUSH url would ask for camera permission from a LAN
+        http:// parent, which the browser refuses — the tile must only ever
+        embed the view (playback) url."""
+        import routes.obs as ro
+        c = self._char(app, video_stream_id='abc123')
+        with app.test_request_context():
+            assert 'view=abc123' in c.video_view_url()
+            assert 'push=' in c.video_push_url()
 
     def test_unknown_presence_keeps_the_camera(self, app, settings):
         """A LAN player never reports presence — that must not be read as a
@@ -339,7 +351,7 @@ class TestTileFallback:
         import routes.obs as ro
         c = self._char(app, video_stream_id='abc123')
         with app.test_request_context():
-            assert 'abc123' in ro._tile_url(c, {}, set())
+            assert '/ttrpg/obs/tile/' in ro._tile_url(c, {}, set())
 
     def test_stale_presence_falls_back_to_the_card(self, app, settings):
         import routes.obs as ro
@@ -353,7 +365,7 @@ class TestTileFallback:
         c = self._char(app, video_stream_id='abc123')
         with app.test_request_context():
             assert '/card/' in ro._tile_url(c, {'Kara': 999}, set())
-            assert 'abc123' in ro._tile_url(c, {'Kara': 3}, set())
+            assert '/ttrpg/obs/tile/' in ro._tile_url(c, {'Kara': 3}, set())
 
     def test_manual_pin_wins_over_a_healthy_camera(self, app, settings):
         import routes.obs as ro

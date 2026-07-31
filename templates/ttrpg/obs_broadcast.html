@@ -125,6 +125,17 @@
         players, whether they're online). Use &#9650;&#9660; to set the turn order &mdash;
         that's also the order the number keys and Next/Previous follow.
       </p>
+      {% if cfg.portal_url %}
+      <div class="small text-muted mt-2 d-flex align-items-center gap-2 flex-wrap">
+        <span>Remote players log in at</span>
+        <code>{{ cfg.portal_url }}</code>
+        <a href="{{ cfg.portal_url }}" target="_blank" rel="noopener"
+           class="btn btn-sm btn-outline-secondary py-0 px-1"
+           style="font-size:.7rem;">open</a>
+        <span>&mdash; their camera link is waiting there. The &#128247; button
+          on a player's row has a QR code to send them.</span>
+      </div>
+      {% endif %}
       {% endif %}
     </div>
 
@@ -205,25 +216,7 @@
         </div>
       </div>
       <div class="row g-2 align-items-end mb-2">
-        <div class="col-sm-5">
-          <form method="post" action="{{ url_for('obs_bp.upload_title_image') }}"
-                enctype="multipart/form-data">
-            <label class="form-label small">Title card image</label>
-            <div class="d-flex gap-2">
-              <input type="file" name="title_image" accept="image/*"
-                     class="form-control form-control-sm">
-              <button class="btn btn-ttrpg btn-sm flex-shrink-0">Upload</button>
-            </div>
-            {% if cfg.title_image %}
-            <div class="small text-muted mt-1">
-              Using <code>{{ cfg.title_image }}</code>
-              <button name="clear" value="1" class="btn btn-link btn-sm p-0 ms-1"
-                      style="font-size:.75rem;">clear</button>
-            </div>
-            {% endif %}
-          </form>
-        </div>
-        <div class="col-sm-7">
+        <div class="col-sm-12">
           <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
              href="{{ url_for('obs_bp.map_view', t=map_token) }}">Preview the map source</a>
           <span class="small text-muted ms-2">Opens exactly what OBS renders.</span>
@@ -274,10 +267,58 @@
     <!-- Connection settings -->
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
-      <form method="post" action="{{ url_for('obs_bp.upload_party_bg') }}"
-            id="obs-bg-form" enctype="multipart/form-data"></form>
-      <form method="post" action="{{ url_for('obs_bp.upload_post_image') }}"
-            id="obs-post-form" enctype="multipart/form-data"></form>
+      <!-- Images: every picture the broadcast uses, in one aligned table.
+           They were previously spread across three places on this page, each
+           with its own upload form, which made it impossible to see at a
+           glance what art was set and what was missing. -->
+      <div class="ttrpg-card p-3 mb-3">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128247; Images</h6>
+        <p class="small text-muted">
+          Every picture the stream uses. Uploads save immediately &mdash; then
+          reload the affected source in OBS (or rebuild the party scene) to see
+          the change.
+        </p>
+        <div style="display:grid;grid-template-columns:88px minmax(9rem,1fr) auto auto;
+                    gap:.5rem .75rem;align-items:center;">
+          {% for img in cfg.images %}
+          <!-- Fixed-size well so every row lines up whatever the art's aspect -->
+          <div style="width:88px;height:50px;border-radius:6px;overflow:hidden;
+                      border:1px solid var(--sp-border);background:var(--ttrpg-primary);
+                      display:flex;align-items:center;justify-content:center;">
+            {% if img.url %}
+            <img src="{{ img.url }}" alt=""
+                 style="max-width:100%;max-height:100%;object-fit:contain;">
+            {% else %}
+            <span class="small text-muted" style="font-size:.65rem;">none</span>
+            {% endif %}
+          </div>
+          <div class="small" style="line-height:1.25;">
+            {{ img.label }}
+            <div class="text-muted" style="font-size:.7rem;">
+              {% if img.file %}<code>{{ img.file }}</code>{% else %}not set{% endif %}
+            </div>
+          </div>
+          <form method="post" enctype="multipart/form-data"
+                action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
+                class="d-flex align-items-center gap-1" style="margin:0;">
+            <input type="file" name="image" accept="image/*"
+                   class="form-control form-control-sm" style="max-width:13rem;">
+            <button class="btn btn-sm btn-ttrpg flex-shrink-0">Upload</button>
+          </form>
+          <form method="post"
+                action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
+                style="margin:0;">
+            {% if img.file %}
+            <button name="clear" value="1"
+                    class="btn btn-sm btn-outline-danger">Clear</button>
+            {% else %}
+            <span class="small text-muted" style="font-size:.7rem;">&nbsp;</span>
+            {% endif %}
+          </form>
+          {% endfor %}
+        </div>
+      </div>
+
       <form method="post" action="{{ url_for('obs_bp.save_config') }}" id="obs-cfg-form">
         <div class="row g-2 mb-2">
           <div class="col-sm-8">
@@ -372,14 +413,15 @@
           </div>
         </div>
         <div class="mb-3 ms-3" style="max-width:38rem;">
-          <label class="form-label small">Pre-show &amp; post-show cards</label>
+          <label class="form-label small">Show cards</label>
           <div class="form-text mb-2">
-            Two scenes to top and tail the stream. Each shows its image at 75% of
-            the canvas over the shared background, with a title you can place.
-            The <b>pre-show</b> card reuses the Title card image above, so you
-            only upload it once.
+            Three scenes to open, break and close the stream. Each shows its
+            image at 75% of the canvas over the shared background, with a title
+            you can place. The <b>pre-show</b> card reuses the Title card image,
+            so you only upload it once.
           </div>
-          {% for kind, label in [('pre', 'Pre-show'), ('post', 'Post-show')] %}
+          {% for kind, label in [('pre', 'Pre-show'), ('intermission', 'Intermission'),
+                                 ('post', 'Post-show')] %}
           {% set c = cfg[kind] %}
           <div class="row g-2 mb-2 align-items-end">
             <div class="col-5">
@@ -398,45 +440,15 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="col-3">
-              {% if kind == 'post' %}
-              <label class="form-label small">Image</label>
-              <div class="d-flex gap-1">
-                <input type="file" name="post_image" accept="image/*"
-                       form="obs-post-form" class="form-control form-control-sm">
-                <button class="btn btn-sm btn-ttrpg flex-shrink-0"
-                        form="obs-post-form">Up</button>
-              </div>
-              {% else %}
-              <div class="form-text mb-1">uses the Title card image</div>
-              {% endif %}
+            <div class="col-3 small text-muted" style="padding-bottom:.4rem;">
+              {% if kind == 'pre' %}uses the <b>Title card</b> image
+              {% else %}artwork in <b>Images</b>{% endif %}
             </div>
           </div>
           {% endfor %}
           <div class="form-text">
-            {% if cfg.post.image %}Post-show image: <code>{{ cfg.post.image }}</code>
-            <button class="btn btn-link btn-sm p-0 ms-1" style="font-size:.75rem;"
-                    form="obs-post-form" name="clear" value="1">clear</button>
-            {% else %}No post-show image yet &mdash; the card shows the title over the
-            background.{% endif %}
-            Titles are saved with Connection Settings; images save on upload.
-          </div>
-        </div>
-        <div class="mb-3 ms-3" style="max-width:38rem;">
-          <label class="form-label small">Party scene background</label>
-          <div class="d-flex align-items-center gap-2">
-            <input type="file" name="party_bg" accept="image/*" form="obs-bg-form"
-                   class="form-control form-control-sm">
-            <button class="btn btn-sm btn-ttrpg" form="obs-bg-form">Upload</button>
-            {% if cfg.party_bg %}
-            <button class="btn btn-sm btn-outline-danger" form="obs-bg-form"
-                    name="clear" value="1">Clear</button>
-            {% endif %}
-          </div>
-          <div class="form-text">
-            {% if cfg.party_bg %}Currently: <code>{{ cfg.party_bg }}</code>.
-            {% else %}No image &mdash; the scene uses a plain dark field.{% endif %}
-            Sits behind every tile; saved on upload, not with the form below.
+            Titles and placement save with Connection Settings; the artwork for
+            each card is set in <b>Images</b> below.
           </div>
         </div>
         <div class="form-check mb-2">

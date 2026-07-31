@@ -841,8 +841,8 @@ def _obs_poll_state():
         snap = obs_ws.current_state()
     except Exception:
         return None
-    from routes.obs import (map_mode, map_scene_name, _special_scene,
-                            viewed_character_id)
+    from routes.obs import (map_mode, viewed_character_id,
+                            CUT_TARGETS, _cut_scene_name)
     return {'connected': snap['connected'],
             'current_scene': snap['current_scene'],
             'recording': snap['recording'],
@@ -850,7 +850,10 @@ def _obs_poll_state():
             'map_mode': map_mode(),
             # So the sidebar's Map button can light up when the map is what's
             # actually on screen, the same way a player's button does.
-            'map_scene': _special_scene('map') or map_scene_name(),
+            # Scene name per cut target, so the sidebar can light the button
+            # matching whatever OBS is really showing.
+            'cut_scenes': {k: _cut_scene_name(k) for k in CUT_TARGETS},
+            'map_scene': _cut_scene_name('map'),
             # Which character the map view is pinned to, so their row's eye
             # button can show that it is the one on screen.
             'view_char': viewed_character_id()}

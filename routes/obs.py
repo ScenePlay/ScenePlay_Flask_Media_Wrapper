@@ -82,9 +82,12 @@ def _obs_cfg():
         'panel_title':   (appsettingGet('obs_panel_title', '') or ''),
         'info_text':     (appsettingGet('obs_info_text', '') or ''),
         'party_bg':      (appsettingGet('obs_party_bg', '') or ''),
+        'portal_url':    portal_login_url(),
         'panel_poll':    ('%g' % panel_poll_s()),
         'pre':           show_cfg('pre'),
+        'intermission':  show_cfg('intermission'),
         'post':          show_cfg('post'),
+        'images':        image_slots(),
         'title_positions': TITLE_POSITIONS,
         'title_image':   (appsettingGet('obs_title_image', '') or '').strip(),
         'map_mode':      map_mode(),
@@ -596,7 +599,7 @@ def save_config():
                   side if side in ('left', 'right', 'top', 'bottom') else 'right')
     appsettingSet('obs_panel_title',
                   (request.form.get('obs_panel_title', '') or '').strip()[:120])
-    for kind in ('pre', 'post'):
+    for kind in ('pre', 'intermission', 'post'):
         appsettingSet(f'obs_{kind}_title',
                       (request.form.get(f'obs_{kind}_title', '') or '').strip()[:120])
         pos = (request.form.get(f'obs_{kind}_title_pos', '') or '').strip().lower()
@@ -944,34 +947,87 @@ def api_view_player():
                     'three_d': three_d, 'current_scene': scene})
 
 
-@obs_bp.route('/api/cut-map', methods=['POST'])
+# What the sidebar's cut buttons can switch to. Party is included so the DM
+# can get back to the table without hunting for it in OBS.
+CUT_TARGETS = {
+    'map':          ('map',          'battle map'),
+    'pre':          ('pre',          'pre-show card'),
+    'intermission': ('intermission', 'intermission card'),
+    'post':         ('post',         'post-show card'),
+    'party':        ('group',        'party scene'),
+}
+
+
+def _cut_scene_name(key):
+    """The OBS scene for a cut target, preferring an explicit binding."""
+    special, _label = CUT_TARGETS[key]
+    scene = _special_scene(special)
+    if scene:
+        return scene
+    return {'map': map_scene_name, 'pre': pre_scene_name,
+            'intermission': intermission_scene_name,
+            'post': post_scene_name, 'party': party_scene_name}[key]()
+
+
+@obs_bp.route('/api/cut/<key>', methods=['POST'])
 @login_required
 @dm_required
-def api_cut_map():
-    """Put the battle map on screen.
+def api_cut(key):
+    """Put one of the ScenePlay scenes on screen.
 
-    Ensures the scene first: a DM who has never run Build / refresh party
-    scene would otherwise get "no such scene" for a button that looks like it
-    should just work."""
+    Ensures the scene first where it can be built: a DM who has never run
+    Build / refresh party scene would otherwise get "no such scene" from a
+    button that looks like it should just work."""
     import obs_ws
+    if key not in CUT_TARGETS:
+        return jsonify({'ok': False, 'error': f'Unknown target {key!r}'}), 400
+
+    # Choosing a scene ENDS the follow-this-character override, every time —
+    # including when the scene is already live. Clicking Map while pinned used
+    # to be a no-op (same scene, pin untouched), so the only way out of a
+    # character's 3D view was to cut elsewhere and come back.
+    #
+    # Done before the connected() check on purpose: the pin governs what the
+    # map SOURCE renders, which is ScenePlay state and nothing to do with OBS.
+    # Releasing it must work even with the rig offline.
+    was_pinned = viewed_character_id()
+    _set_viewed_character(None)
+    unpinned = was_pinned is not None
+
     if not obs_ws.connected():
-        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
-    scene = _special_scene('map') or map_scene_name()
+        return jsonify({'ok': False, 'error': 'OBS is not connected.',
+                        'unpinned': unpinned}), 503
+    _special, label = CUT_TARGETS[key]
+    scene = _cut_scene_name(key)
     try:
         known, _current = obs_ws.scene_list()
         if scene not in (known or []):
-            scene, _warn = ensure_map_scene()
+            if key == 'map':
+                scene, _warn = ensure_map_scene()
+            elif key in ('pre', 'intermission', 'post'):
+                built, _warn = ensure_show_scenes()
+                scene = built.get(key, scene)
         obs_ws.switch_scene(scene)
     except obs_ws.ObsRejected as exc:
-        obs_ws._record_error('cut-map', exc)
+        obs_ws._record_error(f'cut-{key}', exc)
         if exc.code == 600:
             return jsonify({'ok': False,
-                            'error': 'No map scene in OBS yet — run '
+                            'error': f'No {label} scene in OBS yet — run '
                                      'Build / refresh party scene.'}), 404
         return jsonify({'ok': False, 'error': f'OBS refused: {exc.comment or exc}'}), 502
     except obs_ws.ObsUnavailable:
         return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
-    return jsonify({'ok': True, 'current_scene': scene})
+    return jsonify({'ok': True, 'current_scene': scene, 'target': key,
+                    'unpinned': unpinned})
+
+
+@obs_bp.route('/api/cut-map', methods=['POST'])
+@login_required
+@dm_required
+def api_cut_map():
+    """Kept as its own path: the sidebar shipped against it before the generic
+    cut endpoint existed, and an older loaded page may still call it."""
+    return api_cut('map')
 
 
 @obs_bp.route('/api/card-override', methods=['POST'])
@@ -1014,7 +1070,13 @@ def api_map_mode():
         cur = map_mode()
         want = MAP_MODES[(MAP_MODES.index(cur) + 1) % len(MAP_MODES)]
     appsettingSet('obs_map_mode', want)
-    return jsonify({'ok': True, 'mode': want})
+    # Choosing a mode RELEASES any pinned character. The pin outranks the
+    # configured mode, so leaving it on made this button look broken: auto
+    # never got a turn because the pin was still dictating the render, and
+    # the view stayed stuck on whoever was last clicked.
+    was_pinned = viewed_character_id()
+    _set_viewed_character(None)
+    return jsonify({'ok': True, 'mode': want, 'unpinned': was_pinned is not None})
 
 
 @obs_bp.route('/api/map-reload', methods=['POST'])
@@ -1110,6 +1172,11 @@ def post_scene_name():
             or 'ScenePlay Post')
 
 
+def intermission_scene_name():
+    return ((appsettingGet('obs_intermission_scene', '') or '').strip()
+            or 'ScenePlay Intermission')
+
+
 # Where a show card's title sits. Nine positions rather than free coordinates:
 # the DM is placing one line of text over one image, and a dropdown they can
 # get right first time beats an x/y pair they have to nudge on a live stream.
@@ -1118,6 +1185,32 @@ TITLE_POSITIONS = ('top-left', 'top-center', 'top-right',
                    'bottom-left', 'bottom-center', 'bottom-right')
 SHOW_IMAGE_FRACTION = 0.75      # of the canvas, so the background frames it
 
+# Every image the broadcast uses, in one place: slot -> (setting, filename
+# stem, label). Having four near-identical upload handlers scattered down the
+# page was how the settings for them ended up scattered down the UI too.
+IMAGE_SLOTS = {
+    'title':        ('obs_title_image', 'title-card',
+                     'Title card — map idle screen and the pre-show'),
+    'party_bg':     ('obs_party_bg', 'party-bg',
+                     'Background — sits behind every ScenePlay scene'),
+    'intermission': ('obs_intermission_image', 'intermission',
+                     'Intermission card'),
+    'post':         ('obs_post_image', 'post-show', 'Post-show card'),
+}
+
+
+def image_slots():
+    """Slot rows for the Broadcast page: what is set, and where it lives."""
+    out = []
+    for slot, (setting, _stem, label) in IMAGE_SLOTS.items():
+        name = (appsettingGet(setting, '') or '').strip()
+        out.append({
+            'slot': slot, 'label': label, 'file': name,
+            'url': (url_for('static', filename=f'uploads/obs/{name}')
+                    if name else ''),
+        })
+    return out
+
 
 def show_cfg(kind):
     """Image, title and title placement for the pre- or post-show card.
@@ -1125,8 +1218,8 @@ def show_cfg(kind):
     'pre' deliberately shares obs_title_image with the map's idle card: it is
     the same "we're about to start" art, and keeping one setting means the DM
     uploads it once instead of keeping two copies in step."""
-    key = 'obs_title_image' if kind == 'pre' else 'obs_post_image'
-    img = (appsettingGet(key, '') or '').strip()
+    slot = {'pre': 'title', 'post': 'post', 'intermission': 'intermission'}[kind]
+    img = (appsettingGet(IMAGE_SLOTS[slot][0], '') or '').strip()
     pos = (appsettingGet(f'obs_{kind}_title_pos', '') or '').strip().lower()
     return {
         'image': img,
@@ -1237,7 +1330,9 @@ def ensure_map_scene():
     return scene, warnings
 
 
-SHOW_SOURCE = {'pre': 'ScenePlay Pre-Show', 'post': 'ScenePlay Post-Show'}
+SHOW_SOURCE = {'pre': 'ScenePlay Pre-Show',
+               'intermission': 'ScenePlay Intermission Card',
+               'post': 'ScenePlay Post-Show'}
 
 
 def ensure_show_scenes():
@@ -1252,7 +1347,9 @@ def ensure_show_scenes():
     w = snap.get('base_width') or 1920
     h = snap.get('base_height') or 1080
     scenes = {}
-    for kind, name_fn in (('pre', pre_scene_name), ('post', post_scene_name)):
+    for kind, name_fn in (('pre', pre_scene_name),
+                          ('intermission', intermission_scene_name),
+                          ('post', post_scene_name)):
         scene = name_fn()
         obs_ws.ensure_scene(scene)
         try:
@@ -1295,6 +1392,23 @@ def _set_card_override(character_id, on):
     appsettingSet('obs_card_override', ','.join(str(i) for i in sorted(ids)))
 
 
+def player_name_for(char):
+    """The human playing this character, for the overlay.
+
+    display_name when the account has one, else the login. Empty when the
+    character isn't claimed by an account — the overlay just omits the line
+    rather than showing a blank field."""
+    u = getattr(char, 'user', None)
+    if not u:
+        return ''
+    return (getattr(u, 'display_name', '') or '').strip() or (u.username or '').strip()
+
+
+def tile_url(character_id):
+    return (f'{_card_base()}{obs_bp.url_prefix}/tile/{character_id}'
+            f'?t={_card_token(character_id)}')
+
+
 def _tile_url(char, presence=None, overrides=None):
     """What this player's tile should be showing right now.
 
@@ -1313,7 +1427,9 @@ def _tile_url(char, presence=None, overrides=None):
     if _feed_state(char, presence) == 'stale':
         # They had a camera and the relay stopped hearing from them.
         return card_url(char.character_id)
-    return char.video_view_url()
+    # Not the bare feed: the tile page frames it and lays the character's name,
+    # player and HP over the bottom, so one source carries both.
+    return tile_url(char.character_id)
 
 
 @obs_bp.route('/api/build-party', methods=['POST'])
@@ -1604,6 +1720,20 @@ def dm_feed():
                            save_url=url_for('obs_bp.dm_feed'))
 
 
+def portal_login_url():
+    """Where a remote player logs in, or '' when there is no relay.
+
+    The portal is served at the ROOT of the relay (main.py mounts it last, so
+    API routes win), which is why this is just relay_url. A remote player
+    cannot reach this ScenePlay at all, so the camera page is useless to
+    them — the portal link is the one thing worth sending.
+
+    Gated on the URL being configured, NOT on relay_enabled: the GM often
+    sets the table up before switching the relay on, and that is exactly when
+    they want to send people the link."""
+    return (appsettingGet('relay_url', '') or '').strip().rstrip('/')
+
+
 @obs_bp.route('/feed/<int:character_id>')
 @login_required
 def my_feed(character_id):
@@ -1613,11 +1743,16 @@ def my_feed(character_id):
         char.video_stream_id = _new_stream_id()
         db.session.commit()
     push_url = char.video_push_url()
+    portal = portal_login_url()
     return render_template('ttrpg/obs_my_feed.html',
                            char=char,
                            push_url=push_url,
                            view_url=char.video_view_url(),
                            qr_svg=_qr_svg(push_url),
+                           portal_url=portal,
+                           portal_qr=_qr_svg(portal) if portal else '',
+                           player_username=(char.user.username
+                                            if char.user else ''),
                            is_dm=current_user.is_dm(), is_dm_tile=False,
                            save_url=url_for('obs_bp.save_feed',
                                             character_id=character_id))
@@ -1649,7 +1784,23 @@ def save_feed(character_id):
     # Keep an already-built OBS scene pointed at the new feed, so changing
     # your camera doesn't silently leave OBS showing the old one.
     _repoint_obs_source(char)
+    # ...and the relay, or a regenerated link would leave the portal handing
+    # the player a dead one with nothing to say it had changed.
+    _push_feeds_to_relay()
     return redirect(url_for('obs_bp.my_feed', character_id=character_id))
+
+
+def _push_feeds_to_relay():
+    """Re-send every camera link to the relay.
+
+    Lazily imported and deliberately swallowing failures: the relay is
+    optional, often disabled, and a player saving their camera settings must
+    not see an error because a remote service is down."""
+    try:
+        import relay_broadcaster
+        relay_broadcaster.push_character_feeds()
+    except Exception as exc:      # noqa: BLE001 - never block the save
+        current_app.logger.info('feed push to the relay skipped: %s', exc)
 
 
 def _repoint_obs_source(char):
@@ -1727,6 +1878,38 @@ def dm_card_state():
                     'hp_pct': 0, 'ac': 0, 'conditions': []})
 
 
+@obs_bp.route('/tile/<int:character_id>')
+def player_tile(character_id):
+    """A player's camera with their character laid over it.
+
+    The feed is FRAMED rather than being the source itself, so one browser
+    source carries both the video and the character strip. Two stacked
+    sources would have meant a second CEF instance per player and two
+    transforms to keep aligned as the grid resizes.
+
+    Framing is only safe for the VIEW url: it is playback, needing no camera
+    permission. The PUSH url must never be framed — camera delegation from a
+    LAN http:// parent is blocked, which is why the player's own page links
+    out to it instead."""
+    import hmac
+    token = request.args.get('t', '')
+    if not hmac.compare_digest(token, _card_token(character_id)):
+        abort(403)
+    char = db.session.get(tblCharacters, character_id)
+    if not char:
+        abort(404)
+    return render_template(
+        'ttrpg/obs_tile.html', char=char,
+        player=player_name_for(char),
+        portrait_url=(url_for('static',
+                              filename=f'uploads/portraits/{char.portrait_path}')
+                      if char.portrait_path else ''),
+        feed_url=char.video_view_url(),
+        conditions=[c.condition_name for c in char.conditions] if char.conditions else [],
+        poll_s=card_poll_s(),
+        poll_url=url_for('obs_bp.card_state', character_id=character_id, t=token))
+
+
 @obs_bp.route('/card/<int:character_id>')
 def player_card(character_id):
     """Transparent stat card for OBS. No login: OBS can't hold a session, so
@@ -1741,6 +1924,7 @@ def player_card(character_id):
     conditions = [c.condition_name for c in char.conditions] if char.conditions else []
     return render_template('ttrpg/obs_card.html', char=char,
                            conditions=conditions, is_dm=False,
+                           player=player_name_for(char),
                            poll_s=card_poll_s(),
                            poll_url=url_for('obs_bp.card_state',
                                             character_id=character_id,
@@ -1759,6 +1943,7 @@ def card_state(character_id):
         abort(404)
     return jsonify({
         'name': char.name,
+        'player': player_name_for(char),
         'hp_current': char.hp_current, 'hp_max': char.hp_max,
         'hp_pct': char.hp_pct(), 'ac': char.ac,
         'conditions': [c.condition_name for c in char.conditions] if char.conditions else [],
@@ -1778,37 +1963,6 @@ def card_state(character_id):
 MAP_TOKEN_KEY = 'obs-map'
 TITLE_DIR = os.path.join('static', 'uploads', 'obs')
 TITLE_EXT = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
-
-
-@obs_bp.route('/title-image', methods=['POST'])
-@login_required
-@dm_required
-def upload_title_image():
-    """The card the map source falls back to when no map is live."""
-    f = request.files.get('title_image')
-    if request.form.get('clear'):
-        appsettingSet('obs_title_image', '')
-        flash('Title image cleared.')
-        return redirect(url_for('obs_bp.broadcast'))
-    if not f or not f.filename:
-        flash('No image chosen.')
-        return redirect(url_for('obs_bp.broadcast'))
-    ext = f.filename.rsplit('.', 1)[-1].lower()
-    if ext not in TITLE_EXT:
-        flash('Use a PNG, JPG, WEBP or GIF.')
-        return redirect(url_for('obs_bp.broadcast'))
-    os.makedirs(TITLE_DIR, exist_ok=True)
-    name = f'title-{secrets.token_hex(6)}.{ext}'
-    f.save(os.path.join(TITLE_DIR, name))
-    old = (appsettingGet('obs_title_image', '') or '').strip()
-    appsettingSet('obs_title_image', name)
-    if old:
-        try:
-            os.remove(os.path.join(TITLE_DIR, old))
-        except OSError:
-            pass
-    flash('Title image saved.')
-    return redirect(url_for('obs_bp.broadcast'))
 
 
 def _map_token():
@@ -1889,17 +2043,23 @@ def _place_background(scene, canvas_w, canvas_h, warnings):
         return None
 
 
-@obs_bp.route('/post-image', methods=['POST'])
+@obs_bp.route('/image/<slot>', methods=['POST'])
 @login_required
 @dm_required
-def upload_post_image():
-    """Art for the post-show card. The pre-show card reuses the title-card
-    image, so it needs no uploader of its own."""
+def upload_image(slot):
+    """Upload (or clear) one of the broadcast images.
+
+    One handler for all of them. There used to be three near-identical ones,
+    which is how the controls for them ended up in three different places on
+    the page — the UI drifted because the code had."""
+    if slot not in IMAGE_SLOTS:
+        abort(404)
+    setting, stem, label = IMAGE_SLOTS[slot]
     if request.form.get('clear'):
-        appsettingSet('obs_post_image', '')
-        flash('Post-show image cleared.')
+        appsettingSet(setting, '')
+        flash(f'{label.split(chr(8212))[0].strip()} cleared.')
         return redirect(url_for('obs_bp.broadcast'))
-    f = request.files.get('post_image')
+    f = request.files.get('image')
     if not f or not f.filename:
         flash('No image chosen.')
         return redirect(url_for('obs_bp.broadcast'))
@@ -1908,39 +2068,24 @@ def upload_post_image():
         flash('Use a PNG, JPG, WEBP or GIF.')
         return redirect(url_for('obs_bp.broadcast'))
     os.makedirs(BG_DIR, exist_ok=True)
-    name = f'post-show.{ext}'
+    # A stable name per slot: the browser sources cache by URL, so reusing it
+    # means a re-upload replaces the art everywhere instead of leaving the old
+    # file referenced. The cache-buster below is what makes OBS re-fetch.
+    name = f'{stem}.{ext}'
     f.save(os.path.join(BG_DIR, name))
-    appsettingSet('obs_post_image', name)
-    flash('Post-show image updated. Refresh the card source in OBS to see it.')
+    for other in TITLE_EXT:                 # drop a previous different format
+        old = os.path.join(BG_DIR, f'{stem}.{other}')
+        if other != ext and os.path.exists(old):
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+    appsettingSet(setting, name)
+    flash('Image updated. Reload the affected source in OBS to see it.')
     return redirect(url_for('obs_bp.broadcast'))
 
 
-@obs_bp.route('/party-bg', methods=['POST'])
-@login_required
-@dm_required
-def upload_party_bg():
-    """Background art for the party scene — it sits behind every tile."""
-    if request.form.get('clear'):
-        appsettingSet('obs_party_bg', '')
-        flash('Party background cleared.')
-        return redirect(url_for('obs_bp.broadcast'))
-    f = request.files.get('party_bg')
-    if not f or not f.filename:
-        flash('No image chosen.')
-        return redirect(url_for('obs_bp.broadcast'))
-    ext = f.filename.rsplit('.', 1)[-1].lower()
-    if ext not in TITLE_EXT:
-        flash('Use a PNG, JPG, WEBP or GIF.')
-        return redirect(url_for('obs_bp.broadcast'))
-    os.makedirs(BG_DIR, exist_ok=True)
-    name = f'party-bg.{ext}'
-    f.save(os.path.join(BG_DIR, name))
-    appsettingSet('obs_party_bg', name)
-    flash('Party background updated. Refresh the frame source in OBS to see it.')
-    return redirect(url_for('obs_bp.broadcast'))
-
-
-PANEL_MODES = ('bg', 'title', 'info', 'dice', 'pre', 'post')
+PANEL_MODES = ('bg', 'title', 'info', 'dice', 'pre', 'intermission', 'post')
 
 
 @obs_bp.route('/panel')
@@ -1952,6 +2097,9 @@ def panel_view():
     mode = (request.args.get('mode') or 'info').strip().lower()
     return render_template('ttrpg/obs_panel.html',
                            mode=mode if mode in PANEL_MODES else 'info',
+                           # Same table that defines the show scenes, so a new
+                           # card can never be a scene the page won't paint.
+                           card_modes=sorted(SHOW_SOURCE),
                            state_url=url_for('obs_bp.panel_state',
                                              t=_panel_token()),
                            poll_s=panel_poll_s())
@@ -1973,7 +2121,11 @@ def _info_lines():
 
 
 def _recent_rolls(limit=ROLL_LIMIT):
-    """Newest LAST, so the panel reads top-to-bottom like a log."""
+    """Oldest first.
+
+    The panel shows the newest roll on the TOP line and prepends each arrival,
+    so feeding it oldest-first is what leaves them in the right order — each
+    new row pushes the previous one down."""
     import json as _json
     from models.ttrpg import tblDiceRolls
     rows = (tblDiceRolls.query.order_by(tblDiceRolls.roll_id.desc())
@@ -2049,6 +2201,7 @@ def panel_state():
                                             panel_fraction(), title_height(),
                                             True)['panel'],
         'pre': show_cfg('pre'),
+        'intermission': show_cfg('intermission'),
         'post': show_cfg('post'),
         'image_fraction': SHOW_IMAGE_FRACTION,
     })
