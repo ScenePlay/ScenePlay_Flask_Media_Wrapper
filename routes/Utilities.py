@@ -285,6 +285,9 @@ def backup_import():
                         f"{summary['sessions']} sessions, {summary['maps']} maps, "
                         f"{summary['session_monsters']} monsters, {summary['tokens']} tokens, "
                         f"{summary.get('floorplans', 0)} 3D floorplans, "
+                        f"{summary.get('map_prompts', 0)} map prompts, "
+                        f"{summary.get('obs_bindings', 0)} OBS bindings, "
+                        f"{summary.get('dice_rolls', 0)} dice rolls, "
                         f"{summary['notes']} notes, {summary['lighting']} lighting links.")
                 if summary.get('characters_no_owner'):
                     msg += (f" WARNING: {summary['characters_no_owner']} characters were NOT "

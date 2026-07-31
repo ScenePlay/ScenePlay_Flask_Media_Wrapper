@@ -44,6 +44,10 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapNotes (note_id INTEGER PRIMARY KEY, map_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapFloorplans (floorplan_id INTEGER PRIMARY KEY, map_id INT UNIQUE, json_data TEXT, version INT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapDoors (row_id INTEGER PRIMARY KEY, map_id INT, door_key TEXT, is_open INT, updated_at TEXT, UNIQUE(map_id, door_key))",
+    # OBS-integration tables (added alongside the broadcast work)
+    "CREATE TABLE tblBattleMapPrompts (prompt_id INTEGER PRIMARY KEY, map_id INT, kind TEXT, prompt_text TEXT, settings_json TEXT, updated_at TEXT)",
+    "CREATE TABLE tblObsSceneMap (obs_map_id INTEGER PRIMARY KEY, entity_type TEXT, entity_id INT, entity_key TEXT, scene_name TEXT, source_name TEXT, auto_created INT, sort_order INT, updated_at TEXT)",
+    "CREATE TABLE tblDiceRolls (roll_id INTEGER PRIMARY KEY, character_id INT, char_name TEXT, expression TEXT, label TEXT, dice_json TEXT, modifier INT, total INT, adv_mode TEXT, rolled_at TEXT, relay_roll_id INT)",
     "CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, ledTypeModel_ID INT, color TEXT, wait_ms INT, iterations INT, direction INT, cdiff INT, orderBy INT, outPin INT, brightness INT)",
     "CREATE TABLE tblWledPattern (wledPattern_ID INTEGER PRIMARY KEY, scene_ID INT, server_ID INT, effect INT, pallette INT, color1 TEXT, color2 TEXT, color3 TEXT, speed INT, brightness INT, orderBy INT)",
     "CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, modelName TEXT, ledJSON TEXT)",
@@ -85,6 +89,9 @@ def env(tmp_path, monkeypatch):
     uploads.mkdir()
     (uploads / 'portraits').mkdir()
     (uploads / 'portraits' / 'hero.png').write_bytes(b'PNGDATA')
+    # the OBS broadcast art lives in its own subdir — it must ride along too
+    (uploads / 'obs').mkdir()
+    (uploads / 'obs' / 'party-bg.png').write_bytes(b'OBSBG')
     monkeypatch.setattr(sql, 'database', live)
     monkeypatch.setattr(br, 'BACKUP_DIR', str(backups))
     monkeypatch.setattr(br, 'UPLOADS_DIR', str(uploads))
@@ -100,6 +107,7 @@ class TestCreateAndList:
             names = set(z.namelist())
         assert 'manifest.json' in names and 'ScenePlay.db' in names
         assert 'uploads/portraits/hero.png' in names
+        assert 'uploads/obs/party-bg.png' in names
         listed = br.list_backups()
         assert len(listed) == 1 and listed[0]['name'] == os.path.basename(path)
 
@@ -196,8 +204,10 @@ class TestReplace:
     def test_uploads_restored(self, env):
         snap = br.create_backup(label='manual')
         os.remove(env['uploads'] / 'portraits' / 'hero.png')
+        os.remove(env['uploads'] / 'obs' / 'party-bg.png')
         br.restore_replace(snap)
         assert (env['uploads'] / 'portraits' / 'hero.png').read_bytes() == b'PNGDATA'
+        assert (env['uploads'] / 'obs' / 'party-bg.png').read_bytes() == b'OBSBG'
 
     def test_database_only_skips_uploads(self, env):
         """include_uploads=False: DB restores, images are NOT extracted (the
@@ -496,6 +506,112 @@ class TestMergeHomebrew:
         finally:
             sql.database = old
         assert br.restore_merge(old_archive)['homebrew'] == 0
+
+
+class TestMergeObsAdditions:
+    """The OBS-era tables in the full merge: map prompts (local wins per
+    map+kind), OBS scene bindings (local wins, ids remapped), and the dice
+    roll log (append, exact-identity dedup)."""
+
+    def _archive(self, env):
+        live = env['live']
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('alice', 'Alice', 'player', 1)")
+
+        src = str(env['tmp'] / 'srcobs.db')
+        make_db(src)
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('alice', 'Alice', 'player', 1)")
+        x(src, "INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (1, 'Nova', 3, 1, 't')")
+        x(src, "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('SW', 1, '1')")
+        x(src, "INSERT INTO tblSessions(title, session_number, campaign_id, status, created_at) "
+               "VALUES ('Ep1', 1, 1, 'planning', 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, is_active, sort_order, created_at) "
+               "VALUES (1, 'Deck 5', 20, 20, 0, 0, 't')")
+        x(src, "INSERT INTO tblBattleMapPrompts(map_id, kind, prompt_text, settings_json, updated_at) "
+               "VALUES (1, 'art', 'paint the deck', '{}', 't')")
+        x(src, "INSERT INTO tblBattleMapPrompts(map_id, kind, prompt_text, settings_json, updated_at) "
+               "VALUES (1, 'layout', 'walls first', '{}', 't')")
+        # bindings: Nova (character id 1 on the SOURCE — must be remapped),
+        # the group shot (special), and the DM tile (player, id -1)
+        x(src, "INSERT INTO tblObsSceneMap(entity_type, entity_id, entity_key, scene_name, source_name, auto_created, sort_order) "
+               "VALUES ('player', 1, '', 'Player - Nova', 'Player - Nova Cam', 1, 4)")
+        x(src, "INSERT INTO tblObsSceneMap(entity_type, entity_id, entity_key, scene_name, source_name, auto_created, sort_order) "
+               "VALUES ('special', 0, 'group', 'Group Shot', '', 0, 0)")
+        x(src, "INSERT INTO tblObsSceneMap(entity_type, entity_id, entity_key, scene_name, source_name, auto_created, sort_order) "
+               "VALUES ('player', -1, '', 'DM - DM', 'DM - DM Cam', 1, 0)")
+        x(src, "INSERT INTO tblDiceRolls(character_id, char_name, expression, dice_json, total, adv_mode, rolled_at) "
+               "VALUES (1, 'Nova', '1d20+3', '[14]', 17, 'normal', '2026-07-01 20:00:00')")
+        x(src, "INSERT INTO tblDiceRolls(character_id, char_name, expression, dice_json, total, adv_mode, rolled_at) "
+               "VALUES (NULL, 'DM', '2d6', '[3,4]', 7, 'normal', '2026-07-01 20:01:00')")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='obs')
+        finally:
+            sql.database = old
+
+    def test_obs_tables_merge_with_remap(self, env):
+        snap = self._archive(env)
+        s = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        live = env['live']
+
+        assert s['map_prompts'] == 2
+        mid = q(live, "SELECT map_id FROM tblBattleMaps WHERE name='Deck 5'")[0][0]
+        assert sorted(r[0] for r in q(live,
+            "SELECT kind FROM tblBattleMapPrompts WHERE map_id=?", (mid,))) == ['art', 'layout']
+
+        # Nova's binding follows her NEW character id; special + DM carried as-is
+        assert s['obs_bindings'] == 3
+        nova = q(live, "SELECT character_id FROM tblCharacters WHERE name='Nova'")[0][0]
+        assert q(live, "SELECT scene_name FROM tblObsSceneMap "
+                       "WHERE entity_type='player' AND entity_id=?", (nova,)) == [('Player - Nova',)]
+        assert q(live, "SELECT scene_name FROM tblObsSceneMap "
+                       "WHERE entity_type='special' AND entity_key='group'") == [('Group Shot',)]
+        assert q(live, "SELECT scene_name FROM tblObsSceneMap "
+                       "WHERE entity_type='player' AND entity_id=-1") == [('DM - DM',)]
+
+        # rolls: Nova's re-linked, the DM's kept with no character link
+        assert s['dice_rolls'] == 2
+        assert q(live, "SELECT character_id FROM tblDiceRolls WHERE char_name='Nova'") == [(nova,)]
+        assert q(live, "SELECT character_id FROM tblDiceRolls WHERE char_name='DM'") == [(None,)]
+
+    def test_local_bindings_and_prompts_win_and_rerun_is_clean(self, env):
+        snap = self._archive(env)
+        br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        live = env['live']
+        # the DM edits their binding and prompt locally...
+        x(live, "UPDATE tblObsSceneMap SET scene_name='My Group' WHERE entity_key='group'")
+        mid = q(live, "SELECT map_id FROM tblBattleMaps WHERE name='Deck 5'")[0][0]
+        x(live, "UPDATE tblBattleMapPrompts SET prompt_text='mine' "
+                "WHERE map_id=? AND kind='art'", (mid,))
+        # ...and a re-run of the same archive must not undo either, nor duplicate
+        s2 = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert (s2['map_prompts'], s2['obs_bindings'], s2['dice_rolls']) == (0, 0, 0)
+        assert q(live, "SELECT scene_name FROM tblObsSceneMap WHERE entity_key='group'") == [('My Group',)]
+        assert q(live, "SELECT prompt_text FROM tblBattleMapPrompts "
+                       "WHERE map_id=? AND kind='art'", (mid,)) == [('mine',)]
+        assert q(live, "SELECT COUNT(*) FROM tblDiceRolls")[0][0] == 2
+
+    def test_pre_obs_archive_still_merges(self, env):
+        """An archive from before the OBS work has none of the three tables —
+        the merge must pass through without touching the counters."""
+        live = env['live']
+        x(live, "INSERT INTO tblUsers(username, role, active) VALUES ('dm', 'dm', 1)")
+        src = str(env['tmp'] / 'preobs.db')
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if 'ObsSceneMap' in stmt or 'DiceRolls' in stmt or 'BattleMapPrompts' in stmt:
+                continue
+            conn.execute(stmt)
+        conn.commit(); conn.close()
+        old = sql.database
+        sql.database = src
+        try:
+            snap = br.create_backup(label='preobs')
+        finally:
+            sql.database = old
+        s = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert (s['map_prompts'], s['obs_bindings'], s['dice_rolls']) == (0, 0, 0)
 
 
 class TestMergePkeyCollisions:

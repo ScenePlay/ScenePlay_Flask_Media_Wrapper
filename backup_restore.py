@@ -446,7 +446,8 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
     table existing so pre-ttrpg archives pass through untouched."""
     s = {'characters': 0, 'characters_skipped': 0, 'characters_no_owner': 0,
          'sessions': 0, 'maps': 0, 'session_monsters': 0, 'party_links': 0,
-         'tokens': 0, 'map_effects': 0, 'floorplans': 0, 'notes': 0, 'lighting': 0}
+         'tokens': 0, 'map_effects': 0, 'floorplans': 0, 'notes': 0, 'lighting': 0,
+         'map_prompts': 0, 'obs_bindings': 0, 'dice_rolls': 0}
 
     # -- users: match only, never copy ---------------------------------------
     # Resolve the fallback owner FIRST — it seeds user_map for unmatched
@@ -703,6 +704,67 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
             data.update({parent_col: parent, 'sort_order': ceiling + 1})
             _copy_row(c, tbl, data)
             s['notes'] += 1
+
+    # -- battle map LLM prompts: one row per (map, kind), local wins ---------------
+    if _src_has(c, 'tblBattleMapPrompts') and map_map:
+        prcols = _common_cols(c, 'tblBattleMapPrompts', exclude=('prompt_id',))
+        for row in c.execute(
+                f"SELECT {', '.join(prcols)} FROM src.tblBattleMapPrompts").fetchall():
+            data = dict(zip(prcols, row))
+            mid = map_map.get(data.get('map_id'))
+            if not mid:
+                continue
+            if c.execute("SELECT 1 FROM tblBattleMapPrompts WHERE map_id=? AND kind=?",
+                         (mid, data.get('kind') or '')).fetchone():
+                continue                          # local prompt wins
+            data['map_id'] = mid
+            _copy_row(c, 'tblBattleMapPrompts', data)
+            s['map_prompts'] += 1
+
+    # -- OBS scene bindings: local wins on (entity_type, entity_id, entity_key) ----
+    # Rig-local DM config, but worth carrying: sort_order IS the turn rotation.
+    # Player rows follow their character through char_map; the DM tile
+    # (entity_id <= 0) and 'special' rows carry their ids as-is; 'scene' rows
+    # follow the campaign scene through scene_map.
+    if _src_has(c, 'tblObsSceneMap'):
+        ocols = _common_cols(c, 'tblObsSceneMap', exclude=('obs_map_id',))
+        for row in c.execute(f"SELECT {', '.join(ocols)} FROM src.tblObsSceneMap").fetchall():
+            data = dict(zip(ocols, row))
+            etype, eid = data.get('entity_type'), data.get('entity_id')
+            if etype == 'player' and (eid or 0) > 0:
+                ent = char_map.get(eid)
+            elif etype == 'scene':
+                ent = scene_map.get(eid)
+            else:
+                ent = eid
+            if ent is None:
+                continue                          # entity didn't survive the merge
+            if c.execute("SELECT 1 FROM tblObsSceneMap WHERE entity_type=? AND entity_id=? "
+                         "AND coalesce(entity_key,'')=coalesce(?,'')",
+                         (etype, ent, data.get('entity_key'))).fetchone():
+                continue                          # this rig's binding wins
+            data['entity_id'] = ent
+            _copy_row(c, 'tblObsSceneMap', data)
+            s['obs_bindings'] += 1
+
+    # -- dice roll log: append, deduped on exact identity so re-runs are safe ------
+    if _src_has(c, 'tblDiceRolls'):
+        dcols = _common_cols(c, 'tblDiceRolls', exclude=('roll_id',))
+        for row in c.execute(f"SELECT {', '.join(dcols)} FROM src.tblDiceRolls").fetchall():
+            data = dict(zip(dcols, row))
+            if c.execute("SELECT 1 FROM tblDiceRolls "
+                         "WHERE coalesce(char_name,'')=coalesce(?,'') "
+                         "AND coalesce(expression,'')=coalesce(?,'') "
+                         "AND total IS ? AND rolled_at IS ?",
+                         (data.get('char_name'), data.get('expression'),
+                          data.get('total'), data.get('rolled_at'))).fetchone():
+                continue                          # same roll already here (re-run)
+            if 'character_id' in data:
+                # Nullable by design — an unmapped roller keeps the roll, it
+                # just loses the character link (char_name still labels it).
+                data['character_id'] = char_map.get(data.get('character_id'))
+            _copy_row(c, 'tblDiceRolls', data)
+            s['dice_rolls'] += 1
 
     # -- scene lighting: only into scenes with NO local lighting of that type ------
     if _src_has(c, 'tblScenePattern'):
