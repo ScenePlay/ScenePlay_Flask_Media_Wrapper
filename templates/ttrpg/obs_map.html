@@ -455,6 +455,36 @@ function show3d(d, moved) {
   // _last_moved_token_id). There is no overview fallback: with nobody to
   // stand in, apply() shows the 2D map instead of a camera floating in a
   // room belonging to no one.
+  // A NEW pin opens looking at the nearest enemy (else the nearest ally)
+  // rather than at whatever direction the character last walked in.
+  const focus = d.focus_token_id;
+  if (focus != null && focus !== lastPinFocus) {
+    lastPinFocus = focus;
+    const target = pinTarget();
+    restartLookCycle(Date.now(),
+                     target !== null ? {kind: 'at', id: target, ms: LOOK_FORWARD_MS}
+                                     : null);
+    if (bm3dReady) applyLookStep(camPlan[0]);
+  } else if (focus == null) {
+    lastPinFocus = null;
+  }
+
+  // The DM clicked the map: turn that way and hold it.
+  const look = d.look_at;
+  if (look && look.seq !== lastLookSeq) {
+    if (aimAtCell(look.col, look.row)) {
+      lastLookSeq = look.seq;
+      // Hold the new direction rather than letting the next beat yank it away.
+      camPlan = [{kind: 'forward', ms: LOOK_FORWARD_MS}];
+      camPlanIsCycle = false;
+      camStep = 0;
+      camCycles = 0;
+      camStepEndsAt = Date.now() + LOOK_FORWARD_MS;
+    }
+  } else if (!look) {
+    lastLookSeq = null;
+  }
+
   const want = d.through_token_id;
   if (want !== bm3dWantToken) {
     if (BM3D.setViewpoint('first', want)) {
@@ -506,6 +536,8 @@ let camPlan = [], camStep = 0, camStepEndsAt = 0, camNearCells = 6;
 // moving keeps the 3D shot alive instead of being cut off mid-move.
 let camPlanIsCycle = false, camCycles = 0;
 let auto3d = false;             // auto mode: is the 3D shot currently up?
+let lastPinFocus = null;        // which character the DM last pinned
+let lastLookSeq = null;         // which map click has already been obeyed
 let autoBlockedUntil = 0;       // don't re-cut before this — see autoReturn2d
 let autoPending = false;        // movement seen during the cooldown, owed a cut
 
@@ -515,14 +547,36 @@ function camMe() {
   return camTokens.find(t => sameId(t.token_id, camMeId));
 }
 
-function restartLookCycle(now) {
-  // Always re-enter on "forward": whatever just happened, the shot returns to
-  // where the character is heading before it starts glancing around again.
-  camPlan = [{kind: 'forward', ms: LOOK_FORWARD_MS}];
+function restartLookCycle(now, firstStep) {
+  // Normally re-enter on "forward": whatever just happened, the shot returns
+  // to where the character is heading before it glances around again. A
+  // caller can supply its own opening beat instead — that is how a fresh pin
+  // opens looking straight at the nearest enemy.
+  camPlan = [firstStep || {kind: 'forward', ms: LOOK_FORWARD_MS}];
   camPlanIsCycle = false;
   camStep = 0;
   camCycles = 0;
   camStepEndsAt = now + LOOK_FORWARD_MS;
+}
+
+// What a newly pinned character should look at: the nearest enemy anywhere
+// they can see, else the nearest ally. Deliberately NOT limited to the 30ft
+// glance range — the DM asked to see this character, and "there is nobody
+// within 30 feet" is not a reason to open the shot staring at a wall.
+function pinTarget() {
+  const me = camMe();
+  if (!me) return null;
+  let foe = null, foeD = Infinity, ally = null, allyD = Infinity;
+  camTokens.forEach(t => {
+    if (sameId(t.token_id, camMeId)) return;
+    const dx = t.col - me.col, dz = t.row - me.row;
+    if (!dx && !dz) return;             // same square: no direction to face
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (t.entity_type === 'monster') {
+      if (d < foeD) { foeD = d; foe = t.token_id; }
+    } else if (d < allyD) { allyD = d; ally = t.token_id; }
+  });
+  return foe !== null ? foe : ally;
 }
 
 function buildLookPlan() {
@@ -584,6 +638,19 @@ function applyLookStep(step) {
     if (d < bestD) { bestD = d; best = t; }
   });
   if (best) BM3D.setFacing(best.col - me.col, best.row - me.row);
+}
+
+// Turn towards a point on the map. Used by the DM clicking the battle map:
+// the direction is measured from wherever the viewed character is standing,
+// so it means "look over there" rather than "look at these coordinates".
+function aimAtCell(col, row) {
+  const me = camMe();
+  if (!me || !bm3dReady || !window.BM3D || !BM3D.isOpen()) return false;
+  const dx = col - me.col, dz = row - me.row;
+  if (!dx && !dz) return false;          // clicked their own square
+  BM3D.setFacing(dx, dz);
+  camHeading = {dx, dz};                 // the look-around returns here
+  return true;
 }
 
 function camTick() {

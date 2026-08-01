@@ -14,6 +14,7 @@ import re
 import secrets
 import string
 import threading
+import time
 from datetime import datetime
 
 from flask import (Blueprint, render_template, redirect, url_for, abort,
@@ -916,6 +917,31 @@ def api_group():
         return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
     return jsonify({'ok': True, 'current_scene': _special_scene('group')
                     or party_scene_name(), 'character_id': None})
+
+
+@obs_bp.route('/api/look-at', methods=['POST'])
+@login_required
+@dm_required
+def api_look_at():
+    """Point the 3D view at a spot on the map.
+
+    Cheap and stateless: the cell is stashed in settings and the map source
+    picks it up on its next poll. Deliberately NOT gated on OBS being
+    connected — this steers the browser source, which renders whether or not
+    the rig is up."""
+    data = request.get_json(silent=True) or {}
+    try:
+        col, row = int(data.get('col')), int(data.get('row'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'col and row required'}), 400
+    if viewed_character_id() is None:
+        # Nothing is being viewed through, so there is no eye to turn.
+        return jsonify({'ok': False, 'error': 'No character is being viewed.',
+                        'no_pin': True}), 409
+    # Monotonic-enough sequence: two clicks on the SAME cell must both count.
+    seq = int(time.time() * 1000) % 2_000_000_000
+    appsettingSet('obs_look_at', f'{col},{row},{seq}')
+    return jsonify({'ok': True, 'col': col, 'row': row, 'seq': seq})
 
 
 @obs_bp.route('/api/view-player', methods=['POST'])
@@ -2531,6 +2557,8 @@ def map_state():
         # a close-up on that character instead of framing the whole party.
         'focus_token_id': ((through or {}).get('token_id')
                            if pinned is not None and through else None),
+        # Where the DM last clicked, for the 3D camera to turn towards.
+        'look_at': look_at_point(),
         'map_name': bm.name,
         'zoom': _zoom_cfg(),
         # The effective mode: a pin overrides the configured one for as long
@@ -2657,6 +2685,25 @@ def viewed_character_id():
 
 def _set_viewed_character(character_id):
     appsettingSet('obs_view_char', str(character_id or ''))
+    # A look direction belongs to the character it was aimed from. Dropping it
+    # with the pin stops a stale heading being applied to whoever is featured
+    # next, minutes later.
+    appsettingSet('obs_look_at', '')
+
+
+def look_at_point():
+    """{'col','row','seq'} the DM last clicked on the map, or None.
+
+    seq is what the map source watches: the same cell clicked twice must
+    still re-aim, so identity can't be the coordinates alone."""
+    raw = (appsettingGet('obs_look_at', '') or '').strip()
+    if not raw:
+        return None
+    try:
+        col, row, seq = raw.split(',')
+        return {'col': int(col), 'row': int(row), 'seq': int(seq)}
+    except (TypeError, ValueError):
+        return None
 
 
 def _last_moved_token_id(bm):

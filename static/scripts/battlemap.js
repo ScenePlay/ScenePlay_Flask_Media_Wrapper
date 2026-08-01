@@ -699,10 +699,54 @@ if (IS_DM) {   // presence display exists only in the DM sidebar
         e.target !== document.getElementById('map-lines') &&
         e.target !== document.getElementById('map-bg')) return;
     activePan = { startX: e.clientX, startY: e.clientY,
-                  scrollLeft: vp.scrollLeft, scrollTop: vp.scrollTop };
+                  scrollLeft: vp.scrollLeft, scrollTop: vp.scrollTop,
+                  // Remembered so pointerup can tell a CLICK from a pan —
+                  // dragging the map must not also steer the camera.
+                  downX: e.clientX, downY: e.clientY };
     vp.style.cursor = 'grabbing';
     vp.setPointerCapture(e.pointerId);
   });
+
+  // Clicking empty ground while the 3D view is pinned to a character turns
+  // that character's head towards the spot. Background only: token clicks
+  // keep doing what they always did.
+  function maybeLookAt(e) {
+    if (!OBS_ENABLED || !_obsViewChar || !activePan) return;
+    if (Math.hypot(e.clientX - activePan.downX,
+                   e.clientY - activePan.downY) > 6) return;   // that was a pan
+    const grid = document.getElementById('map-grid');
+    if (!grid) return;
+    const r = grid.getBoundingClientRect();
+    const col = clampCol(Math.floor((e.clientX - r.left) / CELL_PX));
+    const row = clampRow(Math.floor((e.clientY - r.top) / CELL_PX));
+    fetch('/ttrpg/obs/api/look-at', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ col, row }),
+    })
+      .then(r2 => r2.json())
+      .then(d => { if (d && d.ok) _lookPing(col, row); })
+      .catch(() => {});
+  }
+
+  // A ping on the clicked cell. Without it this command is invisible from
+  // here — the camera it turns is in the OBS map source, on another screen —
+  // so it read as doing nothing at all.
+  function _lookPing(col, row) {
+    const grid = document.getElementById('map-grid');
+    if (!grid) return;
+    const dot = document.createElement('div');
+    dot.style.cssText =
+      'position:absolute;pointer-events:none;z-index:60;border-radius:50%;' +
+      'border:3px solid #7fd18a;box-shadow:0 0 12px rgba(127,209,138,.9);' +
+      `left:${col * CELL_PX}px;top:${row * CELL_PX}px;` +
+      `width:${CELL_PX}px;height:${CELL_PX}px;box-sizing:border-box;`;
+    grid.appendChild(dot);
+    dot.animate(
+      [{ transform: 'scale(.4)', opacity: 1 },
+       { transform: 'scale(1.9)', opacity: 0 }],
+      { duration: 650, easing: 'ease-out' }
+    ).onfinish = () => dot.remove();
+  }
 
   vp.addEventListener('pointermove', e => {
     if (activePointers.has(e.pointerId)) {
@@ -737,6 +781,7 @@ if (IS_DM) {   // presence display exists only in the DM sidebar
   });
 
   function endPan(e) {
+    maybeLookAt(e);
     activePointers.delete(e.pointerId);
     if (activePointers.size < 2) pinch = null;
     if (activePointers.size === 0) {
@@ -2232,6 +2277,7 @@ function obsViewPlayer(ev, btn) {
       });
       btn.classList.add('btn-outline-success');
       btn.classList.remove('btn-outline-secondary');
+      _obsViewChar = d.character_id;
       // The AUTO/2D/3D button is deliberately NOT repainted: the pin is an
       // override for the moment and the configured mode has not changed.
     })
@@ -2415,6 +2461,9 @@ function _obsSync(obs) {
   const btns = document.querySelectorAll('.obs-view-btn');
   if (!btns.length) return;
   if (!obs) return;                       // OBS disabled server-side
+  // The authority for "is a character pinned" — obsViewPlayer sets it
+  // optimistically, this corrects it (including a pin made from another tab).
+  _obsViewChar = obs.view_char || null;
   const onMap = !!obs.current_scene && obs.current_scene === obs.map_scene;
   btns.forEach(b => {
     // Lit only when this character is BOTH the pinned viewpoint and the map
@@ -2442,7 +2491,13 @@ function _obsSync(obs) {
 
 // Nothing is being viewed through any more — used by every action that
 // releases the pin, so they can't drift on how they clear it.
+// Whether the 3D view is currently pinned to a character. A background click
+// on the map only steers the camera while it is — otherwise the DM's ordinary
+// panning and deselect clicks would fire pointless requests.
+let _obsViewChar = null;
+
 function _obsClearViewButtons() {
+  _obsViewChar = null;
   document.querySelectorAll('.obs-view-btn').forEach(b => {
     b.classList.remove('btn-outline-success');
     b.classList.add('btn-outline-secondary');
