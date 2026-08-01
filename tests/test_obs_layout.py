@@ -1,8 +1,13 @@
-"""Party-scene grid geometry. Pure maths — the invariant that matters is that
-tiles never move when the turn changes: only the featured tile resizes."""
+"""Party-scene grid geometry. Pure maths.
+
+Two modes: an even grid with nobody featured, and the SPOTLIGHT — the featured
+tile doubles in each direction and everyone else shrinks and repacks around it.
+The invariants that matter are that tiles never overlap in either mode (nobody
+gets covered), and that the spotlit tile really is 2x linear."""
 import pytest
 
-from obs_layout import choose_grid, frame_areas, grid_layout
+from obs_layout import (SPOTLIGHT_SPAN, choose_grid, choose_spotlight_grid,
+                        frame_areas, grid_layout)
 
 
 class TestChooseGrid:
@@ -54,30 +59,14 @@ class TestGridLayout:
                          a['y'] + a['h'] <= b['y'] + .01 or b['y'] + b['h'] <= a['y'] + .01)
                 assert apart, f'tiles overlap: {a} {b}'
 
-    def test_featuring_moves_nobody_else(self):
-        """The whole point of this layout: the table doesn't reshuffle when
-        the turn passes."""
-        base = grid_layout(6, 1920, 1080, featured=None)
-        feat = grid_layout(6, 1920, 1080, featured=3)
-        for i, (b, f) in enumerate(zip(base, feat)):
-            if i == 3:
-                continue
-            assert (b['x'], b['y'], b['w'], b['h']) == (f['x'], f['y'], f['w'], f['h'])
-
-    def test_every_tile_is_the_same_size(self):
-        """The turn no longer scales anyone up: a layout that resized the
-        active tile shifted under the audience on every turn."""
+    def test_every_tile_is_the_same_size_when_nobody_is_featured(self):
         for n in range(1, 13):
-            for featured in [None] + list(range(n)):
-                tiles = grid_layout(n, 1920, 1080, featured=featured)
-                sizes = {(t['w'], t['h']) for t in tiles}
-                assert len(sizes) == 1, f'n={n} featured={featured} -> {sizes}'
+            tiles = grid_layout(n, 1920, 1080)
+            sizes = {(t['w'], t['h']) for t in tiles}
+            assert len(sizes) == 1, f'n={n} -> {sizes}'
 
-    def test_featured_changes_nothing_but_the_flag(self):
-        plain = grid_layout(6, 1920, 1080)
+    def test_only_the_flag_marks_the_featured_tile(self):
         feat = grid_layout(6, 1920, 1080, featured=3)
-        assert [(t['x'], t['y'], t['w'], t['h']) for t in plain] == \
-               [(t['x'], t['y'], t['w'], t['h']) for t in feat]
         assert [t['featured'] for t in feat] == [False] * 3 + [True] + [False] * 2
 
     def test_short_last_row_is_centred(self):
@@ -102,6 +91,76 @@ class TestGridLayout:
     def test_respects_a_non_1080p_canvas(self):
         for t in grid_layout(4, 1280, 720):
             assert t['x'] + t['w'] <= 1280.01 and t['y'] + t['h'] <= 720.01
+
+
+class TestSpotlight:
+    """Featuring a player doubles their tile and shrinks everyone else."""
+
+    def test_the_spotlit_tile_is_twice_the_size_of_the_others(self):
+        for n in range(2, 13):
+            for featured in range(n):
+                tiles = grid_layout(n, 1920, 1080, featured=featured, gutter=0)
+                hero = tiles[featured]
+                others = [t for i, t in enumerate(tiles) if i != featured]
+                assert hero['w'] == pytest.approx(others[0]['w'] * SPOTLIGHT_SPAN, rel=.01)
+                assert hero['h'] == pytest.approx(others[0]['h'] * SPOTLIGHT_SPAN, rel=.01)
+
+    def test_everyone_who_is_not_spotlit_stays_one_size(self):
+        for n in range(2, 13):
+            tiles = grid_layout(n, 1920, 1080, featured=0)
+            sizes = {(t['w'], t['h']) for t in tiles[1:]}
+            assert len(sizes) == 1, f'n={n} -> {sizes}'
+
+    def test_nobody_is_ever_covered(self):
+        """The reason this replaced the old grow-in-place spotlight."""
+        for n in range(2, 13):
+            for featured in range(n):
+                tiles = grid_layout(n, 1920, 1080, featured=featured)
+                for i, a in enumerate(tiles):
+                    for b in tiles[i + 1:]:
+                        apart = (a['x'] + a['w'] <= b['x'] + .01
+                                 or b['x'] + b['w'] <= a['x'] + .01
+                                 or a['y'] + a['h'] <= b['y'] + .01
+                                 or b['y'] + b['h'] <= a['y'] + .01)
+                        assert apart, f'n={n} featured={featured}: {a} over {b}'
+
+    def test_the_others_shrink_relative_to_the_even_grid(self):
+        """Where the extra room for the spotlight comes from."""
+        for n in range(3, 13):
+            even = grid_layout(n, 1920, 1080)[0]
+            spot = [t for i, t in enumerate(grid_layout(n, 1920, 1080, featured=0))
+                    if i != 0][0]
+            assert spot['w'] * spot['h'] < even['w'] * even['h'], f'n={n}'
+
+    def test_every_tile_is_placed(self):
+        for n in range(2, 13):
+            for featured in range(n):
+                tiles = grid_layout(n, 1920, 1080, featured=featured)
+                assert len(tiles) == n
+                assert all(t is not None for t in tiles)
+                assert sum(1 for t in tiles if t['featured']) == 1
+
+    def test_a_lone_player_has_nothing_to_shrink(self):
+        assert grid_layout(1, 1920, 1080, featured=0, gutter=0)[0]['w'] == 1920
+
+    def test_out_of_range_featured_falls_back_to_the_even_grid(self):
+        assert grid_layout(4, 1920, 1080, featured=9) == grid_layout(4, 1920, 1080)
+
+    def test_grid_always_has_room_for_the_block_plus_everyone(self):
+        for n in range(2, 17):
+            cols, rows = choose_spotlight_grid(n, 1920, 1080)
+            assert cols >= SPOTLIGHT_SPAN and rows >= SPOTLIGHT_SPAN
+            assert cols * rows >= (n - 1) + SPOTLIGHT_SPAN ** 2
+
+    def test_spotlight_stays_inside_the_tiles_area(self):
+        a = frame_areas(1920, 1080, 'right', 0.3, 96)
+        px, py, pw, ph = a['panel']
+        for n in range(2, 10):
+            for t in grid_layout(n, 1920, 1080, featured=0, area=a['tiles']):
+                overlap_x = min(t['x'] + t['w'], px + pw) - max(t['x'], px)
+                overlap_y = min(t['y'] + t['h'], py + ph) - max(t['y'], py)
+                assert overlap_x <= 0.01 or overlap_y <= 0.01, \
+                    f'n={n}: spotlight overlaps the panel'
 
 
 class TestFrame:

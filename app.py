@@ -74,6 +74,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # transaction across a slow network call and then write on it.
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'timeout': 15}}
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+
+@app.url_defaults
+def _static_cache_bust(endpoint, values):
+    # Stamp static asset URLs with the file's mtime (?v=...) so browsers drop
+    # cached copies the moment the file changes — a stale site.js otherwise
+    # leaves pages calling helpers that don't exist in the cached copy.
+    if endpoint == 'static' and 'filename' in values:
+        try:
+            fp = os.path.join(app.static_folder, values['filename'])
+            values['v'] = int(os.stat(fp).st_mtime)
+        except OSError:
+            pass
 def _load_or_create_secret_key():
     """SECRET_KEY env var wins; otherwise generate a random key once and persist
     it to the instance dir. Replaces the old 'change-me-in-production' fallback —
@@ -240,8 +253,20 @@ def inject_remote_led_status():
 # browser-extension import, and the keep-music-playing toggles.
 from routes._util import sceneplay_dm_guard, dm_only_sceneplay_enabled
 
-for _bp in (sp, sn, ltm, cp, mu, ge, ip, sr, ms, vm, vs, wl, dls, lcf, cs):
+for _bp in (sp, ltm, cp, mu, ge, ip, sr, ms, vm, vs, wl, dls, lcf, cs):
     _bp.before_request(sceneplay_dm_guard)
+
+
+def _sn_sceneplay_guard():
+    # The browser extension reads GET /api/scenes without a session; the
+    # scenes page and its edit endpoints (POSTs) stay DM-locked.
+    from flask import request
+    if request.endpoint == 'sn.data' and request.method == 'GET':
+        return None
+    return sceneplay_dm_guard()
+
+
+sn.before_request(_sn_sceneplay_guard)
 
 
 def _main_sceneplay_guard():
@@ -531,8 +556,14 @@ def _another_instance_running(port=8086):
 if arr[0] > 0:
     if __name__ == '__main__':
         if _another_instance_running():
+            # stderr + explicit hint: under F5 this exit looks like a crash —
+            # the terminal closes on the message before anyone can read it.
             print('*** ScenePlay is already running (port 8086 in use) — '
-                  'not starting a second instance. ***')
+                  'not starting a second instance. ***\n'
+                  '    Debugging with F5? Stop the other copy first (the '
+                  '"app.py -flask" terminal\n    or the waitress/startApp.bat '
+                  'window), then start the debugger again.',
+                  file=sys.stderr, flush=True)
             sys.exit(1)
         startTheadPlayer()
     

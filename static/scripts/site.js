@@ -132,6 +132,67 @@ function restoreGridControls(){
 }
 
 
+// Shared Add New Row POST for the filterable table pages. When the page's
+// campaign/scene filter dropdown has a real selection, ask whether the new
+// row should belong to it — OK stamps the id on the row, Cancel creates it
+// unassigned (0). With the filter on All, no question: the server keeps its
+// historical default. filter = {field, kind, dropdownId} plus optionally:
+//   contextDropdownId/contextKind — a second filter dropdown named in the
+//     dialog so a blank selection is still identifiable (a scene named " "
+//     reads as scene " " (campaign "Strahd")).
+//   confirmSkip — declining the first ask gets a second one; cancelling
+//     that aborts without creating a row at all.
+async function spAddRowPrompt(endpoint, filter) {
+  const body = {};
+  const dd = filter && document.getElementById(filter.dropdownId);
+  const id = dd ? parseInt(dd.value, 10) || 0 : 0;
+  const cd = filter.contextDropdownId
+      && document.getElementById(filter.contextDropdownId);
+  const cdOn = cd ? parseInt(cd.value, 10) || 0 : 0;
+  const cdName = cdOn ? cd.options[cd.selectedIndex].text.trim() : '';
+  if (id) {
+    let label = filter.kind + ' "' + dd.options[dd.selectedIndex].text.trim() + '"';
+    if (cdOn) label += ' (' + filter.contextKind + ' "' + cdName + '")';
+    if (confirm('Add the new row to the currently selected ' + label + '?')) {
+      body[filter.field] = id;
+    } else if (filter.confirmSkip && !confirm('Create the new row with no '
+        + filter.kind + ' instead? (Cancel adds nothing.)')) {
+      return;
+    } else {
+      body[filter.field] = 0;
+    }
+  } else if (cdOn && dd) {
+    // Campaign picked but the scene filter is on All. These rows can only
+    // join a campaign THROUGH a scene, and the scene dropdown already lists
+    // exactly this campaign's scenes — offer them as a numbered pick.
+    const opts = Array.from(dd.options).filter(o => parseInt(o.value, 10) || 0);
+    if (opts.length) {
+      const ans = window.prompt('The ' + filter.contextKind + ' "' + cdName
+          + '" is selected but the ' + filter.kind + ' filter is on All. Rows '
+          + 'here join a ' + filter.contextKind + ' through their '
+          + filter.kind + ' — attach the new row to one of:\n'
+          + opts.map((o, i) => (i + 1) + ') ' + o.text.trim()).join('\n')
+          + '\n\nEnter a number, or leave blank for none (Cancel adds nothing):');
+      if (ans === null) return;
+      const n = parseInt(ans, 10);
+      body[filter.field] = (n >= 1 && n <= opts.length)
+          ? parseInt(opts[n - 1].value, 10) : 0;
+    }
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) console.error(`Add row failed! Status: ${response.status}`);
+  } catch (error) {
+    console.error('Error during fetch operation:', error);
+  }
+  window.location.reload();
+}
+
+
 let _volTimer = null;
 function volumeChange(){
   const slider  = document.getElementById("volume_slider");

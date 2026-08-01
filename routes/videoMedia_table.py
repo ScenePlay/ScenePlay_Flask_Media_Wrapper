@@ -152,8 +152,15 @@ def update():
 
 @vm.route('/api/videomediaaddrow', methods=['POST'])
 def videomediaaddrow():
+    # The page offers to link the new media row to the selected scene:
+    # scene_ID > 0 also creates the tblVideoScene link, with the same
+    # defaults the video-scenes page's own add-row uses.
+    data = request.get_json(silent=True) or {}
     row = ['empty','empty',0,'',1,1,0,'','']
-    CRUD_tblvideomedia(row,"C")
+    media_id = CRUD_tblvideomedia(row,"C")
+    scene_id = int(data.get('scene_ID', 0))
+    if scene_id:
+        CRUD_tblVideoScene([scene_id, media_id, 0, 1, 100, 0], "C")
     return 'tblvideomedia has a new row'
 
 @vm.route('/api/videomediadelrow', methods=['POST'])

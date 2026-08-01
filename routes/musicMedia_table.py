@@ -142,8 +142,15 @@ def update():
 
 @mu.route('/api/musicaddrow', methods=['POST'])
 def musicaddrow():
+    # The page offers to link the new media row to the selected scene:
+    # scene_ID > 0 also creates the tblMusicScene link, with the same
+    # defaults the music-scenes page's own add-row uses.
+    data = request.get_json(silent=True) or {}
     row = [' ',' ',0,'',1,1,0,'','']
-    CRUD_tblMusic(row,"C")
+    media_id = CRUD_tblMusic(row,"C")
+    scene_id = int(data.get('scene_ID', 0))
+    if scene_id:
+        CRUD_tblMusicScene([scene_id, media_id, 1, 100], "C")
     return 'tblmusic has a new row'
 
 @mu.route('/api/musicdelrow', methods=['POST'])

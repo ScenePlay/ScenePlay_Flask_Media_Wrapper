@@ -65,23 +65,27 @@
         </div>
       </div>
       <p class="small text-muted">
-        Everyone lives in one OBS scene as a tile. Giving a player the turn makes
-        their tile <b>bigger in place</b> &mdash; the table stays on screen and
-        nobody's tile moves. Players with no camera get a stat card instead, so
-        the grid never reshuffles when someone connects.
+        Everyone lives in one OBS scene as a tile. Giving a player the turn
+        <b>spotlights</b> them &mdash; their tile grows to double size and the
+        rest shrink and repack around it, easing across rather than jumping.
+        The whole table stays on screen and nobody gets covered, so it reads as
+        "listen to this one" for an important piece of dialog. Players with no
+        camera get a stat card instead of an empty box.
       </p>
       {% if not has_party %}
       <p class="small text-muted mb-0">No active session &mdash; start a session and add a party first.</p>
       {% else %}
-      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
-        <button class="btn btn-sm btn-outline-secondary" onclick="obsStep(-1)">&#9664; Previous</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="obsStep(1)">Next &#9654;</button>
-        <button class="btn btn-sm btn-outline-secondary" onclick="obsGroup()">&#128101; Group shot</button>
-        <span class="small text-muted">Number keys 1&ndash;9 jump straight to a player.</span>
-      </div>
       <div id="obs-rows">
         {% for r in rows %}
-        <div class="d-flex align-items-center gap-2 mb-2 obs-row" data-character-id="{{ r.character_id }}">
+        <div class="d-flex align-items-center gap-2 mb-2 obs-row" data-character-id="{{ r.character_id }}"
+             style="{% if not r.on_stream %}opacity:.55;{% endif %}">
+          <label class="mb-0 d-flex align-items-center" style="cursor:pointer;"
+                 title="On the group feed. Untick to bench this player — they keep their
+                        seat in the session and their place in the running order, but lose
+                        their tile until you tick it back.">
+            <input type="checkbox" class="obs-stream-chk" onchange="obsOnStream(this)"
+                   {% if r.on_stream %}checked{% endif %}>
+          </label>
           <span class="text-muted small obs-row-pos" style="width:1.3rem;text-align:right;">
             {{ r.pos or '·' }}</span>
           <span class="obs-feed-dot" title="{{ {'live': 'Camera feed set, player online',
@@ -113,16 +117,33 @@
                 onclick="obsReorder({{ r.character_id }}, -1)" title="Earlier in the rotation">&#9650;</span>
           <span class="text-muted" style="cursor:pointer;user-select:none;"
                 onclick="obsReorder({{ r.character_id }}, 1)" title="Later in the rotation">&#9660;</span>
-          <span class="badge bg-success obs-row-badge"
-                style="display:{% if r.live %}inline-block{% else %}none{% endif %};">on air</span>
         </div>
         {% endfor %}
       </div>
       <p class="small text-muted mt-2 mb-0">
-        The dot shows whether a player has a camera feed set (and, for remote
-        players, whether they're online). Use &#9650;&#9660; to set the turn order &mdash;
-        that's also the order the number keys and Next/Previous follow.
+        The leftmost tick is who's <b>on the group feed</b>. Untick someone
+        sitting this episode out, or the half of a split party the stream isn't
+        following &mdash; they keep their seat in the session and everything on
+        their sheet, the grid just re-lays-out without them until you tick them
+        back. The dot shows whether a player has a camera feed set (and, for
+        remote players, whether they're online). Use &#9650;&#9660; to set the turn order &mdash;
+        that's also the order the number keys 1&ndash;9 follow (0 or G for the
+        group shot, &#9664;&#9654; to step through the party).
       </p>
+      <div class="row g-2 align-items-end mt-2" style="max-width:32rem;">
+        <div class="col-5">
+          <label class="form-label small mb-1" for="obs-tile-anim">
+            Spotlight glide (ms)</label>
+          <input type="number" id="obs-tile-anim" name="obs_tile_anim_ms"
+                 form="obs-cfg-form" class="form-control form-control-sm"
+                 min="0" max="4000" step="50" value="{{ cfg.tile_anim_ms }}">
+        </div>
+        <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
+          How long the tiles take to resize when the spotlight moves to a
+          player and when <b>0</b>/<b>G</b> evens the table out again.
+          <b>0</b> snaps instantly. Saved with Connection Settings below.
+        </div>
+      </div>
       {% if cfg.portal_url %}
       <div class="small text-muted mt-2 d-flex align-items-center gap-2 flex-wrap">
         <span>Remote players log in at</span>
@@ -538,6 +559,7 @@ const OBS_CARDOVR_URL = "{{ url_for('obs_bp.api_card_override') }}";
 const OBS_MAPMODE_URL = "{{ url_for('obs_bp.api_map_mode') }}";
 const OBS_MAPRELOAD_URL = "{{ url_for('obs_bp.api_map_reload') }}";
 const OBS_MAPSCENE_URL = "{{ url_for('obs_bp.api_map_scene') }}";
+const OBS_ONSTREAM_URL = "{{ url_for('obs_bp.api_on_stream') }}";
 
 function _obsPost(url, body) {
   return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -635,6 +657,25 @@ function obsCardOverride(chk) {
     });
 }
 
+function obsOnStream(chk) {
+  const row = chk.closest('.obs-row');
+  chk.disabled = true;
+  _obsPost(OBS_ONSTREAM_URL, {character_id: row.dataset.characterId,
+                              on_stream: chk.checked})
+    .then(({ok, d}) => {
+      chk.disabled = false;
+      if (!ok || !d.ok) {
+        alert(d.error || 'Could not change that player.');
+        chk.checked = !chk.checked;
+        return;
+      }
+      // The running order renumbers around the gap, so reload rather than
+      // leave the positions on screen lying about which key features whom.
+      location.reload();
+    })
+    .catch(() => { chk.disabled = false; chk.checked = !chk.checked; });
+}
+
 function obsReorder(characterId, delta) {
   _obsPost(OBS_REORDER_URL, {character_id: characterId, delta})
     .then(({ok, d}) => { if (ok && d.ok) location.reload(); });
@@ -692,14 +733,6 @@ function _obsApply(s) {
       b.style.background = on ? 'var(--ttrpg-accent)' : 'var(--ttrpg-surface)';
       b.style.color = on ? 'var(--sp-on-accent)' : 'var(--ttrpg-text)';
       b.style.borderColor = on ? 'var(--ttrpg-accent)' : 'var(--sp-border)';
-    });
-  }
-  if (s.rows) {
-    s.rows.forEach(r => {
-      const row = document.querySelector(`.obs-row[data-character-id="${r.character_id}"]`);
-      if (!row) return;
-      const badge = row.querySelector('.obs-row-badge');
-      if (badge) badge.style.display = r.live ? 'inline-block' : 'none';
     });
   }
   if (s.state !== undefined) {

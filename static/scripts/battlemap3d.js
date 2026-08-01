@@ -37,6 +37,13 @@ window.BM3D = (function () {
   var LERP_RATE = 6;              // 1-exp(-rate*dt) position smoothing
   var FLY_SPEED = 4;              // units/sec (×3 with Shift)
   var YAW_EASE_RATE = 3;          // 1-exp(-rate*dt) turn easing for auto-facing
+  // Auto-aim: stepping into someone's eyes should land on something worth
+  // seeing. Nearest enemy first (that is what matters through a character's
+  // eyes), else the nearest ally, else an idle scan so the shot isn't a
+  // motionless stare at whatever wall the previous view happened to face.
+  var IDLE_SCAN_MIN_MS = 2600;    // dwell before the next idle glance
+  var IDLE_SCAN_MAX_MS = 4400;
+  var IDLE_SCAN_ARC = Math.PI * 0.7;   // widest single idle swing
 
   var WALL_COLORS = [0x8a8578, 0x938e80, 0x827d70, 0x8f8a7c, 0x7d7869];
   var DOOR_COLOR = 0x7a5230;
@@ -64,6 +71,7 @@ window.BM3D = (function () {
   var open_ = false, rafId = null, lastT = 0;
   var yaw = 0, pitch = 0;
   var yawTarget = null;           // headless auto-facing target; null = manual
+  var idleScanUntil = 0;          // >0 = idle scanning; when the next glance is due
   var fogRects = [];              // cloud footprints in cells: {x1,z1,x2,z2}
   var _fogSig = null;
   var _decalSig = null;
@@ -1249,21 +1257,29 @@ window.BM3D = (function () {
   }
 
   function setView(v) {
+    // Aim only when the viewpoint actually CHANGES. setView is also called to
+    // re-seat the same view after a state poll, and re-aiming there would
+    // wrench the camera out of the DM's hands every couple of seconds.
+    var entering = v.kind !== view.kind ||
+                   String(v.tokenId) !== String(view.tokenId);
     // Another character's eyes = another character's movement budget.
     if (String(v.tokenId) !== String(view.tokenId)) resetMoveCounter();
     view = v;
     refreshTokenVisibility();   // own-token hiding + player fog cover
+    if (v.kind !== 'first') idleScanUntil = 0;
     if (v.kind === 'overview') { setOverviewCamera(); return; }
     if (v.kind === 'fly' && !flyPos) {
       flyPos = new THREE.Vector3(cfg.gridCols / 2, 3, cfg.gridRows + 2);
       yaw = 0; pitch = -0.35;
     }
+    if (v.kind === 'first' && entering) _aimOnEnter(v.tokenId);
   }
 
   function onPointerMove(dx, dy) {
     if (view.kind === 'overview') return;
     yaw -= dx * 0.0024;
     yawTarget = null;          // a human took the wheel; stop auto-facing
+    idleScanUntil = 0;         // ...and stop the idle look-around with it
     pitch -= dy * 0.0024;
     var lim = Math.PI / 2 - 0.05;
     pitch = Math.max(-lim, Math.min(lim, pitch));
@@ -1276,6 +1292,57 @@ window.BM3D = (function () {
   function setFacing(dx, dz) {
     if (!dx && !dz) return;
     yawTarget = Math.atan2(-dx, -dz);
+  }
+
+  // Point the camera at something worth seeing when we step into a token's
+  // eyes. Nearest ENEMY wins, because through a character's eyes the thing
+  // worth showing is what is trying to kill them; failing that the nearest
+  // ally; failing that an idle scan. Hidden monsters are filtered out server
+  // side before they reach the page, so this can only pick a visible one.
+  function _aimOnEnter(tokenId) {
+    idleScanUntil = 0;
+    var me = tokenRecs[tokenId];
+    if (!me || !cfg || !cfg.autoAim) return;
+    var mx = tokCol(me.tok), mz = tokRow(me.tok);
+    var foe = null, foeD = Infinity, ally = null, allyD = Infinity;
+    Object.keys(tokenRecs).forEach(function (tid) {
+      if (String(tid) === String(tokenId)) return;
+      var rec = tokenRecs[tid];
+      if (!tokenVisible(rec)) return;          // fogged or otherwise not shown
+      var t = rec.tok;
+      if (t.is_alive === false || t.is_alive === 0) return;
+      var dx = tokCol(t) - mx, dz = tokRow(t) - mz;
+      if (!dx && !dz) return;    // same square gives no direction to face
+      var d = dx * dx + dz * dz;
+      if (t.entity_type === 'player') {
+        if (d < allyD) { allyD = d; ally = {dx: dx, dz: dz}; }
+      } else if (d < foeD) {
+        foeD = d; foe = {dx: dx, dz: dz};
+      }
+    });
+    var pick = foe || ally;
+    if (pick) { setFacing(pick.dx, pick.dz); return; }
+    _beginIdleScan();
+  }
+
+  function _beginIdleScan() {
+    if (!cfg || !cfg.autoAim) return;
+    idleScanUntil = 1;      // due immediately; the next frame picks a heading
+  }
+
+  // An empty room shouldn't be a motionless stare. Drift the heading around by
+  // a random arc every few seconds — the existing yaw easing turns it into a
+  // slow look-around rather than a snap.
+  function _tickIdleScan() {
+    if (!idleScanUntil) return;
+    var now = (window.performance && performance.now) ? performance.now() : Date.now();
+    if (now < idleScanUntil) return;
+    var swing = (Math.random() - 0.5) * IDLE_SCAN_ARC;
+    // Never settle on exactly where we already are, or the beat looks frozen.
+    if (Math.abs(swing) < 0.15) swing = swing < 0 ? -0.15 : 0.15;
+    yawTarget = yaw + swing;
+    idleScanUntil = now + IDLE_SCAN_MIN_MS
+                  + Math.random() * (IDLE_SCAN_MAX_MS - IDLE_SCAN_MIN_MS);
   }
 
   function _easeYaw(dt) {
@@ -1309,6 +1376,7 @@ window.BM3D = (function () {
       if (keys.q) flyPos.y -= speed;
       camera.position.copy(flyPos);
     }
+    _tickIdleScan();
     _easeYaw(dt);
     camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
   }
@@ -1542,6 +1610,11 @@ window.BM3D = (function () {
 
   function openViewer(config) {
     var firstOpen = !renderer;
+    // On by default: an interactive viewer wants the camera pointed at
+    // something the moment you step into a character. A host that plans its
+    // own shots (the OBS map source) passes false so the two don't fight over
+    // the same yawTarget.
+    if (config && config.autoAim === undefined) config.autoAim = true;
     if (firstOpen) {
       cfg = config;
       var canvas = cfg.overlayEl.querySelector('#bm3d-canvas');

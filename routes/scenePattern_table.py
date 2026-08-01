@@ -114,9 +114,12 @@ def update():
 
 @sp.route('/api/scenepatternaddrow', methods=['POST'])
 def scenesaddrow():
+    # scene_ID from the page's "join the selected scene?" prompt (0 =
+    # unassigned); bodiless calls keep the old silent scene-filter stamp.
+    data = request.get_json(silent=True) or {}
     sceneFilter = appsettingGetSceneFilter()
     pinOutData = getLEDOutPIN()
-    row = [int(sceneFilter[0][0]),0,'[0,0,0]',10,10000,1,'[0,0,0]',1,pinOutData[0][0],pinOutData[0][3]]
+    row = [int(data.get('scene_ID', sceneFilter[0][0])),0,'[0,0,0]',10,10000,1,'[0,0,0]',1,pinOutData[0][0],pinOutData[0][3]]
     CRUD_tblScenePattern(row,"C")
     return 'tblScenePattern has a new row'
 

@@ -214,6 +214,15 @@ def last_error():
 
 # ── scene building ────────────────────────────────────────────────────────────
 
+# Browser-source flags that keep a camera feed CONNECTED while its scene is
+# off-air. OBS would otherwise reload the page each time the scene goes live
+# (restart_when_active) or destroy the source while it is hidden (shutdown);
+# either way the feed has to renegotiate WebRTC on the cut back, which is the
+# second or two of empty box seen when returning from the map to the party.
+# The cost is that every camera stays connected all session, on-air or not.
+KEEPALIVE = {'restart_when_active': False, 'shutdown': False}
+
+
 def browser_kind():
     """The input kind for a browser source on THIS OBS build, or '' when the
     build has no browser plugin at all (then scene creation degrades to a
@@ -253,7 +262,7 @@ def create_player_scene(scene_name, source_name, url, timeout=5):
         height = _cache.get('base_height') or 1080
 
     settings = {'url': url, 'width': width, 'height': height,
-                'reroute_audio': True, 'restart_when_active': True}
+                'reroute_audio': True, **KEEPALIVE}
     item_id = None
     try:
         res = request('CreateInput', {
@@ -336,19 +345,25 @@ def scene_items(scene_name, timeout=3):
     return out
 
 
-def ensure_browser_input(scene_name, source_name, url, width, height, timeout=5):
+def ensure_browser_input(scene_name, source_name, url, width, height, timeout=5,
+                         rewrite_settings=True):
     """Make sure a browser source exists AND is in this scene.
 
     Three cases, all idempotent: brand new; input exists elsewhere (add it to
     this scene without duplicating the input); already here (just repoint the
-    URL). Returns (sceneItemId, warnings)."""
+    URL). Returns (sceneItemId, warnings).
+
+    rewrite_settings=False skips the settings write for an input that already
+    exists, leaving the running page completely alone. Pass it when the caller
+    knows the url and size are unchanged: writing them re-renders the page even
+    when nothing differs, which blanks a live camera for a moment."""
     warnings = []
     kind = browser_kind()
     if not kind:
         raise ObsRejected(605, 'This OBS build has no browser source input')
 
     settings = {'url': url, 'width': int(width), 'height': int(height),
-                'reroute_audio': True, 'restart_when_active': True}
+                'reroute_audio': True, **KEEPALIVE}
     try:
         res = request('CreateInput', {
             'sceneName': scene_name, 'inputName': source_name,
@@ -377,11 +392,15 @@ def ensure_browser_input(scene_name, source_name, url, width, height, timeout=5)
     # inside its new box instead of filling it, and the item ends up visibly
     # shorter (or narrower) than asked for. Only re-rendering it at the right
     # resolution makes the bounds an exact fit.
-    request('SetInputSettings',
-            {'inputName': source_name,
-             'inputSettings': {'url': url, 'width': int(width),
-                               'height': int(height)},
-             'overlay': True}, timeout=timeout)
+    # KEEPALIVE goes on here too, not just at create time: sources built by an
+    # earlier version still carry restart_when_active, so "Build / refresh
+    # party scene" is what repairs an existing setup.
+    if rewrite_settings:
+        request('SetInputSettings',
+                {'inputName': source_name,
+                 'inputSettings': {'url': url, 'width': int(width),
+                                   'height': int(height), **KEEPALIVE},
+                 'overlay': True}, timeout=timeout)
     try:
         item_id = scene_items(scene_name, timeout=timeout).get(source_name)
     except ObsRejected:
@@ -410,6 +429,87 @@ def place_item(scene_name, item_id, rect, timeout=3):
         }}, timeout=timeout)
 
 
+# ── animated moves (the spotlight) ────────────────────────────────────────────
+# Featuring a player reflows the whole grid. Snapping every tile to its new box
+# in one frame reads as a glitch; easing them across reads as a camera move.
+
+ANIM_FPS = 30                 # frames a second the ease is sampled at
+_anim_lock = threading.Lock()
+_anim_gen = 0
+
+
+def _ease(t):
+    """Ease-in-out cubic — starts and finishes gently, which is what makes the
+    reflow look intentional rather than like a dropped frame."""
+    return 4 * t ** 3 if t < 0.5 else 1 - ((-2 * t + 2) ** 3) / 2
+
+
+def _send_batch(requests):
+    """Fire a RequestBatch and do NOT wait for the reply.
+
+    An animation frame carries one transform per tile and lands every ~30ms; a
+    correlated round-trip each would cost far more than the move is worth, and
+    a dropped frame is invisible because the next one supersedes it. _dispatch
+    already ignores replies nobody is waiting on."""
+    _send({'op': 8, 'd': {'requestId': str(next(_req_ids)),
+                          'haltOnFailure': False, 'executionType': 0,
+                          'requests': requests}})
+
+
+def animate_items(scene_name, moves, duration_s=0.7, steps=None):
+    """Ease scene items from one rect to another. Returns IMMEDIATELY — the
+    frames go out from a background thread, so no HTTP handler waits on them.
+
+    moves: [(item_id, from_rect, to_rect)] with rects as {'x','y','w','h'}.
+    steps: frame count; derived from the duration at ANIM_FPS when omitted, so
+    a longer move gets more frames instead of a chunkier one.
+
+    A later call supersedes an in-flight one: hammering the number keys must
+    not leave two animations fighting over the same tiles. The last frame is
+    the exact target, so the scene always lands where it was asked to unless a
+    NEWER move took over — which lands somewhere better."""
+    moves = [(i, a, b) for i, a, b in moves if i is not None]
+    if steps is None:
+        steps = max(4, min(int(duration_s * ANIM_FPS), 90))
+    if not moves or steps < 1 or duration_s <= 0:
+        return
+    global _anim_gen
+    with _anim_lock:
+        _anim_gen += 1
+        gen = _anim_gen
+
+    def run():
+        delay = duration_s / steps
+        for step in range(1, steps + 1):
+            with _anim_lock:
+                if gen != _anim_gen:
+                    return              # a newer spotlight owns these tiles
+            t = _ease(step / steps)
+            reqs = [{'requestType': 'SetSceneItemTransform',
+                     'requestData': {
+                         'sceneName': scene_name, 'sceneItemId': item_id,
+                         'sceneItemTransform': {
+                             'positionX': a['x'] + (b['x'] - a['x']) * t,
+                             'positionY': a['y'] + (b['y'] - a['y']) * t,
+                             'boundsType': 'OBS_BOUNDS_SCALE_INNER',
+                             'boundsAlignment': 0, 'alignment': 5,
+                             'boundsWidth': max(a['w'] + (b['w'] - a['w']) * t, 1.0),
+                             'boundsHeight': max(a['h'] + (b['h'] - a['h']) * t, 1.0),
+                         }}}
+                    for item_id, a, b in moves]
+            try:
+                _send_batch(reqs)
+            except ObsUnavailable:
+                return                  # link dropped; the next sync repairs it
+            except Exception:
+                log.exception('party tile animation failed')
+                return
+            if step < steps:
+                time.sleep(delay)
+
+    threading.Thread(target=run, name='obs-tile-anim', daemon=True).start()
+
+
 def set_item_enabled(scene_name, item_id, enabled, timeout=3):
     request('SetSceneItemEnabled', {
         'sceneName': scene_name, 'sceneItemId': item_id,
@@ -430,9 +530,11 @@ def remove_item(scene_name, item_id, timeout=3):
 
 
 def set_browser_url(source_name, url, timeout=3):
-    """Repoint an existing browser source (the player changed their feed)."""
+    """Repoint an existing browser source (the player changed their feed).
+    Re-asserts KEEPALIVE so a source built by an earlier version stops
+    reloading itself on every cut back to its scene."""
     request('SetInputSettings', {'inputName': source_name,
-                                 'inputSettings': {'url': url},
+                                 'inputSettings': {'url': url, **KEEPALIVE},
                                  'overlay': True}, timeout=timeout)
 
 

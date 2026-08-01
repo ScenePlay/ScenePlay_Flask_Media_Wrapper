@@ -554,15 +554,10 @@ def party():
 @login_required
 @dm_required
 def clear_rolls():
-    from datetime import datetime, timezone
-    from extensions import db
-    from models.tblRollLog import tblRollLog
-    from models.ttrpg import tblDiceRolls
-    watermark = datetime.now(timezone.utc).isoformat()
-    appsettingSet('relay_roll_cleared_at', watermark)
-    tblDiceRolls.query.delete()
-    tblRollLog.query.delete()
-    db.session.commit()
+    # Same helper the battlemap's Clear Rolls button calls, so the two can't
+    # drift apart on what "cleared" means (notably the relay watermark).
+    from routes.ttrpg import clear_roll_history
+    clear_roll_history()
     flash('Local roll history cleared. The receiver will ignore relay rolls made before this point.', 'success')
     return redirect(url_for('relay_admin_bp.status'))
 

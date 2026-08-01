@@ -1935,6 +1935,35 @@ function clearMapDiceFeed() {
   document.getElementById('map-dice-result').style.display = 'none';
 }
 
+// Top-bar Clear Rolls (DM only). Unlike the panel's tidy-up above, this empties
+// the feed on the SERVER: the rolls are shared, so they would otherwise stay on
+// every player's map and on the stream overlay, and the next poll would put
+// them back here too.
+function clearRollFeed(btn) {
+  if (!confirm('Clear the roll feed for everyone?\n\nThis removes the roll '
+             + 'history from this map, every player\'s map and the stream '
+             + 'overlay. It cannot be undone.')) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Clearing…';
+  fetch('/ttrpg/dice/clear', {method: 'POST',
+                              headers: {'Content-Type': 'application/json'}})
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false;
+      if (!d || !d.ok) { btn.innerHTML = orig; alert('Could not clear the rolls.'); return; }
+      // Reset the poll's bookkeeping too, or the next cycle would see the same
+      // signature it already had and skip the re-render.
+      _mapLastRollId = 0;
+      _mapFeedSig = '';
+      clearMapDiceFeed();
+      btn.innerHTML = '✓ Cleared';
+      setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig;
+                   alert('Could not reach the server.'); });
+}
+
 startPolling();
 makeDraggable(document.getElementById('dice-map-panel'), document.getElementById('dice-drag-handle'));
 makeDraggable(document.getElementById('fx-panel'), document.getElementById('fx-drag-handle'));
@@ -2229,6 +2258,128 @@ function obsCut(key, btn) {
 
 // Kept so an already-loaded page (or the M hotkey) still works.
 function obsCutMap(btn) { obsCut('map', btn); }
+
+// ── Closeup picker ────────────────────────────────────────────────────────────
+// Counting tiles to work out whose number key to press is the wrong thing to be
+// doing while someone is mid-sentence. This lists the people on the feed by
+// name — character AND the real person — and cuts the closeup on click.
+//
+// Refetched on every open rather than rendered with the page: who is on the
+// group feed changes from the Broadcast page mid-session, and a stale list
+// would offer a closeup that lands on the wrong face.
+
+const _CLOSEUP_DOT = {live: '#28a745', ready: '#b8a24a',
+                      stale: '#c0392b', nofeed: '#555'};
+const _CLOSEUP_TITLE = {
+  live: 'Camera feed set, player online',
+  ready: 'Camera feed set',
+  stale: 'Camera feed set, but the player looks offline',
+  nofeed: 'No camera feed yet — their stat card is on screen',
+};
+
+function obsToggleCloseups(ev) {
+  if (ev) ev.stopPropagation();
+  const pop = document.getElementById('obs-closeup-pop');
+  if (!pop) return;
+  if (pop.style.display === 'block') { obsCloseCloseups(); return; }
+
+  // Anchor beside the strip button, then nudge back on screen if the button
+  // sits low enough that a full list would run off the bottom.
+  const btn = document.getElementById('obs-closeup-btn');
+  const r = btn.getBoundingClientRect();
+  pop.style.display = 'block';
+  pop.style.left = Math.round(r.right + 8) + 'px';
+  pop.style.top = Math.round(
+    Math.max(8, Math.min(r.top, window.innerHeight - pop.offsetHeight - 8))) + 'px';
+
+  const list = document.getElementById('obs-closeup-list');
+  list.innerHTML = '<div style="color:var(--sp-muted,#8a8371);font-size:.72rem;">Loading…</div>';
+  fetch('/ttrpg/obs/api/closeups')
+    .then(r2 => r2.json())
+    .then(d => _obsRenderCloseups(d && d.ok ? d.rows : []))
+    .catch(() => { list.innerHTML =
+      '<div style="color:#c0392b;font-size:.72rem;">Could not reach the server.</div>'; });
+}
+
+function obsCloseCloseups() {
+  const pop = document.getElementById('obs-closeup-pop');
+  if (pop) pop.style.display = 'none';
+}
+
+function _obsRenderCloseups(rows) {
+  const list = document.getElementById('obs-closeup-list');
+  if (!rows.length) {
+    list.innerHTML = '<div style="color:var(--sp-muted,#8a8371);font-size:.72rem;">'
+      + 'Nobody is on the group feed. Tick players on the Broadcast page.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.style = 'display:flex;align-items:center;gap:7px;padding:5px 6px;'
+      + 'border-radius:6px;cursor:pointer;margin-bottom:2px;'
+      + (r.featured ? 'background:rgba(201,168,76,.18);' : '');
+    row.onmouseenter = () => { if (!r.featured) row.style.background = 'rgba(255,255,255,.06)'; };
+    row.onmouseleave = () => { row.style.background = r.featured ? 'rgba(201,168,76,.18)' : 'transparent'; };
+    row.title = _CLOSEUP_TITLE[r.feed] || '';
+    row.onclick = () => obsCloseupTo(r.character_id);
+
+    const dot = document.createElement('span');
+    dot.style = 'width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:'
+      + (_CLOSEUP_DOT[r.feed] || '#555') + ';';
+
+    const names = document.createElement('div');
+    names.style = 'min-width:0;flex:1;';
+    const who = document.createElement('div');
+    who.textContent = r.name;
+    who.style = 'color:var(--ttrpg-text,#e8e2d0);font-size:.78rem;line-height:1.2;'
+      + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+      + (r.featured ? 'font-weight:700;' : '');
+    const player = document.createElement('div');
+    // Showing a stat card instead of a camera is worth saying here: it changes
+    // what the closeup will actually look like on stream.
+    player.textContent = (r.player || '—')
+      + (r.showing === 'card' ? ' · stat card' : '');
+    player.style = 'color:var(--sp-muted,#8a8371);font-size:.66rem;line-height:1.2;'
+      + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    names.appendChild(who);
+    names.appendChild(player);
+
+    const key = document.createElement('span');
+    key.textContent = r.pos <= 9 ? r.pos : '';
+    key.title = r.pos <= 9 ? 'Number key ' + r.pos : '';
+    key.style = 'color:var(--sp-muted,#8a8371);font-size:.62rem;flex:0 0 auto;';
+
+    row.appendChild(dot);
+    row.appendChild(names);
+    row.appendChild(key);
+    list.appendChild(row);
+  });
+}
+
+function obsCloseupTo(characterId) {
+  obsCloseCloseups();
+  fetch('/ttrpg/obs/api/switch', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({character_id: characterId}),
+  })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not cut that closeup.'); return; }
+      _obsSync({connected: true, current_scene: d.scene});
+    })
+    .catch(() => {});
+}
+
+// Click-away and Escape close it, like the other transient menus.
+document.addEventListener('click', ev => {
+  const pop = document.getElementById('obs-closeup-pop');
+  if (!pop || pop.style.display !== 'block') return;
+  if (!pop.contains(ev.target) && ev.target.id !== 'obs-closeup-btn') obsCloseCloseups();
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') obsCloseCloseups();
+});
 
 function obsGroupShot() {
   fetch('/ttrpg/obs/api/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })

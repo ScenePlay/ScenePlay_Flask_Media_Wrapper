@@ -421,6 +421,10 @@ function ensure3d(d) {
       floorplanUrl: FLOORPLAN_URL + '&map_id=' + d.map_id,
       isDM: false,                    // -> solid player fog, never the peek
       isMyToken: () => false,         // nothing here is "ours" to hide
+      // This page plans its own shots (buildLookPlan/camTick), so the viewer's
+      // own auto-aim stays off — two things steering one yawTarget would
+      // stutter the camera on stream.
+      autoAim: false,
       onDoorToggle: null,
       getState: () => bm3dState,
     };

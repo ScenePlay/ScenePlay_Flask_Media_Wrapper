@@ -107,8 +107,11 @@ def update():
 
 @vs.route('/api/videoSceneaddrow', methods=['POST'])
 def videoSceneaddrow():
+    # scene_ID from the page's "join the selected scene?" prompt (0 =
+    # unassigned); bodiless calls keep the old silent scene-filter stamp.
+    data = request.get_json(silent=True) or {}
     sceneFilter = appsettingGetSceneFilter()
-    row = [int(sceneFilter[0][0]),0,0,1,100,0]
+    row = [int(data.get('scene_ID', sceneFilter[0][0])),0,0,1,100,0]
     CRUD_tblVideoScene(row,"C")
     return 'tblvideoScene has a new row'
 

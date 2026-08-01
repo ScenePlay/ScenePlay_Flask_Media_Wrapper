@@ -108,8 +108,12 @@ def update():
 
 @ms.route('/api/musicSceneaddrow', methods=['POST'])
 def scenesaddrow():
+    # The page asks whether the new row joins the selected scene and sends
+    # scene_ID (0 = unassigned); bodiless calls fall back to the old silent
+    # scene-filter stamp.
+    data = request.get_json(silent=True) or {}
     sceneFilter = appsettingGetSceneFilter()
-    row = [int(sceneFilter[0][0]),0,1,100]
+    row = [int(data.get('scene_ID', sceneFilter[0][0])),0,1,100]
     CRUD_tblMusicScene(row,"C")
     return 'tblmusicScene has a new row'
 

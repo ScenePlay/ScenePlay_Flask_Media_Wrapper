@@ -1124,6 +1124,36 @@ def dice_roll():
     })
 
 
+def clear_roll_history():
+    """Wipe the shared roll feed and the session roll log. Returns how many
+    rows went.
+
+    The watermark matters as much as the delete: without it the relay receiver
+    would re-import the very rolls just cleared on its next sync, and the feed
+    would refill by itself a few seconds later."""
+    from datetime import datetime, timezone
+    from models.tblRollLog import tblRollLog
+    from sql import appsettingSet
+    appsettingSet('relay_roll_cleared_at',
+                  datetime.now(timezone.utc).isoformat())
+    removed = tblDiceRolls.query.delete()
+    removed += tblRollLog.query.delete()
+    db.session.commit()
+    return removed
+
+
+@ttrpg.route('/dice/clear', methods=['POST'])
+@login_required
+@dm_required
+def dice_clear():
+    """Empty the roll feed for everyone.
+
+    Server-side on purpose: the feed is shared, so clearing it in this browser
+    alone would leave the same rolls sitting on every player's map and on the
+    stream overlay, and the next poll would put them back here too."""
+    return jsonify({'ok': True, 'removed': clear_roll_history()})
+
+
 @ttrpg.route('/dice/feed')
 @login_required
 def dice_feed():

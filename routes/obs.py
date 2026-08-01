@@ -95,6 +95,7 @@ def _obs_cfg():
         'map_zoom_max':  (appsettingGet('obs_map_zoom_max', '') or '').strip() or '2.2',
         'map_zoom_hold': (appsettingGet('obs_map_zoom_hold_s', '') or '').strip() or '6',
         'card_poll': ('%g' % card_poll_s()),
+        'tile_anim_ms': ('%g' % _tile_anim_ms()),
         # set by app.py's boot guard when a start crashed during OBS bring-up
         'boot_tripped':  appsettingGet('obs_boot_tripped', ''),
         'last_error':    appsettingGet('obs_last_error', ''),
@@ -233,10 +234,12 @@ def _mapping_rows(party, snap):
     known = set(snap.get('scenes') or [])
     presence = _presence()
     overrides = _card_overrides()
+    benched = offstage_ids()
     rows = []
     for char in party:
         scene = mapped.get(char.character_id, '')
         rows.append({
+            'on_stream': char.character_id not in benched,
             'character_id': char.character_id,
             'name': char.name,
             'scene': scene,
@@ -257,8 +260,9 @@ def _rotation_order():
     """Character ids in turn order — what Next/Prev and the number keys walk.
 
     This is the party scene's tile order, so pressing 3 always features the
-    third tile on screen. Everyone in the party is included: a player with no
-    camera still has a stat-card tile to feature."""
+    third tile ON SCREEN — benched players are not counted, or the keys would
+    stop lining up with what the audience sees. A player with no camera still
+    has a stat-card tile and keeps their turn."""
     return [c.character_id for c in _ordered_party()]
 
 
@@ -275,6 +279,11 @@ def _rotation_order():
 # never swapped automatically — that is what the manual pin is for.
 
 _tile_urls = {}                  # character_id -> URL last pushed to OBS
+_tile_rects = {}                 # character_id -> rect last placed, so the
+                                 # spotlight can animate FROM where a tile
+                                 # actually is rather than snapping
+_input_settings = {}             # source name -> (url, w, h) last pushed, so a
+                                 # sync that changes nothing writes nothing
 _watch_timer = None
 _watch_lock = threading.Lock()
 DEFAULT_WATCH_S = 20
@@ -302,8 +311,14 @@ def refresh_tiles():
         if _tile_urls.get(char.character_id) == want:
             continue
         try:
-            obs_ws.set_browser_url(_source_name_for(char), want)
+            source = _source_name_for(char)
+            obs_ws.set_browser_url(source, want)
             _tile_urls[char.character_id] = want
+            # Keep the settings cache honest, or the next sync would decide
+            # the URL still differs and rewrite it a second time.
+            prev = _input_settings.get(source)
+            if prev:
+                _input_settings[source] = (want, prev[1], prev[2])
             swapped.append(char.name)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             # The scene may not be built yet — not worth a stack trace.
@@ -398,13 +413,18 @@ def _schedule_return(app_obj, seconds):
 
 def _unfeature():
     """Back to an even table (or the DM's dedicated wide shot, if they set
-    one). Safe to call from a timer thread."""
+    one). Safe to call from a timer thread.
+
+    The grid is levelled FIRST and ALWAYS. Featuring reflows the party scene,
+    so cutting to a wide shot without levelling would strand a doubled tile
+    behind it — and when the configured wide shot IS the party scene (the
+    obvious thing to set it to) the cut is a no-op and the spotlight simply
+    never goes away."""
     import obs_ws
+    _sync_party_scene(featured_id=None)
     group = _special_scene('group')
-    if group:
+    if group and obs_ws.current_state().get('current_scene') != group:
         obs_ws.switch_scene(group)
-    else:
-        _sync_party_scene(featured_id=None)
     _set_featured(None)
     _cancel_return()
 
@@ -455,7 +475,9 @@ def broadcast():
         appsettingSet('obs_card_base', request.host_url.rstrip('/'))
     cfg = _obs_cfg()
     snap = obs_ws.current_state()
-    party = _ordered_party()
+    # Benched players are listed too — greyed out, with the tick that brings
+    # them back. Leaving them off would strand them off stream for good.
+    party = _ordered_party(include_offstage=True)
     # ScenePlay scene -> OBS scene: activating an ambience/battle scene can
     # also cut OBS (to the map view, a title card...). Scoped to the active
     # session's campaign, same as the battle map's scene buttons.
@@ -631,6 +653,7 @@ def save_config():
                           ('obs_card_poll_s', 2, 120),
                           ('obs_panel_poll_s', 1, 60),
                           ('obs_title_h', 0, 400),
+                          ('obs_tile_anim_ms', 0, 4000),
                           ('obs_panel_fraction', 0.12, 0.6)):
         raw = (request.form.get(field, '') or '').strip()
         try:
@@ -671,7 +694,7 @@ def api_state():
         'recording': snap['recording'],
         'streaming': snap['streaming'],
         'obs_version': snap['obs_version'],
-        'rows': _mapping_rows(_ordered_party(), snap),
+        'rows': _mapping_rows(_ordered_party(include_offstage=True), snap),
         'group_scene': _special_scene('group'),
         'last_error': appsettingGet('obs_last_error', ''),
     })
@@ -1008,7 +1031,18 @@ def api_cut(key):
                         'unpinned': unpinned}), 503
     _special, label = CUT_TARGETS[key]
     scene = _cut_scene_name(key)
+    levelled = False
     try:
+        # The group shot means EVERYONE equal, so cutting to it also ends any
+        # closeup. Without this the button was a one-way door: it put the party
+        # scene up still reflowed around a doubled tile, with no way back to
+        # the even grid from the map. (The G key already did the right thing
+        # via /api/group — the button and the key now agree.)
+        if key == 'party' and featured_id() is not None:
+            _sync_party_scene(featured_id=None)
+            _set_featured(None)
+            _cancel_return()
+            levelled = True
         known, _current = obs_ws.scene_list()
         if scene not in (known or []):
             if key == 'map':
@@ -1027,7 +1061,7 @@ def api_cut(key):
     except obs_ws.ObsUnavailable:
         return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
     return jsonify({'ok': True, 'current_scene': scene, 'target': key,
-                    'unpinned': unpinned})
+                    'unpinned': unpinned, 'levelled': levelled})
 
 
 @obs_bp.route('/api/cut-map', methods=['POST'])
@@ -1059,6 +1093,85 @@ def api_card_override():
     swapped = refresh_tiles()
     return jsonify({'ok': True, 'character_id': character_id,
                     'show_card': on, 'swapped': swapped})
+
+
+def _closeup_rows():
+    """Who the DM can cut a closeup to, for the battle map's closeup popup.
+
+    Only the party members actually on the group feed — a benched player has
+    no tile, so offering them here could only produce a failed switch. In
+    rotation order, so the list reads the same as the number keys and as the
+    tiles on screen.
+
+    Carries the PLAYER's name as well as the character's: mid-session the DM
+    is usually thinking "get Dave on camera", and every other list in the
+    sidebar shows character names only."""
+    presence = _presence()
+    overrides = _card_overrides()
+    featured = featured_id()
+    out = []
+    for pos, char in enumerate(_ordered_party(), start=1):
+        out.append({
+            'character_id': char.character_id,
+            'name': char.name,
+            'player': ('the DM' if char.character_id == DM_TILE_ID
+                       else player_name_for(char)),
+            'feed': _feed_state(char, presence),
+            'showing': ('card' if _tile_url(char, presence, overrides)
+                        .startswith(_card_base()) else 'camera'),
+            'featured': char.character_id == featured,
+            'pos': pos,
+        })
+    return out
+
+
+@obs_bp.route('/api/closeups')
+@login_required
+@dm_required
+def api_closeups():
+    return jsonify({'ok': True, 'rows': _closeup_rows()})
+
+
+@obs_bp.route('/api/on-stream', methods=['POST'])
+@login_required
+@dm_required
+def api_on_stream():
+    """Bench a player from the party scene, or bring them back.
+
+    For a player missing this episode, or the half of a split party the stream
+    isn't with. They keep their session seat and their place in the running
+    order — only their tile goes, and the grid re-lays-out around the gap."""
+    import obs_ws
+    data = request.get_json(silent=True) or {}
+    try:
+        character_id = int(data.get('character_id') or 0)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'bad character_id'}), 400
+    if not character_id:
+        return jsonify({'ok': False, 'error': 'character_id required'}), 400
+
+    on = bool(data.get('on_stream'))
+    _set_offstage(character_id, not on)
+    # Benching whoever holds the spotlight would leave the stored featured id
+    # pointing at a tile that no longer exists, and the next Next/Previous
+    # would step from nowhere. Level the table instead.
+    if not on and featured_id() == character_id:
+        _set_featured(None)
+    if not obs_ws.connected():
+        return jsonify({'ok': True, 'character_id': character_id,
+                        'on_stream': on, 'warnings': [
+                            'OBS is not connected — the party scene will pick '
+                            'this up next time it is built.']})
+    try:
+        result = _sync_party_scene(featured_id=featured_id())
+    except obs_ws.ObsRejected as exc:
+        obs_ws._record_error('on-stream', exc)
+        return jsonify({'ok': False,
+                        'error': f'OBS refused: {exc.comment or exc}'}), 502
+    except obs_ws.ObsUnavailable:
+        return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
+    return jsonify({'ok': True, 'character_id': character_id, 'on_stream': on,
+                    'warnings': result['warnings']})
 
 
 @obs_bp.route('/api/map-mode', methods=['POST'])
@@ -1382,10 +1495,10 @@ def _source_name_for(char):
     return f'{_scene_name_for(char)} Cam'
 
 
-def _card_overrides():
-    """Character ids the DM has pinned to their stat card. Kept in settings
-    rather than a new column so existing installs need no migration."""
-    raw = (appsettingGet('obs_card_override', '') or '').strip()
+def _id_set(setting):
+    """Character ids stored as a comma-separated setting. Kept in settings
+    rather than new columns so existing installs need no migration."""
+    raw = (appsettingGet(setting, '') or '').strip()
     out = set()
     for part in raw.split(','):
         part = part.strip()
@@ -1395,10 +1508,34 @@ def _card_overrides():
     return out
 
 
-def _set_card_override(character_id, on):
-    ids = _card_overrides()
+def _set_id_flag(setting, character_id, on):
+    ids = _id_set(setting)
     ids.add(character_id) if on else ids.discard(character_id)
-    appsettingSet('obs_card_override', ','.join(str(i) for i in sorted(ids)))
+    appsettingSet(setting, ','.join(str(i) for i in sorted(ids)))
+
+
+def _card_overrides():
+    """Character ids the DM has pinned to their stat card."""
+    return _id_set('obs_card_override')
+
+
+def _set_card_override(character_id, on):
+    _set_id_flag('obs_card_override', character_id, on)
+
+
+def offstage_ids():
+    """Character ids benched from the party scene — no tile, no turn.
+
+    Stores who is OFF rather than who is on, so an install that has never
+    touched this (an empty setting) has the whole party on stream. For a
+    player who can't make this episode, or the half of a split party the
+    stream isn't following: they keep their session seat, their stats and
+    their place in the running order the moment they come back."""
+    return _id_set('obs_offstage')
+
+
+def _set_offstage(character_id, on):
+    _set_id_flag('obs_offstage', character_id, on)
 
 
 def player_name_for(char):
@@ -1450,12 +1587,21 @@ def _tile_url(char, presence=None, overrides=None):
 @dm_required
 def api_build_party():
     """Create/refresh the party scene: every party member gets a tile, laid
-    out on the grid. Idempotent — run it again after the party changes."""
+    out on the grid. Idempotent — run it again after the party changes.
+
+    Rebuilding KEEPS whoever holds the spotlight: dropping back to the even
+    grid here would leave the stored featured id disagreeing with what is on
+    screen, and the next Next/Previous would step from a player the audience
+    can no longer see is featured."""
     import obs_ws
     if not obs_ws.connected():
         return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    # Forget what we believe OBS holds, so this really is the repair button:
+    # ordinary syncs skip writing settings that already match, which would
+    # otherwise make a hand-edited source impossible to put back from here.
+    _input_settings.clear()
     try:
-        result = _sync_party_scene()
+        result = _sync_party_scene(featured_id=featured_id())
         map_scene, map_warn = ensure_map_scene()
         result['warnings'].extend(map_warn)
         result['map_scene'] = map_scene
@@ -1472,12 +1618,47 @@ def api_build_party():
     return jsonify({'ok': True, **result})
 
 
+DEFAULT_TILE_ANIM_MS = 700
+
+
+def _ensure_input(scene, source, url, width, height, warnings):
+    """ensure_browser_input, but only writing the source's settings when they
+    have actually changed.
+
+    Writing them re-renders the page even when nothing differs — which blanks a
+    live camera for an instant. Doing that to every tile on every spotlight
+    change is the flash across the whole grid."""
+    import obs_ws
+    want = (url, int(width), int(height))
+    item_id, warn = obs_ws.ensure_browser_input(
+        scene, source, url, width, height,
+        rewrite_settings=_input_settings.get(source) != want)
+    warnings.extend(warn)
+    if item_id is not None:
+        _input_settings[source] = want
+    return item_id
+
+
+def _tile_anim_ms():
+    """How long the spotlight reflow takes, in ms — Broadcast > Party Scene.
+    0 snaps, which a very busy OBS box or a huge party may prefer.
+
+    Parsed through float() on purpose: save_config stores every clamped number
+    as one ('700.0'), and int() rejects that outright."""
+    try:
+        return max(0, min(int(float(appsettingGet('obs_tile_anim_ms', '')
+                                    or DEFAULT_TILE_ANIM_MS)), 4000))
+    except (TypeError, ValueError):
+        return DEFAULT_TILE_ANIM_MS
+
+
 def _sync_party_scene(featured_id=None):
     """Make OBS match the party: one tile per member, positioned on the grid.
 
-    Tile ORDER is the rotation order, so a player's cell is stable for the
-    whole session — that is what lets the featured tile grow without the rest
-    of the table shuffling underneath it."""
+    Tile ORDER is the rotation order, so a player's slot is stable for the
+    whole session. Featuring someone spotlights them — their tile doubles and
+    the rest shrink around it (see obs_layout) — and tiles that already have a
+    known position ease into their new box instead of jumping."""
     import obs_ws
     scene = party_scene_name()
     obs_ws.ensure_scene(scene)
@@ -1498,31 +1679,57 @@ def _sync_party_scene(featured_id=None):
                 break
 
     # The frame owns the title strip and the info panel, so the tiles get
-    # whatever it leaves. Tiles are all one size now — see grid_layout.
+    # whatever it leaves.
     areas = _frame_areas(canvas_w, canvas_h)
     rects = obs_layout.grid_layout(len(members), canvas_w, canvas_h,
                                    featured=featured_idx, gutter=gutter,
                                    area=areas['tiles'])
+    # Every tile RENDERS at the spotlit size whoever currently holds the
+    # spotlight — see obs_layout.spotlight_tile_size. The transform scales it
+    # down to whatever cell it occupies, so moving the spotlight never resizes
+    # a source, and a source that is never resized never blinks.
+    render_w, render_h = obs_layout.spotlight_tile_size(
+        len(members), canvas_w, canvas_h, gutter, areas['tiles'])
+
     warnings = []
     placed = []
+    moves = []
+    anim_ms = _tile_anim_ms()
     presence = _presence()
     overrides = _card_overrides()
     for char, rect in zip(members, rects):
         source = _source_name_for(char)
         url = _tile_url(char, presence, overrides)
         _tile_urls[char.character_id] = url
-        item_id, warn = obs_ws.ensure_browser_input(
-            scene, source, url, rect['w'], rect['h'])
-        warnings.extend(warn)
+        item_id = _ensure_input(scene, source, url, render_w, render_h, warnings)
         if item_id is None:
             warnings.append(f'Could not place {char.name} in the scene.')
             continue
-        obs_ws.place_item(scene, item_id, rect)
+        # A tile we have placed before eases from where it is; anything new
+        # (or unchanged) is simply put where it belongs.
+        target = {k: rect[k] for k in ('x', 'y', 'w', 'h')}
+        was = _tile_rects.get(char.character_id)
+        if anim_ms and was and was != target:
+            moves.append((item_id, was, target))
+        else:
+            obs_ws.place_item(scene, item_id, rect)
+        _tile_rects[char.character_id] = target
         obs_ws.set_item_enabled(scene, item_id, True)
         _upsert_player_map(char.character_id, scene, source, auto_created=1)
         placed.append({'character_id': char.character_id, 'name': char.name,
                        'source': source, 'item_id': item_id,
                        'featured': rect['featured']})
+
+    # Kicked off before the panel/background work below so the move starts
+    # while those requests are still going out — it runs on its own thread.
+    if moves:
+        obs_ws.animate_items(scene, moves, duration_s=anim_ms / 1000.0)
+
+    # Someone who left the party must not leave a stale rect behind: if they
+    # come back their tile would ease in from wherever it used to sit.
+    live_ids = {p['character_id'] for p in placed}
+    for gone in [cid for cid in _tile_rects if cid not in live_ids]:
+        _tile_rects.pop(gone, None)
 
     keep = {p['source'] for p in placed}
 
@@ -1533,9 +1740,8 @@ def _sync_party_scene(featured_id=None):
         if rect is None:
             continue        # switched off — _prune_party_scene drops it
         try:
-            item_id, warn = obs_ws.ensure_browser_input(
-                scene, src, panel_url(mode), int(rect[2]), int(rect[3]))
-            warnings.extend(warn)
+            item_id = _ensure_input(scene, src, panel_url(mode),
+                                    int(rect[2]), int(rect[3]), warnings)
             if item_id is not None:
                 obs_ws.place_item(scene, item_id, {'x': rect[0], 'y': rect[1],
                                                    'w': rect[2], 'h': rect[3]})
@@ -1585,15 +1791,23 @@ def _prune_party_scene(scene, keep_sources, warnings):
             warnings.append(f'Could not remove the old tile "{source}" ({exc}).')
 
 
-def _ordered_party():
+def _ordered_party(include_offstage=False):
     """Everyone with a tile, in turn order: saved order first, then anyone
     new, so adding a character never renumbers the rest.
 
     The DM rides along as a normal entry — they take turns narrating too —
-    and lands at the front until the DM reorders themselves elsewhere."""
+    and lands at the front until the DM reorders themselves elsewhere.
+
+    Benched players are left out, which is what keeps them off the grid AND
+    out of the rotation, so the number keys count the tiles actually on
+    screen. include_offstage=True is for the Broadcast page, which has to list
+    them or there would be no way to bring anyone back."""
     party = {c.character_id: c for c in _active_party()}
     if dm_tile_enabled():
         party[DM_TILE_ID] = dm_tile()
+    if not include_offstage:
+        for benched in offstage_ids():
+            party.pop(benched, None)
     ordered = []
     rows = (tblObsSceneMap.query
             .filter_by(entity_type='player')
@@ -2054,9 +2268,10 @@ def _place_background(scene, canvas_w, canvas_h, warnings):
     streaming box pays for one browser source instead of three."""
     import obs_ws
     try:
-        item_id, warn = obs_ws.ensure_browser_input(
-            scene, BG_SOURCE_NAME, panel_url('bg'), canvas_w, canvas_h)
-        warnings.extend(warn)
+        # Through _ensure_input: this runs on every party sync, and rewriting
+        # the art's settings each time re-renders it behind the cameras.
+        item_id = _ensure_input(scene, BG_SOURCE_NAME, panel_url('bg'),
+                                canvas_w, canvas_h, warnings)
         if item_id is None:
             return None
         obs_ws.place_item(scene, item_id,

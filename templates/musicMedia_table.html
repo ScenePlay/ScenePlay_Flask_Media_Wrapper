@@ -40,12 +40,9 @@
           button.setAttribute("value","Add New Row")
           button.style = "float: right; margin-right: 100px";
           button.onclick = function() {
-              //alert("Button clicked!");
-              fetch('/api/musicaddrow', {
-              method: 'GET',
-              headers: {'Content-Type': 'application/json'},
-              });
-              window.location.reload();
+              spAddRowPrompt('/api/musicaddrow',
+                  {field: 'scene_ID', kind: 'scene', dropdownId: 'editSceneDropdown',
+                   contextDropdownId: 'campaignFilterDropdown', contextKind: 'campaign'});
           }
           element.parentNode.insertBefore(button, element.nextSibling);
       }

@@ -103,7 +103,11 @@ def update():
 
 @sn.route('/api/scenesaddrow', methods=['POST'])
 def scenesaddrow():
-    row = [' ',1,1,1]
+    # The page asks whether the new scene joins the selected campaign and
+    # sends campaign_id (0 = leave unassigned); bodiless calls keep the
+    # historical default of campaign 1.
+    data = request.get_json(silent=True) or {}
+    row = [' ',1,1,int(data.get('campaign_id', 1))]
     CRUD_tblScenes(row,"C")
     return 'tblScenes has a new row'
 

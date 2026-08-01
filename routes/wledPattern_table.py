@@ -123,8 +123,11 @@ def update():
 
 @wl.route('/api/wledpatternaddrow', methods=['POST'])
 def wledaddrow():
+    # scene_ID from the page's "join the selected scene?" prompt (0 =
+    # unassigned); bodiless calls keep the old silent scene-filter stamp.
+    data = request.get_json(silent=True) or {}
     sceneFilter = appsettingGetSceneFilter()
-    newrow = tbl(scene_ID=int(sceneFilter[0][0]), server_ID=0, effect=0, pallette=0, color1='[0,0,0]', color2='[0,0,0]', color3='[0,0,0]', speed=125, brightness=125, orderBy=1)
+    newrow = tbl(scene_ID=int(data.get('scene_ID', sceneFilter[0][0])), server_ID=0, effect=0, pallette=0, color1='[0,0,0]', color2='[0,0,0]', color3='[0,0,0]', speed=125, brightness=125, orderBy=1)
     db.session.add(newrow)
     db.session.commit()
     return 'tblwledPattern has a new row'
