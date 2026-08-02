@@ -1405,9 +1405,18 @@ window.BM3D = (function () {
     // phones no matter how fast the renderer is.
     canvas.style.touchAction = 'none';
 
-    canvas.addEventListener('click', function () {
+    canvas.addEventListener('click', function (e) {
       if (!open_) return;
-      if (hasLock && document.pointerLockElement !== canvas && view.kind !== 'overview') {
+      // Pointer lock is a MOUSE affordance. Android Chrome HAS
+      // requestPointerLock, so gating on support alone locked the pointer on
+      // a tap: the phone showed "To show your cursor, switch apps or reload
+      // the page", look-around died (a locked view is driven by mousemove,
+      // which a touch screen never sends) while the synthesized dblclick kept
+      // stepping — "I can move but I can't look". It also ate the first tap,
+      // so tapping a door did nothing until the second try.
+      var fromMouse = (e && e.pointerType) ? e.pointerType === 'mouse' : !IS_TOUCH;
+      if (hasLock && fromMouse && document.pointerLockElement !== canvas &&
+          view.kind !== 'overview') {
         canvas.requestPointerLock();
         return;   // first click locks; the next clicks interact
       }
