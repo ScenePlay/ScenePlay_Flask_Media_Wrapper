@@ -71,6 +71,12 @@ window.BM3D = (function () {
   var open_ = false, rafId = null, lastT = 0;
   var yaw = 0, pitch = 0;
   var yawTarget = null;           // headless auto-facing target; null = manual
+  // Set the moment a human drags to look. Auto-facing and the idle scan both
+  // stand down for the rest of this character's turn at the camera: the view
+  // used to be seized back on every re-entry into first person (a state poll
+  // re-seating the view after a move does exactly that), which read as "I
+  // can't look around after I move".
+  var manualLook = false;
   var idleScanUntil = 0;          // >0 = idle scanning; when the next glance is due
   var fogRects = [];              // cloud footprints in cells: {x1,z1,x2,z2}
   var _fogSig = null;
@@ -1262,8 +1268,13 @@ window.BM3D = (function () {
     // wrench the camera out of the DM's hands every couple of seconds.
     var entering = v.kind !== view.kind ||
                    String(v.tokenId) !== String(view.tokenId);
-    // Another character's eyes = another character's movement budget.
-    if (String(v.tokenId) !== String(view.tokenId)) resetMoveCounter();
+    // Another character's eyes = another character's movement budget, and a
+    // fresh camera: auto-aim gets one go at pointing the NEW viewpoint
+    // somewhere useful even if the last one was being driven by hand.
+    if (String(v.tokenId) !== String(view.tokenId)) {
+      resetMoveCounter();
+      manualLook = false;
+    }
     view = v;
     refreshTokenVisibility();   // own-token hiding + player fog cover
     if (v.kind !== 'first') idleScanUntil = 0;
@@ -1280,6 +1291,7 @@ window.BM3D = (function () {
     yaw -= dx * 0.0024;
     yawTarget = null;          // a human took the wheel; stop auto-facing
     idleScanUntil = 0;         // ...and stop the idle look-around with it
+    manualLook = true;         // ...and don't take it back on the next re-entry
     pitch -= dy * 0.0024;
     var lim = Math.PI / 2 - 0.05;
     pitch = Math.max(-lim, Math.min(lim, pitch));
@@ -1301,6 +1313,9 @@ window.BM3D = (function () {
   // side before they reach the page, so this can only pick a visible one.
   function _aimOnEnter(tokenId) {
     idleScanUntil = 0;
+    // A player who has looked around by hand keeps their view. Re-entering
+    // the SAME token is a re-seat, not a new point of view.
+    if (manualLook) return;
     var me = tokenRecs[tokenId];
     if (!me || !cfg || !cfg.autoAim) return;
     var mx = tokCol(me.tok), mz = tokRow(me.tok);
@@ -1326,7 +1341,7 @@ window.BM3D = (function () {
   }
 
   function _beginIdleScan() {
-    if (!cfg || !cfg.autoAim) return;
+    if (!cfg || !cfg.autoAim || manualLook) return;
     idleScanUntil = 1;      // due immediately; the next frame picks a heading
   }
 
@@ -1692,6 +1707,8 @@ window.BM3D = (function () {
   function closeViewer() {
     open_ = false;
     resetMoveCounter();
+    // A reopened viewer is a fresh camera — auto-aim should get its one go.
+    manualLook = false;
     if (rafId) cancelAnimationFrame(rafId);
     rafId = null;
     if (document.pointerLockElement) document.exitPointerLock();
