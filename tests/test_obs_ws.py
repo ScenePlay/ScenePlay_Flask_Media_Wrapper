@@ -263,3 +263,55 @@ class TestLifecycle:
         assert ow.connected() is True
         monkeypatch.setattr(ow, '_state', 'auth_failed')
         assert ow.connected() is False
+
+
+class TestRepointExistingSource:
+    """Moving ScenePlay to a different address (OBS on another machine) must
+    rewrite the URL of sources that ALREADY exist. A browser source keeps
+    whatever URL it was created with, so without this the DM changes the
+    setting, sees ScenePlay generate the right links, and OBS still renders
+    blank pages from the old address."""
+
+    def _calls(self, monkeypatch, existing):
+        """Drive ensure_browser_input with CreateInput reporting 'already
+        exists', capturing every request it makes."""
+        sent = []
+
+        def fake_request(kind, data=None, timeout=None):
+            sent.append((kind, data or {}))
+            if kind == 'CreateInput' and existing:
+                raise ow.ObsRejected(601, 'Input already exists')
+            if kind == 'GetSceneItemList':
+                return {'sceneItems': [{'sourceName': 'Player - Carl Cam',
+                                        'sceneItemId': 7}]}
+            if kind == 'GetInputKindList':
+                return {'inputKinds': ['browser_source']}
+            return {}
+
+        monkeypatch.setattr(ow, 'request', fake_request)
+        monkeypatch.setattr(ow, 'browser_kind', lambda: 'browser_source')
+        return sent
+
+    def test_existing_input_is_repointed_and_resized(self, monkeypatch):
+        sent = self._calls(monkeypatch, existing=True)
+        item_id, warnings = ow.ensure_browser_input(
+            'ScenePlay Party', 'Player - Carl Cam',
+            'http://192.168.7.30:8086/ttrpg/obs/tile/1?t=x', 640, 360)
+        assert item_id == 7 and not warnings
+        settings = [d for k, d in sent if k == 'SetInputSettings']
+        assert settings, 'an existing input was never repointed'
+        s = settings[0]['inputSettings']
+        assert s['url'].startswith('http://192.168.7.30:8086'), s['url']
+        # the resize rides along: SCALE_INNER bounds letterbox a source still
+        # rendering at its old resolution instead of filling its box
+        assert s['width'] == 640 and s['height'] == 360, s
+
+    def test_new_input_is_created_with_the_url(self, monkeypatch):
+        sent = self._calls(monkeypatch, existing=False)
+        ow.ensure_browser_input('ScenePlay Party', 'Player - Carl Cam',
+                                'http://192.168.7.30:8086/x', 640, 360)
+        created = [d for k, d in sent if k == 'CreateInput']
+        assert created and created[0]['inputSettings']['url'].startswith(
+            'http://192.168.7.30:8086')
+        assert not [k for k, _ in sent if k == 'SetInputSettings'], \
+            'a brand new input should not need a second settings call'

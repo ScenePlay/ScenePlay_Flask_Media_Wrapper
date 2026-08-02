@@ -4,11 +4,17 @@
 
      Deliberately standalone (no base template): this renders inside an OBS
      browser source, where a nav bar or page chrome would be broadcast. The
-     background is transparent so it composites over the scene behind it. -->
+     background is transparent so it composites over the scene behind it.
+
+     ?over=1 makes it OPAQUE instead. That is the card used as an overlay on
+     top of a still-running camera source — which is how a player pinned to
+     their card keeps their MICROPHONE live while their picture is hidden. A
+     transparent card there would let the video show around its edges. -->
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%;
-    background: transparent;        /* OBS composites over whatever is behind */
+    /* transparent composites over the scene; opaque hides the camera below */
+    background: {% if opaque %}#14151b{% else %}transparent{% endif %};
     overflow: hidden;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
@@ -93,7 +99,10 @@
   {% else %}
   <div class="hp-text" style="opacity:.75;">Dungeon Master</div>
   {% endif %}
-  <div class="nocam">no camera</div>
+  {# Only true when this card IS the source. As an overlay it is covering a
+     camera that is still running (and still audible), so the label would be
+     a lie. #}
+  {% if not opaque %}<div class="nocam">no camera</div>{% endif %}
 </div>
 
 <script>

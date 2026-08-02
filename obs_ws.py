@@ -392,15 +392,26 @@ def ensure_browser_input(scene_name, source_name, url, width, height, timeout=5,
     # inside its new box instead of filling it, and the item ends up visibly
     # shorter (or narrower) than asked for. Only re-rendering it at the right
     # resolution makes the bounds an exact fit.
-    # KEEPALIVE goes on here too, not just at create time: sources built by an
-    # earlier version still carry restart_when_active, so "Build / refresh
-    # party scene" is what repairs an existing setup.
+    # KEEPALIVE and reroute_audio go on here too, not just at create time:
+    # sources built by an earlier version still carry restart_when_active and
+    # still send their audio to the desktop instead of into OBS, so "Build /
+    # refresh party scene" is what repairs an existing setup.
     if rewrite_settings:
-        request('SetInputSettings',
-                {'inputName': source_name,
-                 'inputSettings': {'url': url, 'width': int(width),
-                                   'height': int(height), **KEEPALIVE},
-                 'overlay': True}, timeout=timeout)
+        fixed = {'url': url, 'width': int(width), 'height': int(height),
+                 'reroute_audio': True, **KEEPALIVE}
+        try:
+            request('SetInputSettings',
+                    {'inputName': source_name, 'inputSettings': fixed,
+                     'overlay': True}, timeout=timeout)
+        except ObsRejected as exc:
+            if 'reroute' not in (exc.comment or '').lower():
+                raise
+            fixed.pop('reroute_audio', None)
+            request('SetInputSettings',
+                    {'inputName': source_name, 'inputSettings': fixed,
+                     'overlay': True}, timeout=timeout)
+            warnings.append("This OBS build would not route browser audio "
+                            "into OBS — mics may need routing by hand.")
     try:
         item_id = scene_items(scene_name, timeout=timeout).get(source_name)
     except ObsRejected:
@@ -536,6 +547,28 @@ def set_browser_url(source_name, url, timeout=3):
     request('SetInputSettings', {'inputName': source_name,
                                  'inputSettings': {'url': url, **KEEPALIVE},
                                  'overlay': True}, timeout=timeout)
+
+
+MONITOR_OFF = 'OBS_MONITORING_TYPE_NONE'
+MONITOR_ROOM = 'OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT'
+
+
+def set_input_mute(source_name, muted, timeout=3):
+    """Mute/unmute one source in the OBS mixer."""
+    request('SetInputMute', {'inputName': source_name,
+                             'inputMuted': bool(muted)}, timeout=timeout)
+
+
+def set_audio_monitor(source_name, monitor_type, timeout=3):
+    """Whether OBS also plays this source out loud in the room.
+
+    MONITOR_OFF still sends it to the stream/recording — it only decides
+    whether the DM hears it locally. Not every OBS build exposes monitoring
+    (it needs a monitoring device configured), so callers treat a rejection as
+    non-fatal."""
+    request('SetInputAudioMonitorType',
+            {'inputName': source_name, 'monitorType': monitor_type},
+            timeout=timeout)
 
 
 def refresh_browser_source(source_name, timeout=3):

@@ -1,9 +1,18 @@
 <!-- A player's tile in the OBS party scene: their camera, with the character
      they are playing laid over the bottom of it.
 
-     One source, not two. The feed is framed here rather than being the source
-     itself, so the video and the character strip resize together as the grid
-     changes and OBS only pays for one browser instance per player.
+     TWO sources, not one, whenever a camera is actually showing (strip_only):
+     the feed is its own top-level browser source and this page supplies only
+     the character strip, transparent, layered over it.
+
+     It used to frame the feed here so one source carried both. That cannot
+     work over plain http://. An https iframe inside an http parent is not a
+     secure context, so WebRTC is unavailable inside it and vdo.ninja renders
+     nothing — measured in OBS itself: the same view URL shows the camera as a
+     top-level source and is black one iframe deep, while a framed
+     example.com renders fine. &cleanoutput then hides the error, so the tile
+     is a silent black rectangle. The iframe below is kept only for the local
+     browser (https, or the relay), where framing does work.
 
      Only the VIEW url is ever framed — that is playback and needs no camera
      permission. The PUSH url cannot be framed from a LAN http:// parent, which
@@ -11,7 +20,9 @@
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #14151b;
+    /* Transparent in strip mode so the camera source below shows through;
+       the dark field is only there to back a tile that carries its own feed. */
+    background: {% if strip_only %}transparent{% else %}#14151b{% endif %};
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
   }
@@ -86,7 +97,10 @@
 </style>
 
 <div id="tile">
-  {% if feed_url %}
+  {% if strip_only %}
+  {# The camera is the source underneath. Anything painted here would cover
+     it, so the tile contributes only its border and the strip. #}
+  {% elif feed_url %}
   <iframe id="cam" src="{{ feed_url }}" allow="autoplay; fullscreen"
           referrerpolicy="no-referrer" scrolling="no"></iframe>
   {% else %}

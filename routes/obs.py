@@ -84,6 +84,12 @@ def _obs_cfg():
         'info_text':     (appsettingGet('obs_info_text', '') or ''),
         'party_bg':      (appsettingGet('obs_party_bg', '') or ''),
         'portal_url':    portal_login_url(),
+        'feed_noaudio':  (appsettingGet('obs_feed_noaudio', '0') or '0'),
+        'dm_audio':      (appsettingGet('obs_dm_audio', '0') or '0'),
+        'feed_monitor':  (appsettingGet('obs_feed_monitor', '0') or '0'),
+        'card_base':     _card_base(),
+        'card_base_lan': lan_base(),
+        'card_base_loopback': is_loopback_base(_card_base()),
         'panel_poll':    ('%g' % panel_poll_s()),
         'pre':           show_cfg('pre'),
         'intermission':  show_cfg('intermission'),
@@ -308,18 +314,27 @@ def refresh_tiles():
     overrides = _card_overrides()
     swapped = []
     for char in _ordered_party():
-        want = _tile_url(char, presence, overrides)
+        want = _tile_plan(char, presence, overrides)
         if _tile_urls.get(char.character_id) == want:
             continue
+        url, overlay = want
         try:
-            source = _source_name_for(char)
-            obs_ws.set_browser_url(source, want)
+            # The camera source usually does NOT change here — it stays on the
+            # feed so the player keeps their microphone. What swaps is the
+            # overlay above it, between the name strip and the stat card.
+            for source, u in ((_source_name_for(char), url),
+                              (_overlay_source_name_for(char), overlay)):
+                if u is None:
+                    continue
+                prev = _input_settings.get(source)
+                if prev and prev[0] == u:
+                    continue
+                obs_ws.set_browser_url(source, u)
+                # Keep the settings cache honest, or the next sync would decide
+                # the URL still differs and rewrite it a second time.
+                if prev:
+                    _input_settings[source] = (u, prev[1], prev[2])
             _tile_urls[char.character_id] = want
-            # Keep the settings cache honest, or the next sync would decide
-            # the URL still differs and rewrite it a second time.
-            prev = _input_settings.get(source)
-            if prev:
-                _input_settings[source] = (want, prev[1], prev[2])
             swapped.append(char.name)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             # The scene may not be built yet — not worth a stack trace.
@@ -473,7 +488,11 @@ def broadcast():
     # address the DM is reaching ScenePlay on is one OBS can reach too, in the
     # normal same-machine / same-LAN setup.
     if not (appsettingGet('obs_card_base', '') or '').strip():
-        appsettingSet('obs_card_base', request.host_url.rstrip('/'))
+        # NOT request.host_url when that is loopback: a DM browsing
+        # http://localhost would bake in an address only this machine can
+        # resolve, and OBS on any other box would render blank sources.
+        here = request.host_url.rstrip('/')
+        appsettingSet('obs_card_base', lan_base() if is_loopback_base(here) else here)
     cfg = _obs_cfg()
     snap = obs_ws.current_state()
     # Benched players are listed too — greyed out, with the tick that brings
@@ -624,6 +643,15 @@ def save_config():
                   '1' if request.form.get('obs_scene_link') else '0')
     appsettingSet('obs_dm_enabled',
                   '1' if request.form.get('obs_dm_enabled') else '0')
+    base = (request.form.get('obs_card_base', '') or '').strip().rstrip('/')
+    if base:
+        appsettingSet('obs_card_base', base)
+    appsettingSet('obs_feed_noaudio',
+                  '1' if request.form.get('obs_feed_noaudio') else '0')
+    appsettingSet('obs_dm_audio',
+                  '1' if request.form.get('obs_dm_audio') else '0')
+    appsettingSet('obs_feed_monitor',
+                  '1' if request.form.get('obs_feed_monitor') else '0')
     appsettingSet('obs_panel_on',
                   '1' if request.form.get('obs_panel_on') else '0')
     side = (request.form.get('obs_panel_side', '') or 'right').strip().lower()
@@ -1227,6 +1255,44 @@ def api_map_mode():
     return jsonify({'ok': True, 'mode': want, 'unpinned': was_pinned is not None})
 
 
+@obs_bp.route('/api/reload-sources', methods=['POST'])
+@login_required
+@dm_required
+def api_reload_sources():
+    """Force every ScenePlay browser source to re-fetch its page.
+
+    A browser source caches whatever it first loaded, so a source created
+    while the page address was wrong keeps showing that blank result forever —
+    correct box, correct URL in its settings, nothing on screen. Rebuilding
+    does not fix it; only a refresh does."""
+    import obs_ws
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    wanted = {BG_SOURCE_NAME, TITLE_SOURCE_NAME, PANEL_SOURCE_NAME,
+              DICE_SOURCE_NAME, MAP_SOURCE_NAME, *SHOW_SOURCE.values()}
+    # ...plus every player/DM tile, whose names carry the managed prefixes.
+    scenes = [party_scene_name(), map_scene_name(), pre_scene_name(),
+              intermission_scene_name(), post_scene_name()]
+    for sc in scenes:
+        try:
+            for src in obs_ws.scene_items(sc):
+                if src.startswith(_MANAGED_PREFIXES):
+                    wanted.add(src)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+            pass
+    done, failed = [], []
+    for src in sorted(wanted):
+        try:
+            obs_ws.refresh_browser_source(src)
+            done.append(src)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            # 600 = the source isn't in this collection; that is not an error
+            # worth showing, it just means the DM has not built that scene.
+            if getattr(exc, 'code', None) != 600:
+                failed.append(f'{src} ({exc})')
+    return jsonify({'ok': True, 'refreshed': done, 'failed': failed})
+
+
 @obs_bp.route('/api/map-reload', methods=['POST'])
 @login_required
 @dm_required
@@ -1521,6 +1587,13 @@ def _source_name_for(char):
     return f'{_scene_name_for(char)} Cam'
 
 
+def _overlay_source_name_for(char):
+    """What ScenePlay draws above a player's camera source: the name strip
+    while they are on screen, their stat card while they are not. Shares the
+    managed prefix so pruning and the reload-all sweep own it too."""
+    return f'{_scene_name_for(char)} Overlay'
+
+
 def _id_set(setting):
     """Character ids stored as a comma-separated setting. Kept in settings
     rather than new columns so existing installs need no migration."""
@@ -1585,6 +1658,12 @@ def tile_url(character_id):
             f'?t={_card_token(character_id)}')
 
 
+def strip_url(character_id):
+    """The tile page with the video left out — the name strip alone, on
+    transparency, to sit over a camera source."""
+    return tile_url(character_id) + '&strip=1'
+
+
 def _tile_url(char, presence=None, overrides=None):
     """What this player's tile should be showing right now.
 
@@ -1603,9 +1682,38 @@ def _tile_url(char, presence=None, overrides=None):
     if _feed_state(char, presence) == 'stale':
         # They had a camera and the relay stopped hearing from them.
         return card_url(char.character_id)
-    # Not the bare feed: the tile page frames it and lays the character's name,
-    # player and HP over the bottom, so one source carries both.
     return tile_url(char.character_id)
+
+
+def _tile_plan(char, presence=None, overrides=None):
+    """(url for this player's own source, url for the overlay above it or None).
+
+    Two rules, and the second is what carries the audio:
+
+    The camera cannot be framed by the tile page. OBS loads that page over
+    plain http, and an https frame under an http ancestor is not a secure
+    context, so WebRTC never starts and the feed is silently black. So the
+    SOURCE is the bare feed and ScenePlay's own artwork rides above it as a
+    second source.
+
+    And anyone with a feed configured keeps that feed as their source even
+    when their stat card is showing — the card is drawn OVER the running
+    camera rather than replacing it. Replacing it would tear down the WebRTC
+    connection, and with it the player's microphone: pinning someone to their
+    card would silence them mid-sentence. Only a player with no feed at all
+    has the card as their source, and there is no audio to lose there."""
+    if overrides is None:
+        overrides = _card_overrides()
+    feed = char.video_view_url()
+    if not feed:
+        return card_url(char.character_id), None
+    if presence is None:
+        presence = _presence()
+    hidden = (char.character_id in overrides
+              or _feed_state(char, presence) == 'stale')
+    if hidden:
+        return feed, card_url(char.character_id, over=True)
+    return feed, strip_url(char.character_id)
 
 
 @obs_bp.route('/api/build-party', methods=['POST'])
@@ -1634,6 +1742,12 @@ def api_build_party():
         show_scenes, show_warn = ensure_show_scenes()
         result['warnings'].extend(show_warn)
         result['show_scenes'] = show_scenes
+        # Read back what OBS ACTUALLY holds, rather than what we believe we
+        # sent. A source that silently fails to land is otherwise invisible
+        # from here — the build reports success and the scene is missing a
+        # piece with nothing to say so.
+        result['contents'] = _scene_inventory(
+            [result['scene'], map_scene] + sorted(show_scenes.values()))
     except obs_ws.ObsRejected as exc:
         obs_ws._record_error('build-party', exc)
         return jsonify({'ok': False, 'error': f'OBS refused: {exc.comment or exc}'}), 502
@@ -1663,6 +1777,48 @@ def _ensure_input(scene, source, url, width, height, warnings):
     if item_id is not None:
         _input_settings[source] = want
     return item_id
+
+
+def _apply_tile_audio(source, char, warnings):
+    """Put one camera source's audio where the DM asked for it.
+
+    Two separate questions, and OBS answers them with different calls:
+
+    MUTE decides whether the source reaches the stream at all. The DM's own
+    tile is muted by default — it is their own microphone coming back at them,
+    which is an echo on the broadcast and, if they are monitoring, feedback in
+    the room. Their real mic is already an OBS input.
+
+    MONITORING decides whether the DM hears it locally. Off by default because
+    most tables are already on a voice call and would hear everyone twice;
+    turn it on when these feeds are the only way the DM hears their players.
+    A build with no monitoring device configured rejects this, which is not
+    worth failing a scene build over."""
+    import obs_ws
+    is_dm = char.character_id == DM_TILE_ID
+    try:
+        obs_ws.set_input_mute(source, is_dm and not _dm_audio_on())
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        warnings.append(f'Could not set the audio for {char.name} ({exc}).')
+        return
+    try:
+        obs_ws.set_audio_monitor(
+            source,
+            obs_ws.MONITOR_ROOM if _feed_monitor_on() else obs_ws.MONITOR_OFF)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        # No monitoring device set up in OBS. The feed still reaches the
+        # stream; only the DM's own speakers miss out.
+        log.info('OBS would not set monitoring for %s', source)
+
+
+def _dm_audio_on():
+    """Does the DM's own camera tile carry audio into OBS?"""
+    return (appsettingGet('obs_dm_audio', '0') or '0') == '1'
+
+
+def _feed_monitor_on():
+    """Does OBS play the player feeds out loud in the DM's room?"""
+    return (appsettingGet('obs_feed_monitor', '0') or '0') == '1'
 
 
 def _tile_anim_ms():
@@ -1723,10 +1879,11 @@ def _sync_party_scene(featured_id=None):
     anim_ms = _tile_anim_ms()
     presence = _presence()
     overrides = _card_overrides()
+    strips = set()
     for char, rect in zip(members, rects):
         source = _source_name_for(char)
-        url = _tile_url(char, presence, overrides)
-        _tile_urls[char.character_id] = url
+        url, overlay = _tile_plan(char, presence, overrides)
+        _tile_urls[char.character_id] = (url, overlay)
         item_id = _ensure_input(scene, source, url, render_w, render_h, warnings)
         if item_id is None:
             warnings.append(f'Could not place {char.name} in the scene.')
@@ -1741,10 +1898,31 @@ def _sync_party_scene(featured_id=None):
             obs_ws.place_item(scene, item_id, rect)
         _tile_rects[char.character_id] = target
         obs_ws.set_item_enabled(scene, item_id, True)
+        # Only a source actually pointed at a feed carries sound; a card is a
+        # silent web page and needs no mixer treatment.
+        if overlay is not None:
+            _apply_tile_audio(source, char, warnings)
         _upsert_player_map(char.character_id, scene, source, auto_created=1)
         placed.append({'character_id': char.character_id, 'name': char.name,
                        'source': source, 'item_id': item_id,
                        'featured': rect['featured']})
+
+        # The overlay rides in the SAME box, one layer up: the name strip over
+        # a visible camera, the opaque stat card over a hidden one. A player
+        # with no feed at all has no overlay — their source IS the card.
+        if overlay is None:
+            continue
+        overlay_source = _overlay_source_name_for(char)
+        s_item = _ensure_input(scene, overlay_source, overlay,
+                               render_w, render_h, warnings)
+        if s_item is None:
+            continue
+        strips.add(overlay_source)
+        if anim_ms and was and was != target:
+            moves.append((s_item, was, target))
+        else:
+            obs_ws.place_item(scene, s_item, rect)
+        obs_ws.set_item_enabled(scene, s_item, True)
 
     # Kicked off before the panel/background work below so the move starts
     # while those requests are still going out — it runs on its own thread.
@@ -1757,7 +1935,7 @@ def _sync_party_scene(featured_id=None):
     for gone in [cid for cid in _tile_rects if cid not in live_ids]:
         _tile_rects.pop(gone, None)
 
-    keep = {p['source'] for p in placed}
+    keep = {p['source'] for p in placed} | strips
 
     # Title strip and info panel, each in its own box.
     for src, rect, mode, label in (
@@ -1794,6 +1972,60 @@ def _sync_party_scene(featured_id=None):
     obs_ws.scene_list(refresh=True)
     return {'scene': scene, 'tiles': placed, 'warnings': warnings,
             'featured_id': featured_id}
+
+
+def _scene_inventory(scene_names):
+    """{scene: [description, ...]} straight from OBS, for the build report.
+
+    Reports each item's ENABLED state and its box, not just its name: a source
+    that is present but hidden, off-canvas or zero-sized looks identical to a
+    working one in a bare name list, and those are exactly the states that
+    make a scene "missing" something the build swears it placed."""
+    import obs_ws
+    out = {}
+    for name in scene_names:
+        if not name or name in out:
+            continue
+        try:
+            lst = obs_ws.request('GetSceneItemList', {'sceneName': name})
+            rows = []
+            for it in sorted(lst.get('sceneItems') or [],
+                             key=lambda i: i.get('sceneItemIndex', 0)):
+                src = it.get('sourceName', '?')
+                bits = [src]
+                if not it.get('sceneItemEnabled', True):
+                    bits.append('HIDDEN')
+                try:
+                    tr = obs_ws.request('GetSceneItemTransform', {
+                        'sceneName': name,
+                        'sceneItemId': it.get('sceneItemId')})['sceneItemTransform']
+                    w = round(tr.get('boundsWidth') or tr.get('width') or 0)
+                    h = round(tr.get('boundsHeight') or tr.get('height') or 0)
+                    bits.append(f'@{round(tr.get("positionX", 0))},'
+                                f'{round(tr.get("positionY", 0))} {w}x{h}')
+                    if w < 2 or h < 2:
+                        bits.append('ZERO SIZE')
+                except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+                    pass
+                # What the source is ACTUALLY pointed at. A tile still on
+                # /card/ after its owner was un-pinned, or a source left on an
+                # old host, both look perfect in a name-and-box listing.
+                try:
+                    st = obs_ws.request('GetInputSettings',
+                                        {'inputName': src})['inputSettings']
+                    u = str(st.get('url') or '')
+                    if u:
+                        # Drop the capability token: this text gets pasted into
+                        # chats and screenshots.
+                        u = re.sub(r'([?&]t=)[^&]*', r'\1<token>', u)
+                        bits.append(u)
+                except (obs_ws.ObsRejected, obs_ws.ObsUnavailable, KeyError):
+                    pass
+                rows.append('  '.join(bits))
+            out[name] = rows
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            out[name] = [f'(could not read: {exc})']
+    return out
 
 
 def _prune_party_scene(scene, keep_sources, warnings):
@@ -2076,6 +2308,21 @@ def _repoint_obs_source(char):
 # Derived from the app secret, so it needs no storage and rotating the secret
 # revokes every card at once.
 
+def token_ok(given, expected):
+    """Constant-time token compare that cannot crash the request.
+
+    hmac.compare_digest raises TypeError on strings holding non-ASCII, so a
+    URL carrying, say, a pasted ellipsis turned a wrong token into a 500
+    instead of a clean 403. Comparing the UTF-8 bytes keeps it constant-time
+    and makes every bad token look the same to the caller."""
+    import hmac
+    try:
+        return hmac.compare_digest((given or '').encode('utf-8', 'replace'),
+                                   (expected or '').encode('utf-8', 'replace'))
+    except (TypeError, ValueError):
+        return False
+
+
 def _card_token(character_id):
     import hashlib
     import hmac
@@ -2085,6 +2332,45 @@ def _card_token(character_id):
 
 
 DEFAULT_CARD_PORT = 8086          # the port ws.py serves ScenePlay on
+
+
+def lan_base():
+    """This machine's LAN address, as a browser-source base URL.
+
+    Found by opening a UDP socket toward a public address and reading back
+    which local interface the OS picked — no packet is actually sent. Falls
+    back to the hostname, then to loopback."""
+    import socket
+    ip = ''
+    try:
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sk.connect(('8.8.8.8', 80))
+            ip = sk.getsockname()[0]
+        finally:
+            sk.close()
+    except OSError:
+        ip = ''
+    if not ip or ip.startswith('127.'):
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            ip = ''
+    return f'http://{ip or "127.0.0.1"}:{DEFAULT_CARD_PORT}'
+
+
+def is_loopback_base(base):
+    """True when `base` points at whoever is asking — which is exactly what
+    breaks OBS on a SECOND machine: 'localhost' there is the OBS box, not
+    this one, so every source loads nothing."""
+    host = (base or '').split('//', 1)[-1].split('/')[0]
+    if host.startswith('['):                 # [::1]:8086 — IPv6 is bracketed,
+        host = host[1:host.find(']')] if ']' in host else host[1:]
+    else:                                    # ...so only strip a port here
+        host = host.split(':')[0]
+    host = host.strip().lower()
+    return host in ('localhost', '127.0.0.1', '::1', '0.0.0.0', '') or \
+        host.startswith('127.')
 
 
 def _card_base():
@@ -2099,32 +2385,33 @@ def _card_base():
     return base.rstrip('/') if base else f'http://127.0.0.1:{DEFAULT_CARD_PORT}'
 
 
-def card_url(character_id):
+def card_url(character_id, over=False):
+    """over=True asks for the opaque card — the one that covers a camera source
+    still running underneath it, so the player stays audible."""
     # Flask's <int:> converter never matches a negative number, so the DM's
     # card gets its own path rather than /card/-1.
     leaf = 'dm' if character_id == DM_TILE_ID else str(character_id)
     return (f'{_card_base()}{obs_bp.url_prefix}/card/{leaf}'
-            f'?t={_card_token(character_id)}')
+            f'?t={_card_token(character_id)}' + ('&over=1' if over else ''))
 
 
 @obs_bp.route('/card/dm')
 def dm_card():
     """The DM's tile when they have no camera. Same token gate as a player
     card; a separate path because <int:> never matches a negative id."""
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _card_token(DM_TILE_ID)):
+    if not token_ok(request.args.get('t', ''), _card_token(DM_TILE_ID)):
         abort(403)
     tile = dm_tile()
     return render_template('ttrpg/obs_card.html', char=tile, conditions=[],
                            is_dm=True, poll_s=card_poll_s(),
+                           opaque=request.args.get('over') == '1',
                            poll_url=url_for('obs_bp.dm_card_state',
                                             t=request.args.get('t', '')))
 
 
 @obs_bp.route('/card/dm/state')
 def dm_card_state():
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _card_token(DM_TILE_ID)):
+    if not token_ok(request.args.get('t', ''), _card_token(DM_TILE_ID)):
         abort(403)
     tile = dm_tile()
     return jsonify({'name': tile.name, 'hp_current': 0, 'hp_max': 0,
@@ -2136,15 +2423,15 @@ def dm_card_state():
 def dm_tile_view():
     """The DM's camera with their name over it. Separate path for the same
     reason /card/dm is: <int:> will not match the DM's negative id."""
-    import hmac
     token = request.args.get('t', '')
-    if not hmac.compare_digest(token, _card_token(DM_TILE_ID)):
+    if not token_ok(token, _card_token(DM_TILE_ID)):
         abort(403)
     tile = dm_tile()
     return render_template(
         'ttrpg/obs_tile.html', char=tile,
         player=dm_player_name(), portrait_url='',
         feed_url=tile.video_view_url(),
+        strip_only=request.args.get('strip') == '1',
         conditions=[], is_dm=True, poll_s=card_poll_s(),
         poll_url=url_for('obs_bp.dm_card_state', t=token))
 
@@ -2153,18 +2440,18 @@ def dm_tile_view():
 def player_tile(character_id):
     """A player's camera with their character laid over it.
 
-    The feed is FRAMED rather than being the source itself, so one browser
-    source carries both the video and the character strip. Two stacked
-    sources would have meant a second CEF instance per player and two
-    transforms to keep aligned as the grid resizes.
+    ?strip=1 drops the video and serves the character strip alone, transparent,
+    to be layered over a camera source of its own. That is what the party scene
+    builds, because an https feed framed inside this http page is not a secure
+    context and so cannot run WebRTC at all — see obs_tile.html. Without the
+    flag the feed is still framed, which works wherever the parent is https.
 
     Framing is only safe for the VIEW url: it is playback, needing no camera
     permission. The PUSH url must never be framed — camera delegation from a
     LAN http:// parent is blocked, which is why the player's own page links
     out to it instead."""
-    import hmac
     token = request.args.get('t', '')
-    if not hmac.compare_digest(token, _card_token(character_id)):
+    if not token_ok(token, _card_token(character_id)):
         abort(403)
     char = db.session.get(tblCharacters, character_id)
     if not char:
@@ -2176,6 +2463,7 @@ def player_tile(character_id):
                               filename=f'uploads/portraits/{char.portrait_path}')
                       if char.portrait_path else ''),
         feed_url=char.video_view_url(),
+        strip_only=request.args.get('strip') == '1',
         conditions=[c.condition_name for c in char.conditions] if char.conditions else [],
         poll_s=card_poll_s(),
         poll_url=url_for('obs_bp.card_state', character_id=character_id, t=token))
@@ -2185,9 +2473,8 @@ def player_tile(character_id):
 def player_card(character_id):
     """Transparent stat card for OBS. No login: OBS can't hold a session, so
     the URL carries a token. compare_digest to keep it constant-time."""
-    import hmac
     token = request.args.get('t', '')
-    if not hmac.compare_digest(token, _card_token(character_id)):
+    if not token_ok(token, _card_token(character_id)):
         abort(403)
     char = db.session.get(tblCharacters, character_id)
     if not char:
@@ -2196,6 +2483,7 @@ def player_card(character_id):
     return render_template('ttrpg/obs_card.html', char=char,
                            conditions=conditions, is_dm=False,
                            player=player_name_for(char),
+                           opaque=request.args.get('over') == '1',
                            poll_s=card_poll_s(),
                            poll_url=url_for('obs_bp.card_state',
                                             character_id=character_id,
@@ -2206,8 +2494,7 @@ def player_card(character_id):
 def card_state(character_id):
     """Live values for the card — it polls this so HP/conditions track play
     without the DM touching anything."""
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _card_token(character_id)):
+    if not token_ok(request.args.get('t', ''), _card_token(character_id)):
         abort(403)
     char = db.session.get(tblCharacters, character_id)
     if not char:
@@ -2248,8 +2535,7 @@ def map_url():
 
 
 def _check_map_token():
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _map_token()):
+    if not token_ok(request.args.get('t', ''), _map_token()):
         abort(403)
 
 
@@ -2372,8 +2658,7 @@ PANEL_MODES = ('bg', 'title', 'info', 'dice', 'pre', 'intermission', 'post')
 @obs_bp.route('/panel')
 def panel_view():
     """One page, three modes — see the template header."""
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _panel_token()):
+    if not token_ok(request.args.get('t', ''), _panel_token()):
         abort(403)
     mode = (request.args.get('mode') or 'info').strip().lower()
     return render_template('ttrpg/obs_panel.html',
@@ -2435,8 +2720,7 @@ def _recent_rolls(limit=ROLL_LIMIT):
 
 @obs_bp.route('/panel/state')
 def panel_state():
-    import hmac
-    if not hmac.compare_digest(request.args.get('t', ''), _panel_token()):
+    if not token_ok(request.args.get('t', ''), _panel_token()):
         abort(403)
     snap = {}
     try:

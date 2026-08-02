@@ -28,6 +28,18 @@ def _vdo_url(kind, stream_id):
         base += '/'
     params = _setting('obs_vdo_view_params' if kind == 'view' else 'obs_vdo_push_params')
     url = f'{base}?{kind}={quote(stream_id, safe="")}{params}'
+    # Purely an audio choice: for tables whose player audio already reaches OBS
+    # by another route and would otherwise be doubled.
+    #
+    # NOT an autoplay workaround, despite appearances. Autoplay policy was
+    # measured inside OBS's own browser engine and it starts a feed with audio
+    # without any gesture; black tiles came from framing the feed in an http
+    # page instead (see obs_tile.html). &noaudio was kept because it is a real
+    # option, not because it fixes anything. &muted and &mute were also
+    # measured and neither mutes view-side playback at all.
+    if kind == 'view' and (appsettingGet('obs_feed_noaudio', '0') or '0') == '1' \
+            and '&noaudio' not in params:
+        url += '&noaudio'
     password = (appsettingGet('obs_vdo_password', '') or '').strip()
     if password:
         url += '&password=' + quote(password, safe='')

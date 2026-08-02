@@ -190,6 +190,8 @@
           <label class="form-label small">Map source in OBS</label>
           <button type="button" class="btn btn-sm btn-outline-secondary w-100"
                   onclick="obsReloadMap(this)">&#8635; Reload map source</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1"
+                  onclick="obsReloadAll(this)">&#8635; Reload ALL ScenePlay sources</button>
           <div class="form-text">
             OBS keeps a browser source's page loaded until you reload it, so
             after a ScenePlay update the stream can still be running the old
@@ -301,6 +303,42 @@
     <!-- Connection settings -->
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
+      <!-- Where OBS fetches ScenePlay's pages from. Its own card because
+           getting this wrong is invisible: OBS connects over the websocket
+           perfectly and then renders blank sources. -->
+      <div class="ttrpg-card p-3 mb-3">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#127760; Page address for OBS</h6>
+        {% if cfg.card_base_loopback %}
+        <div class="alert py-2 px-3 mb-2" style="background:var(--ttrpg-primary);
+             border:1px solid #c9a227;color:#8a6d1f;">
+          &#9888; This is a <b>loopback</b> address, so it only works when OBS runs
+          on <i>this same machine</i>. On another computer &mdash; a Mac running OBS,
+          for example &mdash; <code>localhost</code> means <i>that</i> computer, so every
+          ScenePlay source loads nothing even though the connection is fine.
+          {% if cfg.card_base_lan != cfg.card_base %}
+          Use <code>{{ cfg.card_base_lan }}</code> instead.
+          {% endif %}
+        </div>
+        {% endif %}
+        <div class="row g-2 align-items-end">
+          <div class="col-sm-7">
+            <label class="form-label small">Base URL OBS should load pages from</label>
+            <input type="text" name="obs_card_base" form="obs-cfg-form"
+                   class="form-control form-control-sm"
+                   value="{{ cfg.card_base }}" placeholder="{{ cfg.card_base_lan }}">
+          </div>
+          <div class="col-sm-5">
+            <div class="form-text mb-1">
+              This machine on the LAN: <code>{{ cfg.card_base_lan }}</code>
+            </div>
+            <div class="form-text">
+              Saved with Connection Settings. Rebuild the party scene afterwards
+              so existing sources are repointed.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Images: every picture the broadcast uses, in one aligned table.
            They were previously spread across three places on this page, each
            with its own upload form, which made it impossible to see at a
@@ -392,6 +430,43 @@
                    min="0" max="3600" step="5" value="{{ cfg.auto_return_s }}">
             <div class="form-text">0 = stay put.</div>
           </div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-feed-noaudio"
+                 name="obs_feed_noaudio" value="1"
+                 {% if cfg.feed_noaudio == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-feed-noaudio">
+            Camera tiles carry <b>video only</b>
+            <span class="text-muted">(drops the audio track from the tiles, for
+            when the players' audio already reaches OBS another way and you do
+            not want it twice. This is <b>not</b> a fix for black tiles &mdash;
+            OBS starts a feed with audio just fine.)</span>
+          </label>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-feed-monitor"
+                 name="obs_feed_monitor" value="1"
+                 {% if cfg.feed_monitor == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-feed-monitor">
+            <b>Play the players out loud</b> here
+            <span class="text-muted">(the feeds always reach the stream. Tick
+            this only if OBS is how <em>you</em> hear your players &mdash; if
+            you are already on a voice call, you will hear everyone twice.
+            Needs a monitoring device set in OBS under Settings &rarr;
+            Audio.)</span>
+          </label>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-dm-audio"
+                 name="obs_dm_audio" value="1"
+                 {% if cfg.dm_audio == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-dm-audio">
+            Your own tile carries <b>your</b> audio
+            <span class="text-muted">(off by default: your camera tile is your
+            own microphone coming back to you, so it doubles your voice on the
+            broadcast and can howl if you are monitoring. Leave it off and let
+            your real mic input carry you.)</span>
+          </label>
         </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-panel-on"
@@ -558,6 +633,7 @@ const OBS_REORDER_URL = "{{ url_for('obs_bp.api_reorder') }}";
 const OBS_CARDOVR_URL = "{{ url_for('obs_bp.api_card_override') }}";
 const OBS_MAPMODE_URL = "{{ url_for('obs_bp.api_map_mode') }}";
 const OBS_MAPRELOAD_URL = "{{ url_for('obs_bp.api_map_reload') }}";
+const OBS_RELOADALL_URL = "{{ url_for('obs_bp.api_reload_sources') }}";
 const OBS_MAPSCENE_URL = "{{ url_for('obs_bp.api_map_scene') }}";
 const OBS_ONSTREAM_URL = "{{ url_for('obs_bp.api_on_stream') }}";
 
@@ -607,7 +683,15 @@ function obsBuildParty(btn) {
     .then(({ok, d}) => {
       btn.disabled = false; btn.innerHTML = orig;
       if (!ok || !d.ok) { alert(d.error || 'Could not build the party scene.'); return; }
-      if (d.warnings && d.warnings.length) alert(d.warnings.join('\n'));
+      // Show what OBS actually ended up holding. "Built successfully" while a
+      // source is quietly missing is the failure mode this replaces.
+      const bits = [];
+      if (d.warnings && d.warnings.length) bits.push(d.warnings.join('\n'), '');
+      Object.keys(d.contents || {}).forEach(sc => {
+        bits.push(sc + ':');
+        (d.contents[sc] || []).forEach(src => bits.push('   \u2022 ' + src));
+      });
+      if (bits.length) alert(bits.join('\n'));
       location.reload();
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
@@ -630,6 +714,26 @@ function obsReloadMap(btn) {
       if (!ok || !d.ok) { btn.innerHTML = orig; alert(d.error || 'Could not reload the map source.'); return; }
       btn.innerHTML = '\u2713 Reloaded';
       setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+// A source that cached a blank page keeps showing it: the settings and the
+// transform look perfect and nothing renders. This is the cure for that.
+function obsReloadAll(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Reloading\u2026';
+  _obsPost(OBS_RELOADALL_URL, {})
+    .then(({ok, d}) => {
+      btn.disabled = false; btn.innerHTML = orig;
+      if (!ok || !d.ok) { alert(d.error || 'Could not reload the sources.'); return; }
+      const msg = ['Refreshed ' + (d.refreshed || []).length + ' source(s):']
+        .concat((d.refreshed || []).map(s => '   \u2022 ' + s));
+      if (d.failed && d.failed.length) {
+        msg.push('', 'Failed:');
+        (d.failed).forEach(f => msg.push('   \u2022 ' + f));
+      }
+      alert(msg.join('\n'));
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
 }
