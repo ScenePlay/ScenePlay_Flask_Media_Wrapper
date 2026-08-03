@@ -1066,6 +1066,38 @@ def _cut_scene_name(key):
             'post': post_scene_name, 'party': party_scene_name}[key]()
 
 
+@obs_bp.route('/api/output/<kind>', methods=['POST'])
+@login_required
+@dm_required
+def api_output(kind):
+    """Start or stop OBS's recording / streaming.
+
+    Deliberately explicit rather than a toggle: a toggle acts on what the page
+    last heard, so a double-click, a stale poll, or the DM having hit the key
+    inside OBS turns "stop" into "start" and puts the broadcast live again."""
+    import obs_ws
+    if kind not in obs_ws.OUTPUTS:
+        return jsonify({'ok': False, 'error': f'Unknown output {kind!r}'}), 400
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    want = bool((request.get_json(silent=True) or {}).get('on'))
+    try:
+        now = obs_ws.set_output_active(kind, want)
+    except obs_ws.ObsRejected as exc:
+        obs_ws._record_error(f'{kind}-{"start" if want else "stop"}', exc)
+        return jsonify({'ok': False,
+                        'error': f'OBS refused: {exc.comment or exc}'}), 502
+    except obs_ws.ObsUnavailable as exc:
+        obs_ws._record_error(f'{kind}-{"start" if want else "stop"}', exc)
+        return jsonify({'ok': False, 'error': 'Lost the OBS connection.'}), 503
+    # Keep the cached snapshot honest so the next poll cannot flicker the
+    # button back to its old label before the event lands.
+    with obs_ws._cache_lock:
+        obs_ws._cache['recording' if kind == 'record' else 'streaming'] = now
+    return jsonify({'ok': True, 'kind': kind, 'active': now,
+                    **{('recording' if kind == 'record' else 'streaming'): now}})
+
+
 @obs_bp.route('/api/cut/<key>', methods=['POST'])
 @login_required
 @dm_required

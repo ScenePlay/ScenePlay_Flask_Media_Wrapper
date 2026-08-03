@@ -44,6 +44,18 @@
         <span class="badge bg-primary ms-1" id="obs-live-pill"
               style="display:{% if snap.streaming %}inline-block{% else %}none{% endif %};">LIVE</span>
       </div>
+      <!-- Record and stream, beside the pills that report them. The record
+           button doubles as the reminder: without it, "not recording" shows
+           nothing at all, and a forgotten record is only discovered after the
+           session. Labels are driven by the poll, so hitting record inside OBS
+           updates them here within 3s. -->
+      <div class="mt-2 d-flex flex-wrap gap-2">
+        <button id="obs-record-btn" class="btn btn-sm btn-outline-danger"
+                onclick="obsOutput('record', this)" disabled>&#9679; Start recording</button>
+        <button id="obs-stream-btn" class="btn btn-sm btn-outline-primary"
+                onclick="obsOutput('stream', this)" disabled>&#9654; Start streaming</button>
+        <span class="small text-muted align-self-center" id="obs-output-note"></span>
+      </div>
       <div id="obs-problems" class="mt-2 small" style="color:#e09090;">
         {% for p in problems %}<div>&#9888; {{ p }}</div>{% endfor %}
       </div>
@@ -707,6 +719,9 @@ const OBS_REFRESH_URL = "{{ url_for('obs_bp.api_refresh') }}";
 const OBS_NEXT_URL    = "{{ url_for('obs_bp.api_next') }}";
 const OBS_GROUP_URL   = "{{ url_for('obs_bp.api_group') }}";
 const OBS_BUILD_URL   = "{{ url_for('obs_bp.api_build_party') }}";
+// Built with a placeholder so the kind is substituted client-side rather than
+// concatenated onto a hand-written path.
+const OBS_OUTPUT_URL  = "{{ url_for('obs_bp.api_output', kind='__kind__') }}";
 const OBS_REORDER_URL = "{{ url_for('obs_bp.api_reorder') }}";
 const OBS_CARDOVR_URL = "{{ url_for('obs_bp.api_card_override') }}";
 const OBS_MAPMODE_URL = "{{ url_for('obs_bp.api_map_mode') }}";
@@ -1050,6 +1065,64 @@ function _obsApply(s) {
   if (s.streaming !== undefined) {
     document.getElementById('obs-live-pill').style.display = s.streaming ? 'inline-block' : 'none';
   }
+  _obsPaintOutputs(s);
+}
+
+// The buttons say what OBS is doing, never what this page last asked for —
+// so starting or stopping inside OBS itself is reflected here within a poll.
+function _obsPaintOutputs(s) {
+  const live = s.state === 'connected';
+  [['obs-record-btn', s.recording, '&#9679; Start recording', '&#9632; Stop recording',
+    'btn-outline-danger', 'btn-danger'],
+   ['obs-stream-btn', s.streaming, '&#9654; Start streaming', '&#9632; Stop streaming',
+    'btn-outline-primary', 'btn-primary']
+  ].forEach(([id, on, offLabel, onLabel, offCls, onCls]) => {
+    const b = document.getElementById(id);
+    if (!b || on === undefined) return;
+    if (b.dataset.busy === '1') return;         // mid-request, leave it alone
+    b.disabled = !live;
+    b.innerHTML = on ? onLabel : offLabel;
+    b.classList.remove(offCls, onCls);
+    b.classList.add(on ? onCls : offCls);
+    b.dataset.on = on ? '1' : '0';
+  });
+  const note = document.getElementById('obs-output-note');
+  if (note) {
+    note.textContent = live ? (s.recording ? '' : 'Not recording.')
+                            : 'Connect to OBS to record or stream.';
+  }
+}
+
+function obsOutput(kind, btn) {
+  const on = btn.dataset.on === '1';
+  // Confirm anything that ends a take or touches the public broadcast.
+  // Starting a recording is the one action left frictionless — it is the one
+  // you never want to hesitate over.
+  const ask = on
+    ? (kind === 'record' ? 'Stop recording? The take ends here.'
+                         : 'Stop streaming? This ends the broadcast for everyone watching.')
+    : (kind === 'stream' ? 'Start streaming? This goes live publicly.' : null);
+  if (ask && !confirm(ask)) return;
+
+  const orig = btn.innerHTML;
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.textContent = on ? 'Stopping…' : 'Starting…';
+  _obsPost(OBS_OUTPUT_URL.replace('__kind__', kind), {on: !on})
+    .then(({ok, d}) => {
+      btn.dataset.busy = '0';
+      btn.disabled = false;
+      if (!ok || !d.ok) {
+        btn.innerHTML = orig;
+        _obsShowBuildReport({error: (d && d.error) ||
+                                    ('Could not ' + (on ? 'stop ' : 'start ') + kind + '.')});
+        return;
+      }
+      _obsPaintOutputs(d);       // reflect the state OBS actually reported
+    })
+    .catch(() => {
+      btn.dataset.busy = '0'; btn.disabled = false; btn.innerHTML = orig;
+    });
 }
 
 function obsPoll() {

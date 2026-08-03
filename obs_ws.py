@@ -641,6 +641,47 @@ def set_audio_monitor(source_name, monitor_type, timeout=3):
             timeout=timeout)
 
 
+OUTPUTS = {'stream': ('StartStream', 'StopStream', 'GetStreamStatus'),
+           'record': ('StartRecord', 'StopRecord', 'GetRecordStatus')}
+
+
+OUTPUT_SETTLE_S = 2.5
+
+
+def set_output_active(kind, on, timeout=5, settle=OUTPUT_SETTLE_S):
+    """Start or stop OBS's stream/record output. Returns whether it is now on.
+
+    The state is read back rather than assumed: the cache is fed by events,
+    which have not necessarily arrived by the time this returns, and a button
+    that lies about whether you are live is worse than no button. Asking for
+    the state it is already in is treated as success — OBS rejects it, but the
+    DM got what they asked for.
+
+    Reading it back ONCE is not enough. Measured against real OBS: a
+    GetRecordStatus issued straight after StartRecord still reports inactive,
+    so the caller would paint "Start recording" while recording. The output
+    settles within a second or so — poll until it agrees, then give up and
+    report whatever is true rather than what was asked for."""
+    start, stop, status = OUTPUTS[kind]
+    try:
+        request(start if on else stop, timeout=timeout)
+    except ObsRejected as exc:
+        # 500 OutputRunning / 501 OutputNotRunning — already where we wanted.
+        if exc.code not in (500, 501):
+            raise
+    deadline = time.monotonic() + max(0.0, settle)
+    while True:
+        now = bool(request(status, timeout=timeout).get('outputActive'))
+        if now == on or time.monotonic() >= deadline:
+            return now
+        time.sleep(0.15)
+
+
+def output_active(kind, timeout=3):
+    _start, _stop, status = OUTPUTS[kind]
+    return bool(request(status, timeout=timeout).get('outputActive'))
+
+
 def refresh_browser_source(source_name, timeout=3):
     """Force a reload — the player restarted their camera."""
     request('PressInputPropertiesButton',
