@@ -52,6 +52,24 @@
       {% endif %}
     </div>
 
+    <!-- Manual switch. Directly under Status because the two are read
+         together: the status card says which scene is live, this one changes
+         it. -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">All Scenes</h6>
+      <div id="obs-scene-buttons" class="d-flex flex-wrap gap-2">
+        {% for s in snap.scenes %}
+        <button class="btn btn-sm obs-scene-btn"
+                data-scene="{{ s }}" onclick="obsSwitchScene(this)"
+                style="background:{% if s == snap.current_scene %}var(--ttrpg-accent);color:var(--sp-on-accent){% else %}var(--ttrpg-surface);color:var(--ttrpg-text){% endif %};
+                       border:1px solid {% if s == snap.current_scene %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
+          {{ s }}</button>
+        {% else %}
+        <span class="small text-muted">No scenes yet &mdash; connect to OBS first.</span>
+        {% endfor %}
+      </div>
+    </div>
+
     <!-- Scene mapping: the point of the page -->
     <div class="ttrpg-card p-3 mb-3">
       <div class="d-flex align-items-center justify-content-between mb-2">
@@ -62,8 +80,14 @@
             &#9635; Build / refresh party scene</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="obsRefreshScenes(this)">
             &#8635; Re-read from OBS</button>
+          <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
+                  title="Saves every setting on this page">Save</button>
         </div>
       </div>
+      <!-- Where a build reports what OBS ended up holding. Inline rather than
+           a modal: the report is worth reading, but not worth interrupting a
+           session for. Filled by _obsShowBuildReport. -->
+      <div id="obs-build-report" class="small mb-2" hidden></div>
       <p class="small text-muted">
         Everyone lives in one OBS scene as a tile. Giving a player the turn
         <b>spotlights</b> them &mdash; their tile grows to double size and the
@@ -141,7 +165,7 @@
         <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
           How long the tiles take to resize when the spotlight moves to a
           player and when <b>0</b>/<b>G</b> evens the table out again.
-          <b>0</b> snaps instantly. Saved with Connection Settings below.
+          <b>0</b> snaps instantly. Saved with any <b>Save</b> on this page.
         </div>
       </div>
       {% if cfg.portal_url %}
@@ -160,7 +184,14 @@
 
     <!-- Battle map source -->
     <div class="ttrpg-card p-3 mb-3">
-      <h6 style="color:var(--ttrpg-accent);" class="mb-2">Battle Map on Stream</h6>
+      <!-- Every card carrying settings gets its own Save. They all submit the
+           one settings form, so it saves the whole page wherever it is
+           clicked — the point is not having to scroll to reach it. -->
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-0">Battle Map on Stream</h6>
+        <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
+                title="Saves every setting on this page">Save</button>
+      </div>
       <p class="small text-muted">
         The map is a <b>browser source</b> &mdash; just the map, not your screen or a
         browser window. It follows the live map, shows it through the active
@@ -223,7 +254,7 @@
           <input type="number" name="obs_map_zoom_hold_s" form="obs-cfg-form"
                  class="form-control form-control-sm" min="1" max="120" step="1"
                  value="{{ cfg.map_zoom_hold }}">
-          <div class="form-text">Saved with Connection Settings below.</div>
+          <div class="form-text">Saved with any <b>Save</b> on this page.</div>
         </div>
         <div class="col-sm-4">
           <label class="form-label small">Stat card refresh (s)</label>
@@ -284,30 +315,49 @@
     </div>
     {% endif %}
 
-    <!-- Manual switch -->
-    <div class="ttrpg-card p-3 mb-3">
-      <h6 style="color:var(--ttrpg-accent);" class="mb-2">All Scenes</h6>
-      <div id="obs-scene-buttons" class="d-flex flex-wrap gap-2">
-        {% for s in snap.scenes %}
-        <button class="btn btn-sm obs-scene-btn"
-                data-scene="{{ s }}" onclick="obsSwitchScene(this)"
-                style="background:{% if s == snap.current_scene %}var(--ttrpg-accent);color:var(--sp-on-accent){% else %}var(--ttrpg-surface);color:var(--ttrpg-text){% endif %};
-                       border:1px solid {% if s == snap.current_scene %}var(--ttrpg-accent){% else %}var(--sp-border){% endif %};">
-          {{ s }}</button>
-        {% else %}
-        <span class="small text-muted">No scenes yet &mdash; connect to OBS first.</span>
-        {% endfor %}
-      </div>
-    </div>
-
     <!-- Connection settings -->
     <div class="ttrpg-card p-3 mb-3">
-      <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 style="color:var(--ttrpg-accent);" class="mb-0">Connection Settings</h6>
+        <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
+                title="Saves every setting on this page">Save</button>
+      </div>
+
+      <!-- How ScenePlay reaches OBS. First, because it is the connection this
+           card is named for and nothing else here works until it holds.
+           These live OUTSIDE the settings form and bind to it with form=, the
+           same way the page-address field below does. -->
+      <div class="row g-2 mb-2">
+        <div class="col-sm-8">
+          <label class="form-label small">OBS host</label>
+          <input type="text" name="obs_host" form="obs-cfg-form"
+                 class="form-control form-control-sm"
+                 placeholder="127.0.0.1" value="{{ cfg.host }}">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label small">Port</label>
+          <input type="number" name="obs_port" form="obs-cfg-form"
+                 class="form-control form-control-sm"
+                 min="1" max="65535" value="{{ cfg.port }}">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label small">WebSocket password</label>
+        <input type="password" name="obs_password" form="obs-cfg-form"
+               class="form-control form-control-sm"
+               placeholder="{% if cfg.has_password %}leave blank to keep existing{% else %}from OBS → Tools → WebSocket Server Settings{% endif %}"
+               value="" autocomplete="new-password">
+      </div>
+
       <!-- Where OBS fetches ScenePlay's pages from. Its own card because
            getting this wrong is invisible: OBS connects over the websocket
            perfectly and then renders blank sources. -->
       <div class="ttrpg-card p-3 mb-3">
-        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#127760; Page address for OBS</h6>
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h6 style="color:var(--ttrpg-accent);" class="mb-0">&#127760; Page address for OBS</h6>
+          <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
+                  title="Saves every setting on this page">Save</button>
+        </div>
         {% if cfg.card_base_loopback %}
         <div class="alert py-2 px-3 mb-2" style="background:var(--ttrpg-primary);
              border:1px solid #c9a227;color:#8a6d1f;">
@@ -320,20 +370,38 @@
           {% endif %}
         </div>
         {% endif %}
+        {% if cfg.card_base_stale %}
+        <div class="alert py-2 px-3 mb-2" style="background:var(--ttrpg-primary);
+             border:1px solid #c9a227;color:#8a6d1f;">
+          &#9888; This machine now answers on <code>{{ cfg.card_base_lan }}</code>,
+          not <code>{{ cfg.card_base }}</code> &mdash; its address has changed since
+          this was saved. Every ScenePlay source will render <b>blank</b> until it
+          is updated, while OBS still connects perfectly over the websocket.
+          Use the button below, then rebuild the party scene.
+        </div>
+        {% endif %}
         <div class="row g-2 align-items-end">
           <div class="col-sm-7">
-            <label class="form-label small">Base URL OBS should load pages from</label>
-            <input type="text" name="obs_card_base" form="obs-cfg-form"
-                   class="form-control form-control-sm"
-                   value="{{ cfg.card_base }}" placeholder="{{ cfg.card_base_lan }}">
+            <label class="form-label small" for="obs-card-base">
+              Base URL OBS should load pages from</label>
+            <div class="input-group input-group-sm">
+              <input type="text" name="obs_card_base" form="obs-cfg-form"
+                     id="obs-card-base" class="form-control form-control-sm"
+                     value="{{ cfg.card_base }}" placeholder="{{ cfg.card_base_lan }}">
+              <button class="btn btn-sm btn-outline-secondary" type="button"
+                      onclick="obsUseThisMachine(this)"
+                      title="Fill in the address this machine is reachable on">
+                Use this machine</button>
+            </div>
           </div>
           <div class="col-sm-5">
             <div class="form-text mb-1">
               This machine on the LAN: <code>{{ cfg.card_base_lan }}</code>
             </div>
             <div class="form-text">
-              Saved with Connection Settings. Rebuild the party scene afterwards
-              so existing sources are repointed.
+              Filled in automatically the first time you opened this page.
+              Saved with any <b>Save</b> on this page &mdash; rebuild the party scene
+              afterwards so existing sources are repointed.
             </div>
           </div>
         </div>
@@ -392,24 +460,6 @@
       </div>
 
       <form method="post" action="{{ url_for('obs_bp.save_config') }}" id="obs-cfg-form">
-        <div class="row g-2 mb-2">
-          <div class="col-sm-8">
-            <label class="form-label small">OBS host</label>
-            <input type="text" name="obs_host" class="form-control form-control-sm"
-                   placeholder="127.0.0.1" value="{{ cfg.host }}">
-          </div>
-          <div class="col-sm-4">
-            <label class="form-label small">Port</label>
-            <input type="number" name="obs_port" class="form-control form-control-sm"
-                   min="1" max="65535" value="{{ cfg.port }}">
-          </div>
-        </div>
-        <div class="mb-2">
-          <label class="form-label small">WebSocket password</label>
-          <input type="password" name="obs_password" class="form-control form-control-sm"
-                 placeholder="{% if cfg.has_password %}leave blank to keep existing{% else %}from OBS → Tools → WebSocket Server Settings{% endif %}"
-                 value="" autocomplete="new-password">
-        </div>
         <div class="row g-2 mb-3">
           <div class="col-sm-8">
             <label class="form-label small">Group shot scene
@@ -441,6 +491,34 @@
             when the players' audio already reaches OBS another way and you do
             not want it twice. This is <b>not</b> a fix for black tiles &mdash;
             OBS starts a feed with audio just fine.)</span>
+          </label>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small mb-1" for="obs-vdo-room">
+            vdo.ninja room
+          </label>
+          <input class="form-control form-control-sm" id="obs-vdo-room"
+                 name="obs_vdo_room" value="{{ cfg.vdo_room }}"
+                 placeholder="e.g. dungeoncrawler — or paste a room link">
+          <div class="form-text small">
+            Put your players in your existing room so they hear each other and
+            you. It is added to the links <em>they</em> open; OBS still watches
+            each player individually, so every camera keeps its own fader in
+            the Audio Mixer. Leave blank for solo streams that only OBS hears.
+          </div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-music-capture"
+                 name="obs_music_capture" value="1"
+                 {% if cfg.music_capture == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-music-capture">
+            <b>Capture the music into OBS</b>
+            <span class="text-muted">(adds the music player's own output
+            &mdash; <code>{{ cfg.music_device }}</code> &mdash; to the party
+            scene, which every other scene inherits, so it reaches the stream
+            everywhere. Only the music is on that device, so it can never pick
+            up your players and loop. Your remote players hear the music
+            through the portal, not through this.)</span>
           </label>
         </div>
         <div class="form-check mb-2">
@@ -676,26 +754,141 @@ function obsGroup() {
     });
 }
 
+// The address ScenePlay worked out for this machine. Preferred over reading
+// location.origin in the browser, because a DM browsing on localhost would
+// otherwise fill in an address only this machine can resolve — the exact
+// mistake that renders every OBS source blank.
+const OBS_SUGGESTED_BASE = "{{ cfg.card_base_suggested }}";
+
+function obsUseThisMachine(btn) {
+  const inp = document.getElementById('obs-card-base');
+  if (!inp) return;
+  inp.value = OBS_SUGGESTED_BASE;
+  inp.focus();
+  const orig = btn.textContent;
+  btn.textContent = 'Filled — now Save';
+  setTimeout(() => { btn.textContent = orig; }, 2500);
+}
+
+const OBS_REPORT_KEY = 'obsBuildReport';
+
+function _obsShowBuildReport(rep) {
+  const box = document.getElementById('obs-build-report');
+  if (!box || !rep) return;
+  const esc = s => String(s).replace(/[&<>]/g,
+    c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+  const warn = rep.warnings || [];
+  const contents = rep.contents || {};
+  const scenes = Object.keys(contents);
+  if (!rep.error && !warn.length && !scenes.length) { box.hidden = true; return; }
+
+  let html = '';
+  if (rep.error) {
+    html += '<div class="alert alert-danger py-2 px-3 mb-2">' +
+            esc(rep.error) + '</div>';
+  }
+  if (warn.length) {
+    html += '<div class="alert alert-warning py-2 px-3 mb-2">' +
+            '<ul class="mb-0 ps-3">' +
+            warn.map(w => '<li>' + esc(w) + '</li>').join('') + '</ul></div>';
+  }
+  if (scenes.length) {
+    // Collapsed: at a glance what matters is whether anything warned. The
+    // inventory is one click away for when a source is quietly missing.
+    html += '<details><summary class="text-muted" style="cursor:pointer">' +
+            'What OBS is holding (' + scenes.length + ' scenes)</summary>' +
+            '<div class="mt-2">' + scenes.map(sc =>
+              '<div class="mb-1"><b>' + esc(sc) + '</b><ul class="mb-0 ps-3">' +
+              (contents[sc] || []).map(s => '<li>' + esc(s) + '</li>').join('') +
+              '</ul></div>').join('') + '</div></details>';
+  }
+  box.innerHTML = html;
+  box.hidden = false;
+}
+
 function obsBuildParty(btn) {
   const orig = btn.innerHTML;
   btn.disabled = true; btn.textContent = 'Building…';
   _obsPost(OBS_BUILD_URL, {})
     .then(({ok, d}) => {
       btn.disabled = false; btn.innerHTML = orig;
-      if (!ok || !d.ok) { alert(d.error || 'Could not build the party scene.'); return; }
-      // Show what OBS actually ended up holding. "Built successfully" while a
-      // source is quietly missing is the failure mode this replaces.
-      const bits = [];
-      if (d.warnings && d.warnings.length) bits.push(d.warnings.join('\n'), '');
-      Object.keys(d.contents || {}).forEach(sc => {
-        bits.push(sc + ':');
-        (d.contents[sc] || []).forEach(src => bits.push('   \u2022 ' + src));
-      });
-      if (bits.length) alert(bits.join('\n'));
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) ||
+                                    'Could not build the party scene.'});
+        return;
+      }
+      // What OBS actually ended up holding. "Built successfully" while a
+      // source is quietly missing is the failure mode this reports. It rides
+      // through the reload below in sessionStorage so it can live on the page
+      // instead of in a modal that has to be dismissed first.
+      try {
+        sessionStorage.setItem(OBS_REPORT_KEY, JSON.stringify(
+          {warnings: d.warnings || [], contents: d.contents || {}}));
+      } catch (e) { /* private mode: the reload simply shows nothing */ }
       location.reload();
     })
     .catch(() => { btn.disabled = false; btn.innerHTML = orig; });
 }
+
+// Pick the report back up on the far side of the reload, once.
+document.addEventListener('DOMContentLoaded', function () {
+  let raw = null;
+  try {
+    raw = sessionStorage.getItem(OBS_REPORT_KEY);
+    sessionStorage.removeItem(OBS_REPORT_KEY);
+  } catch (e) { return; }
+  if (raw) {
+    try { _obsShowBuildReport(JSON.parse(raw)); } catch (e) { /* ignore */ }
+  }
+});
+
+// Saving posts and redirects, which lands back at the top of the page — a long
+// scroll away from the setting just changed. Stash the position on the way out
+// and put it back on the way in.
+const OBS_SCROLL_KEY = 'obsCfgScroll';
+
+function _obsSavedPill() {
+  // The "OBS settings saved" flash renders at the top of the page, which is
+  // precisely where the DM is no longer looking once the position is kept.
+  const pill = document.createElement('div');
+  pill.textContent = '✓ Settings saved';
+  pill.setAttribute('role', 'status');
+  pill.id = 'obs-saved-pill';
+  pill.style.cssText =
+    'position:fixed;left:50%;transform:translateX(-50%);bottom:1.5rem;' +
+    'z-index:1080;padding:.4rem .9rem;border-radius:999px;' +
+    'background:var(--ttrpg-accent);color:var(--sp-on-accent);' +
+    'font-size:.85rem;box-shadow:0 2px 10px rgba(0,0,0,.35);' +
+    'transition:opacity .4s;';
+  document.body.appendChild(pill);
+  setTimeout(function () { pill.style.opacity = '0'; }, 1800);
+  setTimeout(function () { pill.remove(); }, 2400);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  const form = document.getElementById('obs-cfg-form');
+  if (form) {
+    // Fires for every Save on the page, including the ones bound by form=,
+    // and for Enter pressed in a text field.
+    form.addEventListener('submit', function () {
+      try { sessionStorage.setItem(OBS_SCROLL_KEY, String(window.scrollY)); }
+      catch (e) { /* private mode: it simply lands at the top */ }
+    });
+  }
+  let raw = null;
+  try {
+    raw = sessionStorage.getItem(OBS_SCROLL_KEY);
+    sessionStorage.removeItem(OBS_SCROLL_KEY);
+  } catch (e) { return; }
+  if (raw === null) return;
+  const y = parseInt(raw, 10) || 0;
+  window.scrollTo(0, y);
+  // Again once images have laid out: before they load the document can be
+  // shorter than it will be, and the browser clamps the scroll to fit.
+  window.addEventListener('load', function () { window.scrollTo(0, y); },
+                          {once: true});
+  _obsSavedPill();
+});
 
 function obsSetMapMode(mode) {
   _obsPost(OBS_MAPMODE_URL, {mode})

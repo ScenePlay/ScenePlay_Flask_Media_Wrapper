@@ -16,6 +16,7 @@ import string
 import threading
 import time
 from datetime import datetime
+from urllib.parse import unquote, urlsplit
 
 from flask import (Blueprint, render_template, redirect, url_for, abort,
                    request, flash, jsonify, current_app)
@@ -87,9 +88,14 @@ def _obs_cfg():
         'feed_noaudio':  (appsettingGet('obs_feed_noaudio', '0') or '0'),
         'dm_audio':      (appsettingGet('obs_dm_audio', '0') or '0'),
         'feed_monitor':  (appsettingGet('obs_feed_monitor', '0') or '0'),
+        'vdo_room':      (appsettingGet('obs_vdo_room', '') or ''),
+        'music_capture': ('1' if music_capture_on() else '0'),
+        'music_device':  music_device_id(),
         'card_base':     _card_base(),
         'card_base_lan': lan_base(),
         'card_base_loopback': is_loopback_base(_card_base()),
+        'card_base_suggested': suggested_card_base(),
+        'card_base_stale': card_base_stale(),
         'panel_poll':    ('%g' % panel_poll_s()),
         'pre':           show_cfg('pre'),
         'intermission':  show_cfg('intermission'),
@@ -488,11 +494,7 @@ def broadcast():
     # address the DM is reaching ScenePlay on is one OBS can reach too, in the
     # normal same-machine / same-LAN setup.
     if not (appsettingGet('obs_card_base', '') or '').strip():
-        # NOT request.host_url when that is loopback: a DM browsing
-        # http://localhost would bake in an address only this machine can
-        # resolve, and OBS on any other box would render blank sources.
-        here = request.host_url.rstrip('/')
-        appsettingSet('obs_card_base', lan_base() if is_loopback_base(here) else here)
+        appsettingSet('obs_card_base', suggested_card_base())
     cfg = _obs_cfg()
     snap = obs_ws.current_state()
     # Benched players are listed too — greyed out, with the tick that brings
@@ -652,6 +654,15 @@ def save_config():
                   '1' if request.form.get('obs_dm_audio') else '0')
     appsettingSet('obs_feed_monitor',
                   '1' if request.form.get('obs_feed_monitor') else '0')
+    appsettingSet('obs_music_capture',
+                  '1' if request.form.get('obs_music_capture') else '0')
+    if 'obs_vdo_room' in request.form:
+        # Strip a pasted full URL down to the room name: the DM is far more
+        # likely to have a vdo.ninja link to hand than the bare word.
+        room = (request.form.get('obs_vdo_room', '') or '').strip()
+        if 'room=' in room:
+            room = room.split('room=', 1)[1].split('&')[0]
+        appsettingSet('obs_vdo_room', unquote(room)[:80])
     appsettingSet('obs_panel_on',
                   '1' if request.form.get('obs_panel_on') else '0')
     side = (request.form.get('obs_panel_side', '') or 'right').strip().lower()
@@ -1969,6 +1980,9 @@ def _sync_party_scene(featured_id=None):
         pass
 
     _prune_party_scene(scene, keep, warnings)
+    # Last: the audio scene references the tile sources this build just
+    # settled, and nests into scenes that must already exist.
+    _build_audio(canvas_w, canvas_h, warnings)
     obs_ws.scene_list(refresh=True)
     return {'scene': scene, 'tiles': placed, 'warnings': warnings,
             'featured_id': featured_id}
@@ -2026,6 +2040,164 @@ def _scene_inventory(scene_names):
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             out[name] = [f'(could not read: {exc})']
     return out
+
+
+# Legacy: sound used to ride in a scene of its own. The party scene carries it
+# now — this name survives only so a build can clear the old one away.
+AUDIO_SCENE_NAME = 'ScenePlay Audio'
+MUSIC_SOURCE_NAME = 'ScenePlay Music'
+
+
+def music_capture_on():
+    return (appsettingGet('obs_music_capture', '1') or '1') == '1'
+
+
+def music_device_id():
+    """The monitor of the null sink mpv already plays into.
+
+    Capturing THAT rather than the desktop is what keeps this safe: the sink
+    carries the music and nothing else, so it cannot pick up the players'
+    voices coming back out of OBS's monitoring and turn them into a loop."""
+    default = 'sceneplay_music'
+    try:
+        from relay_audio_stream import SINK_NAME
+        default = SINK_NAME
+    except Exception:
+        pass
+    return ((appsettingGet('obs_music_device', '') or '').strip()
+            or f'{default}.monitor')
+
+
+def _scenes_in_obs():
+    """The ScenePlay scenes that actually exist right now, party first."""
+    import obs_ws
+    try:
+        known, _cur = obs_ws.scene_list(refresh=True)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        return []
+    names = {s if isinstance(s, str) else s.get('sceneName') for s in known}
+    want = [_cut_scene_name(k) for k in
+            ('party', 'map', 'pre', 'intermission', 'post')]
+    out = []
+    for n in want:                       # dedupe, keep order, skip missing
+        if n in names and n not in out:
+            out.append(n)
+    return out
+
+
+def _build_audio(canvas_w, canvas_h, warnings):
+    """Carry the table's sound into every scene.
+
+    OBS renders a source's audio only while that source is in the CURRENT
+    scene — global mic/desktop devices are the sole exception. The cameras
+    live in the party scene, so cutting to the battle map used to take every
+    player's voice with it, mid-sentence.
+
+    The party scene ITSELF is nested into each of the other scenes and parked
+    off-canvas. A nested scene's inputs are live whenever the parent is on
+    program, and position has no bearing on audio, so every voice and the
+    music carry across a cut while drawing nothing. One source of truth:
+    whoever can be heard in the party scene can be heard everywhere, with no
+    second membership list to fall out of step.
+
+    The trade, chosen deliberately: OBS composites the whole party scene into
+    a texture it then throws away, and if that off-canvas transform is ever
+    lost the party layout lands on top of whatever scene it is nested in. The
+    next build puts it back."""
+    import obs_ws
+    scenes = _scenes_in_obs()
+    if not scenes:
+        return
+    party = party_scene_name()
+
+    if music_capture_on():
+        device = music_device_id()
+        try:
+            # Party only — every other scene inherits it by nesting.
+            obs_ws.ensure_audio_input(party, MUSIC_SOURCE_NAME, device)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(
+                f'Could not capture the music into OBS ({exc}). '
+                f'Expected an audio device named "{device}" — it only '
+                f'exists while the music player is running.')
+        _warn_if_music_doubled(warnings)
+
+    _drop_legacy_audio_scene(warnings)
+
+    for sc in scenes:
+        if sc == party:
+            continue        # a scene cannot contain itself
+        try:
+            item = obs_ws.ensure_nested_scene(sc, party)
+            if item is not None:
+                # Off-canvas: heard, never seen.
+                obs_ws.place_item(sc, item, {'x': int(canvas_w) + 100, 'y': 0,
+                                             'w': 320, 'h': 180})
+                obs_ws.set_item_enabled(sc, item, True)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not carry the audio into "{sc}" ({exc}).')
+
+
+def _drop_legacy_audio_scene(warnings):
+    """Undo the earlier arrangement: a separate 'ScenePlay Audio' scene, and a
+    music capture in every scene rather than only the party's.
+
+    Both would now be the same inputs active twice over — the nested party
+    scene already carries them."""
+    import obs_ws
+    party = party_scene_name()
+    try:
+        known, _cur = obs_ws.scene_list(refresh=True)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        return
+    names = [s if isinstance(s, str) else s.get('sceneName') for s in known]
+    for sc in names:
+        if not sc or sc == AUDIO_SCENE_NAME:
+            continue
+        try:
+            items = obs_ws.scene_items(sc)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+            continue
+        stale = [AUDIO_SCENE_NAME]
+        if sc != party:
+            stale.append(MUSIC_SOURCE_NAME)
+        for src in stale:
+            if src in items:
+                try:
+                    obs_ws.remove_item(sc, items[src])
+                except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+                    pass
+    if AUDIO_SCENE_NAME in names:
+        try:
+            obs_ws.request('RemoveScene', {'sceneName': AUDIO_SCENE_NAME})
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not remove the old audio scene ({exc}).')
+
+
+def _warn_if_music_doubled(warnings):
+    """Desktop Audio also hears the music, because the music sink is looped
+    back to the GM's speakers so they can hear it too. Capturing both puts it
+    in the stream twice, slightly out of phase."""
+    import obs_ws
+    try:
+        special = obs_ws.request('GetSpecialInputs')
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        return
+    for key in ('desktop1', 'desktop2'):
+        name = special.get(key)
+        if not name:
+            continue
+        try:
+            if obs_ws.request('GetInputMute',
+                              {'inputName': name})['inputMuted']:
+                continue
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+            continue
+        warnings.append(
+            f'"{name}" is also capturing this machine\'s audio, so the music '
+            f'may reach the stream twice. Mute it in the Audio Mixer, or '
+            f'untick "Capture the music into OBS".')
+        return
 
 
 def _prune_party_scene(scene, keep_sources, warnings):
@@ -2357,6 +2529,37 @@ def lan_base():
         except OSError:
             ip = ''
     return f'http://{ip or "127.0.0.1"}:{DEFAULT_CARD_PORT}'
+
+
+def suggested_card_base():
+    """The best guess at an address OBS can fetch ScenePlay from.
+
+    Prefers the address the DM's own browser is using, because it carries the
+    real port — lan_base() can only assume the default one. Falls back to the
+    LAN sniff when the DM is on loopback, since baking in localhost would work
+    here and render blank on any other machine."""
+    try:
+        here = request.host_url.rstrip('/')
+    except RuntimeError:            # no request context (background thread)
+        return lan_base()
+    return lan_base() if is_loopback_base(here) else here
+
+
+def card_base_stale():
+    """Has the saved address stopped being this machine?
+
+    Only judged for a bare IPv4 literal: a hostname or an mDNS name may still
+    resolve perfectly well and must not be nagged about. A DHCP lease moving
+    this box to a new address is otherwise invisible — OBS keeps connecting
+    over the websocket and every source quietly renders nothing."""
+    base = (appsettingGet('obs_card_base', '') or '').strip()
+    if not base or is_loopback_base(base):
+        return False
+    host = urlsplit(base).hostname or ''
+    if not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', host):
+        return False
+    mine = urlsplit(lan_base()).hostname or ''
+    return bool(mine) and not mine.startswith('127.') and mine != host
 
 
 def is_loopback_base(base):

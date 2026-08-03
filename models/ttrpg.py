@@ -40,6 +40,15 @@ def _vdo_url(kind, stream_id):
     if kind == 'view' and (appsettingGet('obs_feed_noaudio', '0') or '0') == '1' \
             and '&noaudio' not in params:
         url += '&noaudio'
+    # The table's vdo.ninja room, on the PUSH end only. Joining the room is
+    # what lets the players hear each other and the GM — without it every
+    # player is a solo stream that only OBS ever subscribes to, so nobody
+    # hears anybody. View URLs stay solo (?view=<id>) on purpose: that is what
+    # keeps one tile per player in OBS with its own mixer fader, instead of
+    # one source carrying the whole room already mixed together.
+    room = (appsettingGet('obs_vdo_room', '') or '').strip()
+    if kind == 'push' and room and '&room=' not in params:
+        url += '&room=' + quote(room, safe='')
     password = (appsettingGet('obs_vdo_password', '') or '').strip()
     if password:
         url += '&password=' + quote(password, safe='')

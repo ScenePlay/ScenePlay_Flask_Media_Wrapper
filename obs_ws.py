@@ -549,6 +549,76 @@ def set_browser_url(source_name, url, timeout=3):
                                  'overlay': True}, timeout=timeout)
 
 
+def audio_capture_kind():
+    """The input kind for capturing an OUTPUT device (a monitor / loopback).
+
+    Named differently on every platform, and absent entirely on a build
+    without the plugin — returns None rather than guessing, so the caller can
+    warn instead of creating something broken."""
+    try:
+        kinds = request('GetInputKindList').get('inputKinds') or []
+    except (ObsRejected, ObsUnavailable):
+        return None
+    for want in ('pulse_output_capture',        # Linux, PulseAudio/PipeWire
+                 'wasapi_output_capture',       # Windows
+                 'coreaudio_output_capture'):   # macOS
+        if want in kinds:
+            return want
+    return None
+
+
+def ensure_audio_input(scene_name, source_name, device_id, timeout=5):
+    """An audio-capture source pinned to one device, present in this scene.
+
+    Idempotent like ensure_browser_input: created if new, re-pointed if it
+    already exists, and added to the scene if it is only in another one."""
+    kind = audio_capture_kind()
+    if not kind:
+        raise ObsRejected(605, 'This OBS build has no audio output capture')
+    try:
+        res = request('CreateInput', {
+            'sceneName': scene_name, 'inputName': source_name,
+            'inputKind': kind, 'inputSettings': {'device_id': device_id},
+            'sceneItemEnabled': True}, timeout=timeout)
+        return res.get('sceneItemId')
+    except ObsRejected as exc:
+        if exc.code != 601:
+            raise
+    request('SetInputSettings',
+            {'inputName': source_name,
+             'inputSettings': {'device_id': device_id}, 'overlay': True},
+            timeout=timeout)
+    try:
+        item_id = scene_items(scene_name, timeout=timeout).get(source_name)
+    except ObsRejected:
+        item_id = None
+    if item_id is None:
+        item_id = request('CreateSceneItem', {
+            'sceneName': scene_name, 'sourceName': source_name,
+            'sceneItemEnabled': True}, timeout=timeout).get('sceneItemId')
+    return item_id
+
+
+def ensure_nested_scene(parent_scene, child_scene, timeout=5):
+    """Put one scene inside another as a source, once.
+
+    A scene is a source, so nesting is how audio outlives a cut: the child's
+    inputs are active whenever the parent is on program."""
+    if parent_scene == child_scene:
+        # OBS rejects this, but not before the request goes out; a scene that
+        # contained itself would recurse forever.
+        raise ObsRejected(600, 'a scene cannot contain itself')
+    try:
+        item_id = scene_items(parent_scene, timeout=timeout).get(child_scene)
+    except ObsRejected:
+        item_id = None
+    if item_id is not None:
+        return item_id
+    return request('CreateSceneItem', {
+        'sceneName': parent_scene, 'sourceName': child_scene,
+        'sceneItemEnabled': True}, timeout=timeout).get('sceneItemId')
+
+
 MONITOR_OFF = 'OBS_MONITORING_TYPE_NONE'
 MONITOR_ROOM = 'OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT'
 
