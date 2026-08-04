@@ -1741,8 +1741,21 @@ window.BM3D = (function () {
     if (!cfg) return;
     cfg.gridCols = opts.gridCols || cfg.gridCols;
     cfg.gridRows = opts.gridRows || cfg.gridRows;
-    plan = opts.floorplan || { walls: [], doors: [], elevations: [] };
-    planVersion = opts.floorplanVersion || null;
+    if (opts.floorplanUrl) {
+      // Hosts that FETCH their floorplan (the OBS map source) pass a URL
+      // rather than a plan. Clearing the walls and waiting for the version
+      // watcher would leave them empty for good: that watcher only fires when
+      // it has a previous version to compare against, and this call is what
+      // clears it. So keep the old walls on screen and fetch the new plan
+      // now — they are replaced the moment it lands.
+      cfg.floorplanUrl = opts.floorplanUrl;
+      planVersion = null;
+      _fetchingPlan = false;      // a fetch for the OLD map must not block this
+      fetchPlanAndRebuild();
+    } else {
+      plan = opts.floorplan || { walls: [], doors: [], elevations: [] };
+      planVersion = opts.floorplanVersion || null;
+    }
     doorStates = {};
     if (scene && scene.fog) {   // draw distance scales with the map span
       var span = Math.max(cfg.gridCols, cfg.gridRows);

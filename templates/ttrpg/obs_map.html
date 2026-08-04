@@ -466,15 +466,25 @@ function ensure3d(d) {
 }
 
 function rebuild3d(d) {
-  try { BM3D.close(); } catch (e) { /* already gone — rebuild regardless */ }
+  // setMap, NOT close+open. close() leaves the renderer alive, so open() takes
+  // its re-open path — which only swaps the config object and shows the
+  // overlay. It never reloads the floor texture, so the walls came back from
+  // the new map (the floorplan watcher re-fetches) while the floor kept the
+  // OLD map's art painted on it.
   bm3dCfg = bm3dConfigFor(d);
   bm3dMapId = d.map_id;
   reset3dCameraState();
   try {
-    BM3D.open(bm3dCfg);
+    BM3D.setMap({
+      gridCols: d.cols, gridRows: d.rows,
+      bgUrl: bm3dCfg.bgUrl,
+      bgVideoEl: bm3dCfg.bgVideoEl,
+      floorplanUrl: bm3dCfg.floorplanUrl,
+    });
   } catch (e) {
-    // Leave it closed rather than half-built; the next poll tries again.
-    bm3dCfg = null; bm3dMapId = null;
+    // Fall back to a full teardown rather than leave half the old map up.
+    try { BM3D.close(); BM3D.open(bm3dCfg); }
+    catch (e2) { bm3dCfg = null; bm3dMapId = null; }
   }
 }
 
