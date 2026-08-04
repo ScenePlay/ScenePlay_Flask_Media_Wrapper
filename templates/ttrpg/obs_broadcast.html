@@ -361,6 +361,69 @@
                value="" autocomplete="new-password">
       </div>
 
+      <!-- What "local" vs "remote" actually costs you. The consequences used
+           to be spread over four cards and a post-hoc build warning, each one
+           invisible until it produced a blank source or a dead channel — and
+           every one of them decided by this single question. -->
+      <div class="ttrpg-card p-3 mb-3">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h6 style="color:var(--ttrpg-accent);" class="mb-0">
+            &#128421; Where OBS is running</h6>
+          <span class="badge"
+                style="background:{% if cfg.rig.local %}var(--ttrpg-accent);color:var(--sp-on-accent){% else %}var(--ttrpg-primary);color:#8a6d1f;border:1px solid #c9a227{% endif %};">
+            {{ cfg.rig.where }}</span>
+        </div>
+        <div class="small mb-2">
+          <span class="text-muted">Connecting to</span>
+          <code>{{ cfg.rig.host }}</code>
+          {% if cfg.rig.platform %}
+          <span class="text-muted">&mdash; {{ cfg.rig.platform }}</span>
+          {% endif %}
+        </div>
+
+        <div class="row g-2 small">
+          <div class="col-sm-6">
+            <div class="fw-bold" style="color:var(--ttrpg-accent);">
+              {% if cfg.rig.local %}Same machine{% else %}Different machine{% endif %}
+            </div>
+            <ul class="mb-0 ps-3 text-muted">
+              {% if cfg.rig.local %}
+              <li>Pages can load from this machine directly.</li>
+              <li>Music is <b>monitored</b> off the audio device.</li>
+              <li>Nothing extra to keep open.</li>
+              {% else %}
+              <li>Pages must load over the <b>LAN address</b>, never localhost.</li>
+              <li>Music must be <b>streamed</b> &mdash; OBS cannot reach this
+                  machine's audio devices.</li>
+              <li>This machine has to stay reachable for the whole session.</li>
+              {% endif %}
+            </ul>
+          </div>
+          <div class="col-sm-6">
+            <div class="fw-bold" style="color:var(--ttrpg-accent);">
+              Music path: {{ cfg.rig.transport }}</div>
+            <div class="text-muted">{{ cfg.rig.music_why }}</div>
+          </div>
+        </div>
+
+        {% if cfg.rig.problems %}
+        <div class="alert py-2 px-3 mb-0 mt-2" style="background:var(--ttrpg-primary);
+             border:1px solid #c0392b;color:#e09090;">
+          <ul class="mb-0 ps-3">
+            {% for p in cfg.rig.problems %}<li>{{ p }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+        {% if cfg.rig.steps %}
+        <div class="form-text mt-2 mb-0">
+          <b>For this setup:</b>
+          <ul class="mb-0 ps-3">
+            {% for s in cfg.rig.steps %}<li>{{ s }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+
       <!-- Where OBS fetches ScenePlay's pages from. Its own card because
            getting this wrong is invisible: OBS connects over the websocket
            perfectly and then renders blank sources. -->

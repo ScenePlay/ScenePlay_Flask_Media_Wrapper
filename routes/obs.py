@@ -97,6 +97,7 @@ def _obs_cfg():
         'music_label':   music_device_label(),
         'music_push':    music_push_url(),
         'obs_local':     obs_is_local(),
+        'rig':           rig_summary(),
         'dm_mic_label':  (appsettingGet('obs_dm_mic_label', '') or ''),
         'dm_mic_hint':   (appsettingGet('obs_dm_mic_label', '')
                           or 'your mic\'s name'),
@@ -2231,6 +2232,66 @@ def can_capture_music_device():
     it happens to be running on the same host."""
     import obs_ws
     return obs_ws.audio_capture_kind() == 'pulse_output_capture'
+
+
+MUSIC_WHY = {
+    'device': 'OBS is on this machine and can read the music sink directly — '
+              'no stream, no extra tab, no delay.',
+    'feed':   'OBS cannot reach this machine\'s audio devices, so the music '
+              'travels to it as a vdo.ninja stream.',
+    'off':    'Music is not being sent to OBS at all.',
+}
+
+
+def rig_summary():
+    """Where OBS is running, and everything that follows from it.
+
+    Written because the consequences were scattered: the page address lives in
+    one card, the music path in another, and the macOS limitation only ever
+    appeared as a build warning after the fact. Each one is invisible until it
+    silently produces a blank source or a dead channel, and every one of them
+    is decided by the same question — is OBS on this machine or another?"""
+    import obs_ws
+    local = obs_is_local()
+    platform = (obs_ws.current_state().get('obs_platform') or '').strip()
+    is_mac = ('mac' in platform.lower() or 'darwin' in platform.lower())
+    transport = music_transport()
+    base = _card_base()
+
+    problems, steps = [], []
+    # The single most common invisible failure: OBS connects over the
+    # websocket perfectly and then renders every source blank.
+    if not local and is_loopback_base(base):
+        problems.append(
+            f'The page address is {base} — a loopback address. OBS is on '
+            f'another machine, where that means ITS own machine, so every '
+            f'ScenePlay source will render blank. Use {lan_base()}.')
+    if is_mac:
+        problems.append(
+            'This OBS runs on macOS, which carries no browser-source audio at '
+            'all (measured). Player voices and the music feed will be silent '
+            'here however they are configured; only OBS\'s own inputs have '
+            'sound.')
+    if transport == 'feed':
+        steps.append('Open the music feed on the machine playing the music '
+                     'and leave the tab running.')
+    if not local:
+        # Never quote a loopback base here: the problem above is already
+        # telling them to change it, and repeating it as the address to keep
+        # reachable is advice that contradicts itself.
+        reach = lan_base() if is_loopback_base(base) else base
+        steps.append('Player camera tiles load ScenePlay pages over the LAN, '
+                     'so this machine must stay reachable at ' + reach + '.')
+    return {
+        'local': local,
+        'where': 'This machine' if local else 'Another machine',
+        'host': (appsettingGet('obs_host', '') or '').strip() or '127.0.0.1',
+        'platform': platform,
+        'transport': transport,
+        'music_why': MUSIC_WHY.get(transport, ''),
+        'problems': problems,
+        'steps': steps,
+    }
 
 
 def music_transport():
