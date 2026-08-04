@@ -117,6 +117,11 @@ class TestAudioBed:
         monkeypatch.setattr(
             obs_ws, 'request',
             lambda t, d=None, **k: calls['requests'].append((t, d)) or {})
+        # This OBS can capture the sink directly, so 'auto' means 'device'.
+        # Declared as a CAPABILITY: the platform name is not what decides it.
+        monkeypatch.setattr(obs_ws, 'audio_capture_kind',
+                            lambda: 'pulse_output_capture')
+        monkeypatch.setattr(ro, 'obs_is_local', lambda: True)
         monkeypatch.setattr(ro, '_ordered_party', lambda *a, **k: [_char()])
         return calls
 

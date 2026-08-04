@@ -663,6 +663,13 @@ def map_view(map_id):
     obs_enabled = (current_user.is_dm()
                    and appsettingGet('obs_enabled', '0') == '1')
     obs_scene_map = {}
+    # Which scene buttons drive OBS, and whether that link is actually armed.
+    # Shown to the DM only: a player has no OBS to speak of.
+    obs_scene_links, obs_links_live = {}, False
+    if current_user.is_dm():
+        from routes.obs import scene_link_map, scene_links_live
+        obs_scene_links = scene_link_map()
+        obs_links_live = scene_links_live()
     if obs_enabled:
         from models.ttrpg import tblObsSceneMap
         obs_scene_map = {r.entity_id: r.scene_name for r in
@@ -681,7 +688,9 @@ def map_view(map_id):
                            floorplan_version=floorplan_version,
                            bm3d_available=bm3d_available,
                            obs_enabled=obs_enabled,
-                           obs_scene_map=obs_scene_map)
+                           obs_scene_map=obs_scene_map,
+                           obs_scene_links=obs_scene_links,
+                           obs_links_live=obs_links_live)
 
 
 # ── Relay presence endpoint ──────────────────────────────────────────────────

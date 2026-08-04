@@ -31,6 +31,11 @@ log = logging.getLogger(__name__)
 _IS_WIN = os.name == "nt"
 
 SINK_NAME = "sceneplay_music"
+# The same audio re-exposed as a normal capture device, so a browser can send
+# it as a vdo.ninja feed. Chrome hides monitor sources; a remapped source it
+# will list. SOURCE_LABEL is what the DM matches with &audiodevice=.
+SOURCE_NAME = "sceneplay_music_src"
+SOURCE_LABEL = "ScenePlay-Music"
 
 _CHUNK = 1024          # ~64 ms of audio at 128 kbps — small packets, smooth cadence
 _POST_BATCH = 4096     # assemble small reads into ~4 KB POST writes: the relay's
@@ -142,6 +147,24 @@ def _ensure_graph_pactl():
     if loop.returncode != 0:
         raise RuntimeError(loop.stderr.strip())
     _graph_modules.append(loop.stdout.strip())
+    # Expose the monitor as an ORDINARY capture source as well, so a browser
+    # can pick the music as if it were a microphone — which is how the music
+    # reaches an OBS on another machine, as a vdo.ninja feed.
+    #
+    # Needed because Chrome does not list PulseAudio monitor sources at all
+    # (measured: enumerateDevices returns only the real mic, while Firefox
+    # does list monitors). A remapped source appears in both. Non-fatal: local
+    # capture and the portal stream work fine without it.
+    remap = _run_cmd("pactl", "load-module", "module-remap-source",
+                     f"master={SINK_NAME}.monitor",
+                     f"source_name={SOURCE_NAME}",
+                     f"source_properties=device.description={SOURCE_LABEL}")
+    if remap.returncode == 0:
+        _graph_modules.append(remap.stdout.strip())
+    else:
+        log.info("music capture source not exposed (%s) — a browser on this "
+                 "machine may not be able to select the music",
+                 remap.stderr.strip()[:120])
 
 
 def _ensure_graph_pipewire():

@@ -571,13 +571,26 @@
                      color:var(--ttrpg-accent);">&#9654; <span id="map-active-scene-name"></span></span>
       </div>
       {% for scene in campaign_scenes %}
-      <button class="map-scene-btn btn btn-sm w-100 mb-1 text-start"
+      {% set obs_scene = (obs_scene_links or {}).get(scene.scene_ID) %}
+      <button class="map-scene-btn btn btn-sm w-100 mb-1 text-start d-flex
+                     align-items-center justify-content-between gap-1"
               data-scene-id="{{ scene.scene_ID }}"
               data-scene-name="{{ scene.sceneName | e }}"
               onclick="mapActivateScene(this)"
               style="background:var(--ttrpg-surface);color:var(--ttrpg-text);
                      border:1px solid #444;font-size:.75rem;padding:3px 7px;">
-        {{ scene.sceneName }}
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          {{ scene.sceneName }}</span>
+        {# Marks a scene that also cuts OBS. Dimmed when the mapping exists but
+           the Scene Links switch is off — mapped-and-armed vs mapped-and-inert
+           are otherwise indistinguishable, which is exactly the confusion this
+           marker is here to end. #}
+        {% if obs_scene %}
+        <span class="map-obs-flag" style="flex:0 0 auto;font-size:.7rem;
+              {% if obs_links_live %}opacity:1;{% else %}opacity:.35;{% endif %}"
+              title="{% if obs_links_live %}Also cuts OBS to &quot;{{ obs_scene }}&quot;{% else %}Mapped to OBS &quot;{{ obs_scene }}&quot;, but scene linking is switched OFF on the Broadcast page, so it will not cut{% endif %}">
+          &#127909;</span>
+        {% endif %}
       </button>
       {% endfor %}
       {% elif sess and sess.campaign_id %}

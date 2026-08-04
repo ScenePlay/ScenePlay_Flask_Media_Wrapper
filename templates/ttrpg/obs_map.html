@@ -404,36 +404,78 @@ function bm3dPayload(d) {
 }
 
 let bm3dCfg = null;
+let bm3dMapId = null;     // which map bm3dCfg describes
+
+function bm3dConfigFor(d) {
+  return {
+    overlayEl: document.getElementById('bm3d-overlay'),
+    gridCols: d.cols, gridRows: d.rows,
+    bgUrl: d.is_video ? '' : d.bg_url,
+    bgVideoEl: d.is_video ? el('map-video') : null,
+    floorplanUrl: FLOORPLAN_URL + '&map_id=' + d.map_id,
+    isDM: false,                    // -> solid player fog, never the peek
+    isMyToken: () => false,         // nothing here is "ours" to hide
+    // This page plans its own shots (buildLookPlan/camTick), so the viewer's
+    // own auto-aim stays off — two things steering one yawTarget would
+    // stutter the camera on stream.
+    autoAim: false,
+    onDoorToggle: null,
+    getState: () => bm3dState,
+  };
+}
+
+// Everything below is about ONE map: where its tokens were last seen, which
+// character we are looking through, and the shot in progress. Carried into a
+// new map they describe cells that no longer exist.
+function reset3dCameraState() {
+  camPlan = []; camStep = 0; camStepEndsAt = 0;
+  camPlanIsCycle = false; camCycles = 0;
+  camTokens = []; camMeId = null; camHeading = null;
+  lastSeenPos = {};
+  autoPending = false;
+  bm3dWantToken = null;
+}
 
 function ensure3d(d) {
   if (bm3dLoading) return;
-  if (bm3dReady) {                 // loaded already — just re-open after a toggle
+  if (bm3dReady) {
+    // The DM switched maps. Reopening would rebuild the previous map: every
+    // value in the cached config — grid size, background, floorplan URL —
+    // belongs to the map we just left, so the viewer went on drawing it while
+    // the 2D map (which re-reads bg_url every poll) had already moved on.
+    // The null guard is not paranoia: sameId stringifies, so a payload with no
+    // map_id would read as "changed" on EVERY poll and rebuild the scene
+    // several times a second — a permanent flicker on stream.
+    if (d.map_id != null && !sameId(d.map_id, bm3dMapId)) {
+      rebuild3d(d);
+      return;
+    }
     if (!BM3D.isOpen() && bm3dCfg) { BM3D.open(bm3dCfg); bm3dWantToken = null; }
     return;
   }
   bm3dLoading = true;
   loadScript(THREE_URL).then(() => loadScript(BM3D_URL)).then(() => {
-    bm3dCfg = {
-      overlayEl: document.getElementById('bm3d-overlay'),
-      gridCols: d.cols, gridRows: d.rows,
-      bgUrl: d.is_video ? '' : d.bg_url,
-      bgVideoEl: d.is_video ? el('map-video') : null,
-      floorplanUrl: FLOORPLAN_URL + '&map_id=' + d.map_id,
-      isDM: false,                    // -> solid player fog, never the peek
-      isMyToken: () => false,         // nothing here is "ours" to hide
-      // This page plans its own shots (buildLookPlan/camTick), so the viewer's
-      // own auto-aim stays off — two things steering one yawTarget would
-      // stutter the camera on stream.
-      autoAim: false,
-      onDoorToggle: null,
-      getState: () => bm3dState,
-    };
+    bm3dCfg = bm3dConfigFor(d);
+    bm3dMapId = d.map_id;
     BM3D.open(bm3dCfg);
     bm3dReady = true;
     bm3dLoading = false;    // MUST clear: the reopen path guards on this, so
                             // leaving it set blocks every later toggle back
                             // into 3D.
   }).catch(() => { bm3dLoading = false; });
+}
+
+function rebuild3d(d) {
+  try { BM3D.close(); } catch (e) { /* already gone — rebuild regardless */ }
+  bm3dCfg = bm3dConfigFor(d);
+  bm3dMapId = d.map_id;
+  reset3dCameraState();
+  try {
+    BM3D.open(bm3dCfg);
+  } catch (e) {
+    // Leave it closed rather than half-built; the next poll tries again.
+    bm3dCfg = null; bm3dMapId = null;
+  }
 }
 
 function show3d(d, moved) {

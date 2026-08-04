@@ -533,6 +533,48 @@
             through the portal, not through this.)</span>
           </label>
         </div>
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-sm-5">
+            <label class="form-label small mb-1" for="obs-music-transport">
+              How the music reaches OBS</label>
+            <select name="obs_music_transport" id="obs-music-transport"
+                    form="obs-cfg-form" class="form-select form-select-sm">
+              {% for m, lbl in [('auto', 'Automatic'),
+                                ('device', 'Capture the audio device'),
+                                ('feed', 'Send it as a vdo.ninja feed'),
+                                ('off', 'Do not send music to OBS')] %}
+              <option value="{{ m }}"
+                      {% if cfg.music_transport == m %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text small">
+              Now using: <b>{{ cfg.music_resolved }}</b>
+              {% if cfg.obs_local %}(OBS is on this machine){% else %}(OBS is on another machine){% endif %}
+            </div>
+          </div>
+          <div class="col-sm-7">
+            <label class="form-label small mb-1" for="obs-music-label">
+              Audio device vdo.ninja should send</label>
+            <input type="text" name="obs_music_device_label" id="obs-music-label"
+                   form="obs-cfg-form" class="form-control form-control-sm"
+                   value="{{ cfg.music_label }}" placeholder="ScenePlay-Music">
+            <div class="form-text small">
+              Matched on the device <em>label</em>. The default is the music
+              player's own sink. On Windows or macOS this is your virtual
+              cable instead (e.g. <code>CABLE Output</code>).
+            </div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <a class="btn btn-sm btn-ttrpg" target="_blank" rel="noopener"
+             href="{{ cfg.music_push }}">&#9835; Start the music feed</a>
+          <span class="small text-muted ms-2">
+            Open this <b>on the machine playing the music</b> and leave the tab
+            running. It carries <b>only</b> the music &mdash; no camera, no
+            microphone &mdash; with echo cancellation and auto-gain off, which
+            would otherwise mangle it.
+          </span>
+        </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-feed-monitor"
                  name="obs_feed_monitor" value="1"
@@ -659,6 +701,23 @@
             <span class="text-muted">(you narrate too &mdash; turn it off to stay off camera)</span>
           </label>
         </div>
+        <div class="mb-3">
+          <label class="form-label small mb-1" for="obs-dm-mic">
+            Your microphone <span class="text-muted">(optional)</span></label>
+          <input type="text" name="obs_dm_mic_label" id="obs-dm-mic"
+                 form="obs-cfg-form" class="form-control form-control-sm"
+                 value="{{ cfg.dm_mic_label }}"
+                 placeholder="leave blank to let vdo.ninja choose">
+          <div class="form-text small">
+            Pins the device on <em>your</em> camera link, matched on its label.
+            Worth setting when this machine also plays the music: some browsers
+            list the same name twice &mdash; once as the microphone, once as
+            <code>Monitor of&hellip;</code> the speakers &mdash; and the monitor
+            would put the music and every player's voice into your own mic
+            channel. Chrome hides those monitors, so
+            <code>{{ cfg.dm_mic_hint }}</code> is unambiguous there.
+          </div>
+        </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="obs-scene-link"
                  name="obs_scene_link" value="1"
@@ -730,18 +789,41 @@ const OBS_RELOADALL_URL = "{{ url_for('obs_bp.api_reload_sources') }}";
 const OBS_MAPSCENE_URL = "{{ url_for('obs_bp.api_map_scene') }}";
 const OBS_ONSTREAM_URL = "{{ url_for('obs_bp.api_on_stream') }}";
 
+// Never rejects. A rejected promise here was a SILENT no-op in every caller
+// that had no .catch — the button looked dead and said nothing, which is
+// indistinguishable from a broken button. Failures come back through the same
+// {ok:false, d:{error}} shape every caller already checks, so one fix covers
+// all of them. A non-JSON body (a login redirect, an HTML error page) lands
+// here too, which is what a session that expired behind an open tab looks
+// like.
 function _obsPost(url, body) {
   return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
                      body: JSON.stringify(body || {})})
-    .then(r => r.json().then(d => ({ok: r.ok, d})));
+    .then(r => r.json()
+      .then(d => ({ok: r.ok, d}))
+      .catch(() => ({ok: false, d: {ok: false, error:
+        'ScenePlay returned an unreadable reply (HTTP ' + r.status +
+        '). If you have been logged out, reload the page.'}})))
+    .catch(() => ({ok: false, d: {ok: false, error:
+      'Could not reach ScenePlay. Is the server still running?'}}));
 }
 
 function obsSwitchScene(btn) {
   const scene = btn.dataset.scene;
   _obsPost(OBS_SWITCH_URL, {scene})
     .then(({ok, d}) => {
-      if (!ok || !d.ok) { alert(d.error || 'Switch failed.'); return; }
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) ||
+                                    ('Could not switch to "' + scene + '".')});
+        return;
+      }
       _obsApply({current_scene: d.current_scene});
+    })
+    // Without this a failed request was a SILENT no-op — the button looked
+    // dead and said nothing, which is indistinguishable from a broken button.
+    .catch(() => {
+      _obsShowBuildReport({error: 'Could not reach ScenePlay to switch to "' +
+                                  scene + '". Reload the page and try again.'});
     });
 }
 

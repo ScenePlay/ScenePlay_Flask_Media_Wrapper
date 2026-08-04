@@ -91,6 +91,15 @@ def _obs_cfg():
         'vdo_room':      (appsettingGet('obs_vdo_room', '') or ''),
         'music_capture': ('1' if music_capture_on() else '0'),
         'music_device':  music_device_id(),
+        'music_transport': (appsettingGet('obs_music_transport', 'auto')
+                            or 'auto'),
+        'music_resolved': music_transport(),
+        'music_label':   music_device_label(),
+        'music_push':    music_push_url(),
+        'obs_local':     obs_is_local(),
+        'dm_mic_label':  (appsettingGet('obs_dm_mic_label', '') or ''),
+        'dm_mic_hint':   (appsettingGet('obs_dm_mic_label', '')
+                          or 'your mic\'s name'),
         'card_base':     _card_base(),
         'card_base_lan': lan_base(),
         'card_base_loopback': is_loopback_base(_card_base()),
@@ -154,10 +163,23 @@ class _DmTile:
         return _vdo_url('view', self.video_stream_id) if self.video_stream_id else ''
 
     def video_push_url(self):
+        """The DM's camera link, with their microphone pinned if they said
+        which one.
+
+        Worth pinning on the machine that also plays the music: a bare label
+        match can land on the wrong device. A typical box lists the same name
+        twice — once as the microphone and once as "Monitor of ..." the
+        speakers — and picking the monitor would put the music and every
+        player's voice into the DM's own microphone channel."""
         from models.ttrpg import _vdo_url
+        from urllib.parse import quote
         if self.video_feed_url or not self.video_stream_id:
             return ''
-        return _vdo_url('push', self.video_stream_id)
+        url = _vdo_url('push', self.video_stream_id)
+        mic = (appsettingGet('obs_dm_mic_label', '') or '').strip()
+        if mic and 'audiodevice=' not in url:
+            url += '&audiodevice=' + quote(mic, safe='')
+        return url
 
     def hp_pct(self):
         return 0
@@ -553,6 +575,29 @@ def api_map_scene():
     return jsonify({'ok': True, 'scene_name': obs_scene})
 
 
+def scene_link_map():
+    """{ScenePlay scene_id: OBS scene name} for every scene that drives OBS.
+
+    Bulk, because the callers render a whole sidebar of scene buttons and a
+    query per button would be paid on every battle-map load."""
+    try:
+        return {r.entity_id: r.scene_name for r in
+                tblObsSceneMap.query.filter_by(entity_type='scene').all()
+                if r.scene_name}
+    except Exception:
+        return {}
+
+
+def scene_links_live():
+    """Will activating a mapped scene ACTUALLY move OBS right now?
+
+    A mapping alone is not enough — obs_scene_link gates the whole feature,
+    and a scene mapped while that is off looks identical to one that works.
+    Distinguishing the two is the entire point of showing a marker."""
+    return ((appsettingGet('obs_enabled', '0') or '0') == '1'
+            and (appsettingGet('obs_scene_link', '0') or '0') == '1')
+
+
 def obs_scene_for_sceneplay_scene(scene_id):
     """Used by routes/main._activate_scene. Returns '' when the feature is
     off, nothing is mapped, or anything at all goes wrong — activating a
@@ -656,6 +701,18 @@ def save_config():
                   '1' if request.form.get('obs_feed_monitor') else '0')
     appsettingSet('obs_music_capture',
                   '1' if request.form.get('obs_music_capture') else '0')
+    if 'obs_music_transport' in request.form:
+        mode = (request.form.get('obs_music_transport', '') or 'auto').strip()
+        appsettingSet('obs_music_transport',
+                      mode if mode in MUSIC_TRANSPORTS else 'auto')
+    if 'obs_dm_mic_label' in request.form:
+        appsettingSet('obs_dm_mic_label',
+                      (request.form.get('obs_dm_mic_label', '')
+                       or '').strip()[:120])
+    if 'obs_music_device_label' in request.form:
+        appsettingSet('obs_music_device_label',
+                      (request.form.get('obs_music_device_label', '')
+                       or '').strip()[:120])
     if 'obs_vdo_room' in request.form:
         # Strip a pasted full URL down to the room name: the DM is far more
         # likely to have a vdo.ninja link to hand than the bare word.
@@ -2080,8 +2137,119 @@ AUDIO_SCENE_NAME = 'ScenePlay Audio'
 MUSIC_SOURCE_NAME = 'ScenePlay Music'
 
 
+MUSIC_FEED_SOURCE_NAME = 'ScenePlay Music Feed'
+MUSIC_TRANSPORTS = ('auto', 'device', 'feed', 'off')
+DEFAULT_MUSIC_LABEL = 'ScenePlay-Music'    # relay_audio_stream.SOURCE_LABEL
+
+
 def music_capture_on():
     return (appsettingGet('obs_music_capture', '1') or '1') == '1'
+
+
+def music_device_label():
+    """The audio input vdo.ninja should grab, matched on its LABEL.
+
+    Defaults to the null sink's description, which the browser lists as
+    "Monitor of ScenePlay-Stream" — distinctive enough to match safely. The
+    real microphone is NOT safe to match this way on a typical box: its label
+    usually appears twice, once as the input and once as "Monitor of ..." the
+    output, and picking the monitor would capture the speakers, players and
+    all."""
+    return ((appsettingGet('obs_music_device_label', '') or '').strip()
+            or DEFAULT_MUSIC_LABEL)
+
+
+def music_stream_id():
+    """The DM's music push id, minted once and then kept."""
+    sid = (appsettingGet('obs_music_stream_id', '') or '').strip()
+    if not sid:
+        sid = _new_stream_id()
+        appsettingSet('obs_music_stream_id', sid)
+    return sid
+
+
+def _music_vdo_url(kind):
+    """Build the music push/view URL.
+
+    Deliberately NOT models._vdo_url: this stream carries music, not a person,
+    so it wants &proaudio (stereo, high bitrate, and crucially no echo
+    cancellation / denoise / auto-gain, which mangle music) and it must stay
+    OUT of the table's room — players already get the music through the portal
+    and would otherwise hear it twice."""
+    from urllib.parse import quote
+    from models.ttrpg import VDO_DEFAULTS
+    base = ((appsettingGet('obs_vdo_base', '') or '').strip()
+            or VDO_DEFAULTS['obs_vdo_base'])
+    if not base.endswith('/'):
+        base += '/'
+    sid = quote(music_stream_id(), safe='')
+    if kind == 'push':
+        url = (f'{base}?push={sid}&proaudio&autostart'
+               f'&audiodevice={quote(music_device_label(), safe="")}')
+    else:
+        url = f'{base}?view={sid}&proaudio&cleanoutput&transparent&autostart'
+    password = (appsettingGet('obs_vdo_password', '') or '').strip()
+    if password:
+        url += '&password=' + quote(password, safe='')
+    return url
+
+
+def music_push_url():
+    """What the DM opens on the machine playing the music."""
+    return _music_vdo_url('push')
+
+
+def music_view_url():
+    return _music_vdo_url('view')
+
+
+def obs_is_local():
+    """Is OBS on this same machine? Decides whether a local audio device can
+    be captured at all."""
+    host = (appsettingGet('obs_host', '') or '').strip().lower()
+    if host in ('', '127.0.0.1', 'localhost', '::1', '[::1]'):
+        return True
+    return host == (urlsplit(lan_base()).hostname or '').lower()
+
+
+def obs_platform():
+    import obs_ws
+    return (obs_ws.current_state().get('obs_platform') or '').lower()
+
+
+def can_capture_music_device():
+    """Could THIS OBS capture the music sink directly?
+
+    Asked as a capability, never as a platform name. OBS reports its distro —
+    this box answers "Freedesktop SDK 25.08 (Flatpak runtime)", with no
+    "Linux" in it anywhere — so matching on the name sent the one machine that
+    CAN capture the sink down the vdo.ninja path instead.
+
+    The sink is a PulseAudio/PipeWire device, so the real question is whether
+    OBS offers a PulseAudio output capture at all. A macOS or Windows OBS
+    offers coreaudio/wasapi instead and could never see this sink, even when
+    it happens to be running on the same host."""
+    import obs_ws
+    return obs_ws.audio_capture_kind() == 'pulse_output_capture'
+
+
+def music_transport():
+    """How the music should reach OBS: 'device', 'feed', or 'off'.
+
+    'auto' monitors the sink directly when OBS is on this machine and able to
+    read it, and streams it as a vdo.ninja feed otherwise. Local and remote
+    rigs therefore need no different setup — the same build does the right
+    thing for whichever OBS is currently connected."""
+    want = (appsettingGet('obs_music_transport', 'auto') or 'auto').strip()
+    if want not in MUSIC_TRANSPORTS:
+        want = 'auto'
+    if want != 'auto':
+        return want
+    if not music_capture_on():
+        return 'off'
+    if obs_is_local() and can_capture_music_device():
+        return 'device'
+    return 'feed'
 
 
 def music_device_id():
@@ -2142,16 +2310,14 @@ def _build_audio(canvas_w, canvas_h, warnings):
         return
     party = party_scene_name()
 
-    if music_capture_on():
-        device = music_device_id()
-        try:
-            # Party only — every other scene inherits it by nesting.
-            obs_ws.ensure_audio_input(party, MUSIC_SOURCE_NAME, device)
-        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
-            warnings.append(
-                f'Could not capture the music into OBS ({exc}). '
-                f'Expected an audio device named "{device}" — it only '
-                f'exists while the music player is running.')
+    transport = music_transport()
+    if 'mac' in obs_platform() or 'darwin' in obs_platform():
+        warnings.append(
+            'This OBS runs on macOS, where obs-browser carries no browser '
+            'source audio at all — measured. Player voices and any vdo.ninja '
+            'music feed will be silent on this machine whatever is set here.')
+    _place_music(party, transport, canvas_w, warnings)
+    if transport == 'device':
         _warn_if_music_doubled(warnings)
 
     _drop_legacy_audio_scene(warnings)
@@ -2168,6 +2334,52 @@ def _build_audio(canvas_w, canvas_h, warnings):
                 obs_ws.set_item_enabled(sc, item, True)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             warnings.append(f'Could not carry the audio into "{sc}" ({exc}).')
+
+
+def _place_music(party, transport, canvas_w, warnings):
+    """Put exactly ONE music source in the party scene, and clear the other.
+
+    Leaving both behind would either double the music or leave a dead source
+    that looks correct and plays nothing — the failure this whole integration
+    keeps producing."""
+    import obs_ws
+    stale = {'device': MUSIC_FEED_SOURCE_NAME,
+             'feed': MUSIC_SOURCE_NAME}.get(transport)
+    if transport == 'off':
+        stale = None
+    try:
+        items = obs_ws.scene_items(party)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        items = {}
+    for name in ([stale] if stale else [MUSIC_SOURCE_NAME,
+                                        MUSIC_FEED_SOURCE_NAME]):
+        if name in items:
+            try:
+                obs_ws.remove_item(party, items[name])
+            except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+                pass
+
+    if transport == 'device':
+        device = music_device_id()
+        try:
+            obs_ws.ensure_audio_input(party, MUSIC_SOURCE_NAME, device)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(
+                f'Could not capture the music into OBS ({exc}). Expected an '
+                f'audio device named "{device}" — it exists only on the '
+                f'machine running the music, and only while it is playing.')
+    elif transport == 'feed':
+        try:
+            item = _ensure_input(party, MUSIC_FEED_SOURCE_NAME,
+                                 music_view_url(), 320, 180, warnings)
+            if item is not None:
+                # Audio only — parked off-canvas so its blank frame never
+                # lands on the layout.
+                obs_ws.place_item(party, item, {'x': int(canvas_w) + 100,
+                                                'y': 0, 'w': 320, 'h': 180})
+                obs_ws.set_item_enabled(party, item, True)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+            warnings.append(f'Could not add the music feed ({exc}).')
 
 
 def _drop_legacy_audio_scene(warnings):

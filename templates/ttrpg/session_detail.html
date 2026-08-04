@@ -218,6 +218,7 @@
       </div>
       <div class="d-flex flex-wrap gap-2">
         {% for scene in campaign_scenes %}
+        {% set obs_scene = (obs_scene_links or {}).get(scene.scene_ID) %}
         <button class="btn btn-sm scene-btn"
                 data-scene-id="{{ scene.scene_ID }}"
                 data-scene-name="{{ scene.sceneName | e }}"
@@ -225,6 +226,14 @@
                 style="background:var(--ttrpg-surface);color:var(--ttrpg-text);
                        border:1px solid var(--sp-border);">
           {{ scene.sceneName }}
+          {# Dimmed when mapped but the Scene Links switch is off — see the
+             battle map's copy of this marker. #}
+          {% if obs_scene %}
+          <span class="scene-obs-flag" style="font-size:.75rem;
+                {% if obs_links_live %}opacity:1;{% else %}opacity:.35;{% endif %}"
+                title="{% if obs_links_live %}Also cuts OBS to &quot;{{ obs_scene }}&quot;{% else %}Mapped to OBS &quot;{{ obs_scene }}&quot;, but scene linking is switched OFF on the Broadcast page, so it will not cut{% endif %}">
+            &#127909;</span>
+          {% endif %}
         </button>
         {% endfor %}
       </div>

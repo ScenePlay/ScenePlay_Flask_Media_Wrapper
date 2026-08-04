@@ -88,6 +88,7 @@ def _blank_cache():
         'record_timecode': '',
         'stream_timecode': '',
         'obs_version': '',
+        'obs_platform': '',
         'ws_version': '',
         'base_width': 1920,
         'base_height': 1080,
@@ -554,11 +555,13 @@ def audio_capture_kind():
 
     Named differently on every platform, and absent entirely on a build
     without the plugin — returns None rather than guessing, so the caller can
-    warn instead of creating something broken."""
-    try:
-        kinds = request('GetInputKindList').get('inputKinds') or []
-    except (ObsRejected, ObsUnavailable):
-        return None
+    warn instead of creating something broken.
+
+    Read from the primed cache, like browser_kind: this is asked on every
+    Broadcast page render, and a live round trip per render is a needless cost
+    for something that cannot change while a connection lasts."""
+    with _cache_lock:
+        kinds = list(_cache.get('input_kinds') or [])
     for want in ('pulse_output_capture',        # Linux, PulseAudio/PipeWire
                  'wasapi_output_capture',       # Windows
                  'coreaudio_output_capture'):   # macOS
@@ -1029,6 +1032,10 @@ def _apply_primed(request_type, data):
     if request_type == 'GetVersion':
         with _cache_lock:
             _cache['obs_version'] = data.get('obsVersion', '')
+            # Which OS OBS runs on decides what can carry audio at all: macOS
+            # obs-browser routes NO browser-source audio (measured), so the
+            # camera tiles and any vdo.ninja music feed are silent there.
+            _cache['obs_platform'] = data.get('platformDescription', '')
             _cache['ws_version'] = data.get('obsWebSocketVersion',
                                             _cache.get('ws_version', ''))
     elif request_type == 'GetSceneList':

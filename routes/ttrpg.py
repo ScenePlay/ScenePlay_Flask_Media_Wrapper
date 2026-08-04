@@ -1269,6 +1269,13 @@ def session_detail(session_id):
         current_vol = currentvolume()
     except Exception:
         current_vol = 50
+    # Same OBS markers as the battle map's scene list — the buttons are the
+    # same buttons, and a marker on one page but not the other reads as a bug.
+    obs_scene_links, obs_links_live = {}, False
+    if current_user.is_dm():
+        from routes.obs import scene_link_map, scene_links_live
+        obs_scene_links = scene_link_map()
+        obs_links_live = scene_links_live()
     return render_template('ttrpg/session_detail.html',
                            sess=sess,
                            campaigns=campaigns,
@@ -1276,6 +1283,8 @@ def session_detail(session_id):
                            party_ids=party_ids,
                            conditions=condition_texts(),
                            campaign_scenes=campaign_scenes,
+                           obs_scene_links=obs_scene_links,
+                           obs_links_live=obs_links_live,
                            current_vol=current_vol)
 
 
