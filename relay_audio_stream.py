@@ -211,6 +211,7 @@ def _ensure_graph():
         else:
             raise RuntimeError("neither pactl nor pw-cli/pw-loopback found")
         _graph_ready = True
+        _stamp_sink_epoch()
         return True
     except Exception as e:
         _graph_failed = True
@@ -218,6 +219,47 @@ def _ensure_graph():
                     "failed (%s); local playback unaffected", e)
         _teardown_graph()
         return False
+
+
+def _obs_wants_sink():
+    """Does ScenePlay's OBS integration need the capture sink?
+
+    The sink was originally the relay's private business, so it only came up
+    when the relay was enabled. OBS then grew two music paths that BOTH read
+    from it — the device capture reads its monitor, the vdo.ninja feed reads
+    the remapped source — and mpv only plays into it while the graph exists.
+    So with the relay off, switching music into OBS produced silence with
+    nothing wrong anywhere: a correct source, on a real device, that nothing
+    was feeding."""
+    try:
+        from sql import appsettingGet
+        if appsettingGet('obs_enabled', '0') != '1':
+            return False
+        if (appsettingGet('obs_music_capture', '1') or '1') != '1':
+            return False
+        return (appsettingGet('obs_music_transport', 'auto') or 'auto') != 'off'
+    except Exception:
+        return False
+
+
+def _stamp_sink_epoch():
+    """Record that a BRAND NEW capture sink now exists.
+
+    OBS binds its audio capture to the sink instance that was there when the
+    source was created. Destroy and recreate the sink — which happens every
+    time this player restarts — and OBS keeps the dead handle: the source
+    still reads the right device name, still shows unmuted, and carries
+    silence. Nothing about it looks wrong.
+
+    This runs in the music player's own OS process, so the stamp goes through
+    the settings table rather than a call: ScenePlay notices the value moved
+    and re-binds OBS on its next watch tick. Best-effort — a failure here must
+    never touch playback."""
+    try:
+        from sql import appsettingSet
+        appsettingSet('obs_music_sink_epoch', str(time.time()))
+    except Exception:
+        log.debug("could not stamp the music sink epoch", exc_info=True)
 
 
 def _teardown_graph():
@@ -739,6 +781,13 @@ def on_track_start(song_id):
             if _relay_on():
                 _ensure_graph()
                 _ensure_supervisor()
+            elif _obs_wants_sink():
+                # The relay is off but OBS still wants the music. Without the
+                # graph, sink_name() returns None, mpv plays straight to the
+                # speakers, and OBS captures a device nothing is feeding — so
+                # the music silently never reaches the stream. No supervisor
+                # here: there is no relay to push to, only a sink to provide.
+                _ensure_graph()
             cfg = _cfg_active()
             streaming = bool(cfg) and (_IS_WIN or _graph_ready)
             if streaming:

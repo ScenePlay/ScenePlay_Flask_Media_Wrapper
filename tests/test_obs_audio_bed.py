@@ -16,8 +16,12 @@ def settings(app, monkeypatch):
     import routes.obs as ro
     import sql
     fake = lambda name, default=None: store.get(name, default)   # noqa: E731
+    sets = lambda name, value: store.__setitem__(name, str(value))  # noqa: E731
     monkeypatch.setattr(sql, 'appsettingGet', fake)
     monkeypatch.setattr(ro, 'appsettingGet', fake)
+    # Stubbed too, or a test that writes a setting reaches the real database.
+    monkeypatch.setattr(sql, 'appsettingSet', sets)
+    monkeypatch.setattr(ro, 'appsettingSet', sets)
     return store
 
 
@@ -360,3 +364,141 @@ class TestCaptureKindNeverGuessesNo:
         with obs_ws._cache_lock:
             obs_ws._cache['input_kinds'] = []
         assert obs_ws.audio_capture_kind() is None
+
+
+class TestMusicSelfHealing:
+    """The music sink is destroyed and recreated every time the music player
+    restarts. OBS keeps a handle to the OLD instance, so the source reads the
+    right device name, shows unmuted, and carries silence — with nothing
+    anywhere to say it broke. The player stamps a new epoch; ScenePlay
+    notices and re-binds without anyone pressing anything.
+    """
+
+    @pytest.fixture()
+    def rig(self, monkeypatch, settings):
+        import obs_ws
+        import routes.obs as ro
+        calls = []
+        monkeypatch.setattr(obs_ws, 'connected', lambda: True)
+        monkeypatch.setattr(obs_ws, 'scene_items',
+                            lambda n, **k: {ro.MUSIC_SOURCE_NAME: 1})
+        monkeypatch.setattr(
+            obs_ws, 'ensure_audio_input',
+            lambda sc, n, d, **k: calls.append((sc, n, d)) or 1)
+        monkeypatch.setattr(ro, 'music_transport', lambda: 'device')
+        return calls
+
+    def test_a_new_sink_triggers_a_rebind(self, app, settings, rig):
+        import routes.obs as ro
+        settings['obs_music_sink_epoch'] = '111.0'
+        settings['obs_music_bound_epoch'] = '100.0'
+        assert ro.rebind_music_if_stale() is True
+        assert rig and rig[0][1] == ro.MUSIC_SOURCE_NAME
+        assert settings['obs_music_bound_epoch'] == '111.0', 'must claim it'
+
+    def test_an_unchanged_sink_does_nothing(self, app, settings, rig):
+        """The normal pass, every watch tick — it must stay cheap and silent."""
+        import routes.obs as ro
+        settings['obs_music_sink_epoch'] = '111.0'
+        settings['obs_music_bound_epoch'] = '111.0'
+        assert ro.rebind_music_if_stale() is False
+        assert rig == []
+
+    def test_rebinding_happens_only_once_per_new_sink(self, app, settings, rig):
+        import routes.obs as ro
+        settings['obs_music_sink_epoch'] = '222.0'
+        settings['obs_music_bound_epoch'] = '111.0'
+        assert ro.rebind_music_if_stale() is True
+        assert ro.rebind_music_if_stale() is False
+        assert len(rig) == 1
+
+    def test_no_stamp_at_all_is_not_a_rebind(self, app, settings, rig):
+        """An older music player never stamps; that must not mean 'rebind on
+        every tick forever'."""
+        import routes.obs as ro
+        assert ro.rebind_music_if_stale() is False
+        assert rig == []
+
+    def test_the_feed_path_has_no_sink_to_go_stale(self, app, settings,
+                                                   monkeypatch, rig):
+        import routes.obs as ro
+        monkeypatch.setattr(ro, 'music_transport', lambda: 'feed')
+        settings['obs_music_sink_epoch'] = '111.0'
+        assert ro.rebind_music_if_stale() is False
+        assert rig == []
+
+    def test_a_disconnected_obs_is_left_alone(self, app, settings, monkeypatch,
+                                              rig):
+        import obs_ws
+        import routes.obs as ro
+        monkeypatch.setattr(obs_ws, 'connected', lambda: False)
+        settings['obs_music_sink_epoch'] = '111.0'
+        assert ro.rebind_music_if_stale() is False
+        assert rig == []
+
+    def test_an_unbuilt_scene_waits_for_the_build(self, app, settings,
+                                                  monkeypatch, rig):
+        """A build binds fresh anyway — re-binding a source that is not there
+        would only produce a confusing error."""
+        import obs_ws
+        import routes.obs as ro
+        monkeypatch.setattr(obs_ws, 'scene_items', lambda n, **k: {})
+        settings['obs_music_sink_epoch'] = '111.0'
+        assert ro.rebind_music_if_stale() is False
+        assert rig == []
+
+
+class TestSinkComesUpForObsAlone:
+    """The capture sink used to be the relay's private business, so it only
+    existed while the relay was enabled.
+
+    OBS then grew two music paths that BOTH read from it, and mpv only plays
+    INTO it while the graph exists. So with the relay switched off, music into
+    OBS was silence with nothing wrong anywhere: a correct source, on a real
+    device, that nothing was feeding.
+    """
+
+    @pytest.fixture()
+    def sql_settings(self, monkeypatch):
+        import sql
+        store = {}
+        monkeypatch.setattr(
+            sql, 'appsettingGet',
+            lambda name, default=None: store.get(name, default))
+        return store
+
+    def test_obs_music_alone_justifies_the_sink(self, sql_settings):
+        import relay_audio_stream as ras
+        sql_settings.update({'obs_enabled': '1', 'obs_music_capture': '1',
+                             'obs_music_transport': 'device'})
+        assert ras._obs_wants_sink() is True
+
+    def test_the_feed_path_needs_it_too(self, sql_settings):
+        """The vdo.ninja feed reads the remapped source off the same sink."""
+        import relay_audio_stream as ras
+        sql_settings.update({'obs_enabled': '1', 'obs_music_capture': '1',
+                             'obs_music_transport': 'feed'})
+        assert ras._obs_wants_sink() is True
+
+    def test_music_switched_off_does_not(self, sql_settings):
+        import relay_audio_stream as ras
+        sql_settings.update({'obs_enabled': '1', 'obs_music_capture': '1',
+                             'obs_music_transport': 'off'})
+        assert ras._obs_wants_sink() is False
+
+    def test_obs_disabled_does_not(self, sql_settings):
+        import relay_audio_stream as ras
+        sql_settings.update({'obs_enabled': '0', 'obs_music_capture': '1',
+                             'obs_music_transport': 'device'})
+        assert ras._obs_wants_sink() is False
+
+    def test_unreadable_settings_never_raise(self, monkeypatch):
+        """This runs in the music player's process, where nothing may be
+        allowed to break playback."""
+        import sql
+        import relay_audio_stream as ras
+
+        def boom(*a, **k):
+            raise RuntimeError('no database')
+        monkeypatch.setattr(sql, 'appsettingGet', boom)
+        assert ras._obs_wants_sink() is False

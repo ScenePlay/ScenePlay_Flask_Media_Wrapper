@@ -382,6 +382,38 @@ def refresh_tiles():
     return swapped
 
 
+def rebind_music_if_stale():
+    """Re-point the music capture when the sink underneath it was replaced.
+
+    The music player stamps obs_music_sink_epoch every time it builds a new
+    capture sink. OBS, meanwhile, holds a handle to the sink instance that
+    existed when its source was created — so a player restart leaves the
+    source reading the correct device name, unmuted, and completely silent.
+    That is the failure this table kept hitting: nothing looks wrong anywhere.
+
+    Cheap: two settings reads and an early return on the normal pass, when the
+    stamp has not moved. Returns True only when it actually re-bound."""
+    import obs_ws
+    epoch = (appsettingGet('obs_music_sink_epoch', '') or '').strip()
+    if not epoch or epoch == (appsettingGet('obs_music_bound_epoch', '') or ''):
+        return False
+    # Only the device path binds to a sink at all; a vdo.ninja feed has no
+    # local device to go stale, and 'off' has nothing to re-bind.
+    if music_transport() != 'device' or not obs_ws.connected():
+        return False
+    party = party_scene_name()
+    try:
+        if MUSIC_SOURCE_NAME not in obs_ws.scene_items(party):
+            return False        # not built yet — a build will bind it fresh
+        obs_ws.ensure_audio_input(party, MUSIC_SOURCE_NAME, music_device_id())
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        log.info('Music re-bind skipped: %s', exc)
+        return False
+    appsettingSet('obs_music_bound_epoch', epoch)
+    log.info('Music capture re-bound: the sink was replaced underneath it')
+    return True
+
+
 def start_feed_watch(app_obj):
     """Idempotent repeating check. Runs only while OBS is enabled — it
     reschedules itself and simply does nothing when the feature is off."""
@@ -395,6 +427,7 @@ def start_feed_watch(app_obj):
             with app_obj.app_context():
                 if appsettingGet('obs_enabled', '0') == '1':
                     refresh_tiles()
+                    rebind_music_if_stale()
         except Exception as exc:          # a watchdog must never die loudly
             log.info('OBS feed watch failed: %s', exc)
         finally:
