@@ -97,6 +97,12 @@ def _obs_cfg():
         'music_transport': (appsettingGet('obs_music_transport', 'auto')
                             or 'auto'),
         'music_resolved': music_transport(),
+        # Whether the path in use was CHOSEN or worked out. A stale manual
+        # choice looks identical to a correct automatic one on the page, and
+        # it silently survives moving OBS back to this machine — which is how
+        # a local rig ended up waiting on a vdo.ninja tab nobody had opened.
+        'music_forced': ((appsettingGet('obs_music_transport', 'auto')
+                          or 'auto') != 'auto'),
         'music_label':   music_device_label(),
         'music_push':    music_push_url(),
         'obs_local':     obs_is_local(),
@@ -707,22 +713,29 @@ def save_config():
                   '1' if request.form.get('obs_dm_audio') else '0')
     appsettingSet('obs_feed_monitor',
                   '1' if request.form.get('obs_feed_monitor') else '0')
-    appsettingSet('obs_music_capture',
-                  '1' if request.form.get('obs_music_capture') else '0')
     if 'obs_music_transport' in request.form:
         mode = (request.form.get('obs_music_transport', '') or 'auto').strip()
-        appsettingSet('obs_music_transport',
-                      mode if mode in MUSIC_TRANSPORTS else 'auto')
+        if mode not in MUSIC_TRANSPORTS:
+            mode = 'auto'
+        appsettingSet('obs_music_transport', mode)
+        # Kept in step with the select, which is now the ONLY control. It used
+        # to be a checkbox of its own meaning the same thing as "off", so the
+        # two could be set against each other with nothing on the page to show
+        # it — and whichever said "no" won, invisibly.
+        appsettingSet('obs_music_capture', '0' if mode == 'off' else '1')
     appsettingSet('obs_room_per_stream',
                   '1' if request.form.get('obs_room_per_stream') else '0')
     if 'obs_dm_mic_label' in request.form:
         appsettingSet('obs_dm_mic_label',
                       (request.form.get('obs_dm_mic_label', '')
                        or '').strip()[:120])
-    if 'obs_music_device_label' in request.form:
-        appsettingSet('obs_music_device_label',
-                      (request.form.get('obs_music_device_label', '')
-                       or '').strip()[:120])
+    # Only when it was actually sent: the field is DISABLED while the local
+    # device path is in use, and a disabled field submits nothing. Writing a
+    # blank then would quietly discard the DM's vdo.ninja device name every
+    # time they saved from the other path.
+    label = (request.form.get('obs_music_device_label') or '').strip()
+    if label:
+        appsettingSet('obs_music_device_label', label[:120])
     if 'obs_vdo_room' in request.form:
         # Strip a pasted full URL down to the room name: the DM is far more
         # likely to have a vdo.ninja link to hand than the bare word.

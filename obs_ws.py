@@ -230,6 +230,17 @@ def browser_kind():
     clear error instead of a confusing rejection)."""
     with _cache_lock:
         kinds = list(_cache.get('input_kinds') or [])
+    if not kinds:
+        # Same trap as audio_capture_kind: an empty cache means "not primed
+        # yet", not "this build has no browser source". Answering '' there
+        # fails every build with a flat "no browser source input".
+        try:
+            kinds = list(request('GetInputKindList').get('inputKinds') or [])
+        except (ObsRejected, ObsUnavailable):
+            return ''
+        if kinds:
+            with _cache_lock:
+                _cache['input_kinds'] = list(kinds)
     if 'browser_source' in kinds:
         return 'browser_source'
     for k in kinds:
@@ -559,12 +570,27 @@ def audio_capture_kind():
 
     Read from the primed cache, like browser_kind: this is asked on every
     Broadcast page render, and a live round trip per render is a needless cost
-    for something that cannot change while a connection lasts."""
+    for something that cannot change while a connection lasts.
+
+    But NEVER answer "no such kind" just because the cache happens to be
+    empty. The caller turns that into "this OBS cannot capture local audio",
+    which silently moves the music onto a vdo.ninja feed and DELETES the
+    working device capture — for a table whose sink is right there. An empty
+    cache means "not primed yet", not "not supported", so ask OBS directly."""
+    want_kinds = ('pulse_output_capture',       # Linux, PulseAudio/PipeWire
+                  'wasapi_output_capture',      # Windows
+                  'coreaudio_output_capture')   # macOS
     with _cache_lock:
         kinds = list(_cache.get('input_kinds') or [])
-    for want in ('pulse_output_capture',        # Linux, PulseAudio/PipeWire
-                 'wasapi_output_capture',       # Windows
-                 'coreaudio_output_capture'):   # macOS
+    if not kinds:
+        try:
+            kinds = list(request('GetInputKindList').get('inputKinds') or [])
+        except (ObsRejected, ObsUnavailable):
+            return None
+        if kinds:
+            with _cache_lock:
+                _cache['input_kinds'] = list(kinds)
+    for want in want_kinds:
         if want in kinds:
             return want
     return None

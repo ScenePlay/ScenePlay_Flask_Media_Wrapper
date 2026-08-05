@@ -293,3 +293,70 @@ class TestAudioDeviceRebind:
         state['device_id'] = 'sceneplay_music.monitor'
         obs_ws.ensure_audio_input('Party', 'M', 'sceneplay_music.monitor')
         assert state['device_id'] == 'sceneplay_music.monitor'
+
+
+class TestCaptureKindNeverGuessesNo:
+    """An empty cache means "not primed yet", never "not supported".
+
+    Answering None from an empty cache made music_transport() decide this OBS
+    cannot capture local audio — which moves the music to a vdo.ninja feed
+    that needs a browser tab nobody opened, and DELETES the working device
+    capture on the way. A silent, destructive flip from a cache race.
+    """
+
+    def test_empty_cache_asks_obs_instead_of_answering_no(self, monkeypatch):
+        import obs_ws
+        asked = []
+
+        def fake_request(rtype, data=None, timeout=3):
+            asked.append(rtype)
+            return {'inputKinds': ['browser_source', 'pulse_output_capture']}
+        monkeypatch.setattr(obs_ws, 'request', fake_request)
+        with obs_ws._cache_lock:
+            obs_ws._cache['input_kinds'] = []
+        assert obs_ws.audio_capture_kind() == 'pulse_output_capture'
+        assert asked == ['GetInputKindList'], 'must have asked OBS'
+
+    def test_the_live_answer_is_cached(self, monkeypatch):
+        import obs_ws
+        calls = []
+
+        def fake_request(rtype, data=None, timeout=3):
+            calls.append(rtype)
+            return {'inputKinds': ['pulse_output_capture']}
+        monkeypatch.setattr(obs_ws, 'request', fake_request)
+        with obs_ws._cache_lock:
+            obs_ws._cache['input_kinds'] = []
+        obs_ws.audio_capture_kind()
+        obs_ws.audio_capture_kind()
+        assert len(calls) == 1, 'should not re-ask once it knows'
+
+    def test_a_primed_cache_is_used_without_asking(self, monkeypatch):
+        import obs_ws
+
+        def boom(*a, **k):
+            raise AssertionError('should not have asked OBS')
+        monkeypatch.setattr(obs_ws, 'request', boom)
+        with obs_ws._cache_lock:
+            obs_ws._cache['input_kinds'] = ['pulse_output_capture']
+        assert obs_ws.audio_capture_kind() == 'pulse_output_capture'
+
+    def test_a_build_with_no_such_kind_still_answers_none(self, monkeypatch):
+        """A genuine absence must still report None — that is what sends the
+        music to a feed on a Mac or Windows OBS, correctly."""
+        import obs_ws
+        monkeypatch.setattr(obs_ws, 'request',
+                            lambda *a, **k: {'inputKinds': ['browser_source']})
+        with obs_ws._cache_lock:
+            obs_ws._cache['input_kinds'] = []
+        assert obs_ws.audio_capture_kind() is None
+
+    def test_an_unreachable_obs_reports_none_without_raising(self, monkeypatch):
+        import obs_ws
+
+        def boom(*a, **k):
+            raise obs_ws.ObsUnavailable('socket closed')
+        monkeypatch.setattr(obs_ws, 'request', boom)
+        with obs_ws._cache_lock:
+            obs_ws._cache['input_kinds'] = []
+        assert obs_ws.audio_capture_kind() is None
