@@ -90,7 +90,8 @@ def _obs_cfg():
         'dm_audio':      (appsettingGet('obs_dm_audio', '0') or '0'),
         'feed_monitor':  (appsettingGet('obs_feed_monitor', '0') or '0'),
         'vdo_room':      table_room(),
-        'room_per_stream': (appsettingGet('obs_room_per_stream', '0') or '0'),
+        'room_audio_only': (appsettingGet('obs_room_audio_only', '1') or '1'),
+        'room_videobitrate': _room_bitrate_str(),
         'room_join_url': (dm_tile().video_push_url() if table_room() else ''),
         'music_capture': ('1' if music_capture_on() else '0'),
         'music_device':  music_device_id(),
@@ -756,8 +757,6 @@ def save_config():
         # two could be set against each other with nothing on the page to show
         # it — and whichever said "no" won, invisibly.
         appsettingSet('obs_music_capture', '0' if mode == 'off' else '1')
-    appsettingSet('obs_room_per_stream',
-                  '1' if request.form.get('obs_room_per_stream') else '0')
     if 'obs_dm_mic_label' in request.form:
         appsettingSet('obs_dm_mic_label',
                       (request.form.get('obs_dm_mic_label', '')
@@ -769,6 +768,20 @@ def save_config():
     label = (request.form.get('obs_music_device_label') or '').strip()
     if label:
         appsettingSet('obs_music_device_label', label[:120])
+    # Checkbox is "players SEE each other" — the inverse of the stored flag,
+    # so an unticked (absent) box lands on the safe audio-only default.
+    appsettingSet('obs_room_audio_only',
+                  '0' if request.form.get('obs_room_video') else '1')
+    if 'obs_room_videobitrate' in request.form:
+        from models.ttrpg import (ROOM_BITRATE_DEFAULT, ROOM_BITRATE_MIN,
+                                  ROOM_BITRATE_MAX)
+        try:
+            v = int(float(request.form.get('obs_room_videobitrate', '')
+                          or ROOM_BITRATE_DEFAULT))
+        except (TypeError, ValueError):
+            v = ROOM_BITRATE_DEFAULT
+        appsettingSet('obs_room_videobitrate',
+                      str(max(ROOM_BITRATE_MIN, min(v, ROOM_BITRATE_MAX))))
     if 'obs_vdo_room' in request.form:
         # Strip a pasted full URL down to the room name: the DM is far more
         # likely to have a vdo.ninja link to hand than the bare word.
@@ -1211,18 +1224,13 @@ def api_output(kind):
     if not obs_ws.connected():
         return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
     want = bool((request.get_json(silent=True) or {}).get('on'))
-    rotated = ''
-    if (kind == 'stream' and want
-            and (appsettingGet('obs_room_per_stream', '0') or '0') == '1'):
-        # A new room per broadcast, so a link handed out for last week's
-        # session is not a way into this one.
-        #
-        # Done BEFORE the stream starts, never after: rotating mid-show would
-        # strand every player in the room they are already sitting in, and
-        # they would only find out by going quiet on air.
-        rotated = _new_room_name()
-        appsettingSet('obs_vdo_room', rotated)
-        repush_feeds('room rotated for stream')
+    # Deliberately NO room rotation here. A per-stream room sounded like
+    # security but was a trap: the new room is empty while every player's open
+    # camera tab is still in the old one, so OBS re-points to it and the whole
+    # table goes black and silent right as the show starts — and no code can
+    # move a player's browser tab for them. The GUID room is unguessable; the
+    # New-room button covers an actually leaked link, at a moment the DM
+    # chooses.
     try:
         now = obs_ws.set_output_active(kind, want)
     except obs_ws.ObsRejected as exc:
@@ -1237,7 +1245,6 @@ def api_output(kind):
     with obs_ws._cache_lock:
         obs_ws._cache['recording' if kind == 'record' else 'streaming'] = now
     return jsonify({'ok': True, 'kind': kind, 'active': now,
-                    'new_room': rotated,
                     **{('recording' if kind == 'record' else 'streaming'): now}})
 
 
@@ -2272,6 +2279,11 @@ def repush_feeds(reason=''):
         relay_broadcaster.push_character_feeds()
     except Exception as exc:                 # relay off, absent, or failing
         log.info('Camera-link re-push skipped (%s): %s', reason, exc)
+
+
+def _room_bitrate_str():
+    from models.ttrpg import _room_videobitrate
+    return str(_room_videobitrate())
 
 
 def table_room():

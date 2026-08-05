@@ -502,3 +502,61 @@ class TestSinkComesUpForObsAlone:
             raise RuntimeError('no database')
         monkeypatch.setattr(sql, 'appsettingGet', boom)
         assert ras._obs_wants_sink() is False
+
+
+class TestRoomBandwidth:
+    """A room is a P2P mesh: at a full table every camera would upload video
+    to nine peers plus OBS. Guests therefore exchange voices only by default
+    (&novideo is viewer-side: stop RECEIVING peers' video, keep SENDING your
+    own — so OBS keeps every face at one video upload per player), and every
+    push carries a sender-side hard ceiling (&maxvideobitrate)."""
+
+    def test_room_pushes_are_audio_only_by_default(self, settings):
+        settings['obs_vdo_room'] = 'abc123'
+        url = _char().video_push_url()
+        assert '&novideo' in url
+        assert '&maxvideobitrate=2500' in url
+
+    def test_seeing_each_other_can_be_enabled(self, settings):
+        settings['obs_vdo_room'] = 'abc123'
+        settings['obs_room_audio_only'] = '0'
+        url = _char().video_push_url()
+        assert '&novideo' not in url
+        assert '&maxvideobitrate=2500' in url, 'the ceiling stays either way'
+
+    def test_view_urls_are_never_throttled(self, settings):
+        """OBS's solo views carry the faces to the stream — full quality."""
+        settings['obs_vdo_room'] = 'abc123'
+        view = _char().video_view_url()
+        assert '&novideo' not in view
+        assert 'maxvideobitrate' not in view
+
+    def test_no_room_no_caps(self, settings):
+        """Solo streams have exactly one viewer (OBS); the mesh problem the
+        caps exist for does not arise."""
+        url = _char().video_push_url()
+        assert '&novideo' not in url and 'maxvideobitrate' not in url
+
+    def test_bitrate_is_clamped(self, settings):
+        settings['obs_vdo_room'] = 'abc123'
+        settings['obs_room_videobitrate'] = '99999'
+        assert '&maxvideobitrate=8000' in _char().video_push_url()
+        settings['obs_room_videobitrate'] = '50'
+        assert '&maxvideobitrate=200' in _char().video_push_url()
+        settings['obs_room_videobitrate'] = 'junk'
+        assert '&maxvideobitrate=2500' in _char().video_push_url()
+
+    def test_dm_push_gets_the_same_treatment(self, app, settings):
+        """The DM's camera is one more mesh publisher like any other."""
+        import routes.obs as ro
+        settings['obs_vdo_room'] = 'abc123'
+        settings['obs_dm_stream_id'] = 'dmcam'
+        url = ro.dm_tile().video_push_url()
+        assert '&novideo' in url and '&maxvideobitrate=2500' in url
+
+    def test_music_push_is_untouched(self, app, settings):
+        """Roomless and audio-only already — no video to cap."""
+        import routes.obs as ro
+        settings['obs_vdo_room'] = 'abc123'
+        url = ro.music_push_url()
+        assert 'novideo' not in url and 'maxvideobitrate' not in url

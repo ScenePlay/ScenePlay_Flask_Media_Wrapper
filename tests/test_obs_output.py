@@ -208,49 +208,36 @@ class TestOutputRoute:
         assert self._post(dm_client, 'record', True).status_code == 503
 
 
-class TestRoomRotation:
-    """A new room per broadcast, so last week's link is not a way in."""
+class TestOutputsNeverTouchTheRoom:
+    """Starting or stopping an output must NEVER change the table's room.
+
+    Per-stream rotation existed briefly and was removed: the freshly minted
+    room is empty while every player's open camera tab is still in the old
+    one, so OBS re-points at nobody and the whole table goes black and silent
+    right as the show starts. No code can move a player's browser tab for
+    them. The GUID room is unguessable; the New-room button covers a leak.
+    """
 
     def _post(self, client, kind, on):
         return client.post(f'/ttrpg/obs/api/output/{kind}', json={'on': on})
 
-    def test_starting_a_stream_mints_a_new_room(self, dm_client, obs,
-                                                monkeypatch):
-        import routes.obs as ro
-        store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'oldroom'}
-        monkeypatch.setattr(ro, 'appsettingGet',
-                            lambda n, d=None: store.get(n, d))
-        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
-        d = self._post(dm_client, 'stream', True).get_json()
-        assert d['new_room'] and d['new_room'] != 'oldroom'
-        assert store['obs_vdo_room'] == d['new_room']
-
-    def test_stopping_a_stream_never_rotates(self, dm_client, obs, monkeypatch):
-        """Rotating on the way OUT would strand the table for no reason."""
+    @pytest.mark.parametrize('kind,on', [
+        ('stream', True), ('stream', False),
+        ('record', True), ('record', False),
+    ])
+    def test_no_output_action_writes_the_room(self, dm_client, obs,
+                                              monkeypatch, kind, on):
+        """Even with the LEGACY setting still '1' in an old database — the
+        feature is gone, not merely defaulted off."""
         import routes.obs as ro
         store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'keepme'}
+        writes = []
         monkeypatch.setattr(ro, 'appsettingGet',
                             lambda n, d=None: store.get(n, d))
-        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
-        assert self._post(dm_client, 'stream', False).get_json()['new_room'] == ''
+        monkeypatch.setattr(ro, 'appsettingSet',
+                            lambda n, v: writes.append(n) or store.__setitem__(n, v))
+        d = self._post(dm_client, kind, on).get_json()
+        assert d['ok'] is True
         assert store['obs_vdo_room'] == 'keepme'
-
-    def test_recording_never_rotates(self, dm_client, obs, monkeypatch):
-        """Only the public broadcast justifies stranding everyone."""
-        import routes.obs as ro
-        store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'keepme'}
-        monkeypatch.setattr(ro, 'appsettingGet',
-                            lambda n, d=None: store.get(n, d))
-        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
-        assert self._post(dm_client, 'record', True).get_json()['new_room'] == ''
-        assert store['obs_vdo_room'] == 'keepme'
-
-    def test_off_by_default_leaves_the_room_alone(self, dm_client, obs,
-                                                  monkeypatch):
-        import routes.obs as ro
-        store = {'obs_vdo_room': 'keepme'}
-        monkeypatch.setattr(ro, 'appsettingGet',
-                            lambda n, d=None: store.get(n, d))
-        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
-        assert self._post(dm_client, 'stream', True).get_json()['new_room'] == ''
-        assert store['obs_vdo_room'] == 'keepme'
+        assert 'obs_vdo_room' not in writes
+        assert 'new_room' not in d, 'the response key went with the feature'

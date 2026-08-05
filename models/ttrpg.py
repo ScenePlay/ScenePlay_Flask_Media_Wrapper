@@ -10,6 +10,21 @@ VDO_DEFAULTS = {
 }
 
 
+ROOM_BITRATE_DEFAULT = 2500        # kbps; vdo.ninja's own usual target
+ROOM_BITRATE_MIN, ROOM_BITRATE_MAX = 200, 8000
+
+
+def _room_videobitrate():
+    """Outbound video ceiling for room publishers, in kbps, clamped sane."""
+    from sql import appsettingGet
+    try:
+        v = int(float(appsettingGet('obs_room_videobitrate', '')
+                      or ROOM_BITRATE_DEFAULT))
+    except (TypeError, ValueError):
+        v = ROOM_BITRATE_DEFAULT
+    return max(ROOM_BITRATE_MIN, min(v, ROOM_BITRATE_MAX))
+
+
 def _vdo_url(kind, stream_id):
     """Build a VDO.ninja push/view URL for one stream id.
 
@@ -56,6 +71,23 @@ def _vdo_url(kind, stream_id):
             # one-stream OBS view rather than joining the room as a guest
             # (?view=<id>&room=<room> on its own renders a "Join Room" page).
             url += '&scene'
+        else:
+            # A room is a P2P mesh: with a full table of ten, every camera
+            # would upload video to nine peers AND to OBS's solo view — a load
+            # phones and home upload cannot carry, failing exactly at full
+            # party size. So by default guests exchange VOICES only:
+            #
+            # &novideo is viewer-side — this tab stops RECEIVING peers' video
+            # but still SENDS its own camera, so OBS keeps every face while
+            # each player uploads one video stream instead of ten. Faces reach
+            # players through the broadcast anyway.
+            #
+            # &maxvideobitrate is the sender-side hard ceiling per outbound
+            # encode (per docs; &outboundvideobitrate is only a default that
+            # viewers may override), so no single link can run away.
+            if (appsettingGet('obs_room_audio_only', '1') or '1') == '1':
+                url += '&novideo'
+            url += f'&maxvideobitrate={_room_videobitrate()}'
     password = (appsettingGet('obs_vdo_password', '') or '').strip()
     if password:
         url += '&password=' + quote(password, safe='')

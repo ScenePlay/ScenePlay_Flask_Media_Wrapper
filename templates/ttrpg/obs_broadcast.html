@@ -594,19 +594,33 @@
             or paste the name of a room you already use.
             {% endif %}
           </div>
-          <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" id="obs-room-rotate"
-                   name="obs_room_per_stream" value="1" form="obs-cfg-form"
-                   {% if cfg.room_per_stream == '1' %}checked{% endif %}>
-            <label class="form-check-label small" for="obs-room-rotate">
-              A <b>new room for every stream</b>
-              <span class="text-muted">(minted the moment you hit Start
-              streaming, so a link from last week's session is not a way into
-              this one. It rotates <em>before</em> going live &mdash; but
-              anyone already sitting in the old room is left behind and has to
-              reopen their camera link, so go live <b>before</b> the table
-              joins, not after.)</span>
-            </label>
+          <div class="row g-2 align-items-end mt-1">
+            <div class="col-sm-7">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="obs-room-video"
+                       name="obs_room_video" value="1" form="obs-cfg-form"
+                       {% if cfg.room_audio_only != '1' %}checked{% endif %}>
+                <label class="form-check-label small" for="obs-room-video">
+                  Players <b>see</b> each other's video in the room
+                  <span class="text-muted">(off = voices only between players,
+                  which is the safe default: with a full table every camera
+                  would otherwise upload to nine peers <em>and</em> OBS at
+                  once, which chokes phones and home upload. Faces still reach
+                  everyone through the stream either way.)</span>
+                </label>
+              </div>
+            </div>
+            <div class="col-sm-5">
+              <label class="form-label small mb-1" for="obs-room-bitrate">
+                Camera bitrate ceiling (kbps)</label>
+              <input type="number" name="obs_room_videobitrate" id="obs-room-bitrate"
+                     form="obs-cfg-form" class="form-control form-control-sm"
+                     min="200" max="8000" step="100"
+                     value="{{ cfg.room_videobitrate }}">
+              <div class="form-text small">
+                Hard cap per camera. Applies after players reopen their links.
+              </div>
+            </div>
           </div>
           {% if cfg.room_join_url %}
           <div class="mt-2">
