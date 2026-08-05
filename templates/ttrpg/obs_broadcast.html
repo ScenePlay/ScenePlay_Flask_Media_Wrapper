@@ -568,19 +568,57 @@
             OBS starts a feed with audio just fine.)</span>
           </label>
         </div>
-        <div class="mb-2">
+        <div class="mb-3">
           <label class="form-label small mb-1" for="obs-vdo-room">
-            vdo.ninja room
+            Table room <span class="text-muted">— how players hear each other</span>
           </label>
-          <input class="form-control form-control-sm" id="obs-vdo-room"
-                 name="obs_vdo_room" value="{{ cfg.vdo_room }}"
-                 placeholder="e.g. dungeoncrawler — or paste a room link">
-          <div class="form-text small">
-            Put your players in your existing room so they hear each other and
-            you. It is added to the links <em>they</em> open; OBS still watches
-            each player individually, so every camera keeps its own fader in
-            the Audio Mixer. Leave blank for solo streams that only OBS hears.
+          <div class="input-group input-group-sm">
+            <input class="form-control form-control-sm" id="obs-vdo-room"
+                   name="obs_vdo_room" form="obs-cfg-form" value="{{ cfg.vdo_room }}"
+                   placeholder="no room — players cannot hear each other">
+            <button class="btn btn-sm btn-outline-secondary" type="button"
+                    onclick="obsNewRoom(this)"
+                    title="Create a new room and put the whole table in it">
+              {% if cfg.vdo_room %}New room{% else %}Create room{% endif %}</button>
           </div>
+          <div class="form-text small" id="obs-room-note">
+            {% if cfg.vdo_room %}
+            Every camera link &mdash; players' and yours &mdash; now joins this
+            room, so the table hears each other directly. OBS still watches
+            each player <em>individually</em>, so every camera keeps its own
+            fader in the Audio Mixer. Anyone already holding an old link must
+            reopen their camera page to pick the room up.
+            {% else %}
+            Without a room each player is a lone stream that only OBS ever
+            listens to &mdash; they cannot hear each other or you. Create one,
+            or paste the name of a room you already use.
+            {% endif %}
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="obs-room-rotate"
+                   name="obs_room_per_stream" value="1" form="obs-cfg-form"
+                   {% if cfg.room_per_stream == '1' %}checked{% endif %}>
+            <label class="form-check-label small" for="obs-room-rotate">
+              A <b>new room for every stream</b>
+              <span class="text-muted">(minted the moment you hit Start
+              streaming, so a link from last week's session is not a way into
+              this one. It rotates <em>before</em> going live &mdash; but
+              anyone already sitting in the old room is left behind and has to
+              reopen their camera link, so go live <b>before</b> the table
+              joins, not after.)</span>
+            </label>
+          </div>
+          {% if cfg.room_join_url %}
+          <div class="mt-2">
+            <a class="btn btn-sm btn-ttrpg" target="_blank" rel="noopener"
+               href="{{ cfg.room_join_url }}">&#127908; Join the room</a>
+            <span class="small text-muted ms-2">
+              Your own camera and microphone, in the room with everyone.
+              Wear headphones &mdash; every live mic in the room is now playing
+              out of your speakers and back into itself otherwise.
+            </span>
+          </div>
+          {% endif %}
         </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-music-capture"
@@ -928,6 +966,31 @@ function obsUseThisMachine(btn) {
   const orig = btn.textContent;
   btn.textContent = 'Filled — now Save';
   setTimeout(() => { btn.textContent = orig; }, 2500);
+}
+
+const OBS_NEWROOM_URL = "{{ url_for('obs_bp.api_new_room') }}";
+
+function obsNewRoom(btn) {
+  const cur = document.getElementById('obs-vdo-room').value.trim();
+  // Replacing a live room strands anyone already in the old one, so make the
+  // DM say yes to that specifically — creating the FIRST room is harmless.
+  if (cur && !confirm('Replace the room "' + cur + '"?\n\nEveryone in the ' +
+                      'old room will be left behind until they reopen their ' +
+                      'camera link.')) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Creating…';
+  _obsPost(OBS_NEWROOM_URL, {})
+    .then(({ok, d}) => {
+      btn.disabled = false; btn.textContent = orig;
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) || 'Could not create a room.'});
+        return;
+      }
+      document.getElementById('obs-vdo-room').value = d.room;
+      // Reload so the join link and the explanatory note match the new room
+      // rather than describing the state it was in a moment ago.
+      location.reload();
+    });
 }
 
 const OBS_REPORT_KEY = 'obsBuildReport';

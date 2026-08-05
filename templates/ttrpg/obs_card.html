@@ -146,13 +146,39 @@ apply({ name: {{ char.name | tojson }}, player: {{ player | default('') | tojson
 // change at the pace of a turn, so seconds of lag cost nothing.
 const POLL_MS = {{ (poll_s | default(10)) * 1000 }};
 
+// Nearly every one of those polls returns exactly what the last one did: HP
+// and conditions only move when something happens at the table, and most of a
+// session is not combat. So the card eases off while the answer keeps coming
+// back the same, and snaps straight back to full rate the moment anything
+// changes. Multiplied by a whole party of cards, the quiet stretches stop
+// costing anything.
+//
+// The ceiling is deliberately modest. Nothing can PUSH to a browser source, so
+// this interval is also the worst-case lag before a hit shows on stream —
+// backing off to minutes would make the card wrong exactly when it matters.
+const POLL_MAX_MS = POLL_MS * 4;
+const POLL_GROWTH = 1.5;
+let pollMs = POLL_MS;
+let lastPayload = null;
+
+function onPoll(d) {
+  const sig = JSON.stringify(d);
+  if (sig !== lastPayload) {
+    lastPayload = sig;        // something moved — pay full attention again
+    pollMs = POLL_MS;
+  } else {
+    pollMs = Math.min(pollMs * POLL_GROWTH, POLL_MAX_MS);
+  }
+  apply(d);
+}
+
 function schedule() {
   // Spread the cards out instead of letting the whole party fire on the same
   // tick — they all load together when the scene is built, so without jitter
   // they stay in lockstep for the rest of the session.
   setTimeout(() => {
-    fetch(POLL_URL).then(r => r.json()).then(apply).catch(() => {}).finally(schedule);
-  }, POLL_MS * (0.85 + Math.random() * 0.3));
+    fetch(POLL_URL).then(r => r.json()).then(onPoll).catch(() => {}).finally(schedule);
+  }, pollMs * (0.85 + Math.random() * 0.3));
 }
 schedule();
 </script>

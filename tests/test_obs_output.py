@@ -206,3 +206,51 @@ class TestOutputRoute:
             raise obs_ws.ObsUnavailable('socket closed')
         monkeypatch.setattr(obs_ws, 'set_output_active', boom)
         assert self._post(dm_client, 'record', True).status_code == 503
+
+
+class TestRoomRotation:
+    """A new room per broadcast, so last week's link is not a way in."""
+
+    def _post(self, client, kind, on):
+        return client.post(f'/ttrpg/obs/api/output/{kind}', json={'on': on})
+
+    def test_starting_a_stream_mints_a_new_room(self, dm_client, obs,
+                                                monkeypatch):
+        import routes.obs as ro
+        store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'oldroom'}
+        monkeypatch.setattr(ro, 'appsettingGet',
+                            lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
+        d = self._post(dm_client, 'stream', True).get_json()
+        assert d['new_room'] and d['new_room'] != 'oldroom'
+        assert store['obs_vdo_room'] == d['new_room']
+
+    def test_stopping_a_stream_never_rotates(self, dm_client, obs, monkeypatch):
+        """Rotating on the way OUT would strand the table for no reason."""
+        import routes.obs as ro
+        store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'keepme'}
+        monkeypatch.setattr(ro, 'appsettingGet',
+                            lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
+        assert self._post(dm_client, 'stream', False).get_json()['new_room'] == ''
+        assert store['obs_vdo_room'] == 'keepme'
+
+    def test_recording_never_rotates(self, dm_client, obs, monkeypatch):
+        """Only the public broadcast justifies stranding everyone."""
+        import routes.obs as ro
+        store = {'obs_room_per_stream': '1', 'obs_vdo_room': 'keepme'}
+        monkeypatch.setattr(ro, 'appsettingGet',
+                            lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
+        assert self._post(dm_client, 'record', True).get_json()['new_room'] == ''
+        assert store['obs_vdo_room'] == 'keepme'
+
+    def test_off_by_default_leaves_the_room_alone(self, dm_client, obs,
+                                                  monkeypatch):
+        import routes.obs as ro
+        store = {'obs_vdo_room': 'keepme'}
+        monkeypatch.setattr(ro, 'appsettingGet',
+                            lambda n, d=None: store.get(n, d))
+        monkeypatch.setattr(ro, 'appsettingSet', store.__setitem__)
+        assert self._post(dm_client, 'stream', True).get_json()['new_room'] == ''
+        assert store['obs_vdo_room'] == 'keepme'

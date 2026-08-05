@@ -587,6 +587,28 @@ def ensure_audio_input(scene_name, source_name, device_id, timeout=5):
     except ObsRejected as exc:
         if exc.code != 601:
             raise
+    # Re-applying an IDENTICAL device_id is a no-op in OBS: it keeps the handle
+    # it already holds. The music sink is destroyed and recreated every time
+    # the music player restarts, so that handle goes dead and the source reads
+    # silence forever while its settings still look perfect.
+    #
+    # Measured on a live rig with a tone playing into the sink: same-value
+    # write left it at 0.00000; nudging to another device and back gave
+    # 0.18362. So force a genuine re-open when nothing else would change.
+    try:
+        now = request('GetInputSettings',
+                      {'inputName': source_name},
+                      timeout=timeout)['inputSettings'].get('device_id')
+    except (ObsRejected, ObsUnavailable):
+        now = None
+    if now == device_id:
+        try:
+            request('SetInputSettings',
+                    {'inputName': source_name,
+                     'inputSettings': {'device_id': 'default'},
+                     'overlay': True}, timeout=timeout)
+        except (ObsRejected, ObsUnavailable):
+            pass        # the real write below still stands a chance
     request('SetInputSettings',
             {'inputName': source_name,
              'inputSettings': {'device_id': device_id}, 'overlay': True},

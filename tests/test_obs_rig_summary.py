@@ -117,3 +117,53 @@ class TestNoContradictoryAdvice:
         settings['obs_host'] = '192.168.7.91'
         settings['obs_card_base'] = 'http://192.168.7.30:9000'
         assert '192.168.7.30:9000' in ' '.join(ro.rig_summary()['steps'])
+
+
+class TestCustomUrlLeavesPlayersOutside:
+    """A custom feed URL is a link ScenePlay does not build, so the room never
+    reaches it. That player publishes outside the room — silently, because
+    their own camera page looks perfectly normal to them."""
+
+    def _party(self, monkeypatch, chars):
+        import routes.obs as ro
+        monkeypatch.setattr(ro, '_active_party', lambda: chars)
+
+    def test_a_custom_url_player_is_named(self, app, settings, rig,
+                                          monkeypatch):
+        import routes.obs as ro
+        from models.ttrpg import tblCharacters
+        settings['obs_host'] = '127.0.0.1'
+        settings['obs_vdo_room'] = 'abc123'
+        carl = tblCharacters(character_id=1, user_id=1, name='Carl', level=1,
+                             hp_current=1, hp_max=1,
+                             created_at='2026-01-01 00:00:00',
+                             video_feed_url='https://vdo.ninja/?view=X')
+        self._party(monkeypatch, [carl])
+        s = ro.rig_summary()
+        assert any('Carl' in p for p in s['problems'])
+
+    def test_nothing_said_when_everyone_is_managed(self, app, settings, rig,
+                                                   monkeypatch):
+        import routes.obs as ro
+        from models.ttrpg import tblCharacters
+        settings['obs_host'] = '127.0.0.1'
+        settings['obs_vdo_room'] = 'abc123'
+        ok = tblCharacters(character_id=2, user_id=1, name='Donut', level=1,
+                           hp_current=1, hp_max=1,
+                           created_at='2026-01-01 00:00:00',
+                           video_stream_id='xyz', video_feed_url='')
+        self._party(monkeypatch, [ok])
+        assert ro.rig_summary()['problems'] == []
+
+    def test_silent_when_there_is_no_room(self, app, settings, rig,
+                                          monkeypatch):
+        """Without a room a custom URL is a legitimate choice, not a fault."""
+        import routes.obs as ro
+        from models.ttrpg import tblCharacters
+        settings['obs_host'] = '127.0.0.1'
+        carl = tblCharacters(character_id=1, user_id=1, name='Carl', level=1,
+                             hp_current=1, hp_max=1,
+                             created_at='2026-01-01 00:00:00',
+                             video_feed_url='https://vdo.ninja/?view=X')
+        self._party(monkeypatch, [carl])
+        assert ro.rig_summary()['problems'] == []

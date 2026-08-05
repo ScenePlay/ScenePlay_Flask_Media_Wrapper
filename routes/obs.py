@@ -15,6 +15,7 @@ import secrets
 import string
 import threading
 import time
+import uuid
 from datetime import datetime
 from urllib.parse import unquote, urlsplit
 
@@ -88,7 +89,9 @@ def _obs_cfg():
         'feed_noaudio':  (appsettingGet('obs_feed_noaudio', '0') or '0'),
         'dm_audio':      (appsettingGet('obs_dm_audio', '0') or '0'),
         'feed_monitor':  (appsettingGet('obs_feed_monitor', '0') or '0'),
-        'vdo_room':      (appsettingGet('obs_vdo_room', '') or ''),
+        'vdo_room':      table_room(),
+        'room_per_stream': (appsettingGet('obs_room_per_stream', '0') or '0'),
+        'room_join_url': (dm_tile().video_push_url() if table_room() else ''),
         'music_capture': ('1' if music_capture_on() else '0'),
         'music_device':  music_device_id(),
         'music_transport': (appsettingGet('obs_music_transport', 'auto')
@@ -471,6 +474,10 @@ def _unfeature():
     if group and obs_ws.current_state().get('current_scene') != group:
         obs_ws.switch_scene(group)
     _set_featured(None)
+    # "Everyone on screen" means letting go of BOTH holds on one character:
+    # the enlarged tile and the map pinned to their eyes. Releasing only the
+    # tile left the battle map still staring through whoever it was.
+    _set_viewed_character(None)
     _cancel_return()
 
 
@@ -706,6 +713,8 @@ def save_config():
         mode = (request.form.get('obs_music_transport', '') or 'auto').strip()
         appsettingSet('obs_music_transport',
                       mode if mode in MUSIC_TRANSPORTS else 'auto')
+    appsettingSet('obs_room_per_stream',
+                  '1' if request.form.get('obs_room_per_stream') else '0')
     if 'obs_dm_mic_label' in request.form:
         appsettingSet('obs_dm_mic_label',
                       (request.form.get('obs_dm_mic_label', '')
@@ -720,7 +729,19 @@ def save_config():
         room = (request.form.get('obs_vdo_room', '') or '').strip()
         if 'room=' in room:
             room = room.split('room=', 1)[1].split('&')[0]
-        appsettingSet('obs_vdo_room', unquote(room)[:80])
+        room = unquote(room)
+        safe = clean_room(room)
+        # Say so rather than silently storing something different: a room name
+        # that quietly lost its punctuation would put the DM in one room and
+        # everyone still holding the old link in another.
+        if room and safe != room:
+            flash(f'Room name adjusted to "{safe}" — vdo.ninja rooms must be '
+                  f'alphanumeric and at most {ROOM_MAX} characters.')
+        if safe != table_room():
+            appsettingSet('obs_vdo_room', safe)
+            repush_feeds('room changed')
+        else:
+            appsettingSet('obs_vdo_room', safe)
     appsettingSet('obs_panel_on',
                   '1' if request.form.get('obs_panel_on') else '0')
     side = (request.form.get('obs_panel_side', '') or 'right').strip().lower()
@@ -1078,6 +1099,11 @@ def api_view_player():
                         'error': f'{char.name} has no token on this map.'}), 409
 
     _set_viewed_character(character_id)
+    # Arm the same clock the spotlight uses. Pinning the map to one character
+    # is the other way a session gets stranded on one person, and it used to
+    # be the way with NO way back — the auto-return never armed here, so the
+    # pin held until the DM went and released it by hand.
+    _after_switch('')
     mode = effective_map_mode(bm, True)
     three_d = mode == '3d'
     # Deliberately NOT written to obs_map_mode. This is a shot call for the
@@ -1139,6 +1165,18 @@ def api_output(kind):
     if not obs_ws.connected():
         return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
     want = bool((request.get_json(silent=True) or {}).get('on'))
+    rotated = ''
+    if (kind == 'stream' and want
+            and (appsettingGet('obs_room_per_stream', '0') or '0') == '1'):
+        # A new room per broadcast, so a link handed out for last week's
+        # session is not a way into this one.
+        #
+        # Done BEFORE the stream starts, never after: rotating mid-show would
+        # strand every player in the room they are already sitting in, and
+        # they would only find out by going quiet on air.
+        rotated = _new_room_name()
+        appsettingSet('obs_vdo_room', rotated)
+        repush_feeds('room rotated for stream')
     try:
         now = obs_ws.set_output_active(kind, want)
     except obs_ws.ObsRejected as exc:
@@ -1153,6 +1191,7 @@ def api_output(kind):
     with obs_ws._cache_lock:
         obs_ws._cache['recording' if kind == 'record' else 'streaming'] = now
     return jsonify({'ok': True, 'kind': kind, 'active': now,
+                    'new_room': rotated,
                     **{('recording' if kind == 'record' else 'streaming'): now}})
 
 
@@ -1843,6 +1882,13 @@ def api_build_party():
         show_scenes, show_warn = ensure_show_scenes()
         result['warnings'].extend(show_warn)
         result['show_scenes'] = show_scenes
+        # Audio last, once EVERY scene exists. It nests the party scene into
+        # the others, so running it before they are built silently wires up
+        # nothing — which is how a first build after wiping the collection
+        # left the table audible only on the party scene.
+        snap = obs_ws.current_state()
+        _build_audio(snap.get('base_width') or 1920,
+                     snap.get('base_height') or 1080, result['warnings'])
         # Read back what OBS ACTUALLY holds, rather than what we believe we
         # sent. A source that silently fails to land is otherwise invisible
         # from here — the build reports success and the scene is missing a
@@ -2070,9 +2116,13 @@ def _sync_party_scene(featured_id=None):
         pass
 
     _prune_party_scene(scene, keep, warnings)
-    # Last: the audio scene references the tile sources this build just
-    # settled, and nests into scenes that must already exist.
-    _build_audio(canvas_w, canvas_h, warnings)
+    # NOT _build_audio here. It nests the party scene into the map and show
+    # scenes, and those are created AFTER this function returns — so on a
+    # first build (or the first after the DM wipes their collection) they do
+    # not exist yet, nothing gets nested, and the table goes silent the moment
+    # the program cuts away from the party. api_build_party calls it once the
+    # whole set is present. Featuring a player comes through here too, and has
+    # no business re-wiring audio.
     obs_ws.scene_list(refresh=True)
     return {'scene': scene, 'tiles': placed, 'warnings': warnings,
             'featured_id': featured_id}
@@ -2158,6 +2208,67 @@ def music_device_label():
     all."""
     return ((appsettingGet('obs_music_device_label', '') or '').strip()
             or DEFAULT_MUSIC_LABEL)
+
+
+def repush_feeds(reason=''):
+    """Tell the relay portal that the camera links changed.
+
+    The links are built HERE — ScenePlay owns the vdo.ninja base, the params,
+    the password and the room — and the relay only carries the finished string.
+    So a room the portal never hears about is worse than a broken link: the old
+    one still WORKS, it just joins a room nobody else is in, and the player
+    sits there able to see themselves and hear no one.
+
+    Queued and coalesced by the broadcaster, so this never blocks the request,
+    and silent when the relay is off — which is the normal case."""
+    try:
+        import relay_broadcaster
+        relay_broadcaster.push_character_feeds()
+    except Exception as exc:                 # relay off, absent, or failing
+        log.info('Camera-link re-push skipped (%s): %s', reason, exc)
+
+
+def table_room():
+    """The vdo.ninja room the whole table shares, or '' when there isn't one."""
+    return (appsettingGet('obs_vdo_room', '') or '').strip()
+
+
+# vdo.ninja rejects a room name that is not alphanumeric or runs past 30
+# characters — and it rejects it at the GUEST, so a bad name looks like the
+# player's link being broken rather than a setting being wrong.
+ROOM_MAX = 30
+
+
+def clean_room(name):
+    """A room name vdo.ninja will actually accept: alphanumeric, <= 30."""
+    return re.sub(r'[^A-Za-z0-9]', '', (name or '').strip())[:ROOM_MAX]
+
+
+def _new_room_name():
+    """A fresh room name: a GUID, trimmed to what vdo.ninja allows.
+
+    Random rather than readable, because the name IS the way in. vdo.ninja
+    rooms are created simply by being joined, so anyone who guesses
+    'dungeoncrawler' walks into the session — camera, microphone and all.
+
+    Hex, so it is alphanumeric with no hyphens to be rejected or mangled in a
+    URL, and cut to 30 characters. That still leaves ~120 bits of randomness,
+    which is not a number anyone guesses."""
+    return uuid.uuid4().hex[:ROOM_MAX]
+
+
+@obs_bp.route('/api/room/new', methods=['POST'])
+@login_required
+@dm_required
+def api_new_room():
+    """Create the table's room. Every push link picks it up immediately —
+    players and the DM alike — so the only thing left is for people to reopen
+    their camera page."""
+    room = _new_room_name()
+    appsettingSet('obs_vdo_room', room)
+    repush_feeds('new room')
+    return jsonify({'ok': True, 'room': room,
+                    'join_url': dm_tile().video_push_url()})
 
 
 def music_stream_id():
@@ -2272,6 +2383,21 @@ def rig_summary():
             'all (measured). Player voices and the music feed will be silent '
             'here however they are configured; only OBS\'s own inputs have '
             'sound.')
+    # A custom feed URL is a link ScenePlay does not build, so the room never
+    # gets added to it. That player publishes outside the room: they hear
+    # nobody, nobody hears them, and their OBS tile stays black — while their
+    # own camera page looks perfectly fine to them.
+    if table_room():
+        try:
+            outside = [c.name for c in _active_party()
+                       if (c.video_feed_url or '').strip()]
+        except Exception:
+            outside = []
+        if outside:
+            problems.append(
+                'Outside the table room, because they use a custom feed URL '
+                'ScenePlay cannot add the room to: ' + ', '.join(outside) +
+                '. Clear the custom URL on their camera page to bring them in.')
     if transport == 'feed':
         steps.append('Open the music feed on the machine playing the music '
                      'and leave the tab running.')

@@ -7,6 +7,8 @@ else has to travel as a stream.
 """
 import pytest
 
+from models.ttrpg import tblCharacters
+
 
 @pytest.fixture()
 def settings(app, monkeypatch):
@@ -35,6 +37,14 @@ def plat(monkeypatch):
                         lambda: box['kind'] == 'pulse_output_capture')
     monkeypatch.setattr(ro, 'lan_base', lambda: 'http://192.168.7.30:8086')
     return box
+
+
+def _char(**over):
+    base = dict(character_id=7, user_id=1, name='Kara', level=1,
+                hp_current=5, hp_max=5, created_at='2026-01-01 00:00:00',
+                video_stream_id='abc123')
+    base.update(over)
+    return tblCharacters(**base)
 
 
 class TestMusicUrls:
@@ -249,3 +259,103 @@ class TestCapabilityNotPlatformName:
         monkeypatch.setattr(ro, 'lan_base', lambda: 'http://192.168.7.30:8086')
         monkeypatch.setattr(obs_ws, 'audio_capture_kind', lambda: None)
         assert ro.music_transport() == 'feed'
+
+
+class TestTableRoom:
+    """The room is created for the table, and its name is the way in."""
+
+    def test_new_room_fits_what_vdo_ninja_accepts(self, app, settings):
+        """vdo.ninja rejects a name over 30 chars or with punctuation in it —
+        and it rejects it at the GUEST, so it looks like the player's link is
+        broken rather than the setting being wrong."""
+        import routes.obs as ro
+        r = ro._new_room_name()
+        assert 0 < len(r) <= ro.ROOM_MAX, len(r)
+        assert r.isalnum(), r
+        assert r != ro._new_room_name(), 'a fresh room every time'
+
+    def test_room_is_unguessable(self, app, settings):
+        """The name IS the credential — a vdo.ninja room exists as soon as
+        someone joins it, so a guessable name is an open door to the table."""
+        import routes.obs as ro
+        rooms = {ro._new_room_name() for _ in range(200)}
+        assert len(rooms) == 200, 'collisions mean predictability'
+
+    def test_creating_a_room_puts_everyone_in_it(self, app, settings):
+        import routes.obs as ro
+        settings['obs_vdo_room'] = ro._new_room_name()
+        settings['obs_dm_stream_id'] = 'dmcam'
+        room = settings['obs_vdo_room']
+        assert '&room=' + room in _char().video_push_url()
+        assert '&room=' + room in ro.dm_tile().video_push_url(), \
+            'the DM has to be in the room too, or nobody hears them'
+
+    def test_the_music_push_stays_out_of_the_room(self, app, settings):
+        """Players already get the music from the portal; in the room as well
+        they would hear it twice, drifting against itself."""
+        import routes.obs as ro
+        settings['obs_vdo_room'] = ro._new_room_name()
+        assert 'room=' not in ro.music_push_url()
+
+
+class TestRoomNameCleaning:
+    """A name vdo.ninja will not take is a broken session, not a typo."""
+
+    def test_punctuation_is_stripped(self, app, settings):
+        import routes.obs as ro
+        assert ro.clean_room('my-table room!') == 'mytableroom'
+
+    def test_over_length_is_trimmed(self, app, settings):
+        import routes.obs as ro
+        out = ro.clean_room('a' * 60)
+        assert len(out) == ro.ROOM_MAX
+
+    def test_already_valid_is_untouched(self, app, settings):
+        import routes.obs as ro
+        assert ro.clean_room('dungeoncrawler') == 'dungeoncrawler'
+
+    def test_generated_rooms_survive_cleaning(self, app, settings):
+        """Whatever the generator emits must already be acceptable, or the
+        Create button would hand out a name the guests reject."""
+        import routes.obs as ro
+        for _ in range(50):
+            r = ro._new_room_name()
+            assert ro.clean_room(r) == r
+
+
+class TestRelayLearnsTheRoom:
+    """The portal carries the link ScenePlay builds, so it has to be told when
+    that link changes. An un-pushed room is worse than a broken one: the old
+    link still works, into a room nobody else is in."""
+
+    @pytest.fixture()
+    def pushed(self, monkeypatch):
+        import relay_broadcaster as rb
+        calls = []
+        monkeypatch.setattr(rb, 'push_character_feeds',
+                            lambda: calls.append(1))
+        return calls
+
+    def test_repush_is_called(self, app, settings, pushed):
+        import routes.obs as ro
+        ro.repush_feeds('test')
+        assert pushed == [1]
+
+    def test_a_dead_relay_never_breaks_the_caller(self, app, settings,
+                                                  monkeypatch):
+        """The relay is usually off; that must not fail a room change."""
+        import relay_broadcaster as rb
+        import routes.obs as ro
+
+        def boom():
+            raise RuntimeError('relay unreachable')
+        monkeypatch.setattr(rb, 'push_character_feeds', boom)
+        ro.repush_feeds('test')          # must not raise
+
+    def test_the_pushed_link_carries_the_room(self, app, settings):
+        """What the portal receives is the finished URL, room included — the
+        relay is never told the room separately."""
+        import routes.obs as ro
+        settings['obs_vdo_room'] = ro._new_room_name()
+        url = _char().video_push_url()
+        assert 'room=' + settings['obs_vdo_room'] in url

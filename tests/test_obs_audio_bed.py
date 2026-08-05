@@ -30,13 +30,22 @@ def _char(**over):
 
 
 class TestRoom:
-    def test_room_joins_the_push_link_only(self, settings):
-        """Players join the room; OBS keeps watching each stream solo so every
-        camera keeps its own fader instead of arriving pre-mixed."""
+    def test_both_ends_carry_the_room(self, settings):
+        """MEASURED: a publisher inside a room is not reachable by stream id
+        alone — ?view=<id> resolves nothing and the tile stays black. The view
+        needs the room to find them, plus &scene so it renders ONE stream for
+        OBS instead of a "Join Room" page."""
         settings['obs_vdo_room'] = 'dungeoncrawler'
         c = _char()
         assert '&room=dungeoncrawler' in c.video_push_url()
-        assert 'room=' not in c.video_view_url()
+        view = c.video_view_url()
+        assert '&room=dungeoncrawler' in view
+        assert '&scene' in view
+
+    def test_no_room_leaves_the_view_url_alone(self, settings):
+        """Without a room the solo id works, and &scene would be noise."""
+        view = _char().video_view_url()
+        assert 'room=' not in view and 'scene' not in view
 
     def test_no_room_configured_changes_nothing(self, settings):
         c = _char()
@@ -221,3 +230,66 @@ class TestLegacyCleanup:
         assert ('ScenePlay Map', 33) in obs['removed']
         assert ('ScenePlay Party', 11) not in obs['removed'], \
             'the party scene is where the music belongs now'
+
+
+class TestAudioDeviceRebind:
+    """Re-applying an identical device_id is a NO-OP in OBS — it keeps the
+    handle it already holds. The music sink is destroyed and recreated every
+    time the music player restarts, so that handle dies and the source reads
+    silence forever while its settings still look perfect.
+
+    Measured on a live rig with a tone playing: same-value write left the meter
+    at 0.00000; nudging to another device and back gave 0.18362.
+    """
+
+    @pytest.fixture()
+    def ws(self, monkeypatch):
+        import obs_ws
+        sent = []
+        state = {'device_id': None}
+
+        def fake_request(rtype, data=None, timeout=5):
+            sent.append((rtype, (data or {}).get('inputSettings',
+                                                 (data or {}))))
+            if rtype == 'CreateInput':
+                raise obs_ws.ObsRejected(601, 'already exists')
+            if rtype == 'GetInputSettings':
+                return {'inputSettings': {'device_id': state['device_id']}}
+            if rtype == 'SetInputSettings':
+                state['device_id'] = data['inputSettings'].get('device_id')
+            if rtype == 'GetInputKindList':
+                return {'inputKinds': ['pulse_output_capture']}
+            return {}
+        monkeypatch.setattr(obs_ws, 'request', fake_request)
+        monkeypatch.setattr(obs_ws, 'audio_capture_kind',
+                            lambda: 'pulse_output_capture')
+        monkeypatch.setattr(obs_ws, 'scene_items', lambda n, **k: {'M': 1})
+        return sent, state
+
+    def _devices_written(self, sent):
+        return [s.get('device_id') for t, s in sent
+                if t == 'SetInputSettings']
+
+    def test_same_device_is_nudged_to_force_a_reopen(self, ws):
+        import obs_ws
+        sent, state = ws
+        state['device_id'] = 'sceneplay_music.monitor'
+        obs_ws.ensure_audio_input('Party', 'M', 'sceneplay_music.monitor')
+        written = self._devices_written(sent)
+        assert written == ['default', 'sceneplay_music.monitor'], written
+
+    def test_a_genuinely_new_device_needs_no_nudge(self, ws):
+        """Changing the value re-opens on its own; nudging would be a needless
+        extra dropout."""
+        import obs_ws
+        sent, state = ws
+        state['device_id'] = 'something.else'
+        obs_ws.ensure_audio_input('Party', 'M', 'sceneplay_music.monitor')
+        assert self._devices_written(sent) == ['sceneplay_music.monitor']
+
+    def test_the_wanted_device_is_always_what_lands(self, ws):
+        import obs_ws
+        sent, state = ws
+        state['device_id'] = 'sceneplay_music.monitor'
+        obs_ws.ensure_audio_input('Party', 'M', 'sceneplay_music.monitor')
+        assert state['device_id'] == 'sceneplay_music.monitor'

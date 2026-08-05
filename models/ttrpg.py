@@ -47,8 +47,15 @@ def _vdo_url(kind, stream_id):
     # keeps one tile per player in OBS with its own mixer fader, instead of
     # one source carrying the whole room already mixed together.
     room = (appsettingGet('obs_vdo_room', '') or '').strip()
-    if kind == 'push' and room and '&room=' not in params:
+    if room and '&room=' not in params:
         url += '&room=' + quote(room, safe='')
+        if kind == 'view':
+            # MEASURED: a publisher inside a room is NOT reachable by stream id
+            # alone — ?view=<id> resolves nothing, and the tile just sits black.
+            # The room is needed to find them, and &scene is what makes this a
+            # one-stream OBS view rather than joining the room as a guest
+            # (?view=<id>&room=<room> on its own renders a "Join Room" page).
+            url += '&scene'
     password = (appsettingGet('obs_vdo_password', '') or '').strip()
     if password:
         url += '&password=' + quote(password, safe='')
