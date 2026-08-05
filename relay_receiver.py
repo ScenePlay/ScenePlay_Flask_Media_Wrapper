@@ -1010,15 +1010,25 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
             _download_portrait(char, relay_url, portrait_rel)
 
     elif mutation_type == 'video_feed_set':
-        # A remote player supplied (or cleared) their own camera URL in the
-        # portal. ScenePlay owns the value; OBS reads it from here. Re-checked
-        # rather than trusted: the relay validates too, but this is the
-        # boundary where portal input becomes local data.
+        # Custom camera URLs are no longer accepted from anywhere, including an
+        # older portal that still offers the field.
+        #
+        # ScenePlay builds every camera link so it can put the table's ROOM in
+        # it. A pasted link has no room, so that player publishes alone: their
+        # own camera page looks perfect to them, they hear nobody, nobody hears
+        # them, and their tile is black on the stream with nothing to say why.
+        # A remote player could set this without the GM ever seeing it, which
+        # is exactly the kind of silent break worth refusing at the boundary.
+        #
+        # A CLEAR (empty url) is still honoured — that walks someone holding an
+        # old custom link back into the room.
         url = (data.get('feed_url') or '').strip()
-        if url and (len(url) > 500 or not url.lower().startswith(('http://', 'https://'))):
-            log.warning('Rejected video_feed_set URL for %s', char.name)
+        if url:
+            log.info('Ignoring video_feed_set for %s: custom feed URLs are no '
+                     'longer supported (they cannot carry the table room)',
+                     char.name)
         else:
-            char.video_feed_url = url
+            char.video_feed_url = ''
             # Keep an already-built OBS browser source pointing at the right
             # feed, so a player swapping to their own capture mid-session
             # doesn't leave OBS showing the old one.

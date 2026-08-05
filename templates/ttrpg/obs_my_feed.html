@@ -107,26 +107,14 @@
 
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-2">Using your own setup?</h6>
-      <p class="small text-muted">
-        Already streaming from OBS, a capture card, or your own vdo.ninja room?
-        Paste the <b>view</b> link here and the GM's OBS will use it instead.
-        Leave it blank to go back to the ScenePlay link above.
+      <p class="small text-muted mb-0">
+        Use the link above &mdash; it is the only one that works. ScenePlay
+        builds it with the table's <b>room</b> baked in, which is what lets you
+        hear everyone and lets them hear you. A link from anywhere else has no
+        room in it, so you would publish on your own: your camera would look
+        fine to you, you would hear nobody, and your tile would sit black on
+        the stream with nothing to explain why.
       </p>
-      <form method="post" action="{{ save_url }}">
-        <input type="hidden" name="action" value="save">
-        <div class="d-flex gap-2 mb-2">
-          <input type="url" name="video_feed_url" class="form-control form-control-sm"
-                 placeholder="https://vdo.ninja/?view=…"
-                 value="{{ char.video_feed_url }}"
-                 style="background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);">
-          <button class="btn btn-ttrpg btn-sm flex-shrink-0">Save</button>
-        </div>
-      </form>
-      {% if char.video_feed_url %}
-      <p class="small mb-0" style="color:var(--ttrpg-accent);">
-        &#9989; Using your custom feed. The GM's OBS loads this URL.
-      </p>
-      {% endif %}
     </div>
 
     <div class="ttrpg-card p-3">

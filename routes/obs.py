@@ -2743,22 +2743,6 @@ def _new_stream_id():
     return ''.join(secrets.choice(alphabet) for _ in range(_STREAM_ID_LEN))
 
 
-def _normalize_feed_url(url):
-    """Validator for a player-supplied feed URL.
-
-    Deliberately NOT the relay's _normalize_device_url, which is a host[:port]
-    check that rejects paths and query strings — the whole point of a
-    VDO.ninja link is its query string. Empty clears the override."""
-    url = (url or '').strip()
-    if not url:
-        return ''
-    if len(url) > _MAX_FEED_URL:
-        raise ValueError('That URL is too long.')
-    if not re.match(r'^https?://', url, re.I):
-        raise ValueError('The URL must start with http:// or https://')
-    return url
-
-
 def _own_character(character_id):
     """A player may only touch their own character; the DM may touch anyone's
     (they set feeds up for people who are at the table but not logged in)."""
@@ -2783,14 +2767,12 @@ def dm_feed():
             appsettingSet('obs_dm_feed_url', '')
             flash('New camera link generated — the old one no longer works.')
         else:
-            try:
-                appsettingSet('obs_dm_feed_url',
-                              _normalize_feed_url(request.form.get('video_feed_url')))
-            except ValueError as exc:
-                flash(str(exc))
-                return redirect(url_for('obs_bp.dm_feed'))
-            if not (appsettingGet('obs_dm_feed_url', '')
-                    or appsettingGet('obs_dm_stream_id', '')):
+            # Custom feed URLs are no longer accepted from anywhere. ScenePlay
+            # builds the link so it can put the table's ROOM in it; a pasted
+            # link has none, which drops that person out of the room silently —
+            # they see themselves, hear nobody, and their tile is black.
+            appsettingSet('obs_dm_feed_url', '')
+            if not appsettingGet('obs_dm_stream_id', ''):
                 appsettingSet('obs_dm_stream_id', _new_stream_id())
             flash('Camera settings saved.')
         refresh_tiles()
@@ -2858,15 +2840,13 @@ def save_feed(character_id):
         char.video_feed_url = ''
         flash('New camera link generated — the old one no longer works.')
     else:
-        try:
-            char.video_feed_url = _normalize_feed_url(request.form.get('video_feed_url'))
-        except ValueError as exc:
-            flash(str(exc))
-            return redirect(url_for('obs_bp.my_feed', character_id=character_id))
-        if not char.video_feed_url and not char.video_stream_id:
+        # No custom URLs, from here or anywhere else — see dm_feed. Clearing on
+        # save also walks any player still holding an old one back into the
+        # room the next time they touch this page.
+        char.video_feed_url = ''
+        if not char.video_stream_id:
             char.video_stream_id = _new_stream_id()
-        flash('Camera settings saved.' if char.video_feed_url
-              else 'Custom URL cleared — back to your ScenePlay camera link.')
+        flash('Camera settings saved.')
     db.session.commit()
 
     # Keep an already-built OBS scene pointed at the new feed, so changing

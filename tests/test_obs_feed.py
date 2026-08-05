@@ -72,34 +72,23 @@ class TestVdoUrls:
         assert 'push=a%20b%26c' in c.video_push_url()
 
 
-class TestFeedUrlValidator:
-    def test_accepts_query_strings(self):
-        """The relay's device validator rejects paths/queries — ours must not,
-        since a VDO.ninja link IS a query string."""
-        from routes.obs import _normalize_feed_url
-        url = 'https://vdo.ninja/?view=abc&cleanoutput'
-        assert _normalize_feed_url(url) == url
+class TestCustomFeedUrlsAreGone:
+    """Custom camera URLs were removed, not merely hidden.
 
-    def test_blank_clears(self):
-        from routes.obs import _normalize_feed_url
-        assert _normalize_feed_url('') == ''
-        assert _normalize_feed_url('   ') == ''
+    ScenePlay builds every link so it can put the table's ROOM in it. A pasted
+    link has no room, so that person publishes alone: their own camera page
+    looks perfect, they hear nobody, nobody hears them, and their tile is black
+    on the stream with nothing to say why.
+    """
 
-    @pytest.mark.parametrize('bad', [
-        'javascript:alert(1)',
-        'data:text/html,<script>',
-        'vdo.ninja/?view=abc',            # no scheme
-        'ftp://example.com/x',
-    ])
-    def test_rejects_non_http(self, bad):
-        from routes.obs import _normalize_feed_url
-        with pytest.raises(ValueError):
-            _normalize_feed_url(bad)
+    def test_the_validator_is_gone(self):
+        """Leaving it behind invites the field being wired back up."""
+        import routes.obs as ro
+        assert not hasattr(ro, '_normalize_feed_url')
 
-    def test_rejects_overlong(self):
-        from routes.obs import _normalize_feed_url
-        with pytest.raises(ValueError):
-            _normalize_feed_url('https://x/' + 'a' * 600)
+    def test_the_page_offers_no_field(self):
+        src = open('templates/ttrpg/obs_my_feed.html').read()
+        assert 'name="video_feed_url"' not in src
 
 
 class TestStreamIds:
@@ -278,36 +267,43 @@ class TestRelayFeedPush:
 
 
 class TestFeedMutation:
-    """A portal player setting their own URL comes back as a mutation."""
+    """The portal can still send a video_feed_set — an older portal build
+    still offers the field — so the refusal has to live at this boundary.
+
+    A remote player could otherwise put themselves outside the table room
+    without the GM ever seeing it: their camera page looks perfect, they hear
+    nobody, nobody hears them, and their tile is black on the stream.
+    """
 
     def _apply(self, char, data):
         import relay_receiver as rr
         rr._apply_mutation(char, 'video_feed_set', data, 'http://relay', db)
 
-    def test_sets_url(self, app):
+    def test_a_custom_url_is_ignored(self, app):
         c = _char(video_stream_id='abc')
         db.session.add(c)
         db.session.commit()
         self._apply(c, {'feed_url': 'https://vdo.ninja/?view=mine'})
-        assert c.video_feed_url == 'https://vdo.ninja/?view=mine'
+        assert c.video_feed_url in ('', None), \
+            'a pasted link would drop this player out of the room'
 
-    def test_clearing_restores_the_generated_link(self, app, settings):
+    def test_an_existing_custom_url_is_not_overwritten_by_another(self, app):
+        """Refusing means refusing — not swapping one bad value for another."""
+        c = _char(video_feed_url='https://old/one')
+        db.session.add(c)
+        db.session.commit()
+        self._apply(c, {'feed_url': 'https://new/two'})
+        assert c.video_feed_url == 'https://old/one'
+
+    def test_clearing_is_still_honoured(self, app, settings):
+        """The one direction that must keep working: it walks a player still
+        holding an old custom link back into the room."""
         c = _char(video_stream_id='abc', video_feed_url='https://x/y')
         db.session.add(c)
         db.session.commit()
         self._apply(c, {'feed_url': ''})
         assert c.video_feed_url == ''
         assert 'abc' in c.video_view_url()     # back to the ScenePlay link
-
-    @pytest.mark.parametrize('bad', ['javascript:alert(1)', 'ftp://x/y', 'x' * 600])
-    def test_rejects_bad_urls_at_the_local_boundary(self, app, bad):
-        """The relay validates too, but this is where portal input becomes
-        local data — re-check rather than trust."""
-        c = _char(video_feed_url='https://good/existing')
-        db.session.add(c)
-        db.session.commit()
-        self._apply(c, {'feed_url': bad})
-        assert c.video_feed_url == 'https://good/existing'
 
 
 class TestTileFallback:
