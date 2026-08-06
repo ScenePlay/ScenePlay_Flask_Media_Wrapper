@@ -530,6 +530,8 @@ def startTheadPlayer():
             # back again, without anyone touching the Broadcast page.
             from routes.obs import start_feed_watch
             start_feed_watch(app)
+            from routes.obs import start_dice_watch
+            start_dice_watch(app)
             relay_guard.disarm_after_grace(relay_guard.OBS_GUARD_PATH)
 
 

@@ -560,3 +560,99 @@ class TestRoomBandwidth:
         settings['obs_vdo_room'] = 'abc123'
         url = ro.music_push_url()
         assert 'novideo' not in url and 'maxvideobitrate' not in url
+
+
+class TestMachineMicMuting:
+    """OBS adds a Mic/Aux on its own machine by default, and a global device
+    is live in EVERY scene. Muting is not enough: a muted input stays
+    CAPTURED — the meter flickers and macOS keeps its mic-in-use indicator
+    lit, which reads as "still recording me" because at the hardware level it
+    is. So when the DM's tile carries their voice, the build REMOVES the
+    machine mics (OBS's own Settings → Audio → Disabled), falling back to a
+    mute only when removal is refused."""
+
+    @pytest.fixture()
+    def mics(self, monkeypatch, settings):
+        import obs_ws
+        state = {'special': {'mic1': 'Mic/Aux'}, 'muted': {'Mic/Aux': False},
+                 'removable': True}
+        calls = {'removed': [], 'muted': []}
+
+        def fake_request(rtype, data=None, timeout=3):
+            if rtype == 'GetSpecialInputs':
+                return dict(state['special'])
+            if rtype == 'GetInputMute':
+                return {'inputMuted': state['muted'][data['inputName']]}
+            if rtype == 'RemoveInput':
+                if not state['removable']:
+                    raise obs_ws.ObsRejected(600, 'cannot remove')
+                calls['removed'].append(data['inputName'])
+                return {}
+            return {}
+        monkeypatch.setattr(obs_ws, 'request', fake_request)
+        monkeypatch.setattr(
+            obs_ws, 'set_input_mute',
+            lambda n, m, **k: calls['muted'].append((n, m)) or
+            state['muted'].__setitem__(n, m))
+        return state, calls
+
+    def test_tile_audio_on_removes_the_machine_mic(self, app, settings, mics):
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '1'
+        _state, calls = mics
+        warnings = []
+        ro._mute_machine_mics(warnings)
+        assert calls['removed'] == ['Mic/Aux']
+        assert calls['muted'] == [], 'removal makes muting moot'
+        assert warnings and 'Settings' in warnings[0], \
+            'must say where to get it back'
+
+    def test_tile_audio_off_leaves_the_mic_alone(self, app, settings, mics):
+        """With tile audio off, that mic may be the DM's ONLY voice path —
+        the classic local-OBS setup. Removing it would silence them."""
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '0'
+        _state, calls = mics
+        ro._mute_machine_mics([])
+        assert calls['removed'] == [] and calls['muted'] == []
+
+    def test_refused_removal_falls_back_to_mute(self, app, settings, mics):
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '1'
+        state, calls = mics
+        state['removable'] = False
+        warnings = []
+        ro._mute_machine_mics(warnings)
+        assert calls['removed'] == []
+        assert calls['muted'] == [('Mic/Aux', True)]
+        assert warnings and 'refused' in warnings[0]
+
+    def test_refused_removal_of_an_already_muted_mic_stays_quiet(
+            self, app, settings, mics):
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '1'
+        state, calls = mics
+        state['removable'] = False
+        state['muted']['Mic/Aux'] = True
+        warnings = []
+        ro._mute_machine_mics(warnings)
+        assert calls['muted'] == [] and warnings == []
+
+    def test_a_build_with_no_mics_does_nothing(self, app, settings, mics):
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '1'
+        state, calls = mics
+        state['special'] = {}
+        ro._mute_machine_mics([])
+        assert calls['removed'] == [] and calls['muted'] == []
+
+    def test_an_unreachable_obs_never_breaks_the_build(self, app, settings,
+                                                       monkeypatch):
+        import obs_ws
+        import routes.obs as ro
+        settings['obs_dm_audio'] = '1'
+
+        def boom(*a, **k):
+            raise obs_ws.ObsUnavailable('gone')
+        monkeypatch.setattr(obs_ws, 'request', boom)
+        ro._mute_machine_mics([])          # must not raise

@@ -458,7 +458,7 @@ def place_item(scene_name, item_id, rect, timeout=3):
 
 ANIM_FPS = 30                 # frames a second the ease is sampled at
 _anim_lock = threading.Lock()
-_anim_gen = 0
+_anim_gen = {}      # scene_name -> generation; see animate_items
 
 
 def _ease(t):
@@ -496,17 +496,20 @@ def animate_items(scene_name, moves, duration_s=0.7, steps=None):
         steps = max(4, min(int(duration_s * ANIM_FPS), 90))
     if not moves or steps < 1 or duration_s <= 0:
         return
-    global _anim_gen
+    # Generation PER SCENE, not global: the dice reflow animates the party
+    # scene and the map scene back-to-back, and a global counter meant the
+    # second call killed the first after a frame or two — tiles frozen
+    # mid-slide while the other scene animated happily.
     with _anim_lock:
-        _anim_gen += 1
-        gen = _anim_gen
+        _anim_gen[scene_name] = _anim_gen.get(scene_name, 0) + 1
+        gen = _anim_gen[scene_name]
 
     def run():
         delay = duration_s / steps
         for step in range(1, steps + 1):
             with _anim_lock:
-                if gen != _anim_gen:
-                    return              # a newer spotlight owns these tiles
+                if gen != _anim_gen.get(scene_name):
+                    return              # a newer move owns this scene's items
             t = _ease(step / steps)
             reqs = [{'requestType': 'SetSceneItemTransform',
                      'requestData': {
@@ -530,7 +533,12 @@ def animate_items(scene_name, moves, duration_s=0.7, steps=None):
             if step < steps:
                 time.sleep(delay)
 
-    threading.Thread(target=run, name='obs-tile-anim', daemon=True).start()
+    t = threading.Thread(target=run, name='obs-tile-anim', daemon=True)
+    t.start()
+    # Returned so callers who must NOT overlap animations can wait on the
+    # truth. Wall time can be many times duration_s against a remote OBS —
+    # every frame is a round-trip — so a clock guess is worthless.
+    return t
 
 
 def set_item_enabled(scene_name, item_id, enabled, timeout=3):

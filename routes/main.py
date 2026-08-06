@@ -288,6 +288,15 @@ def _activate_scene(id):
                     obs_ws.switch_scene(obs_scene, timeout=1.5)
         except Exception as exc:
             print(f'OBS scene link skipped: {exc}')
+        # The scene may also carry a stream-audio policy — e.g. PreShow mutes
+        # everyone so the table can talk freely off-air, and the opening scene
+        # unmutes them. Independent of the scene-CUT toggle above, and wrapped
+        # for the same reason: a scene must activate with OBS in any state.
+        try:
+            from routes.obs import apply_scene_audio
+            apply_scene_audio(scene_id)
+        except Exception as exc:
+            print(f'OBS scene audio skipped: {exc}')
     scnID = []
     scnID.append(id)
     scnPat = CRUD_tblScenePattern(scnID,"bySceneID")

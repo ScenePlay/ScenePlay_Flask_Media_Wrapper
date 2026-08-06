@@ -84,7 +84,7 @@ def _obs_cfg():
         'title_h':       ('%g' % title_height()),
         'panel_title':   (appsettingGet('obs_panel_title', '') or ''),
         'info_text':     (appsettingGet('obs_info_text', '') or ''),
-        'party_bg':      (appsettingGet('obs_party_bg', '') or ''),
+        'party_bg':      art_setting('obs_party_bg'),
         'portal_url':    portal_login_url(),
         'feed_noaudio':  (appsettingGet('obs_feed_noaudio', '0') or '0'),
         'dm_audio':      (appsettingGet('obs_dm_audio', '0') or '0'),
@@ -117,12 +117,13 @@ def _obs_cfg():
         'card_base_suggested': suggested_card_base(),
         'card_base_stale': card_base_stale(),
         'panel_poll':    ('%g' % panel_poll_s()),
+        'dice_autohide': ('1' if dice_autohide_on() else '0'),
         'pre':           show_cfg('pre'),
         'intermission':  show_cfg('intermission'),
         'post':          show_cfg('post'),
         'images':        image_slots(),
         'title_positions': TITLE_POSITIONS,
-        'title_image':   (appsettingGet('obs_title_image', '') or '').strip(),
+        'title_image':   art_setting('obs_title_image'),
         'map_mode':      map_mode(),
         'map_zoom':      appsettingGet('obs_map_zoom', '1') or '1',
         'map_zoom_max':  (appsettingGet('obs_map_zoom_max', '') or '').strip() or '2.2',
@@ -281,6 +282,7 @@ def _mapping_rows(party, snap):
     presence = _presence()
     overrides = _card_overrides()
     benched = offstage_ids()
+    muted_ids = _muted_ids()
     rows = []
     for char in party:
         scene = mapped.get(char.character_id, '')
@@ -294,6 +296,7 @@ def _mapping_rows(party, snap):
             'feed': _feed_state(char, presence),
             'has_custom_url': bool(char.video_feed_url),
             'show_card': char.character_id in overrides,
+            'muted': char.character_id in muted_ids,
             'showing': 'card' if _tile_url(char, presence, overrides).startswith(
                 _card_base()) else 'camera',
             'pos': order.index(char.character_id) + 1 if char.character_id in order else 0,
@@ -415,6 +418,177 @@ def rebind_music_if_stale():
     return True
 
 
+# ── the dice reflow: slide the roll panel in, give the room back after ───────
+DICE_REFLOW_HOLD_S = 5          # quiet seconds before the panel slides away
+DICE_REFLOW_ANIM_S = 0.6
+_dice_state = {'shown': False, 'last_id': None, 'last_roll_at': 0.0,
+               'threads': []}
+_dice_timer = None
+_dice_lock = threading.Lock()
+
+
+def _newest_roll_id():
+    """max(roll_id), straight from sqlite — runs every second, must be cheap,
+    and rolls arrive from another PROCESS too (the relay writes them
+    directly), so an in-app hook could never see them all."""
+    import sqlite3
+    from extensions import databaseDir
+    try:
+        con = sqlite3.connect(databaseDir, timeout=1.0)
+        row = con.execute('SELECT max(roll_id) FROM tblDiceRolls').fetchone()
+        con.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _dice_reflow(show):
+    """Make room for the dice, or give it back — by MOVING things, not by
+    covering them.
+
+    In: every tile eases into the panel-on grid while the roll panel slides
+    in from off-canvas. Out: the reverse, and the tiles retake the full
+    width. The map scene gets the same treatment. All eased through
+    animate_items, the same engine the spotlight uses, so nothing snaps."""
+    import obs_ws
+    if not obs_ws.connected():
+        return False
+    snap = obs_ws.current_state()
+    w = snap.get('base_width') or 1920
+    h = snap.get('base_height') or 1080
+    withp = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
+                                   title_height(), True)
+    full = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
+                                  title_height(), False)
+    if withp['panel'] is None:
+        return False
+    px, py, pw, ph = withp['panel']
+    panel_box = {'x': px, 'y': py, 'w': pw, 'h': ph}
+    panel_off = dict(panel_box, x=float(w))
+
+    try:
+        gutter = int(appsettingGet('obs_tile_gutter', '')
+                     or obs_layout.DEFAULT_GUTTER)
+    except (TypeError, ValueError):
+        gutter = obs_layout.DEFAULT_GUTTER
+
+    party = party_scene_name()
+    try:
+        items = obs_ws.scene_items(party)
+        members = _ordered_party()
+        fid = featured_id()
+        fidx = next((i for i, c in enumerate(members)
+                     if c.character_id == fid), None)
+        area = withp['tiles'] if show else full['tiles']
+        rects = obs_layout.grid_layout(len(members), w, h, featured=fidx,
+                                       gutter=gutter, area=area)
+        moves = []
+        for char, rect in zip(members, rects):
+            target = {k: rect[k] for k in ('x', 'y', 'w', 'h')}
+            was = _tile_rects.get(char.character_id) or target
+            for name in (_source_name_for(char),
+                         _overlay_source_name_for(char)):
+                iid = items.get(name)
+                if iid is not None:
+                    moves.append((iid, was, target))
+            _tile_rects[char.character_id] = target
+        pid = items.get(PANEL_SOURCE_NAME)
+        if pid is not None:
+            moves.append((pid, panel_off if show else panel_box,
+                          panel_box if show else panel_off))
+        if moves:
+            t = obs_ws.animate_items(party, moves,
+                                     duration_s=DICE_REFLOW_ANIM_S)
+            if t is not None:
+                _dice_state['threads'].append(t)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        log.info('Dice reflow (party) skipped: %s', exc)
+        return False
+
+    # The map scene: the map itself breathes in and out the same way.
+    try:
+        mscene = map_scene_name()
+        mitems = obs_ws.scene_items(mscene)
+        moves = []
+        m_show = {'x': withp['tiles'][0], 'y': withp['tiles'][1],
+                  'w': withp['tiles'][2], 'h': withp['tiles'][3]}
+        m_full = {'x': full['tiles'][0], 'y': full['tiles'][1],
+                  'w': full['tiles'][2], 'h': full['tiles'][3]}
+        mid = mitems.get(MAP_SOURCE_NAME)
+        if mid is not None:
+            moves.append((mid, m_full if show else m_show,
+                          m_show if show else m_full))
+        did = mitems.get(DICE_SOURCE_NAME)
+        if did is not None:
+            moves.append((did, panel_off if show else panel_box,
+                          panel_box if show else panel_off))
+        if moves:
+            t = obs_ws.animate_items(mscene, moves,
+                                     duration_s=DICE_REFLOW_ANIM_S)
+            if t is not None:
+                _dice_state['threads'].append(t)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        log.info('Dice reflow (map) skipped: %s', exc)
+    return True
+
+
+def _dice_tick(now):
+    """One heartbeat of the roll watcher. Factored for tests: hand it a
+    clock, it decides show/hide."""
+    st = _dice_state
+    # Never start a reflow while the previous one is still ANIMATING: two
+    # animation threads writing the same transforms interleave, and whichever
+    # finishes LAST wins — measured, with the panel ending up in whichever
+    # state was supposed to be gone. The guard watches the actual threads,
+    # not a clock: against a remote OBS every frame is a round-trip, so the
+    # 0.6s animation can take several real seconds. A roll arriving mid-slide
+    # is not lost; the next tick acts on it.
+    st['threads'] = [t for t in st['threads'] if t.is_alive()]
+    if st['threads']:
+        return
+    newest = _newest_roll_id()
+    if st['last_id'] is None:
+        # First look: whatever is already in the feed is history, not an
+        # event — coming up mid-session must not slide the panel in.
+        st['last_id'] = newest
+        return
+    if newest != st['last_id']:
+        st['last_id'] = newest
+        st['last_roll_at'] = now
+        if not st['shown'] and _dice_reflow(True):
+            st['shown'] = True
+    elif st['shown'] and now - st['last_roll_at'] > DICE_REFLOW_HOLD_S:
+        if _dice_reflow(False):
+            st['shown'] = False
+
+
+def start_dice_watch(app_obj):
+    """1s heartbeat while OBS control is on. Cheap: one MAX() on sqlite and
+    an early return unless something changed. It has to be a poll — rolls
+    also arrive from the relay portal, which writes the table from a
+    different process where no in-app hook could see them."""
+    global _dice_timer
+
+    def _tick():
+        try:
+            with app_obj.app_context():
+                if (appsettingGet('obs_enabled', '0') == '1'
+                        and panel_on() and dice_autohide_on()):
+                    with _dice_lock:
+                        _dice_tick(time.time())
+        except Exception as exc:          # a watchdog must never die loudly
+            log.info('Dice watch failed: %s', exc)
+        finally:
+            start_dice_watch(app_obj)
+
+    with _watch_lock:
+        if _dice_timer is not None:
+            _dice_timer.cancel()
+        _dice_timer = threading.Timer(1.0, _tick)
+        _dice_timer.daemon = True
+        _dice_timer.start()
+
+
 def start_feed_watch(app_obj):
     """Idempotent repeating check. Runs only while OBS is enabled — it
     reschedules itself and simply does nothing when the feature is off."""
@@ -443,11 +617,14 @@ def start_feed_watch(app_obj):
 
 
 def stop_feed_watch():
-    global _watch_timer
+    global _watch_timer, _dice_timer
     with _watch_lock:
         if _watch_timer is not None:
             _watch_timer.cancel()
             _watch_timer = None
+        if _dice_timer is not None:
+            _dice_timer.cancel()
+            _dice_timer = None
 
 
 # ── who currently has the turn ────────────────────────────────────────────────
@@ -582,7 +759,8 @@ def broadcast():
                    .filter_by(campaign_id=sess.campaign_id, active=1)
                    .order_by(tblscenes.orderBy).all()):
             scene_rows.append({'scene_id': sc.scene_ID, 'name': sc.sceneName,
-                               'obs_scene': linked.get(sc.scene_ID, '')})
+                               'obs_scene': linked.get(sc.scene_ID, ''),
+                               'audio': scene_audio_policy(sc.scene_ID)})
     return render_template('ttrpg/obs_broadcast.html',
                            cfg=cfg, snap=snap,
                            rows=_mapping_rows(party, snap),
@@ -681,6 +859,7 @@ def toggle():
         relay_guard.arm(relay_guard.OBS_GUARD_PATH)
         obs_ws.start(current_app._get_current_object())
         start_feed_watch(current_app._get_current_object())
+        start_dice_watch(current_app._get_current_object())
         relay_guard.disarm_after_grace(relay_guard.OBS_GUARD_PATH)
         flash('OBS control enabled — connecting.')
     else:
@@ -803,6 +982,8 @@ def save_config():
             appsettingSet('obs_vdo_room', safe)
     appsettingSet('obs_panel_on',
                   '1' if request.form.get('obs_panel_on') else '0')
+    appsettingSet('obs_dice_autohide',
+                  '1' if request.form.get('obs_dice_autohide') else '0')
     side = (request.form.get('obs_panel_side', '') or 'right').strip().lower()
     appsettingSet('obs_panel_side',
                   side if side in ('left', 'right', 'top', 'bottom') else 'right')
@@ -850,6 +1031,14 @@ def save_config():
         # auth_failed / unsupported verdict.
         appsettingSet('obs_last_error', '')
         obs_ws.restart()
+    # The page auto-saves on change: answer fetch with JSON so nothing
+    # navigates. The redirect stays for plain form posts (no-JS fallback).
+    if request.headers.get('X-Requested-With') == 'fetch':
+        # The stored room may differ from what was typed (clean_room strips
+        # punctuation and trims) — hand it back so the page can show what was
+        # actually kept, since there is no reload to reveal it.
+        return jsonify({'ok': True, 'reconnecting': bool(changed),
+                        'room': table_room()})
     flash('OBS settings saved.' + (' Reconnecting.' if changed else ''))
     return redirect(url_for('obs_bp.broadcast'))
 
@@ -1207,6 +1396,118 @@ def _cut_scene_name(key):
     return {'map': map_scene_name, 'pre': pre_scene_name,
             'intermission': intermission_scene_name,
             'post': post_scene_name, 'party': party_scene_name}[key]()
+
+
+@obs_bp.route('/api/mute', methods=['POST'])
+@login_required
+@dm_required
+def api_mute():
+    """Mute or unmute voices on the stream: one character, or every player.
+
+    {'character_id': id, 'muted': bool}  — one person (the DM included)
+    {'all': True, 'muted': bool}         — every player; the DM is deliberately
+                                           left out, since "mute the table" and
+                                           "mute myself" are different acts.
+
+    Persisted first, then pushed to OBS: builds re-assert tile audio, so a
+    mute that lived only in OBS would silently lift on the next rebuild."""
+    data = request.get_json(silent=True) or {}
+    muted = bool(data.get('muted'))
+
+    scope = data.get('all')
+    if scope:
+        # True (legacy) and 'players' spare the DM; 'everyone' includes them —
+        # the whole-table silence for free talk before the show.
+        targets = [c for c in _ordered_party()
+                   if scope == 'everyone' or c.character_id != DM_TILE_ID]
+    else:
+        try:
+            cid = int(data.get('character_id'))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'character_id required'}), 400
+        char = (dm_tile() if cid == DM_TILE_ID
+                else db.session.get(tblCharacters, cid))
+        if char is None:
+            return jsonify({'ok': False, 'error': 'No such character.'}), 404
+        targets = [char]
+
+    failed = _apply_mutes(targets, muted)
+    return jsonify({'ok': True, 'muted': muted,
+                    'muted_ids': sorted(_muted_ids()),
+                    'applied_later': failed})
+
+
+def _apply_mutes(targets, muted):
+    """Persist then push each mute; returns names OBS couldn't take yet."""
+    import obs_ws
+    failed = []
+    for char in targets:
+        _set_muted(char.character_id, muted)
+        if not obs_ws.connected():
+            continue        # the setting holds; the next build applies it
+        try:
+            obs_ws.set_input_mute(_source_name_for(char), muted)
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+            # Not built yet, or the source is a stat card — the persisted
+            # setting still wins on the next build.
+            failed.append(char.name)
+    return failed
+
+
+SCENE_AUDIO_POLICIES = ('', 'mute_players', 'mute_all', 'unmute_all')
+
+
+def scene_audio_policy(scene_id):
+    """What activating this ScenePlay scene does to the stream's voices."""
+    v = (appsettingGet(f'obs_scene_audio:{int(scene_id)}', '') or '').strip()
+    return v if v in SCENE_AUDIO_POLICIES else ''
+
+
+def apply_scene_audio(scene_id):
+    """Apply a scene's stream-audio policy — called when the scene activates.
+
+    This is what lets a PreShow scene carry 'mute everyone' with it: the table
+    talks freely in the room while the broadcast shows the pre-show card in
+    silence, and the opening scene flips everyone audible again. Same
+    persistence as the buttons, so a rebuild mid-scene keeps the policy.
+
+    Returns the policy applied ('' when none). Never raises: activating a
+    scene must survive OBS being off, gone, or wrong."""
+    try:
+        if (appsettingGet('obs_enabled', '0') or '0') != '1':
+            return ''
+        policy = scene_audio_policy(scene_id)
+        if not policy:
+            return ''
+        everyone = _ordered_party()
+        if policy == 'mute_players':
+            _apply_mutes([c for c in everyone
+                          if c.character_id != DM_TILE_ID], True)
+        elif policy == 'mute_all':
+            _apply_mutes(everyone, True)
+        elif policy == 'unmute_all':
+            _apply_mutes(everyone, False)
+        return policy
+    except Exception as exc:                   # noqa: BLE001
+        log.info('Scene audio policy skipped for %s: %s', scene_id, exc)
+        return ''
+
+
+@obs_bp.route('/api/scene-audio', methods=['POST'])
+@login_required
+@dm_required
+def api_scene_audio():
+    """Store one ScenePlay scene's stream-audio policy."""
+    data = request.get_json(silent=True) or {}
+    try:
+        scene_id = int(data.get('scene_id'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'scene_id required'}), 400
+    policy = (data.get('policy') or '').strip()
+    if policy not in SCENE_AUDIO_POLICIES:
+        return jsonify({'ok': False, 'error': f'Unknown policy {policy!r}'}), 400
+    appsettingSet(f'obs_scene_audio:{scene_id}', policy)
+    return jsonify({'ok': True, 'scene_id': scene_id, 'policy': policy})
 
 
 @obs_bp.route('/api/output/<kind>', methods=['POST'])
@@ -1605,14 +1906,48 @@ IMAGE_SLOTS = {
     'post':         ('obs_post_image', 'post-show', 'Post-show card'),
 }
 
+# Show art can also be a looping VIDEO — an animated title card or an ambient
+# background. Videos skip the Pillow downscale (it cannot read them) and are
+# rendered by the pages as <video autoplay muted loop>.
+VIDEO_EXT = {'mp4', 'webm'}
+VIDEO_MAX_BYTES = 200 * 1024 * 1024
+
+
+def _active_session_id():
+    sess = tblSessions.query.filter_by(status='active').first()
+    return sess.session_id if sess else None
+
+
+def art_setting(setting):
+    """The art for one slot: this session's own choice first, else the shared
+    default.
+
+    Per-session values live in the same settings table under a derived key
+    ('obs_post_image:s7') — the established no-migration idiom here — so each
+    session can carry its own pre/post/title/background art while a session
+    that never set any simply inherits the shared set."""
+    sid = _active_session_id()
+    if sid is not None:
+        own = (appsettingGet(f'{setting}:s{sid}', '') or '').strip()
+        if own:
+            return own
+    return (appsettingGet(setting, '') or '').strip()
+
 
 def image_slots():
-    """Slot rows for the Broadcast page: what is set, and where it lives."""
+    """Slot rows for the Broadcast page: what is set, where it lives, and
+    whether it is this session's own art or the shared default."""
+    sid = _active_session_id()
     out = []
     for slot, (setting, _stem, label) in IMAGE_SLOTS.items():
-        name = (appsettingGet(setting, '') or '').strip()
+        own = ((appsettingGet(f'{setting}:s{sid}', '') or '').strip()
+               if sid is not None else '')
+        name = own or (appsettingGet(setting, '') or '').strip()
         out.append({
             'slot': slot, 'label': label, 'file': name,
+            'per_session': bool(own),
+            'is_video': name.rsplit('.', 1)[-1].lower() in VIDEO_EXT
+                        if '.' in name else False,
             'url': (url_for('static', filename=f'uploads/obs/{name}')
                     if name else ''),
         })
@@ -1626,7 +1961,7 @@ def show_cfg(kind):
     the same "we're about to start" art, and keeping one setting means the DM
     uploads it once instead of keeping two copies in step."""
     slot = {'pre': 'title', 'post': 'post', 'intermission': 'intermission'}[kind]
-    img = (appsettingGet(IMAGE_SLOTS[slot][0], '') or '').strip()
+    img = art_setting(IMAGE_SLOTS[slot][0])
     pos = (appsettingGet(f'obs_{kind}_title_pos', '') or '').strip().lower()
     return {
         'image': img,
@@ -1670,9 +2005,41 @@ def title_height():
         return obs_layout.DEFAULT_TITLE_H
 
 
+def dice_autohide_on():
+    """Dice panel as a pop-over: hidden until a roll lands, gone 5s later."""
+    return (appsettingGet('obs_dice_autohide', '1') or '1') == '1'
+
+
+def _raise_to_front(scene, item_id, warnings):
+    """Put one scene item above everything else in its scene.
+
+    Needed by the dice pop-over: the tiles/map now OVERLAP the panel's box,
+    and a reused item keeps whatever z-order it had from an older build — so
+    without this the panel pops in *behind* the tiles, which reads as the
+    feature simply not working."""
+    import obs_ws
+    try:
+        items = obs_ws.request('GetSceneItemList',
+                               {'sceneName': scene}).get('sceneItems') or []
+        obs_ws.request('SetSceneItemIndex',
+                       {'sceneName': scene, 'sceneItemId': item_id,
+                        'sceneItemIndex': max(0, len(items) - 1)})
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        warnings.append(f'Could not raise the dice panel to the front ({exc}).')
+
+
 def _frame_areas(canvas_w, canvas_h):
-    return obs_layout.frame_areas(canvas_w, canvas_h, panel_side(),
-                                  panel_fraction(), title_height(), panel_on())
+    areas = obs_layout.frame_areas(canvas_w, canvas_h, panel_side(),
+                                   panel_fraction(), title_height(), panel_on())
+    if panel_on() and dice_autohide_on():
+        # Pop-over mode: the panel's column is given BACK to the tiles/map,
+        # and the panel box stays where it was — laid on top, transparent
+        # until a roll lands. The room is the players' by default; the dice
+        # borrow it for five seconds.
+        full = obs_layout.frame_areas(canvas_w, canvas_h, panel_side(),
+                                      panel_fraction(), title_height(), False)
+        areas['tiles'] = full['tiles']
+    return areas
 
 
 def _panel_token():
@@ -1725,8 +2092,13 @@ def ensure_map_scene():
                 scene, src, panel_url(mode), int(rect[2]), int(rect[3]))
             warnings.extend(warn)
             if sid is not None:
-                obs_ws.place_item(scene, sid, {'x': rect[0], 'y': rect[1],
-                                               'w': rect[2], 'h': rect[3]})
+                box = {'x': rect[0], 'y': rect[1],
+                       'w': rect[2], 'h': rect[3]}
+                if mode == 'dice' and dice_autohide_on():
+                    box['x'] = float(w)     # parked off-canvas until a roll
+                    _dice_state['shown'] = False
+                    _raise_to_front(scene, sid, warnings)
+                obs_ws.place_item(scene, sid, box)
                 obs_ws.set_item_enabled(scene, sid, True)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             warnings.append(f'Could not place the {label} ({exc}).')
@@ -1753,6 +2125,11 @@ def ensure_show_scenes():
     snap = obs_ws.current_state()
     w = snap.get('base_width') or 1920
     h = snap.get('base_height') or 1080
+    # The SAME title strip input the party and map scenes carry, in the same
+    # rect, so the campaign banner never jumps when cutting to a card.
+    areas = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
+                                   title_h=title_height(), panel_on=True)
+    trect = areas['title']
     scenes = {}
     for kind, name_fn in (('pre', pre_scene_name),
                           ('intermission', intermission_scene_name),
@@ -1769,6 +2146,22 @@ def ensure_show_scenes():
                 obs_ws.set_item_enabled(scene, item_id, True)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             warnings.append(f'Could not place the {kind}-show card ({exc}).')
+        if trect is not None:
+            try:
+                tid, warn = obs_ws.ensure_browser_input(
+                    scene, TITLE_SOURCE_NAME, panel_url('title'),
+                    int(trect[2]), int(trect[3]))
+                warnings.extend(warn)
+                if tid is not None:
+                    obs_ws.place_item(scene, tid,
+                                      {'x': trect[0], 'y': trect[1],
+                                       'w': trect[2], 'h': trect[3]})
+                    obs_ws.set_item_enabled(scene, tid, True)
+                    # The card item is full-canvas; a reused strip keeps its
+                    # old z-order and would hide behind it.
+                    _raise_to_front(scene, tid, warnings)
+            except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+                warnings.append(f'Could not place the title strip ({exc}).')
         _place_background(scene, w, h, warnings)
         _upsert_special_map(kind, scene)
         scenes[kind] = scene
@@ -1804,6 +2197,20 @@ def _set_id_flag(setting, character_id, on):
     ids = _id_set(setting)
     ids.add(character_id) if on else ids.discard(character_id)
     appsettingSet(setting, ','.join(str(i) for i in sorted(ids)))
+
+
+def _muted_ids():
+    """Character ids the DM has muted on the stream.
+
+    Persisted, not just pushed at OBS: builds re-assert every tile's audio
+    (_apply_tile_audio), so a mute that lived only inside OBS would silently
+    lift on the next Build / refresh — the sort of surprise that gets noticed
+    on air."""
+    return _id_set('obs_muted_ids')
+
+
+def _set_muted(character_id, on):
+    _set_id_flag('obs_muted_ids', character_id, on)
 
 
 def _card_overrides():
@@ -1996,8 +2403,10 @@ def _apply_tile_audio(source, char, warnings):
     worth failing a scene build over."""
     import obs_ws
     is_dm = char.character_id == DM_TILE_ID
+    muted = (char.character_id in _muted_ids()
+             or (is_dm and not _dm_audio_on()))
     try:
-        obs_ws.set_input_mute(source, is_dm and not _dm_audio_on())
+        obs_ws.set_input_mute(source, muted)
     except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
         warnings.append(f'Could not set the audio for {char.name} ({exc}).')
         return
@@ -2147,8 +2556,16 @@ def _sync_party_scene(featured_id=None):
             item_id = _ensure_input(scene, src, panel_url(mode),
                                     int(rect[2]), int(rect[3]), warnings)
             if item_id is not None:
-                obs_ws.place_item(scene, item_id, {'x': rect[0], 'y': rect[1],
-                                                   'w': rect[2], 'h': rect[3]})
+                box = {'x': rect[0], 'y': rect[1],
+                       'w': rect[2], 'h': rect[3]}
+                if mode == 'info' and dice_autohide_on():
+                    # Reflow mode: the panel waits OFF-CANVAS until a roll
+                    # slides it in. Parked, not hidden, so the slide is a
+                    # move of a live source rather than a pop-in.
+                    box['x'] = float(canvas_w)
+                    _dice_state['shown'] = False
+                    _raise_to_front(scene, item_id, warnings)
+                obs_ws.place_item(scene, item_id, box)
                 obs_ws.set_item_enabled(scene, item_id, True)
                 keep.add(src)
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
@@ -2564,6 +2981,7 @@ def _build_audio(canvas_w, canvas_h, warnings):
     _place_music(party, transport, canvas_w, warnings)
     if transport == 'device':
         _warn_if_music_doubled(warnings)
+    _mute_machine_mics(warnings)
 
     _drop_legacy_audio_scene(warnings)
 
@@ -2661,6 +3079,60 @@ def _drop_legacy_audio_scene(warnings):
             obs_ws.request('RemoveScene', {'sceneName': AUDIO_SCENE_NAME})
         except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
             warnings.append(f'Could not remove the old audio scene ({exc}).')
+
+
+def _mute_machine_mics(warnings):
+    """Mute OBS's own global microphone inputs when the DM's voice already
+    arrives through their camera tile.
+
+    OBS adds a Mic/Aux input on its machine by default, and a global device is
+    live in EVERY scene — so working anywhere near the OBS box puts the DM on
+    the stream twice: once clean through the tile, once roomy and delayed
+    through the machine's mic. On a remote rig nobody even remembers that mic
+    exists.
+
+    Only when the tile carries the DM (obs_dm_audio on): with tile audio OFF
+    the machine's mic may be the DM's one real voice path — the classic
+    local-OBS setup — and muting it would silence them entirely. Mute only,
+    never unmute: a DM who deliberately opened that mic gets to keep it by
+    unmuting it again, and the build note says which channel was touched."""
+    import obs_ws
+    if not _dm_audio_on():
+        return
+    try:
+        special = obs_ws.request('GetSpecialInputs')
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+        return
+    for key in ('mic1', 'mic2', 'mic3', 'mic4'):
+        name = special.get(key)
+        if not name:
+            continue
+        # REMOVE rather than mute. Muting silences the mix but OBS keeps the
+        # device captured — the meter goes on flickering and macOS keeps its
+        # orange mic-in-use dot lit, which reads as "still recording me"
+        # because, at the hardware level, it is. Removal is what OBS's own
+        # Settings → Audio → Disabled does, and putting it back is that same
+        # dropdown.
+        try:
+            obs_ws.request('RemoveInput', {'inputName': name})
+            warnings.append(
+                f'Removed OBS\'s own "{name}" input: your voice already '
+                f'reaches the stream through your camera tile, so that mic '
+                f'could only double you. Re-enable it in OBS under Settings '
+                f'→ Audio if you ever want it back.')
+        except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+            # Couldn't remove — at least keep it out of the mix.
+            try:
+                if obs_ws.request('GetInputMute',
+                                  {'inputName': name})['inputMuted']:
+                    continue
+                obs_ws.set_input_mute(name, True)
+                warnings.append(
+                    f'Muted OBS\'s own "{name}" input (removal was refused). '
+                    f'It stays captured but contributes nothing to the '
+                    f'stream.')
+            except (obs_ws.ObsRejected, obs_ws.ObsUnavailable):
+                continue
 
 
 def _warn_if_music_doubled(warnings):
@@ -3285,34 +3757,57 @@ def upload_image(slot):
     if slot not in IMAGE_SLOTS:
         abort(404)
     setting, stem, label = IMAGE_SLOTS[slot]
+    # Art belongs to the ACTIVE session when there is one, so each session can
+    # carry its own pre/post/title/background set. With no session running the
+    # upload edits the shared default that sessions fall back to.
+    sid = _active_session_id()
+    if sid is not None:
+        setting = f'{setting}:s{sid}'
+        stem = f'{stem}-s{sid}'
+
     if request.form.get('clear'):
         appsettingSet(setting, '')
-        flash(f'{label.split(chr(8212))[0].strip()} cleared.')
+        short = label.split(chr(8212))[0].strip()
+        if sid is not None and (appsettingGet(IMAGE_SLOTS[slot][0], '')
+                                or '').strip():
+            flash(f'{short}: this session\'s art cleared — back to the '
+                  f'shared default.')
+        else:
+            flash(f'{short} cleared.')
         return redirect(url_for('obs_bp.broadcast'))
     f = request.files.get('image')
     if not f or not f.filename:
         flash('No image chosen.')
         return redirect(url_for('obs_bp.broadcast'))
     ext = f.filename.rsplit('.', 1)[-1].lower()
-    if ext not in TITLE_EXT:
-        flash('Use a PNG, JPG, WEBP or GIF.')
+    if ext not in TITLE_EXT | VIDEO_EXT:
+        flash('Use a PNG, JPG, WEBP or GIF — or an MP4/WEBM video loop.')
         return redirect(url_for('obs_bp.broadcast'))
     os.makedirs(BG_DIR, exist_ok=True)
-    # Downscale before saving, like every other image intake (portraits,
-    # tokens, map art all go through the same helper). These render at most
-    # 1920px wide on the canvas, so a 9MB AI generation is pure waste — disk,
-    # LAN bandwidth, and a decode stall in OBS's browser source every reload.
-    # Animated GIFs and Pillow failures fall through with the original bytes.
-    from relay_broadcaster import _downscale_image
     raw = f.read()
-    raw, ext = _downscale_image(raw, ext, max_dim=1920)
-    # A stable name per slot: the browser sources cache by URL, so reusing it
-    # means a re-upload replaces the art everywhere instead of leaving the old
-    # file referenced.
+    if ext in VIDEO_EXT:
+        # No Pillow pass for video — it cannot read them. Size-capped instead:
+        # the file is served to OBS's browser source on every reload.
+        if len(raw) > VIDEO_MAX_BYTES:
+            flash(f'That video is {len(raw) // (1024 * 1024)}MB — keep loops '
+                  f'under {VIDEO_MAX_BYTES // (1024 * 1024)}MB.')
+            return redirect(url_for('obs_bp.broadcast'))
+    else:
+        # Downscale before saving, like every other image intake (portraits,
+        # tokens, map art all go through the same helper). These render at
+        # most 1920px wide on the canvas, so a 9MB AI generation is pure
+        # waste — disk, LAN bandwidth, and a decode stall in OBS's browser
+        # source every reload. Animated GIFs and Pillow failures fall through
+        # with the original bytes.
+        from relay_broadcaster import _downscale_image
+        raw, ext = _downscale_image(raw, ext, max_dim=1920)
+    # A stable name per slot (per session): the browser sources cache by URL,
+    # so reusing it means a re-upload replaces the art everywhere instead of
+    # leaving the old file referenced.
     name = f'{stem}.{ext}'
     with open(os.path.join(BG_DIR, name), 'wb') as out:
         out.write(raw)
-    for other in TITLE_EXT:                 # drop a previous different format
+    for other in (TITLE_EXT | VIDEO_EXT):   # drop a previous different format
         old = os.path.join(BG_DIR, f'{stem}.{other}')
         if other != ext and os.path.exists(old):
             try:
@@ -3320,7 +3815,7 @@ def upload_image(slot):
             except OSError:
                 pass
     appsettingSet(setting, name)
-    flash('Image updated. Reload the affected source in OBS to see it.')
+    flash('Art updated. Reload the affected source in OBS to see it.')
     return redirect(url_for('obs_bp.broadcast'))
 
 
@@ -3410,7 +3905,7 @@ def panel_state():
         # Same derivation the map's idle card uses, so the two agree.
         tp = _title_payload(sess)
         title = tp['campaign'] or tp['session'] or 'ScenePlay'
-    bg = (appsettingGet('obs_party_bg', '') or '').strip()
+    bg = art_setting('obs_party_bg')
 
     turn = ''
     fid = featured_id()
@@ -3733,7 +4228,7 @@ def _map_payload(bm):
 
 def _title_payload(sess):
     from flask import url_for as _url_for
-    img = (appsettingGet('obs_title_image', '') or '').strip()
+    img = art_setting('obs_title_image')
     campaign = ''
     if sess and sess.campaign_id:
         from models.campaigns import tblcampaigns

@@ -516,6 +516,14 @@
                   data-character-id="{{ char.character_id }}"
                   title="Show the map through this character (3D if the map supports it)"
                   onclick="obsViewPlayer(event, this)">&#128065;</button>
+          <!-- The eye's sibling: eye = whose view is on screen, speaker =
+               whose voice is on the stream. Painted by the same 2s poll, so
+               a mute made on the Broadcast page (or by a scene policy) shows
+               here within a beat. -->
+          <button class="obs-mapmute-btn btn btn-sm py-0 px-1 btn-outline-secondary"
+                  data-character-id="{{ char.character_id }}" data-muted="0"
+                  title="Mute this voice on the stream"
+                  onclick="obsMuteFromMap(event, this)">&#128266;</button>
           {% endif %}
           <button class="sidebar-btn btn btn-sm py-0 px-1
                          {% if char.character_id in on_map_player_ids %}btn-outline-danger{% else %}btn-outline-secondary{% endif %}">

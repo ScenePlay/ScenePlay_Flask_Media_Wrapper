@@ -92,8 +92,6 @@
             &#9635; Build / refresh party scene</button>
           <button class="btn btn-sm btn-outline-secondary" onclick="obsRefreshScenes(this)">
             &#8635; Re-read from OBS</button>
-          <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
-                  title="Saves every setting on this page">Save</button>
         </div>
       </div>
       <!-- Where a build reports what OBS ended up holding. Inline rather than
@@ -111,6 +109,24 @@
       {% if not has_party %}
       <p class="small text-muted mb-0">No active session &mdash; start a session and add a party first.</p>
       {% else %}
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="small text-muted">Stream audio:</span>
+        <button type="button" class="btn btn-sm btn-outline-danger"
+                onclick="obsMuteAll('everyone', true)"
+                title="Silence the whole table on the stream — you included. The room keeps talking; the broadcast goes quiet.">
+          &#128263; Mute everyone</button>
+        <button type="button" class="btn btn-sm btn-outline-danger"
+                onclick="obsMuteAll('players', true)"
+                title="Mute every player's voice on the stream — your own tile is left alone">
+          &#128263; Mute players</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="obsMuteAll('everyone', false)"
+                title="Unmute the whole table on the stream">
+          &#128266; Unmute all</button>
+        <span class="small text-muted">Mutes survive rebuilds; each row's
+          speaker toggles one voice. Scenes can flip these automatically
+          &mdash; see Scene Links.</span>
+      </div>
       <div id="obs-rows">
         {% for r in rows %}
         <div class="d-flex align-items-center gap-2 mb-2 obs-row" data-character-id="{{ r.character_id }}"
@@ -145,6 +161,12 @@
             <input type="checkbox" class="obs-card-chk" onchange="obsCardOverride(this)"
                    {% if r.show_card %}checked{% endif %}> card
           </label>
+          <button type="button" class="btn btn-sm obs-mute-btn
+                         {% if r.muted %}btn-danger{% else %}btn-outline-secondary{% endif %}"
+                  data-muted="{{ '1' if r.muted else '0' }}"
+                  onclick="obsMuteChar(this)"
+                  title="{% if r.muted %}Muted on the stream — click to unmute{% else %}Mute this voice on the stream{% endif %}">
+            {% if r.muted %}&#128263;{% else %}&#128266;{% endif %}</button>
           <a class="btn btn-sm btn-outline-secondary"
              href="{% if r.character_id == dm_id %}{{ url_for('obs_bp.dm_feed') }}
                    {%- else %}{{ url_for('obs_bp.my_feed', character_id=r.character_id) }}{% endif %}"
@@ -177,7 +199,7 @@
         <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
           How long the tiles take to resize when the spotlight moves to a
           player and when <b>0</b>/<b>G</b> evens the table out again.
-          <b>0</b> snaps instantly. Saved with any <b>Save</b> on this page.
+          <b>0</b> snaps instantly. Saves automatically.
         </div>
       </div>
       {% if cfg.portal_url %}
@@ -201,8 +223,6 @@
            clicked — the point is not having to scroll to reach it. -->
       <div class="d-flex align-items-center justify-content-between mb-2">
         <h6 style="color:var(--ttrpg-accent);" class="mb-0">Battle Map on Stream</h6>
-        <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
-                title="Saves every setting on this page">Save</button>
       </div>
       <p class="small text-muted">
         The map is a <b>browser source</b> &mdash; just the map, not your screen or a
@@ -266,7 +286,7 @@
           <input type="number" name="obs_map_zoom_hold_s" form="obs-cfg-form"
                  class="form-control form-control-sm" min="1" max="120" step="1"
                  value="{{ cfg.map_zoom_hold }}">
-          <div class="form-text">Saved with any <b>Save</b> on this page.</div>
+          <div class="form-text">Saves automatically.</div>
         </div>
         <div class="col-sm-4">
           <label class="form-label small">Stat card refresh (s)</label>
@@ -293,9 +313,12 @@
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-2">Scene Links</h6>
       <p class="small text-muted">
-        Activating one of your ScenePlay scenes can cut OBS at the same time &mdash;
-        e.g. a battle scene switches to the map view. Needs
-        <i>Switch OBS when a ScenePlay scene is activated</i> below.
+        Activating one of your ScenePlay scenes can cut OBS at the same time
+        &mdash; e.g. a battle scene switches to the map view (needs
+        <i>Switch OBS when a ScenePlay scene is activated</i> below) &mdash;
+        and can set the stream's voices: give PreShow <b>Mute everyone</b> and
+        the table talks freely off-air while the card is up, then let your
+        opening scene <b>Unmute everyone</b>.
       </p>
       {% if not snap.scenes %}
       <div class="small mb-2" style="color:#c9a227;">
@@ -317,6 +340,16 @@
                style="max-width:18rem;" list="obs-scene-names"
                value="{{ s.obs_scene }}" placeholder="— no OBS switch —"
                onchange="obsSaveSceneLink(this)">
+        <select class="form-select form-select-sm obs-scene-audio"
+                style="max-width:13rem;" onchange="obsSceneAudio(this)"
+                title="What activating this scene does to the STREAM's voices — the room keeps talking either way">
+          {% for v, lbl in [('', '— audio unchanged —'),
+                            ('mute_all', 'Mute everyone'),
+                            ('mute_players', 'Mute players'),
+                            ('unmute_all', 'Unmute everyone')] %}
+          <option value="{{ v }}" {% if s.audio == v %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
         <span class="small obs-scene-note" style="min-width:9rem;">
           {% if s.obs_scene and snap.scenes and s.obs_scene not in snap.scenes %}
           <span style="color:#c9a227;">&#9888; not in OBS</span>
@@ -331,8 +364,6 @@
     <div class="ttrpg-card p-3 mb-3">
       <div class="d-flex align-items-center justify-content-between mb-3">
         <h6 style="color:var(--ttrpg-accent);" class="mb-0">Connection Settings</h6>
-        <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
-                title="Saves every setting on this page">Save</button>
       </div>
 
       <!-- How ScenePlay reaches OBS. First, because it is the connection this
@@ -430,8 +461,6 @@
       <div class="ttrpg-card p-3 mb-3">
         <div class="d-flex align-items-center justify-content-between mb-2">
           <h6 style="color:var(--ttrpg-accent);" class="mb-0">&#127760; Page address for OBS</h6>
-          <button type="submit" form="obs-cfg-form" class="btn btn-sm btn-ttrpg"
-                  title="Saves every setting on this page">Save</button>
         </div>
         {% if cfg.card_base_loopback %}
         <div class="alert py-2 px-3 mb-2" style="background:var(--ttrpg-primary);
@@ -475,7 +504,7 @@
             </div>
             <div class="form-text">
               Filled in automatically the first time you opened this page.
-              Saved with any <b>Save</b> on this page &mdash; rebuild the party scene
+              Saves automatically &mdash; rebuild the party scene
               afterwards so existing sources are repointed.
             </div>
           </div>
@@ -487,11 +516,13 @@
            with its own upload form, which made it impossible to see at a
            glance what art was set and what was missing. -->
       <div class="ttrpg-card p-3 mb-3">
-        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128247; Images</h6>
+        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128247; Show art</h6>
         <p class="small text-muted">
-          Every picture the stream uses. Uploads save immediately &mdash; then
-          reload the affected source in OBS (or rebuild the party scene) to see
-          the change.
+          Pictures or <b>looping videos</b> (MP4/WEBM) for the stream. With a
+          session running, uploads belong to <b>that session</b> &mdash; each
+          session keeps its own set, falling back to the shared default. Choose
+          a file or paste from the clipboard; it saves immediately &mdash; then
+          reload the affected source in OBS (or rebuild the party scene).
         </p>
         <div style="display:grid;grid-template-columns:88px minmax(9rem,1fr) auto auto;
                     gap:.5rem .75rem;align-items:center;">
@@ -500,7 +531,10 @@
           <div style="width:88px;height:50px;border-radius:6px;overflow:hidden;
                       border:1px solid var(--sp-border);background:var(--ttrpg-primary);
                       display:flex;align-items:center;justify-content:center;">
-            {% if img.url %}
+            {% if img.url and img.is_video %}
+            <video src="{{ img.url }}" muted loop autoplay playsinline
+                   style="max-width:100%;max-height:100%;object-fit:contain;"></video>
+            {% elif img.url %}
             <img src="{{ img.url }}" alt=""
                  style="max-width:100%;max-height:100%;object-fit:contain;">
             {% else %}
@@ -509,6 +543,16 @@
           </div>
           <div class="small" style="line-height:1.25;">
             {{ img.label }}
+            {% if img.per_session %}
+            <span class="badge ms-1" style="background:var(--ttrpg-accent);
+                  color:var(--sp-on-accent);font-size:.55rem;vertical-align:middle;"
+                  title="This session's own art — other sessions keep theirs">this session</span>
+            {% elif img.file %}
+            <span class="badge ms-1" style="background:var(--ttrpg-primary);
+                  color:var(--ttrpg-text);border:1px solid var(--sp-border);
+                  font-size:.55rem;vertical-align:middle;"
+                  title="The shared default — used by any session without its own">shared</span>
+            {% endif %}
             <div class="text-muted" style="font-size:.7rem;">
               {% if img.file %}<code>{{ img.file }}</code>{% else %}not set{% endif %}
             </div>
@@ -516,14 +560,23 @@
           <form method="post" enctype="multipart/form-data"
                 action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
                 class="d-flex align-items-center gap-1" style="margin:0;">
-            <input type="file" name="image" accept="image/*"
-                   class="form-control form-control-sm" style="max-width:13rem;">
-            <button class="btn btn-sm btn-ttrpg flex-shrink-0">Upload</button>
+            <!-- Choosing (or pasting) uploads immediately — no Upload button.
+                 paste_image.js drops the clipboard blob into this input and
+                 fires 'change', so both paths share the submit. -->
+            <input type="file" name="image" accept="image/*,video/mp4,video/webm"
+                   class="form-control form-control-sm" style="max-width:13rem;"
+                   onchange="if (this.files.length) this.form.submit();">
+            <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                    onclick="pasteImageNear(this)"
+                    title="Paste an image from the clipboard">&#128203;</button>
           </form>
           <form method="post"
                 action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
                 style="margin:0;">
-            {% if img.file %}
+            {% if img.per_session %}
+            <button name="clear" value="1" class="btn btn-sm btn-outline-danger"
+                    title="Drop this session's art and fall back to the shared default">Clear</button>
+            {% elif img.file %}
             <button name="clear" value="1"
                     class="btn btn-sm btn-outline-danger">Clear</button>
             {% else %}
@@ -742,6 +795,19 @@
             <span class="text-muted">(falls back to the dice roll feed when there are no notes)</span>
           </label>
         </div>
+        <div class="form-check mb-2 ms-3">
+          <input class="form-check-input" type="checkbox" id="obs-dice-autohide"
+                 name="obs_dice_autohide" value="1"
+                 {% if cfg.dice_autohide == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-dice-autohide">
+            Dice as a <b>pop-over</b>
+            <span class="text-muted">(the panel's column is given to the
+            players and the map; the dice fade in over them when a roll lands
+            and fade out 5 seconds later. Notes pin the panel open. Applies to
+            the Party and Map scenes &mdash; <b>rebuild the party scene</b>
+            after changing this, since it changes the layout.)</span>
+          </label>
+        </div>
         <div class="row g-2 mb-2 ms-3" style="max-width:38rem;">
           <div class="col-4">
             <label class="form-label small">Panel sits on the</label>
@@ -890,8 +956,9 @@
                    min="0" max="20000" step="50" value="{{ cfg.transition_ms }}">
           </div>
         </div>
-        <button class="btn btn-ttrpg btn-sm">Save Settings</button>
-        <span class="small text-muted ms-2">Changing host, port or password reconnects.</span>
+        <span class="small text-muted">
+          &#10003; Settings save automatically as you change them. Changing
+          host, port or password reconnects.</span>
       </form>
       <hr style="border-color:var(--sp-border);">
       <p class="small text-muted mb-0">
@@ -904,6 +971,7 @@
   </div>
 </div>
 
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
 <script>
 const OBS_STATE_URL   = "{{ url_for('obs_bp.api_state') }}";
 const OBS_SWITCH_URL  = "{{ url_for('obs_bp.api_switch') }}";
@@ -996,13 +1064,72 @@ function obsUseThisMachine(btn) {
   inp.value = OBS_SUGGESTED_BASE;
   inp.focus();
   const orig = btn.textContent;
-  btn.textContent = 'Filled — now Save';
+  btn.textContent = '\u2713 Filled';
+  obsAutoSave();   // the field never fires 'change' when set from JS
   setTimeout(() => { btn.textContent = orig; }, 2500);
 }
 
 // Which path Automatic would choose right now, decided server-side: whether
 // OBS can read this machine's audio devices is not something the page can know.
 const OBS_MUSIC_AUTO = "{{ 'device' if cfg.obs_local else 'feed' }}";
+
+// ── auto-save ───────────────────────────────────────────────────────────────
+// Every settings field saves itself on change — there is no Save button to
+// hunt for. 'change' rather than 'input' on purpose: text fields commit on
+// blur, so typing a host address does not fire a reconnect per keystroke.
+// Posts the WHOLE form each time (FormData collects the form= -bound fields
+// scattered across the cards too), which the server already parses as one.
+let _obsSaveTimer = null;
+let _obsSaveAgain = false;
+let _obsSaving = false;
+
+function obsAutoSave() {
+  clearTimeout(_obsSaveTimer);
+  _obsSaveTimer = setTimeout(() => {
+    if (_obsSaving) { _obsSaveAgain = true; return; }   // serialise saves
+    const form = document.getElementById('obs-cfg-form');
+    if (!form) return;
+    _obsSaving = true;
+    fetch(form.action, {method: 'POST', body: new FormData(form),
+                        headers: {'X-Requested-With': 'fetch'}})
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => {
+        _obsSavedPill();
+        // Show what was actually stored when the server tidied the room name
+        // (punctuation stripped, length capped) — no reload will reveal it.
+        const roomEl = document.getElementById('obs-vdo-room');
+        if (roomEl && d.room !== undefined && roomEl !== document.activeElement
+            && roomEl.value.trim() !== d.room) {
+          roomEl.value = d.room;
+        }
+        if (d.reconnecting) {
+          const note = document.getElementById('obs-output-note');
+          if (note) note.textContent = 'Reconnecting to OBS…';
+        }
+      })
+      .catch(() => {
+        _obsShowBuildReport({error: 'A setting failed to save — check the ' +
+                                    'connection and change it again.'});
+      })
+      .finally(() => {
+        _obsSaving = false;
+        if (_obsSaveAgain) { _obsSaveAgain = false; obsAutoSave(); }
+      });
+  }, 400);
+}
+
+document.addEventListener('change', (e) => {
+  const el = e.target;
+  if (!el || !el.name) return;
+  // Only fields that belong to the settings form — file inputs and the
+  // upload forms keep their own submit.
+  const form = el.form || (el.getAttribute && el.getAttribute('form')
+                           ? document.getElementById(el.getAttribute('form'))
+                           : null);
+  if (!form || form.id !== 'obs-cfg-form') return;
+  if (el.type === 'file') return;
+  obsAutoSave();
+});
 
 // Grey out the path that is NOT in use. Both blocks used to sit there live at
 // once, so it was possible to fill in feed settings while the device path was
@@ -1034,6 +1161,54 @@ function obsPaintMusicPath() {
   if (forced) forced.style.display = (chosen === 'auto') ? 'none' : '';
 }
 document.addEventListener('DOMContentLoaded', obsPaintMusicPath);
+
+const OBS_MUTE_URL = "{{ url_for('obs_bp.api_mute') }}";
+const OBS_SCENEAUDIO_URL = "{{ url_for('obs_bp.api_scene_audio') }}";
+
+function _obsPaintMuteBtn(btn, muted) {
+  btn.dataset.muted = muted ? '1' : '0';
+  btn.innerHTML = muted ? '&#128263;' : '&#128266;';
+  btn.classList.toggle('btn-danger', muted);
+  btn.classList.toggle('btn-outline-secondary', !muted);
+  btn.title = muted ? 'Muted on the stream — click to unmute'
+                    : 'Mute this voice on the stream';
+}
+
+function obsMuteChar(btn) {
+  const row = btn.closest('.obs-row');
+  const cid = row && parseInt(row.dataset.characterId, 10);
+  if (cid === undefined || cid === null || isNaN(cid)) return;
+  const want = btn.dataset.muted !== '1';
+  btn.disabled = true;
+  _obsPost(OBS_MUTE_URL, {character_id: cid, muted: want})
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) || 'Could not change the mute.'});
+        return;
+      }
+      _obsPaintMuteBtn(btn, want);
+      _obsSavedPill();
+    });
+}
+
+function obsMuteAll(scope, muted) {
+  _obsPost(OBS_MUTE_URL, {all: scope, muted})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) || 'Could not change the mutes.'});
+        return;
+      }
+      // Repaint every row from the server's answer — the DM's own row is
+      // deliberately not part of "all", so it must keep its current state.
+      const ids = new Set(d.muted_ids || []);
+      document.querySelectorAll('.obs-row').forEach(row => {
+        const btn = row.querySelector('.obs-mute-btn');
+        if (btn) _obsPaintMuteBtn(btn, ids.has(parseInt(row.dataset.characterId, 10)));
+      });
+      _obsSavedPill();
+    });
+}
 
 const OBS_NEWROOM_URL = "{{ url_for('obs_bp.api_new_room') }}";
 
@@ -1266,6 +1441,23 @@ function obsOnStream(chk) {
 function obsReorder(characterId, delta) {
   _obsPost(OBS_REORDER_URL, {character_id: characterId, delta})
     .then(({ok, d}) => { if (ok && d.ok) location.reload(); });
+}
+
+function obsSceneAudio(sel) {
+  const row = sel.closest('.obs-scene-row');
+  const note = row.querySelector('.obs-scene-note');
+  _obsPost(OBS_SCENEAUDIO_URL, {scene_id: row.dataset.sceneId,
+                                policy: sel.value})
+    .then(({ok, d}) => {
+      if (!ok || !d.ok) {
+        _obsShowBuildReport({error: (d && d.error) || 'Could not save.'});
+        return;
+      }
+      if (note) {
+        note.innerHTML = '<span style="color:#3fa14a;">✓ saved</span>';
+        setTimeout(() => { note.textContent = ''; }, 2500);
+      }
+    });
 }
 
 function obsSaveSceneLink(inp) {

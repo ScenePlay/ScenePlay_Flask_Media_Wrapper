@@ -29,7 +29,7 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
   }
-  #bg { position: absolute; inset: 0; width: 100%; height: 100%;
+  #bg, #bg-vid { position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; }
   /* Without art the scene would key onto whatever OBS has underneath, which
      is rarely what the DM wants — fall back to the table's own dark field. */
@@ -114,7 +114,7 @@
   .roll.fumble .roll-total { color: #e06666; }
   /* ── pre / post show card ── */
   #show { position: absolute; inset: 0; display: none; }
-  #show-img {
+  #show-img, #show-vid {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     /* 75% of the canvas, contained rather than cropped: the background art is
        meant to frame it, and object-fit:cover would cut off whatever the DM
@@ -137,6 +137,7 @@
 
 <div id="bg-fallback"></div>
 <img id="bg" alt="" style="display:none;">
+<video id="bg-vid" muted loop autoplay playsinline style="display:none;"></video>
 <div id="title">
   <div id="title-main"></div>
   <div id="title-sub"><span id="turn"></span></div>
@@ -147,6 +148,7 @@
 </div>
 <div id="show">
   <img id="show-img" alt="">
+  <video id="show-vid" muted loop autoplay playsinline></video>
   <div id="show-title-wrap"><div id="show-title"></div></div>
 </div>
 
@@ -174,19 +176,40 @@ const SHOW_CARD = CARD_MODES.indexOf(MODE) !== -1;
 const ALIGN = {top: 'flex-start', middle: 'center', bottom: 'flex-end',
                left: 'flex-start', center: 'center', right: 'flex-end'};
 
+// Art may be a still OR a looping video (mp4/webm). One painter for both:
+// point the right element at the URL, hide the other. Videos autoplay because
+// they are muted — no user gesture exists inside a browser source.
+function isVideoUrl(u) { return /\.(mp4|webm)(\?|$)/i.test(u || ''); }
+
+function paintMedia(imgEl, vidEl, url) {
+  const wantVid = isVideoUrl(url);
+  const on = wantVid ? vidEl : imgEl;
+  const off = wantVid ? imgEl : vidEl;
+  off.removeAttribute('src');
+  off.style.display = 'none';
+  if (off === vidEl) { try { vidEl.pause(); } catch (e) {} }
+  if (url) {
+    if (on.getAttribute('src') !== url) {
+      on.src = url;
+      if (on === vidEl) vidEl.play().catch(() => {});
+    }
+    on.style.display = '';
+  } else {
+    on.removeAttribute('src');
+    on.style.display = 'none';
+  }
+  return on;
+}
+
 function paintShow(d) {
   const cfg = d[MODE] || {};
   document.getElementById('show').style.display = 'block';
-  const img = document.getElementById('show-img');
+  const img = paintMedia(document.getElementById('show-img'),
+                         document.getElementById('show-vid'), cfg.image_url);
   if (cfg.image_url) {
-    if (img.getAttribute('src') !== cfg.image_url) img.src = cfg.image_url;
-    img.style.display = '';
     const f = (d.image_fraction || 0.75) * 100;
     img.style.width = f + '%';
     img.style.height = f + '%';
-  } else {
-    img.removeAttribute('src');
-    img.style.display = 'none';
   }
   const t = document.getElementById('show-title');
   t.textContent = cfg.title || '';
@@ -229,9 +252,7 @@ function paintBg(url) {
   if (!SHOW_BG) return;
   if (url === lastBg) return;
   lastBg = url;
-  const img = el('bg');
-  if (url) { img.src = url; img.style.display = ''; }
-  else { img.removeAttribute('src'); img.style.display = 'none'; }
+  paintMedia(el('bg'), el('bg-vid'), url);
 }
 
 function rollRow(r) {
@@ -249,6 +270,7 @@ function rollRow(r) {
 }
 
 let shownRolls = [], mode = null;
+
 
 function paintNotes(lines) {
   const host = el('scroll');

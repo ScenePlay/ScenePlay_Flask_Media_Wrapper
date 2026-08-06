@@ -2284,6 +2284,33 @@ function obsViewPlayer(ev, btn) {
     .catch(() => {});
 }
 
+// The eye's sibling: mute this character's voice on the stream. Same
+// optimistic-then-corrected shape — the 2s poll's muted_ids is the authority,
+// so a mute made on the Broadcast page or by a scene policy lands here too.
+function _obsPaintMapMute(btn, muted) {
+  btn.dataset.muted = muted ? '1' : '0';
+  btn.innerHTML = muted ? '&#128263;' : '&#128266;';
+  btn.classList.toggle('btn-outline-danger', muted);
+  btn.classList.toggle('btn-outline-secondary', !muted);
+  btn.title = muted ? 'Muted on the stream — click to unmute'
+                    : 'Mute this voice on the stream';
+}
+
+function obsMuteFromMap(ev, btn) {
+  ev.stopPropagation();
+  const want = btn.dataset.muted !== '1';
+  fetch('/ttrpg/obs/api/mute', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_id: btn.dataset.characterId, muted: want }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert(d.error || 'Could not change the mute.'); return; }
+      _obsPaintMapMute(btn, want);
+    })
+    .catch(() => {});
+}
+
 // Cut OBS to one of the ScenePlay scenes. Optimistic-then-corrected, same as
 // obsViewPlayer: the 2s poll is the authority, this just avoids a dead-feeling
 // button while the request is in flight.
@@ -2477,6 +2504,14 @@ function _obsSync(obs) {
             : live ? 'The map is being shown through this character now'
             : 'Show the map through this character (3D if the map supports it)';
   });
+  // Speaker buttons follow the persisted mute set, wherever it was changed —
+  // Broadcast page, a scene's audio policy, or another tab of this page.
+  if (obs.muted_ids) {
+    const muted = new Set(obs.muted_ids.map(String));
+    document.querySelectorAll('.obs-mapmute-btn').forEach(b => {
+      _obsPaintMapMute(b, muted.has(String(b.dataset.characterId)));
+    });
+  }
   _obsPaintMapMode(obs.map_mode);
   // Light whichever cut button matches the scene OBS is actually on, so the
   // strip reflects the rig even when the DM switched scenes inside OBS.

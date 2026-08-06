@@ -149,10 +149,21 @@ class TestTileAudio:
         ro._apply_tile_audio('DM - DM Cam', dm, [])
         assert obs['mute'] == [('DM - DM Cam', False)]
 
-    def test_players_are_never_muted(self, app, settings, obs):
+    def test_players_are_unmuted_unless_the_dm_muted_them(self, app, settings,
+                                                          obs):
         import routes.obs as ro
         ro._apply_tile_audio('Player - Kara Cam', _char(), [])
         assert obs['mute'] == [('Player - Kara Cam', False)]
+
+    def test_a_dm_muted_player_stays_muted_through_a_build(self, app, settings,
+                                                           obs):
+        """The mute is persisted, not just pushed at OBS: builds re-assert
+        every tile's audio, so a mute living only in OBS would silently lift
+        on the next rebuild — noticed on air."""
+        import routes.obs as ro
+        settings['obs_muted_ids'] = '7'
+        ro._apply_tile_audio('Player - Kara Cam', _char(), [])
+        assert obs['mute'] == [('Player - Kara Cam', True)]
 
     def test_monitoring_is_off_by_default(self, app, settings, obs):
         """Off still reaches the stream — it only decides whether the DM hears

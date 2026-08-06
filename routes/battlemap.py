@@ -851,7 +851,7 @@ def _obs_poll_state():
     except Exception:
         return None
     from routes.obs import (map_mode, viewed_character_id,
-                            CUT_TARGETS, _cut_scene_name)
+                            CUT_TARGETS, _cut_scene_name, _muted_ids)
     return {'connected': snap['connected'],
             'current_scene': snap['current_scene'],
             'recording': snap['recording'],
@@ -865,7 +865,11 @@ def _obs_poll_state():
             'map_scene': _cut_scene_name('map'),
             # Which character the map view is pinned to, so their row's eye
             # button can show that it is the one on screen.
-            'view_char': viewed_character_id()}
+            'view_char': viewed_character_id(),
+            # Who is muted on the stream, so each row's speaker button shows
+            # the truth even when the mute was flipped from the Broadcast
+            # page, a scene policy, or another tab.
+            'muted_ids': sorted(_muted_ids())}
 
 
 # ── Token CRUD ────────────────────────────────────────────────────────────────
