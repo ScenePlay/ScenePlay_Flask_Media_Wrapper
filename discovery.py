@@ -11,6 +11,7 @@ This does a concurrent TCP-connect sweep (one process, thread pool) and then
 
   * ScenePlay port open  -> GET /api/server-info ; keep if app == "ScenePlay"
   * port 80 open         -> GET /json/info       ; keep if it looks like WLED
+  * obs-websocket open   -> read the Hello frame ; keep if it names a version
 
 Only devices that identify themselves are written to tblServersIP, so the table
 stops filling up with unrelated hardware. A /24 finishes in a few seconds even
@@ -23,6 +24,7 @@ Public API:
 """
 
 import ipaddress
+import json
 import socket
 import threading
 import concurrent.futures
@@ -38,6 +40,7 @@ from models.serverRole import tblserverrole as ServerRole
 # extra port multiplies the number of connect attempts across the whole /24.
 SCENEPLAY_PORT = 8086
 WLED_PORT      = 80
+OBS_PORT       = 4455    # obs-websocket v5 default (the streaming rig's control port)
 
 # A live host normally answers in milliseconds, but under a burst of hundreds of
 # concurrent connects some SYN packets get dropped (switch buffers, WiFi, the
@@ -89,7 +92,7 @@ def get_local_ip():
         s.close()
 
 
-def sweep(ports=(SCENEPLAY_PORT, WLED_PORT), rounds=SWEEP_ROUNDS):
+def sweep(ports=(SCENEPLAY_PORT, WLED_PORT, OBS_PORT), rounds=SWEEP_ROUNDS):
     """Concurrent TCP-connect sweep of the local /24.
 
     Returns {ip_str: set(open_ports)} for every host with at least one of the
@@ -165,6 +168,46 @@ def _identify_wled(ip):
     }
 
 
+def _identify_obs(ip):
+    """Return an OBS device dict if this host runs obs-websocket, else None.
+
+    obs-websocket v5 sends its Hello (op 0) the instant the WebSocket opens —
+    BEFORE authentication — and that frame names the server version. So we can
+    identify OBS, and read its version, without ever knowing the password. A
+    wrong service on 4455 fails the WebSocket handshake or the JSON parse and
+    is dropped; a password-protected OBS still says Hello, so it is found."""
+    try:
+        import websocket
+    except ImportError:
+        return None
+    ws = None
+    try:
+        ws = websocket.create_connection(f'ws://{ip}:{OBS_PORT}',
+                                         timeout=HTTP_TIMEOUT)
+        hello = json.loads(ws.recv())
+    except Exception:
+        return None
+    finally:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+    if not isinstance(hello, dict) or hello.get('op') != 0:
+        return None
+    d = hello.get('d') or {}
+    ver = str(d.get('obsWebSocketVersion') or '').strip()
+    if not ver:
+        return None
+    return {
+        'kind':    'obs',
+        'ip':      ip,
+        'name':    'OBS Studio',
+        'version': ver,
+        'locked':  bool(d.get('authentication')),   # password set on OBS
+    }
+
+
 def identify(open_ports):
     """Probe each swept host to decide what it is. Returns a list of device dicts
     (only ScenePlay and WLED responders survive)."""
@@ -176,6 +219,8 @@ def identify(open_ports):
                 futures[ex.submit(_identify_sceneplay, ip)] = ip
             if WLED_PORT in ports:
                 futures[ex.submit(_identify_wled, ip)] = ip
+            if OBS_PORT in ports:
+                futures[ex.submit(_identify_obs, ip)] = ip
         _progress.update(state='identifying', done=0, total=len(futures))
         for fut in concurrent.futures.as_completed(futures):
             _progress['done'] += 1
@@ -193,6 +238,18 @@ def _role_id(name):
     return role.ID if role else None
 
 
+def _ensure_role(name, order_by):
+    """Role id for `name`, creating the role if it is missing. Fresh installs
+    seed the roles (tblServerRole.json); this backfills a DB that predates a
+    role — the OBS label — so the feature works without a migration."""
+    role = ServerRole.query.filter(ServerRole.name == name).first()
+    if role is None:
+        role = ServerRole(name=name, active=1, orderBy=order_by)
+        db.session.add(role)
+        db.session.flush()          # assign role.ID inside this transaction
+    return role.ID
+
+
 def _record(devices, open_ports):
     """Upsert identified devices into tblServersIP (matched by ipAddress).
 
@@ -200,10 +257,16 @@ def _record(devices, open_ports):
     hand-entered row from a discovered one, so a device that's merely off this
     time just keeps its old PingTime.
 
+    One host can answer for more than one thing (the streaming rig commonly
+    runs ScenePlay AND OBS), so devices are merged per ip into a single row —
+    its ports column already lists every open port.
+
     Role rules:
-      * a WLED responder adopts the WLED role, but only when the row has no
-        meaningful role yet (new, NULL, or the placeholder "None" role), so a
-        manual role choice always stands;
+      * a WLED or OBS-only responder adopts the matching role, but only when the
+        row has no meaningful role yet (new, NULL, or the placeholder "None"
+        role), so a manual choice always stands. A box that is also a ScenePlay
+        server keeps its ScenePlay role — the 4455 in its ports column is what
+        shows it runs OBS;
       * serverroleid is NEVER left NULL — every row lands on at least the "None"
         role. A NULL there crashes the serverIP grid (it does
         `serverroleid.toString()`), which is exactly what broke the display."""
@@ -211,9 +274,17 @@ def _record(devices, open_ports):
 
     wled_role = _role_id('WLED')
     none_role = _role_id('None')
-    created = updated = 0
+    # Only spend a write to create the OBS role when we actually found OBS.
+    obs_role  = (_ensure_role('OBS', 50)
+                 if any(d['kind'] == 'obs' for d in devices) else None)
+
+    by_ip = {}
     for dev in devices:
-        ip = dev['ip']
+        by_ip.setdefault(dev['ip'], []).append(dev)
+
+    created = updated = 0
+    for ip, devs in by_ip.items():
+        kinds = {d['kind'] for d in devs}
         ports_str = ', '.join(str(p) for p in sorted(open_ports.get(ip, [])))
         row = ServerIP.query.filter(ServerIP.ipAddress == ip).first()
         if row is None:
@@ -222,15 +293,32 @@ def _record(devices, open_ports):
             created += 1
         else:
             updated += 1
-        row.serverName = dev['name']
-        row.version    = dev.get('version') or None
-        row.ports      = ports_str
-        row.active     = 1
-        row.PingTime   = _now()
+
+        # ScenePlay and WLED report a real name; OBS does not. Name from a
+        # named responder when there is one; otherwise call an OBS-only box
+        # "OBS Studio", but never clobber a name already on the row.
+        named = next((d for d in devs if d['kind'] in ('sceneplay', 'wled')),
+                     None)
+        if named:
+            row.serverName = named['name']
+            row.version    = named.get('version') or None
+        elif 'obs' in kinds:
+            if not (row.serverName or '').strip():
+                row.serverName = 'OBS Studio'
+            obs_ver = next((d.get('version') for d in devs
+                            if d['kind'] == 'obs'), None)
+            row.version = obs_ver or row.version
+
+        row.ports    = ports_str
+        row.active   = 1
+        row.PingTime = _now()
 
         role_unset = row.serverroleid in (None, none_role)
-        if dev['kind'] == 'wled' and wled_role and role_unset:
+        if role_unset and 'wled' in kinds and wled_role:
             row.serverroleid = wled_role
+        elif (role_unset and 'obs' in kinds and obs_role
+              and 'sceneplay' not in kinds):
+            row.serverroleid = obs_role
         if row.serverroleid is None and none_role is not None:
             row.serverroleid = none_role
     db.session.commit()
@@ -249,6 +337,7 @@ def scan_and_record(app):
             'hosts_open':  len(open_ports),
             'sceneplay':   sum(1 for d in devices if d['kind'] == 'sceneplay'),
             'wled':        sum(1 for d in devices if d['kind'] == 'wled'),
+            'obs':         sum(1 for d in devices if d['kind'] == 'obs'),
             'created':     created,
             'updated':     updated,
         }

@@ -732,6 +732,24 @@ def _problems(cfg, snap):
 
 # ── pages ─────────────────────────────────────────────────────────────────────
 
+def _scanned_obs_servers():
+    """Boxes the Servers-page LAN scan saw with obs-websocket open — any
+    tblServersIP row whose ports column lists 4455. Offered as a pick-list so
+    the DM selects the rig by name instead of remembering its IP. The ports
+    column is the signal (not the OBS role): a box running ScenePlay AND OBS
+    keeps its ScenePlay role but still belongs in this list."""
+    from discovery import OBS_PORT
+    from models.serverIP import tblserversip as ServerIP
+    out = []
+    for row in ServerIP.query.all():
+        ports = {p.strip() for p in (row.ports or '').split(',')}
+        if str(OBS_PORT) in ports and (row.ipAddress or '').strip():
+            out.append({'ip': row.ipAddress.strip(),
+                        'name': (row.serverName or '').strip()
+                        or row.ipAddress.strip()})
+    return sorted(out, key=lambda d: d['name'].lower())
+
+
 @obs_bp.route('/')
 @login_required
 @dm_required
@@ -769,7 +787,8 @@ def broadcast():
                            dm_enabled=dm_tile_enabled(),
                            dm_id=DM_TILE_ID,
                            map_token=_map_token(),
-                           has_party=bool(party))
+                           has_party=bool(party),
+                           obs_servers=_scanned_obs_servers())
 
 
 @obs_bp.route('/api/map-scene', methods=['POST'])

@@ -3,8 +3,8 @@
   <body onload="addButton()">
     <div>
       <h1>Server IP Table</h1>
-      <!-- LAN scan (discovery.py): finds ScenePlay + WLED boxes and upserts
-           them below. Runs server-side in the background; the bar polls
+      <!-- LAN scan (discovery.py): finds ScenePlay + WLED + OBS boxes and
+           upserts them below. Runs server-side in the background; the bar polls
            /api/pingnetwork/status. -->
       <div style="display:flex;align-items:center;gap:10px;margin:6px 0;">
         <input type="button" id="pingNetworkBtn" class="btn btn-primary" value="Ping Network">
@@ -41,7 +41,7 @@
           wrap.style.display = '';
           bar.style.width = '100%';
           const s = p.summary;
-          label.textContent = `done — ${s.sceneplay} ScenePlay, ${s.wled} WLED (${s.created} new, ${s.updated} updated)`;
+          label.textContent = `done — ${s.sceneplay} ScenePlay, ${s.wled} WLED, ${s.obs || 0} OBS (${s.created} new, ${s.updated} updated)`;
         } else if (p.state === 'error') {
           label.textContent = 'scan failed — check the server log';
         }

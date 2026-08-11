@@ -370,16 +370,36 @@
            card is named for and nothing else here works until it holds.
            These live OUTSIDE the settings form and bind to it with form=, the
            same way the page-address field below does. -->
+      {% if obs_servers %}
+      <!-- Filled by the Servers-page LAN scan (discovery.py): every box it saw
+           with obs-websocket (4455) open. Picking one just fills the fields
+           below — nothing applies until Save Connection Settings. -->
+      <div class="mb-2">
+        <label class="form-label small">OBS found on your network</label>
+        <select id="obs-host-pick" class="form-select form-select-sm"
+                onchange="obsPickHost(this)">
+          <option value="">&mdash; choose a scanned server &mdash;</option>
+          {% for s in obs_servers %}
+          <option value="{{ s.ip }}"{% if s.ip == cfg.host %} selected{% endif %}>
+            {{ s.name }} ({{ s.ip }})</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">From the network scan on the Servers page.
+          Picking one fills the host below; save to apply.</div>
+      </div>
+      {% endif %}
       <div class="row g-2 mb-2">
         <div class="col-sm-8">
           <label class="form-label small">OBS host</label>
-          <input type="text" name="obs_host" form="obs-cfg-form"
+          <input type="text" name="obs_host" id="obs-host-input"
+                 form="obs-cfg-form"
                  class="form-control form-control-sm"
                  placeholder="127.0.0.1" value="{{ cfg.host }}">
         </div>
         <div class="col-sm-4">
           <label class="form-label small">Port</label>
-          <input type="number" name="obs_port" form="obs-cfg-form"
+          <input type="number" name="obs_port" id="obs-port-input"
+                 form="obs-cfg-form"
                  class="form-control form-control-sm"
                  min="1" max="65535" value="{{ cfg.port }}">
         </div>
@@ -1191,6 +1211,27 @@ function obsMuteChar(btn) {
       _obsSavedPill();
     });
 }
+
+// Scanned-server picker: fills the host field (and snaps the port back to
+// obs-websocket's 4455 — a scanned entry IS a 4455 responder). Nothing is
+// saved here; the DM still clicks Save Connection Settings.
+function obsPickHost(sel) {
+  if (!sel.value) return;
+  document.getElementById('obs-host-input').value = sel.value;
+  document.getElementById('obs-port-input').value = '4455';
+}
+
+// Hand-typing a different host un-picks the dropdown, so it never claims a
+// selection the field below contradicts.
+(function () {
+  const host = document.getElementById('obs-host-input');
+  const pick = document.getElementById('obs-host-pick');
+  if (host && pick) {
+    host.addEventListener('input', () => {
+      if (pick.value && pick.value !== host.value.trim()) pick.value = '';
+    });
+  }
+})();
 
 function obsMuteAll(scope, muted) {
   _obsPost(OBS_MUTE_URL, {all: scope, muted})

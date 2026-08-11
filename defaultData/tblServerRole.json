@@ -18,5 +18,10 @@
     "name": "WLED",
     "active": 1,
     "orderBy": 40
+  },
+  {
+    "name": "OBS",
+    "active": 1,
+    "orderBy": 50
   }
 ]
