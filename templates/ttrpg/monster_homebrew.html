@@ -418,12 +418,27 @@ function copyIconPrompt() {
   const ta = document.getElementById('icp-text');
   const fb = document.getElementById('icp-copy-fb');
   function showFb() { fb.style.display = ''; setTimeout(() => { fb.style.display = 'none'; }, 2000); }
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(ta.value).then(showFb).catch(() => {
-      ta.removeAttribute('readonly'); ta.select();
-      try { document.execCommand('copy'); showFb(); } catch(e) {}
-      ta.setAttribute('readonly', '');
-    });
+  // The async clipboard API only exists in secure contexts — on the LAN's
+  // plain-http address navigator.clipboard is undefined, so the legacy
+  // select-and-copy path must be a real branch, not just a .catch().
+  function legacyCopy() {
+    ta.removeAttribute('readonly');
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.setAttribute('readonly', '');
+    if (ok) { showFb(); return; }
+    // Last resort: the text is left selected — say what to do with it.
+    fb.textContent = 'Press Ctrl+C to copy';
+    fb.style.display = '';
+    setTimeout(() => { fb.style.display = 'none'; fb.textContent = 'Copied!'; }, 3500);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+    navigator.clipboard.writeText(ta.value).then(showFb).catch(legacyCopy);
+  } else {
+    legacyCopy();
   }
 }
 </script>
