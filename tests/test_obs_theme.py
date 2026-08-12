@@ -191,3 +191,30 @@ class TestStreamNamesNeverShowLogins:
         db.session.commit()
         assert dm_name() == 'Eric the DM'
         assert dm_player_name() == ''
+
+
+class TestArtUrlCacheBusting:
+    """Art filenames are stable per slot (re-uploads overwrite in place), so
+    every served URL must carry the file's mtime — that is what makes a
+    re-upload visible to browser sources that cache by URL."""
+
+    def test_url_carries_the_mtime_and_tracks_changes(self, app, monkeypatch,
+                                                      tmp_path):
+        import routes.obs as ro
+        art = tmp_path / 'party-bg.jpg'
+        art.write_bytes(b'x')
+        monkeypatch.setattr(ro, 'BG_DIR', str(tmp_path))
+        monkeypatch.setattr(ro, '_card_base', lambda: 'http://host:8086')
+        u1 = ro._art_url('party-bg.jpg')
+        assert u1.startswith('http://host:8086/static/uploads/obs/party-bg.jpg?v=')
+        import os
+        os.utime(art, (1, 1))            # a "re-upload" changes the mtime
+        u2 = ro._art_url('party-bg.jpg')
+        assert u1 != u2, 're-upload must produce a NEW url'
+
+    def test_missing_file_still_yields_a_url(self, app, monkeypatch, tmp_path):
+        import routes.obs as ro
+        monkeypatch.setattr(ro, 'BG_DIR', str(tmp_path))
+        monkeypatch.setattr(ro, '_card_base', lambda: 'http://host:8086')
+        assert ro._art_url('gone.jpg').endswith('?v=0')
+        assert ro._art_url('') == ''

@@ -22,6 +22,7 @@
 
      The panel shows the DM's notes when there are any, and otherwise streams
      the dice as they are rolled — so it is never an empty box on stream. -->
+<meta charset="utf-8">
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
@@ -47,7 +48,10 @@
   }
   #title-main { font-weight: 800; letter-spacing: .02em; color: var(--accent-text, #e8d7ac);
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #title-sub { font-weight: 600; opacity: .85; white-space: nowrap; }
+  #title-sub { font-weight: 600; opacity: .85; white-space: nowrap;
+               display: flex; align-items: center; gap: 1.4em; }
+  /* The episode: quieter than the campaign, still readable from the couch. */
+  #session-name { opacity: .8; }
   /* Whose turn it is used to be shown by growing their tile. That moved the
      layout under the audience every turn, so it says it in words instead. */
   #turn { color: #7fd18a; }
@@ -142,7 +146,7 @@
 <video id="bg-vid" muted loop autoplay playsinline style="display:none;"></video>
 <div id="title">
   <div id="title-main"></div>
-  <div id="title-sub"><span id="turn"></span></div>
+  <div id="title-sub"><span id="session-name"></span><span id="turn"></span></div>
 </div>
 <div id="panel">
   <div id="panel-head">Information</div>
@@ -355,6 +359,9 @@ function apply(d) {
   layout();
   paintBg(d.bg_url);
   el('title-main').textContent = d.title || '';
+  // The session rides as a subtitle unless it IS the title (no campaign set).
+  el('session-name').textContent =
+    (d.session && d.session !== d.title) ? d.session : '';
   el('turn').textContent = d.turn ? '▶ ' + d.turn : '';
 
   if (!SHOW_PANEL) return;

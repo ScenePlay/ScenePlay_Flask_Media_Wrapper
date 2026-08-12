@@ -2075,10 +2075,32 @@ def image_slots():
             'per_session': bool(own),
             'is_video': name.rsplit('.', 1)[-1].lower() in VIDEO_EXT
                         if '.' in name else False,
-            'url': (url_for('static', filename=f'uploads/obs/{name}')
+            'url': (url_for('static', filename=f'uploads/obs/{name}',
+                            v=_art_mtime(name))
                     if name else ''),
         })
     return out
+
+
+def _art_mtime(name):
+    try:
+        return int(os.path.getmtime(os.path.join(BG_DIR, name)))
+    except OSError:
+        return 0
+
+
+def _art_url(name):
+    """Absolute URL for an uploaded art file, VERSIONED by the file's mtime.
+
+    Art filenames are stable per slot (a re-upload overwrites the same name),
+    which keeps old files from piling up — but a browser source caches by
+    URL, so without the version stamp a re-upload changed nothing on stream
+    until the source was reloaded by hand. The stamp makes every re-upload a
+    new URL: the pages' paint guards see a change and the fetch skips the
+    cache, so new art lands within one poll."""
+    if not name:
+        return ''
+    return f'{_card_base()}/static/uploads/obs/{name}?v={_art_mtime(name)}'
 
 
 def show_cfg(kind):
@@ -2092,7 +2114,7 @@ def show_cfg(kind):
     pos = (appsettingGet(f'obs_{kind}_title_pos', '') or '').strip().lower()
     return {
         'image': img,
-        'image_url': (f'{_card_base()}/static/uploads/obs/{img}' if img else ''),
+        'image_url': _art_url(img),
         'title': (appsettingGet(f'obs_{kind}_title', '') or '').strip(),
         'pos': pos if pos in TITLE_POSITIONS else 'bottom-center',
     }
@@ -4030,7 +4052,7 @@ def upload_image(slot):
             except OSError:
                 pass
     appsettingSet(setting, name)
-    flash('Art updated. Reload the affected source in OBS to see it.')
+    flash('Art updated — the stream pages pick it up within a few seconds.')
     return redirect(url_for('obs_bp.broadcast'))
 
 
@@ -4121,6 +4143,10 @@ def panel_state():
         # Same derivation the map's idle card uses, so the two agree.
         tp = _title_payload(sess)
         title = tp['campaign'] or tp['session'] or 'ScenePlay'
+    # The session's name rides the strip as a subtitle — "which episode is
+    # this" for the audience. The page drops it when it would just repeat the
+    # main title (no campaign set, so the session IS the title).
+    session_name = (sess.title if sess else '') or ''
     bg = art_setting('obs_party_bg')
 
     turn = ''
@@ -4136,8 +4162,9 @@ def panel_state():
     return jsonify({
         'canvas_w': canvas_w, 'canvas_h': canvas_h,
         'title_rect': areas['title'], 'panel_rect': areas['panel'],
-        'bg_url': (f'{_card_base()}/static/uploads/obs/{bg}' if bg else ''),
+        'bg_url': _art_url(bg),
         'title': title,
+        'session': session_name,
         'turn': turn,
         'info_lines': lines,
         # Always sent now: the party panel prefers notes over dice, but the
@@ -4452,7 +4479,9 @@ def _title_payload(sess):
         camp = db.session.get(tblcampaigns, sess.campaign_id)
         campaign = camp.campaign_name if camp else ''
     return {
-        'image_url': _url_for('static', filename=f'uploads/obs/{img}') if img else '',
+        'image_url': (_url_for('static', filename=f'uploads/obs/{img}',
+                               v=_art_mtime(img))
+                      if img else ''),
         'campaign': campaign,
         'session': (sess.title if sess else ''),
     }
