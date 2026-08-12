@@ -156,7 +156,8 @@
     <!-- Connection config -->
     <div class="ttrpg-card p-3 mb-3">
       <h6 style="color:var(--ttrpg-accent);" class="mb-3">Connection Settings</h6>
-      <form method="post" action="{{ url_for('relay_admin_bp.save_config') }}">
+      <form method="post" action="{{ url_for('relay_admin_bp.save_config') }}"
+            id="relay-cfg-form">
         <div class="mb-2">
           <label class="form-label small">Relay URL</label>
           <input type="url" name="relay_url" class="form-control form-control-sm"
@@ -215,7 +216,12 @@
           <div class="form-text">Loudness of the music sent to portal players —
           independent of your local speakers. Applies from the next track.</div>
         </div>
-        <button type="submit" class="btn btn-sm btn-ttrpg">Save</button>
+        <span class="small text-muted">
+          &#10003; Settings save automatically as you change them.
+          <span id="relay-saved-pill" class="badge bg-success"
+                style="display:none;">&#10003; Saved</span></span>
+        {# no-JS fallback: still posts the classic way #}
+        <noscript><button type="submit" class="btn btn-sm btn-ttrpg">Save</button></noscript>
       </form>
     </div>
 
@@ -277,6 +283,45 @@
 </div>
 
 <script>
+// ── auto-save: the same treatment as the OBS Broadcast form ────────────────
+// Every field in Connection Settings saves itself on change. 'change', not
+// 'input': text fields commit on blur, so typing the relay URL doesn't fire
+// a reconnect per keystroke. Debounced + serialised the same way.
+(function () {
+  const form = document.getElementById('relay-cfg-form');
+  if (!form) return;
+  let timer = null, saving = false, again = false;
+
+  function save() {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (saving) { again = true; return; }
+      saving = true;
+      fetch(form.action, { method: 'POST', body: new FormData(form),
+                           headers: { 'X-Requested-With': 'fetch' } })
+        .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+        .then(() => {
+          const pill = document.getElementById('relay-saved-pill');
+          if (pill) {
+            pill.style.display = '';
+            clearTimeout(pill._t);
+            pill._t = setTimeout(() => { pill.style.display = 'none'; }, 2000);
+          }
+        })
+        .catch(() => alert('A relay setting failed to save — check the ' +
+                           'connection and change it again.'))
+        .finally(() => {
+          saving = false;
+          if (again) { again = false; save(); }
+        });
+    }, 400);
+  }
+
+  form.addEventListener('change', (e) => {
+    if (e.target && e.target.name) save();
+  });
+})();
+
 // Live presence: flip the Online/Offline badges without a page refresh.
 // Polls the local server (which relays to the portal's presence endpoint).
 (function () {

@@ -996,7 +996,8 @@
                                background:linear-gradient(135deg, {{ a }} 34%, {{ b }} 34%, {{ b2 }});"
                         onclick="document.getElementById('obs-accent-input').value='{{ a }}';
                                  document.getElementById('obs-base-input').value='{{ b }}';
-                                 document.getElementById('obs-base2-input').value='{{ b2 }}';">
+                                 document.getElementById('obs-base2-input').value='{{ b2 }}';
+                                 obsAutoSave();">
                 </button>
                 {% endfor %}
               </div>
@@ -1334,6 +1335,7 @@ function obsPickHost(sel) {
   if (!sel.value) return;
   document.getElementById('obs-host-input').value = sel.value;
   document.getElementById('obs-port-input').value = '4455';
+  obsAutoSave();   // JS-set fields fire no 'change' — save explicitly
 }
 
 // Hand-typing a different host un-picks the dropdown, so it never claims a

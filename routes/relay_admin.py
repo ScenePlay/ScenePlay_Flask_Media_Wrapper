@@ -301,6 +301,11 @@ def save_config():
     gain = request.form.get('relay_audio_gain', '50')
     appsettingSet('relay_audio_gain',
                   gain if gain in ('25', '50', '75', '100', '150') else '50')
+    # The page auto-saves over fetch (same treatment as the OBS Broadcast
+    # form); a plain POST — no-JS fallback — keeps the flash + redirect.
+    if request.headers.get('X-Requested-With') == 'fetch':
+        return jsonify({'ok': True,
+                        'reconnecting': url_changed or secret_changed})
     flash('Relay configuration saved.')
     return redirect(url_for('relay_admin_bp.status'))
 
