@@ -34,16 +34,18 @@
   /* Without art the scene would key onto whatever OBS has underneath, which
      is rarely what the DM wants — fall back to the table's own dark field. */
   #bg-fallback { position: absolute; inset: 0;
-                 background: radial-gradient(ellipse at 30% 20%, #1b1d27, #0c0d12 70%); }
+                 background: var(--sfc-bg,
+                             radial-gradient(ellipse at 30% 20%, #1b1d27, #0c0d12 70%)); }
 
   #title {
     position: absolute; left: 0; right: 0; top: 0;
     display: flex; align-items: center; justify-content: space-between;
     gap: 2vw; padding: 0 2.2vw; box-sizing: border-box;
-    background: linear-gradient(180deg, rgba(8,9,13,.92), rgba(8,9,13,.62));
-    border-bottom: 2px solid rgba(200,168,110,.55);
+    background: var(--sfc-title,
+                    linear-gradient(180deg, rgba(8,9,13,.92), rgba(8,9,13,.62)));
+    border-bottom: 2px solid var(--accent-soft, rgba(200,168,110,.55));
   }
-  #title-main { font-weight: 800; letter-spacing: .02em; color: #e8d7ac;
+  #title-main { font-weight: 800; letter-spacing: .02em; color: var(--accent-text, #e8d7ac);
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #title-sub { font-weight: 600; opacity: .85; white-space: nowrap; }
   /* Whose turn it is used to be shown by growing their tile. That moved the
@@ -53,7 +55,7 @@
   #panel {
     position: absolute; box-sizing: border-box;
     display: flex; flex-direction: column;
-    background: rgba(8,9,13,.72);
+    background: var(--sfc-panel, rgba(8,9,13,.72));
     border-left: 1px solid rgba(200,168,110,.35);
     /* Both of these are load-bearing, not tidiness: the roll rows animate on
        arrival, which promotes them to their own compositing layer, and
@@ -70,7 +72,7 @@
                          calc(var(--u, 5px) * 1.6); font-size: calc(var(--u, 5px) * 4.8);
                 font-weight: 700;
                 letter-spacing: .12em; text-transform: uppercase;
-                color: #c8a86e; border-bottom: 1px solid rgba(200,168,110,.25); }
+                color: var(--accent, #c8a86e); border-bottom: 1px solid var(--accent-faint, rgba(200,168,110,.25)); }
   /* The scroll area. It is a real overflow container so long notes can be
      scrolled programmatically; nothing here waits on a human to drag it. */
   #scroll { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
@@ -99,7 +101,7 @@
     to   { opacity: 1; transform: none; }
   }
   .roll-who { grid-column: 1; grid-row: 1;
-              font-weight: 700; color: #e8d7ac; font-size: calc(var(--u, 5px) * 6.6);
+              font-weight: 700; color: var(--accent-text, #e8d7ac); font-size: calc(var(--u, 5px) * 6.6);
               line-height: 1.15;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .roll-what { grid-column: 1; grid-row: 2;
@@ -128,7 +130,7 @@
   }
   #show-title {
     font-size: 5.2vw; font-weight: 800; letter-spacing: .01em;
-    color: #e8d7ac; text-shadow: 0 4px 22px rgba(0,0,0,.95);
+    color: var(--accent-text, #e8d7ac); text-shadow: 0 4px 22px rgba(0,0,0,.95);
     max-width: 100%; line-height: 1.15;
   }
   .empty { opacity: .45; font-size: calc(var(--u, 5px) * 4.4);
@@ -306,8 +308,49 @@ function paintRolls(rolls) {
   el('panel-head').textContent = 'Dice';
 }
 
+// The DM's accent colour, shared with the tiles so one save re-skins the
+// whole stream. Text gets a lightened variant — the raw accent is tuned for
+// borders and reads muddy as type on the dark field.
+function applyTheme(t) {
+  if (!t || !/^#[0-9a-fA-F]{6}$/.test(t.accent || '')) return;
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(t.accent.slice(i, i + 2), 16));
+  const light = [r, g, b].map(v => Math.round(v + (255 - v) * 0.45));
+  const s = document.documentElement.style;
+  s.setProperty('--accent', t.accent);
+  s.setProperty('--accent-text', `rgb(${light.join(',')})`);
+  s.setProperty('--accent-soft', `rgba(${r},${g},${b},.55)`);
+  s.setProperty('--accent-faint', `rgba(${r},${g},${b},.25)`);
+  // The base pair tints every field the pages paint on. base2 defaults to
+  // base server-side, so an untouched theme still renders solid.
+  const base = /^#[0-9a-fA-F]{6}$/.test(t.base || '') ? t.base : '#08090d';
+  const b2 = /^#[0-9a-fA-F]{6}$/.test(t.base2 || '') ? t.base2 : base;
+  const rgbaOf = (h, a) => {
+    const [x, y, z] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    return `rgba(${x},${y},${z},${a})`;
+  };
+  const grad = (c1, c2) => (t.dir === 'radial')
+    ? `radial-gradient(ellipse at 50% 40%, ${c1}, ${c2} 78%)`
+    : `linear-gradient(${parseInt(t.dir, 10) || 180}deg, ${c1}, ${c2})`;
+  // The dither: a faint tiled noise layer over the blend, so the gradient
+  // never shows compression banding on stream. Only when there IS a blend.
+  const noise = base === b2 ? '' : NOISE_LAYER + ', ';
+  s.setProperty('--sfc-bg', noise + grad(base, b2));
+  s.setProperty('--sfc-title', noise + grad(rgbaOf(base, 0.92), rgbaOf(b2, 0.68)));
+  s.setProperty('--sfc-panel', noise + grad(rgbaOf(base, 0.72), rgbaOf(b2, 0.72)));
+}
+
+// 4%-alpha white fractal noise, tiled — the "dither" that keeps the gradient
+// from banding once the stream encoder gets hold of it.
+const NOISE_LAYER = 'url("data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140">' +
+  '<filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2"/>' +
+  '<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.04 0"/></filter>' +
+  '<rect width="140" height="140" filter="url(#n)"/></svg>') + '")';
+applyTheme({{ theme | tojson }});
+
 function apply(d) {
   if (!d) return;
+  if (d.theme) applyTheme(d.theme);
   if (SHOW_CARD) { paintShow(d); return; }
   layout();
   paintBg(d.bg_url);

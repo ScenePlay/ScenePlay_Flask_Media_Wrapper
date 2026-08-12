@@ -14,7 +14,7 @@
   html, body {
     margin: 0; padding: 0; height: 100%;
     /* transparent composites over the scene; opaque hides the camera below */
-    background: {% if opaque %}#14151b{% else %}transparent{% endif %};
+    background: {% if opaque %}var(--base-solid, #14151b){% else %}transparent{% endif %};
     overflow: hidden;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
@@ -29,8 +29,9 @@
        height and squeezed the name down to nothing. */
     gap: 2.5vh;
     padding: 4vh 4vw;
-    background: linear-gradient(160deg, rgba(24,26,34,.92), rgba(14,15,20,.92));
-    border: 2px solid rgba(200,168,110,.55);
+    background: var(--sfc-card,
+                    linear-gradient(160deg, rgba(24,26,34,.92), rgba(14,15,20,.92)));
+    border: 2px solid var(--accent-soft, rgba(200,168,110,.55));
     border-radius: 14px;
     text-shadow: 0 2px 6px rgba(0,0,0,.8);
   }
@@ -40,18 +41,18 @@
     height: 40%; width: auto; max-width: 38%; aspect-ratio: 1;
     border-radius: 50%;
     object-fit: cover;
-    border: 3px solid rgba(200,168,110,.75);
+    border: 3px solid var(--accent-strong, rgba(200,168,110,.75));
     box-shadow: 0 6px 18px rgba(0,0,0,.55);
   }
   .portrait.placeholder {
     display: flex; align-items: center; justify-content: center;
-    background: #23242c; font-size: min(3.4vw, 9vh); color: #c8a86e;
+    background: #23242c; font-size: min(3.4vw, 9vh); color: var(--accent, #c8a86e);
   }
   .name {
     /* Readable from the couch: sized off whichever tile dimension is tighter
        so it scales with the party size instead of being fixed to the width. */
     font-size: min(7vw, 15vh); font-weight: 700; letter-spacing: .01em;
-    color: #e8d7ac; text-align: center;
+    color: var(--accent-text, #e8d7ac); text-align: center;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .player { font-size: min(3.4vw, 7vh); opacity: .72; margin-top: -.4vh;
@@ -112,7 +113,31 @@ function hpColor(pct) {
   return pct > 50 ? '#3fa14a' : pct > 20 ? '#c9a227' : '#c0392b';
 }
 
+function applyTheme(t) {
+  if (!t || !/^#[0-9a-fA-F]{6}$/.test(t.accent || '')) return;
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(t.accent.slice(i, i + 2), 16));
+  const light = [r, g, b].map(v => Math.round(v + (255 - v) * 0.45));
+  const s = document.documentElement.style;
+  s.setProperty('--accent', t.accent);
+  s.setProperty('--accent-text', `rgb(${light.join(',')})`);
+  s.setProperty('--accent-soft', `rgba(${r},${g},${b},.55)`);
+  s.setProperty('--accent-strong', `rgba(${r},${g},${b},.75)`);
+  const base = /^#[0-9a-fA-F]{6}$/.test(t.base || '') ? t.base : '#08090d';
+  const [br, bg2, bb] = [1, 3, 5].map(i => parseInt(base.slice(i, i + 2), 16));
+  const hi = [br, bg2, bb].map(v => Math.round(v + (255 - v) * 0.06));
+  const solid = [br, bg2, bb].map(v => Math.min(255, Math.round(v * 1.5)));
+  s.setProperty('--base-solid', `rgb(${solid.join(',')})`);
+  const b2 = /^#[0-9a-fA-F]{6}$/.test(t.base2 || '') ? t.base2 : base;
+  const [cr, cg, cb] = [1, 3, 5].map(i => parseInt(b2.slice(i, i + 2), 16));
+  const grad = (t.dir === 'radial')
+    ? `radial-gradient(ellipse at 50% 40%, rgba(${hi.join(',')},.92), rgba(${cr},${cg},${cb},.92) 78%)`
+    : `linear-gradient(${parseInt(t.dir, 10) || 160}deg, rgba(${hi.join(',')},.92), rgba(${cr},${cg},${cb},.92))`;
+  s.setProperty('--sfc-card', grad);
+}
+applyTheme({{ theme | tojson }});
+
 function apply(d) {
+  if (d && d.theme) applyTheme(d.theme);
   document.getElementById('pc-name').textContent = d.name;
   const pl = document.getElementById('pc-player');
   // Guard the key: a payload without it must not blank the rendered name.

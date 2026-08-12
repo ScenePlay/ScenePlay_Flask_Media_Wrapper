@@ -93,6 +93,13 @@ def _obs_cfg():
         'room_audio_only': (appsettingGet('obs_room_audio_only', '1') or '1'),
         'room_videobitrate': _room_bitrate_str(),
         'room_join_url': (dm_tile().video_push_url() if table_room() else ''),
+        'accent':        theme_accent(),
+        'base':          theme_base(),
+        'base2':         theme_base2(),
+        'base_dir':      theme_base_dir(),
+        'bezel':         bezel_shape(),
+        'bezel_shapes':  BEZEL_SHAPES,
+        'theme_own':     _theme_session_own(),
         'music_capture': ('1' if music_capture_on() else '0'),
         'music_device':  music_device_id(),
         'music_transport': (appsettingGet('obs_music_transport', 'auto')
@@ -212,12 +219,15 @@ def dm_tile():
 
 
 def dm_player_name():
-    """Login behind the DM tile. dm_name() already prefers display_name for
-    the tile's title, so this shows the account it belongs to instead of
-    repeating the same string twice."""
+    """Who runs the table, for the DM tile's second line. Display name ONLY —
+    the login is an account credential and stays off the stream. Empty when
+    no display name is set; the tile just leaves the line blank."""
     from models.user import tblUsers
     row = tblUsers.query.filter_by(role='dm', active=1).first()
-    return (row.username or '') if row else ''
+    name = (getattr(row, 'display_name', '') or '').strip() if row else ''
+    # dm_name() already uses the display name as the tile's TITLE; repeating
+    # it right underneath says nothing new.
+    return '' if name == dm_name() else name
 
 
 def _active_party():
@@ -343,6 +353,68 @@ def _watch_seconds():
         return int((appsettingGet('obs_feed_watch_s', '') or DEFAULT_WATCH_S))
     except (TypeError, ValueError):
         return DEFAULT_WATCH_S
+
+
+# ── auto cameras: swap on what the tile actually SHOWS ───────────────────────
+# Relay presence only covers portal players. This watches the pixels instead:
+# each pass screenshots every camera source small and cheap, and a feed that
+# renders black gets that player's stat card until light comes back. Two dark
+# passes to swap away (a slow WebRTC reconnect must not flap the tile), one
+# lit pass to swap back (the audience should see a returning face fast).
+_cam_dark_votes = {}             # character_id -> consecutive dark passes
+_auto_dark_ids = set()           # currently swapped to card by the watcher
+AUTO_CAM_DARK_PASSES = 2
+AUTO_CAM_LUMA = 10               # 0-255 mean; a live face is way above this
+
+
+def auto_cam_on():
+    return (appsettingGet('obs_auto_cam', '0') or '0') == '1'
+
+
+def _probe_camera_dark(source):
+    """True when the source's current frame is essentially black — a feed
+    that stopped, a covered lens, or vdo.ninja's video-muted screen."""
+    import base64
+    import io
+
+    import obs_ws
+    from PIL import Image
+    r = obs_ws.request('GetSourceScreenshot',
+                       {'sourceName': source, 'imageFormat': 'png',
+                        'imageWidth': 96, 'imageHeight': 54})
+    raw = base64.b64decode(r['imageData'].split(',', 1)[1])
+    img = Image.open(io.BytesIO(raw)).convert('L')
+    hist = img.histogram()
+    total = sum(hist) or 1
+    mean = sum(i * n for i, n in enumerate(hist)) / total
+    return mean < AUTO_CAM_LUMA
+
+
+def _scan_cameras():
+    """One detection pass over every configured camera. Never raises; a tile
+    OBS can't screenshot right now (scene not built, source busy) simply
+    casts no vote and keeps its current state."""
+    import obs_ws
+    if not (auto_cam_on() and obs_ws.connected()):
+        if _auto_dark_ids or _cam_dark_votes:
+            _auto_dark_ids.clear()
+            _cam_dark_votes.clear()
+        return
+    for char in _ordered_party():
+        if not char.video_view_url():
+            continue
+        cid = char.character_id
+        try:
+            dark = _probe_camera_dark(_source_name_for(char))
+        except Exception:
+            continue
+        if dark:
+            _cam_dark_votes[cid] = _cam_dark_votes.get(cid, 0) + 1
+            if _cam_dark_votes[cid] >= AUTO_CAM_DARK_PASSES:
+                _auto_dark_ids.add(cid)
+        else:
+            _cam_dark_votes[cid] = 0
+            _auto_dark_ids.discard(cid)
 
 
 def refresh_tiles():
@@ -601,6 +673,7 @@ def start_feed_watch(app_obj):
         try:
             with app_obj.app_context():
                 if appsettingGet('obs_enabled', '0') == '1':
+                    _scan_cameras()      # votes feed the swap below
                     refresh_tiles()
                     rebind_music_if_stale()
         except Exception as exc:          # a watchdog must never die loudly
@@ -1014,6 +1087,22 @@ def save_config():
         pos = (request.form.get(f'obs_{kind}_title_pos', '') or '').strip().lower()
         appsettingSet(f'obs_{kind}_title_pos',
                       pos if pos in TITLE_POSITIONS else 'bottom-center')
+    # Stream look. Only well-formed values land; anything else keeps the
+    # current setting rather than wedging the pages on a broken colour.
+    # Same ownership rule as the show art: with a session running the look is
+    # THAT session's; with none it edits the shared default they inherit.
+    _sid = _active_session_id()
+    _sfx = f':s{_sid}' if _sid is not None else ''
+    for key in ('obs_accent_color', 'obs_base_color', 'obs_base_color2'):
+        colour = (request.form.get(key, '') or '').strip()
+        if re.fullmatch(r'#[0-9a-fA-F]{6}', colour):
+            appsettingSet(f'{key}{_sfx}', colour)
+    direction = (request.form.get('obs_base_dir', '') or '').strip().lower()
+    if direction in BASE_DIRS:
+        appsettingSet(f'obs_base_dir{_sfx}', direction)
+    shape = (request.form.get('obs_bezel_shape', '') or '').strip().lower()
+    if shape in BEZEL_SHAPES:
+        appsettingSet(f'obs_bezel_shape{_sfx}', shape)
     # Kept verbatim, newlines and all: each line is one row in the panel.
     appsettingSet('obs_info_text',
                   (request.form.get('obs_info_text', '') or '')[:4000])
@@ -1662,6 +1751,25 @@ def api_card_override():
                     'show_card': on, 'swapped': swapped})
 
 
+@obs_bp.route('/api/auto-cam', methods=['POST'])
+@login_required
+@dm_required
+def api_auto_cam():
+    """Toggle the auto-camera watch: dark feeds swap to the stat card, light
+    coming back swaps to the camera. Runs one pass immediately so the button
+    acts now rather than on the next watch tick."""
+    data = request.get_json(silent=True) or {}
+    on = bool(data.get('on'))
+    appsettingSet('obs_auto_cam', '1' if on else '0')
+    swapped = []
+    try:
+        _scan_cameras()             # also clears the state when turning OFF
+        swapped = refresh_tiles()
+    except Exception as exc:
+        log.info('auto-cam first pass skipped: %s', exc)
+    return jsonify({'ok': True, 'on': on, 'swapped': swapped})
+
+
 def _closeup_rows():
     """Who the DM can cut a closeup to, for the battle map's closeup popup.
 
@@ -1997,6 +2105,70 @@ PANEL_TOKEN_KEY = 'obs-panel'
 BG_DIR = os.path.join('static', 'uploads', 'obs')
 
 
+# ── stream look: accent colour + camera bezel ────────────────────────────────
+# One accent runs through every stream page (tile borders, names, titles) so a
+# colour change re-skins the whole broadcast, not one corner of it. The bezel
+# is the camera tiles' frame shape. Both ride the pages' existing polls, so a
+# save re-skins a LIVE stream inside one poll cycle — no source reloads.
+
+DEFAULT_ACCENT = '#c8a86e'          # the gold the pages shipped with
+DEFAULT_BASE = '#08090d'            # the near-black every surface tint is cut from
+BEZEL_SHAPES = ('rounded', 'square', 'circle', 'hex')
+# Gradient directions: CSS linear-gradient angles (the value points TOWARD
+# that edge/corner), plus a centred radial glow.
+BASE_DIRS = ('0', '45', '90', '135', '180', '225', '270', '315', 'radial')
+THEME_KEYS = ('obs_accent_color', 'obs_base_color', 'obs_base_color2',
+              'obs_base_dir', 'obs_bezel_shape')
+
+
+def theme_accent():
+    # art_setting: this session's own value first, else the shared default —
+    # the same per-session idiom the show art uses.
+    v = art_setting('obs_accent_color')
+    return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else DEFAULT_ACCENT
+
+
+def theme_base():
+    """The surface colour: panel and title-strip fields, tile strip gradient,
+    bezel matte, background fallback. The whole presentation is tinted from
+    this one value, so accent + base together are a full colour theme."""
+    v = art_setting('obs_base_color')
+    return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else DEFAULT_BASE
+
+
+def theme_base2():
+    """The far end of the background gradient. Falls back to the BASE colour
+    (not a constant): base == base2 renders as today's solid look, so the
+    gradient is strictly opt-in."""
+    v = art_setting('obs_base_color2')
+    return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else theme_base()
+
+
+def theme_base_dir():
+    v = art_setting('obs_base_dir').lower()
+    return v if v in BASE_DIRS else '180'
+
+
+def bezel_shape():
+    v = art_setting('obs_bezel_shape').lower()
+    return v if v in BEZEL_SHAPES else 'rounded'
+
+
+def _theme_session_own():
+    """Whether the ACTIVE session carries its own look (vs the shared one)."""
+    sid = _active_session_id()
+    if sid is None:
+        return False
+    return any((appsettingGet(f'{k}:s{sid}', '') or '').strip()
+               for k in THEME_KEYS)
+
+
+def _theme_payload():
+    return {'accent': theme_accent(), 'base': theme_base(),
+            'base2': theme_base2(), 'dir': theme_base_dir(),
+            'bezel': bezel_shape()}
+
+
 def panel_on():
     """The information panel is on by default: an empty strip is easy to spot
     and turn off, whereas a missing one just looks like the layout is wrong."""
@@ -2259,13 +2431,13 @@ def _set_offstage(character_id, on):
 def player_name_for(char):
     """The human playing this character, for the overlay.
 
-    display_name when the account has one, else the login. Empty when the
-    character isn't claimed by an account — the overlay just omits the line
-    rather than showing a blank field."""
+    Display name ONLY — never the login. The login is what someone types into
+    the password box, and the overlay goes out on a public stream; an account
+    without a display name simply gets no second line."""
     u = getattr(char, 'user', None)
     if not u:
         return ''
-    return (getattr(u, 'display_name', '') or '').strip() or (u.username or '').strip()
+    return (getattr(u, 'display_name', '') or '').strip()
 
 
 def tile_url(character_id):
@@ -2295,6 +2467,9 @@ def _tile_url(char, presence=None, overrides=None):
     if char.character_id in overrides:
         return card_url(char.character_id)
     if not char.video_view_url():
+        return card_url(char.character_id)
+    if char.character_id in _auto_dark_ids:
+        # The auto-camera watch saw this feed render black.
         return card_url(char.character_id)
     if presence is None:
         presence = _presence()
@@ -2329,6 +2504,7 @@ def _tile_plan(char, presence=None, overrides=None):
     if presence is None:
         presence = _presence()
     hidden = (char.character_id in overrides
+              or char.character_id in _auto_dark_ids
               or _feed_state(char, presence) == 'stale')
     if hidden:
         return feed, card_url(char.character_id, over=True)
@@ -3569,7 +3745,8 @@ def dm_card():
                            is_dm=True, poll_s=card_poll_s(),
                            opaque=request.args.get('over') == '1',
                            poll_url=url_for('obs_bp.dm_card_state',
-                                            t=request.args.get('t', '')))
+                                            t=request.args.get('t', '')),
+                           theme=_theme_payload())
 
 
 @obs_bp.route('/card/dm/state')
@@ -3579,7 +3756,8 @@ def dm_card_state():
     tile = dm_tile()
     return jsonify({'name': tile.name, 'hp_current': 0, 'hp_max': 0,
                     'hp_pct': 0, 'ac': 0, 'conditions': [],
-                    'player': dm_player_name(), 'is_dm': True})
+                    'player': dm_player_name(), 'is_dm': True,
+                    'theme': _theme_payload()})
 
 
 @obs_bp.route('/tile/dm')
@@ -3596,7 +3774,8 @@ def dm_tile_view():
         feed_url=tile.video_view_url(),
         strip_only=request.args.get('strip') == '1',
         conditions=[], is_dm=True, poll_s=card_poll_s(),
-        poll_url=url_for('obs_bp.dm_card_state', t=token))
+        poll_url=url_for('obs_bp.dm_card_state', t=token),
+        theme=_theme_payload())
 
 
 @obs_bp.route('/tile/<int:character_id>')
@@ -3629,7 +3808,8 @@ def player_tile(character_id):
         strip_only=request.args.get('strip') == '1',
         conditions=[c.condition_name for c in char.conditions] if char.conditions else [],
         poll_s=card_poll_s(),
-        poll_url=url_for('obs_bp.card_state', character_id=character_id, t=token))
+        poll_url=url_for('obs_bp.card_state', character_id=character_id, t=token),
+        theme=_theme_payload())
 
 
 @obs_bp.route('/card/<int:character_id>')
@@ -3650,7 +3830,8 @@ def player_card(character_id):
                            poll_s=card_poll_s(),
                            poll_url=url_for('obs_bp.card_state',
                                             character_id=character_id,
-                                            t=token))
+                                            t=token),
+                           theme=_theme_payload())
 
 
 @obs_bp.route('/card/<int:character_id>/state')
@@ -3668,6 +3849,7 @@ def card_state(character_id):
         'hp_current': char.hp_current, 'hp_max': char.hp_max,
         'hp_pct': char.hp_pct(), 'ac': char.ac,
         'conditions': [c.condition_name for c in char.conditions] if char.conditions else [],
+        'theme': _theme_payload(),
     })
 
 
@@ -3764,6 +3946,20 @@ def _place_background(scene, canvas_w, canvas_h, warnings):
         return None
 
 
+@obs_bp.route('/api/theme-shared', methods=['POST'])
+@login_required
+@dm_required
+def api_theme_shared():
+    """Drop the active session's own look — back to the shared default. The
+    counterpart of the art slots' per-session 'clear'."""
+    sid = _active_session_id()
+    if sid is not None:
+        for key in THEME_KEYS:
+            appsettingSet(f'{key}:s{sid}', '')
+        flash("This session's look cleared — back to the shared default.")
+    return redirect(url_for('obs_bp.broadcast'))
+
+
 @obs_bp.route('/image/<slot>', methods=['POST'])
 @login_required
 @dm_required
@@ -3854,7 +4050,8 @@ def panel_view():
                            card_modes=sorted(SHOW_SOURCE),
                            state_url=url_for('obs_bp.panel_state',
                                              t=_panel_token()),
-                           poll_s=panel_poll_s())
+                           poll_s=panel_poll_s(),
+                           theme=_theme_payload())
 
 
 def panel_poll_s():
@@ -3955,6 +4152,7 @@ def panel_state():
         'intermission': show_cfg('intermission'),
         'post': show_cfg('post'),
         'image_fraction': SHOW_IMAGE_FRACTION,
+        'theme': _theme_payload(),
     })
 
 

@@ -297,6 +297,38 @@ def delete_user(user_id):
     return redirect(url_for('auth.register'))
 
 
+@auth.route('/ttrpg/users/<int:user_id>/edit', methods=['POST'])
+@login_required
+@dm_required
+def edit_user(user_id):
+    """DM-only: rename an account — the login and/or the display name.
+
+    Safe to do live: sessions are keyed by user_id, so renaming a login never
+    logs anyone out — the player just types the new name at their NEXT login.
+    The display name is what the stream overlays print, so fixing a typo here
+    fixes the broadcast on the tiles' next poll too."""
+    user = tblUsers.query.get_or_404(user_id)
+    username = (request.form.get('username') or '').strip()
+    display_name = (request.form.get('display_name') or '').strip()
+    if not username or not display_name:
+        flash('Username and display name are both required.')
+        return redirect(url_for('auth.register'))
+    clash = tblUsers.query.filter(tblUsers.username == username,
+                                  tblUsers.user_id != user_id).first()
+    if clash:
+        flash(f'Username "{username}" is already taken.')
+        return redirect(url_for('auth.register'))
+    old_login = user.username
+    user.username = username
+    user.display_name = display_name
+    db.session.commit()
+    if old_login != username:
+        flash(f'{display_name} updated — they log in as "{username}" from now on.')
+    else:
+        flash(f'{display_name} updated.')
+    return redirect(url_for('auth.register'))
+
+
 @auth.route('/ttrpg/users/<int:user_id>/reset-password', methods=['POST'])
 @login_required
 @dm_required

@@ -22,12 +22,19 @@
     margin: 0; padding: 0; height: 100%; overflow: hidden;
     /* Transparent in strip mode so the camera source below shows through;
        the dark field is only there to back a tile that carries its own feed. */
-    background: {% if strip_only %}transparent{% else %}#14151b{% endif %};
+    background: {% if strip_only %}transparent{% else %}var(--sfc-field, #14151b){% endif %};
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
   }
-  #tile { position: absolute; inset: 0; overflow: hidden; border-radius: 14px;
-          border: 2px solid rgba(200,168,110,.55); box-sizing: border-box; }
+  /* The frame itself (border + matte corners) is drawn by #bezel below, so
+     every shape — rounded, square, circle, hex — renders the same way. The
+     strip and condition badges sit ABOVE it (z-index), so a circle or hex
+     never cuts the name off: the lower third rides over the frame. */
+  #tile { position: absolute; inset: 0; overflow: hidden;
+          box-sizing: border-box; }
+  #bezel { position: absolute; inset: 0; width: 100%; height: 100%;
+           pointer-events: none; z-index: 5; }
+  #strip, #conds { z-index: 6; }
   /* The feed fills the tile. A camera that never connects leaves the dark
      field behind it rather than a white flash of an unstyled frame. */
   #cam { position: absolute; inset: 0; width: 100%; height: 100%;
@@ -47,8 +54,9 @@
              calc(var(--u, 7px) * 2.2);
     /* A gradient, not a solid bar: it keeps the player's face readable while
        still giving the text something to sit on. */
-    background: linear-gradient(180deg, rgba(8,9,13,0), rgba(8,9,13,.82) 42%,
-                                        rgba(8,9,13,.94));
+    background: var(--sfc-strip,
+                    linear-gradient(180deg, rgba(8,9,13,0),
+                                    rgba(8,9,13,.82) 42%, rgba(8,9,13,.94)));
     text-shadow: 0 2px 6px rgba(0,0,0,.9);
   }
   /* The character's face, so the audience can tie the person on camera to
@@ -58,17 +66,18 @@
     flex: 0 0 auto; width: calc(var(--u, 7px) * 9);
     height: calc(var(--u, 7px) * 9); border-radius: 50%;
     object-fit: cover; background: #23242c;
-    border: 2px solid rgba(200,168,110,.8);
+    border: 2px solid var(--accent-strong, rgba(200,168,110,.8));
     box-shadow: 0 3px 12px rgba(0,0,0,.6);
   }
   #face.placeholder {
     display: flex; align-items: center; justify-content: center;
-    font-size: calc(var(--u, 7px) * 4.5); color: #c8a86e;
+    font-size: calc(var(--u, 7px) * 4.5);
+    color: var(--accent, #c8a86e);
   }
   #who { min-width: 0; flex: 1 1 auto; }
   #char-name {
     font-weight: 800; font-size: calc(var(--u, 7px) * 6.4); line-height: 1.1;
-    color: #e8d7ac; white-space: nowrap; overflow: hidden;
+    color: var(--accent-text, #e8d7ac); white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis;
   }
   /* Who is actually playing them — the point of the second line. */
@@ -107,6 +116,8 @@
   <div id="nocam">no camera</div>
   {% endif %}
 
+  <svg id="bezel" xmlns="http://www.w3.org/2000/svg"></svg>
+
   <div id="conds"></div>
 
   <div id="strip">
@@ -139,18 +150,152 @@ const POLL_MS = {{ (poll_s | default(10)) * 1000 }};
 function el(id) { return document.getElementById(id); }
 function hpColor(p) { return p > 50 ? '#3fa14a' : p > 20 ? '#c9a227' : '#c0392b'; }
 
+// ── Stream look: accent colour + bezel shape, set by the DM ─────────────────
+// The camera under this overlay is a rectangle no matter what; the bezel is
+// an SVG that mattes off everything outside the chosen shape and strokes its
+// edge, so circle/hex tiles read as a real frame, not a border on a box.
+let THEME = { accent: '#c8a86e', base: '#08090d', base2: '#08090d',
+              dir: '180', bezel: 'rounded' };
+
+function hexRgb(h) {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16),
+          parseInt(h.slice(5, 7), 16)];
+}
+function rgba(h, a) { const [r, g, b] = hexRgb(h); return `rgba(${r},${g},${b},${a})`; }
+function lighten(h, f) {
+  const [r, g, b] = hexRgb(h).map(v => Math.round(v + (255 - v) * f));
+  return `rgb(${r},${g},${b})`;
+}
+function darken(h, f) {
+  const [r, g, b] = hexRgb(h).map(v => Math.round(v * (1 - f)));
+  return `rgb(${r},${g},${b})`;
+}
+
+function rrectPath(w, h, r, m) {
+  const x = m, y = m, x2 = w - m, y2 = h - m;
+  if (r <= 0) return `M${x} ${y}H${x2}V${y2}H${x}Z`;
+  return `M${x + r} ${y}H${x2 - r}A${r} ${r} 0 0 1 ${x2} ${y + r}V${y2 - r}` +
+         `A${r} ${r} 0 0 1 ${x2 - r} ${y2}H${x + r}A${r} ${r} 0 0 1 ${x} ${y2 - r}` +
+         `V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+}
+
+function shapeGeometry(w, h) {
+  const m = 2;                                  // stroke inset from the edge
+  switch (THEME.bezel) {
+    case 'square':
+      return { path: rrectPath(w, h, 0, m) };
+    case 'circle': {
+      const rx = w / 2 - m, ry = h / 2 - m;
+      return { path: `M${w / 2 - rx} ${h / 2}a${rx} ${ry} 0 1 0 ${2 * rx} 0` +
+                     `a${rx} ${ry} 0 1 0 ${-2 * rx} 0Z` };
+    }
+    case 'hex': {
+      const pts = [[w * 0.25, m], [w * 0.75, m], [w - m, h / 2],
+                   [w * 0.75, h - m], [w * 0.25, h - m], [m, h / 2]];
+      return { path: 'M' + pts.map(p => p.join(' ')).join('L') + 'Z' };
+    }
+    default: {                                  // rounded — the original look
+      const r = Math.max(10, w * 0.02);
+      return { path: rrectPath(w, h, r, m) };
+    }
+  }
+}
+
+// Gradient direction as SVG gradient endpoints (fraction coordinates).
+function dirVec(dir) {
+  const m = { '180': [0, 0, 0, 1], '0': [0, 1, 0, 0], '90': [0, 0, 1, 0],
+              '270': [1, 0, 0, 0], '135': [0, 0, 1, 1], '225': [1, 0, 0, 1],
+              '45': [0, 1, 1, 0], '315': [1, 1, 0, 0] };
+  return m[dir] || m['180'];
+}
+
+function drawBezel() {
+  const box = el('tile').getBoundingClientRect();
+  const w = box.width, h = box.height;
+  if (!w || !h) return;
+  const g = shapeGeometry(w, h);
+  // The matte carries the SAME base pair as every other surface (darkened so
+  // it still reads as a frame), and the same dither: a clipped noise wash so
+  // the blend can't band on stream. Solid pair -> plain fill, no noise.
+  const m1 = darken(THEME.base, 0.2), m2 = darken(THEME.base2, 0.2);
+  const matteHole = `M0 0H${w}V${h}H0Z ${g.path}`;
+  let gradDef;
+  if (THEME.dir === 'radial') {
+    gradDef = `<radialGradient id="bzg" cx="50%" cy="40%" r="80%">` +
+              `<stop offset="0" stop-color="${m1}"/>` +
+              `<stop offset="1" stop-color="${m2}"/></radialGradient>`;
+  } else {
+    const [x1, y1, x2, y2] = dirVec(THEME.dir);
+    gradDef = `<linearGradient id="bzg" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">` +
+              `<stop offset="0" stop-color="${m1}"/>` +
+              `<stop offset="1" stop-color="${m2}"/></linearGradient>`;
+  }
+  const dither = THEME.base === THEME.base2 ? '' :
+    `<rect width="${w}" height="${h}" filter="url(#bzn)"` +
+    ` clip-path="url(#bzc)" opacity="0.05"/>`;
+  el('bezel').innerHTML =
+    `<defs>${gradDef}` +
+    `<filter id="bzn"><feTurbulence type="fractalNoise" baseFrequency="0.9"` +
+    ` numOctaves="2"/><feColorMatrix type="matrix"` +
+    ` values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.9 0"/></filter>` +
+    `<clipPath id="bzc"><path d="${matteHole}" clip-rule="evenodd"/></clipPath>` +
+    `</defs>` +
+    `<path d="${matteHole}" fill-rule="evenodd" fill="url(#bzg)"/>` +
+    dither +
+    `<path d="${g.path}" fill="none" stroke="${rgba(THEME.accent, 0.85)}"` +
+    ` stroke-width="3"/>`;
+  document.body.className = 'shape-' + THEME.bezel;
+}
+
+// 4%-alpha tiled noise — the dither that keeps blends from banding on stream.
+const NOISE_LAYER = 'url("data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140">' +
+  '<filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2"/>' +
+  '<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.04 0"/></filter>' +
+  '<rect width="140" height="140" filter="url(#n)"/></svg>') + '")';
+
+function applyTheme(t) {
+  if (!t || !/^#[0-9a-fA-F]{6}$/.test(t.accent || '')) return;
+  const base = /^#[0-9a-fA-F]{6}$/.test(t.base || '') ? t.base : '#08090d';
+  const b2 = /^#[0-9a-fA-F]{6}$/.test(t.base2 || '') ? t.base2 : base;
+  THEME = { accent: t.accent, base, base2: b2, dir: t.dir || '180',
+            bezel: t.bezel || 'rounded' };
+  const s = document.documentElement.style;
+  s.setProperty('--accent', THEME.accent);
+  s.setProperty('--accent-strong', rgba(THEME.accent, 0.8));
+  s.setProperty('--accent-text', lighten(THEME.accent, 0.45));
+  // The strip keeps its VERTICAL fade whatever the scene direction is —
+  // it exists to make text readable over a face, and a sideways fade would
+  // leave one end of the name unbacked. base2 tints the opaque end.
+  s.setProperty('--sfc-strip',
+    `linear-gradient(180deg, ${rgba(base, 0)}, ${rgba(base, 0.82)} 42%, ` +
+    `${rgba(b2, 0.94)})`);
+  // The field a camera-less tile shows: same pair, same dither, lifted a
+  // little so it doesn't read as a dead black box.
+  const lift = h => `rgb(${hexRgb(h).map(v => Math.min(255, Math.round(v * 1.5))).join(',')})`;
+  const fieldGrad = (THEME.dir === 'radial')
+    ? `radial-gradient(ellipse at 50% 40%, ${lift(base)}, ${lift(b2)} 78%)`
+    : `linear-gradient(${parseInt(THEME.dir, 10) || 180}deg, ${lift(base)}, ${lift(b2)})`;
+  s.setProperty('--sfc-field',
+    (base === b2 ? '' : NOISE_LAYER + ', ') + fieldGrad);
+  drawBezel();
+}
+
 // Text scales with the TILE, so a six-player grid and a twelve-player grid
 // both read correctly. Re-measured on resize because OBS changes the source
 // size when the party grows.
 function sizeText() {
   const w = el('tile').getBoundingClientRect().width / 100;
   if (w > 0) document.documentElement.style.setProperty('--u', w + 'px');
+  drawBezel();
 }
 sizeText();
 addEventListener('resize', sizeText);
+applyTheme({{ theme | tojson }});
 
 function apply(d) {
   if (!d) return;
+  if (d.theme) applyTheme(d.theme);   // a saved re-skin lands on the next poll
   el('char-name').textContent = d.name || '';
   // Only take the player's name from the poll when it has one: a payload
   // without the field must not wipe what the page rendered.

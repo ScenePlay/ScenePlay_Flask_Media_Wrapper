@@ -498,6 +498,29 @@ function _sbSetHp(hpRow, cur, max, pct) {
   if (bar) { bar.style.width = pct + '%'; bar.style.background = hpColor(pct); }
 }
 
+// Collapsible sidebar sections. The title carries data-sb-section="<key>";
+// its box is #sb-sec-<key>. The fold sticks per browser via localStorage —
+// collapsed monsters stay collapsed across reloads and sessions.
+function sbToggleSection(titleEl) {
+  const key = titleEl.dataset.sbSection;
+  const box = document.getElementById('sb-sec-' + key);
+  if (!box) return;
+  const hide = box.style.display !== 'none';
+  box.style.display = hide ? 'none' : '';
+  const caret = titleEl.querySelector('.sb-caret');
+  if (caret) caret.innerHTML = hide ? '▸' : '▾';
+  try { localStorage.setItem('sb-collapse-' + key, hide ? '1' : '0'); } catch (e) {}
+}
+
+// Restore each section's remembered fold once the sidebar exists.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-sb-section]').forEach(t => {
+    let saved = null;
+    try { saved = localStorage.getItem('sb-collapse-' + t.dataset.sbSection); } catch (e) {}
+    if (saved === '1') sbToggleSection(t);   // starts open; one toggle folds it
+  });
+});
+
 function sbAmt(btn) {
   return parseInt(btn.closest('.sb-hp-row').querySelector('.sb-amt').value) || 1;
 }
@@ -2311,6 +2334,25 @@ function obsMuteFromMap(ev, btn) {
     .catch(() => {});
 }
 
+// Table-wide mutes from the strip — the same scopes the Broadcast page's
+// three buttons post. No optimistic paint: the server's answer carries the
+// full muted set, so every row's speaker icon repaints from it right away
+// (and the 2s poll keeps it honest after that).
+function obsMapMuteAll(scope, muted) {
+  fetch('/ttrpg/obs/api/mute', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: scope, muted }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert((d && d.error) || 'Could not change the mutes.'); return; }
+      const ids = new Set((d.muted_ids || []).map(String));
+      document.querySelectorAll('.obs-mapmute-btn').forEach(b =>
+        _obsPaintMapMute(b, ids.has(String(b.dataset.characterId))));
+    })
+    .catch(() => {});
+}
+
 // Cut OBS to one of the ScenePlay scenes. Optimistic-then-corrected, same as
 // obsViewPlayer: the 2s poll is the authority, this just avoids a dead-feeling
 // button while the request is in flight.
@@ -2522,6 +2564,32 @@ function _obsSync(obs) {
   });
   const mode = document.getElementById('obs-mapmode-btn');
   if (mode) mode.style.opacity = obs.connected ? '' : '.4';
+  // Auto-camera watch: the poll is the authority, wherever it was toggled.
+  if (obs.auto_cam !== undefined) {
+    const ac = document.getElementById('obs-autocam-btn');
+    if (ac) {
+      ac.dataset.on = obs.auto_cam ? '1' : '0';
+      _obsLit(ac, !!obs.auto_cam);
+      ac.style.opacity = obs.connected ? '' : '.4';
+    }
+  }
+}
+
+// Auto cameras: dark feed -> stat card, light back -> camera. Optimistic
+// paint; the 2s poll corrects it if the save failed or another tab flipped it.
+function obsToggleAutoCam(btn) {
+  const want = btn.dataset.on !== '1';
+  fetch('/ttrpg/obs/api/auto-cam', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: want }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert((d && d.error) || 'Could not toggle auto cameras.'); return; }
+      btn.dataset.on = d.on ? '1' : '0';
+      _obsLit(btn, d.on);
+    })
+    .catch(() => {});
 }
 
 // Nothing is being viewed through any more — used by every action that

@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
+    {# Explicit, not just the HTTP header: scripts inherit the DOCUMENT's
+       encoding, and battlemap.js uses non-ASCII identifiers (θ) that become
+       a SyntaxError under a windows-1252 fallback. #}
+    <meta charset="utf-8">
     <title>{% block title %}ScenePlay — TTRPG{% endblock %}</title>
     <!-- themes.css first — defines --sp-* and --ttrpg-* aliases for all themes -->
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/themes.css') }}">

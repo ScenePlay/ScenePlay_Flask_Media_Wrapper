@@ -469,8 +469,14 @@
     {% if current_user.is_dm() %}
     <div id="sidebar-wrap">
     <div id="sidebar">
-      <!-- Monsters -->
-      <div class="sidebar-section-title">Monsters &amp; Assets</div>
+      <!-- Monsters. The title is a collapse toggle — a long bestiary buries
+           the Party and Scenes sections below it, so the DM can fold it away;
+           the choice sticks per browser (localStorage). -->
+      <div class="sidebar-section-title" data-sb-section="monsters"
+           onclick="sbToggleSection(this)" style="cursor:pointer;"
+           title="Collapse / expand">
+        <span class="sb-caret">&#9662;</span> Monsters &amp; Assets</div>
+      <div id="sb-sec-monsters">
       {% for sm in monsters %}
       <div class="sidebar-entity"
            data-entity-type="monster"
@@ -502,6 +508,7 @@
       {% else %}
       <p class="text-muted small">No monsters in session.</p>
       {% endfor %}
+      </div>
 
       <!-- Party -->
       <div class="sidebar-section-title mt-2">Party</div>
@@ -694,6 +701,14 @@
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.1rem;line-height:1;cursor:pointer;">&#128247;</button>
+        <!-- Auto cameras: a dead/black feed swaps that player to their stat
+             card; the picture coming back swaps them to camera. Lit = on. -->
+        <button id="obs-autocam-btn" data-on="0"
+                onclick="obsToggleAutoCam(this)"
+                title="Auto cameras: swap a player to their card when their feed goes dark, back to camera when it returns"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">CAM &#9889;</button>
         <button class="obs-cut-btn" data-cut="party" onclick="obsCut('party', this)"
                 title="Cut to the party scene (G)"
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
@@ -725,6 +740,25 @@
                 style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">POST</button>
+        <!-- Table-wide stream mutes — the Broadcast page's three scopes,
+             reachable without leaving the map. The per-character speaker
+             icons repaint from the same poll that corrects everything else. -->
+        <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
+        <button id="obs-muteplr-btn" onclick="obsMapMuteAll('players', true)"
+                title="Mute every player on the stream (your DM mic stays live)"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">PLR&nbsp;&#128263;</button>
+        <button id="obs-muteall-btn" onclick="obsMapMuteAll('everyone', true)"
+                title="Mute everyone on the stream, including your DM mic"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">ALL&nbsp;&#128263;</button>
+        <button id="obs-unmute-btn" onclick="obsMapMuteAll('everyone', false)"
+                title="Unmute everyone on the stream"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">&#128266;</button>
         {% endif %}
         {% endif %}
       </div>

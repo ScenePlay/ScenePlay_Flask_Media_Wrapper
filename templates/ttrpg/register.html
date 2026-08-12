@@ -67,6 +67,13 @@
                             </span>
                         </td>
                         <td class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-user-id="{{ u.user_id }}"
+                                    data-username="{{ u.username }}"
+                                    data-display-name="{{ u.display_name }}"
+                                    onclick="openEditModal(this)">
+                                Edit
+                            </button>
                             <button type="button" class="btn btn-sm btn-ttrpg"
                                     onclick="openResetModal({{ u.user_id }}, '{{ u.display_name | replace("'", "\\'") }}')">
                                 Reset PW
@@ -114,7 +121,48 @@
     </div>
 </div>
 
+<!-- Edit User Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" style="color:var(--ttrpg-accent);">Edit Account</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editUserForm" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Username <span class="text-secondary">(login)</span></label>
+                        <input type="text" name="username" id="editUsernameInput"
+                               class="form-control bg-dark text-light border-secondary" required>
+                        <div class="form-text">They log in with the new name from
+                            their next login; nobody is logged out now.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" name="display_name" id="editDisplayInput"
+                               class="form-control bg-dark text-light border-secondary" required>
+                        <div class="form-text">What the stream overlays show.</div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-ttrpg btn-sm">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
+function openEditModal(btn) {
+    document.getElementById('editUsernameInput').value = btn.dataset.username;
+    document.getElementById('editDisplayInput').value = btn.dataset.displayName;
+    document.getElementById('editUserForm').action =
+        '/ttrpg/users/' + btn.dataset.userId + '/edit';
+    new bootstrap.Modal(document.getElementById('editUserModal')).show();
+}
+
 function openResetModal(userId, displayName) {
     document.getElementById('resetPwLabel').textContent = 'Set a new password for ' + displayName + '.';
     document.getElementById('resetPwInput').value = '';

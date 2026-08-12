@@ -851,7 +851,8 @@ def _obs_poll_state():
     except Exception:
         return None
     from routes.obs import (map_mode, viewed_character_id,
-                            CUT_TARGETS, _cut_scene_name, _muted_ids)
+                            CUT_TARGETS, _cut_scene_name, _muted_ids,
+                            auto_cam_on)
     return {'connected': snap['connected'],
             'current_scene': snap['current_scene'],
             'recording': snap['recording'],
@@ -869,7 +870,10 @@ def _obs_poll_state():
             # Who is muted on the stream, so each row's speaker button shows
             # the truth even when the mute was flipped from the Broadcast
             # page, a scene policy, or another tab.
-            'muted_ids': sorted(_muted_ids())}
+            'muted_ids': sorted(_muted_ids()),
+            # Auto-camera watch (dark feed -> stat card, and back), so the
+            # strip button shows the real state whoever flipped it.
+            'auto_cam': auto_cam_on()}
 
 
 # ── Token CRUD ────────────────────────────────────────────────────────────────

@@ -202,6 +202,24 @@
           <b>0</b> snaps instantly. Saves automatically.
         </div>
       </div>
+      <div class="row g-2 align-items-end mt-2" style="max-width:32rem;">
+        <div class="col-5">
+          <label class="form-label small mb-1">Camera bezel</label>
+          <select name="obs_bezel_shape" form="obs-cfg-form"
+                  class="form-select form-select-sm">
+            {% for s in cfg.bezel_shapes %}
+            <option value="{{ s }}"{% if cfg.bezel == s %} selected{% endif %}>
+              {{ {'rounded': 'Rounded corners', 'square': 'Square',
+                  'circle': 'Circle / oval', 'hex': 'Hexagon'}[s] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
+          The frame around every camera tile. The name strip sits on top, so
+          no shape ever cuts it off. Saves with Connection Settings and
+          re-skins a live stream on the next poll.
+        </div>
+      </div>
       {% if cfg.portal_url %}
       <div class="small text-muted mt-2 d-flex align-items-center gap-2 flex-wrap">
         <span>Remote players log in at</span>
@@ -911,6 +929,98 @@
             each card is set in <b>Images</b> below.
           </div>
         </div>
+        <div class="mb-3 ms-3" style="max-width:38rem;">
+          <label class="form-label small">Stream look
+            {% if cfg.theme_own %}
+            <span class="badge" style="background:var(--ttrpg-accent);
+                  color:var(--sp-on-accent);">this session's own</span>
+            {% endif %}
+          </label>
+          <div class="form-text mb-2">
+            The colour theme for the whole presentation, every scene: the
+            <b>accent</b> paints frames, names, titles and headings; the
+            <b>base</b> tints every surface they sit on &mdash; the title
+            strip, the info panel, tile strips and card fields. A save
+            re-skins a live stream within a few seconds; no source reloads.
+            Like the show art, saving with a session running styles <b>that
+            session</b>; other sessions keep the shared look.
+          </div>
+          <div class="row g-2 align-items-end">
+            <div class="col-2">
+              <label class="form-label small">Accent</label>
+              <input type="color" name="obs_accent_color" id="obs-accent-input"
+                     form="obs-cfg-form" class="form-control form-control-sm"
+                     style="height:2rem;" value="{{ cfg.accent }}">
+            </div>
+            <div class="col-2">
+              <label class="form-label small">Base</label>
+              <input type="color" name="obs_base_color" id="obs-base-input"
+                     form="obs-cfg-form" class="form-control form-control-sm"
+                     style="height:2rem;" value="{{ cfg.base }}">
+            </div>
+            <div class="col-2">
+              <label class="form-label small">Base 2</label>
+              <input type="color" name="obs_base_color2" id="obs-base2-input"
+                     form="obs-cfg-form" class="form-control form-control-sm"
+                     style="height:2rem;" value="{{ cfg.base2 }}">
+            </div>
+            <div class="col-3">
+              <label class="form-label small">Direction</label>
+              <select name="obs_base_dir" id="obs-basedir-input"
+                      form="obs-cfg-form" class="form-select form-select-sm">
+                {% for v, label in [('180', 'Top → bottom'),
+                                    ('0', 'Bottom → top'),
+                                    ('90', 'Left → right'),
+                                    ('270', 'Right → left'),
+                                    ('135', 'Top-left → bottom-right'),
+                                    ('225', 'Top-right → bottom-left'),
+                                    ('45', 'Bottom-left → top-right'),
+                                    ('315', 'Bottom-right → top-left'),
+                                    ('radial', 'Center glow (radial)')] %}
+                <option value="{{ v }}"{% if cfg.base_dir == v %} selected{% endif %}>
+                  {{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-3">
+              <label class="form-label small">Themes</label>
+              <div class="d-flex gap-1 flex-wrap">
+                {% for name, a, b, b2 in [('Gilded night', '#c8a86e', '#08090d', '#1a1408'),
+                                          ('Steel', '#aeb6c4', '#0d1117', '#1c2433'),
+                                          ('Ember', '#e05545', '#140a08', '#2c1009'),
+                                          ('Verdant', '#3fa14a', '#071009', '#0e2414'),
+                                          ('Arcane', '#9b6dff', '#0c081a', '#201040'),
+                                          ('Abyssal', '#4a9eff', '#06101c', '#0d2440')] %}
+                <button type="button" class="btn btn-sm p-0" title="{{ name }}"
+                        style="width:1.8rem;height:1.6rem;border:1px solid #0006;
+                               background:linear-gradient(135deg, {{ a }} 34%, {{ b }} 34%, {{ b2 }});"
+                        onclick="document.getElementById('obs-accent-input').value='{{ a }}';
+                                 document.getElementById('obs-base-input').value='{{ b }}';
+                                 document.getElementById('obs-base2-input').value='{{ b2 }}';">
+                </button>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          <div class="form-text">
+            Base &rarr; Base 2 blends across every surface in the chosen
+            direction, with a faint dither so the stream encoder can't band
+            it. Set Base 2 to the same colour as Base for the classic solid
+            look.
+          </div>
+          {% if cfg.theme_own %}
+          {# form= binding, NOT an inline <form>: nesting a form here would
+             make the browser CLOSE obs-cfg-form early and orphan every
+             control after this point (the DM-tile checkbox stopped saving
+             exactly this way). The tiny form itself sits after the settings
+             form, outside it. #}
+          <div class="mt-2">
+            <button type="submit" form="obs-theme-shared-form"
+                    class="btn btn-sm btn-outline-secondary">
+              Back to the shared look</button>
+          </div>
+          {% endif %}
+        </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-dm-enabled"
                  name="obs_dm_enabled" value="1"
@@ -980,6 +1090,11 @@
           &#10003; Settings save automatically as you change them. Changing
           host, port or password reconnects.</span>
       </form>
+      {# The "Back to the shared look" button submits this via its form=
+         attribute — it must live OUTSIDE obs-cfg-form (nested forms close
+         the outer one early and orphan the controls after them). #}
+      <form method="post" action="{{ url_for('obs_bp.api_theme_shared') }}"
+            id="obs-theme-shared-form"></form>
       <hr style="border-color:var(--sp-border);">
       <p class="small text-muted mb-0">
         In OBS: <b>Tools &rarr; WebSocket Server Settings</b> &rarr; tick <i>Enable WebSocket server</i>,
