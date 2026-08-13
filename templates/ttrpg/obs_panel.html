@@ -40,7 +40,9 @@
 
   #title {
     position: absolute; left: 0; right: 0; top: 0;
-    display: flex; align-items: center; justify-content: space-between;
+    /* Everything groups LEFT: campaign, then session + turn beside it —
+       not spread across the strip. */
+    display: flex; align-items: center; justify-content: flex-start;
     gap: 2vw; padding: 0 2.2vw; box-sizing: border-box;
     background: var(--sfc-title,
                     linear-gradient(180deg, rgba(8,9,13,.92), rgba(8,9,13,.62)));
