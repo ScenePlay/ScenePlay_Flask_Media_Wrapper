@@ -1,12 +1,18 @@
 {
   "manifest_version": 3,
   "name": "ScenePlay",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Send the current YouTube video or playlist to a ScenePlay server.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": "icon.png"
-  }
+  },
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
 }
-
