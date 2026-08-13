@@ -20,43 +20,87 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #f2efe6;
   }
+  /* The card is an OBJECT on the table, where a camera is a WINDOW: cameras
+     run bezel-to-edge, the card sits inset with room to cast a shadow. That
+     inset + the layered elevation is what makes it read as 3D on stream.
+     Every shadow is vh-scaled so it lands INSIDE the source bounds instead
+     of getting sliced off at the tile edge. */
+  body { box-sizing: border-box; padding: 2.6vh 2.6vw 7vh; }
   .card {
     box-sizing: border-box;
+    position: relative;
     height: 100%;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     /* vh/vw, not %: percentage padding and gap resolve against the WIDTH,
        and these tiles are about 2.2:1, so a "4%" gap ate a quarter of the
        height and squeezed the name down to nothing. */
-    gap: 2.5vh;
-    padding: 4vh 4vw;
+    gap: 1.8vh;
+    padding: 3vh 4vw;
     background: var(--sfc-card,
                     linear-gradient(160deg, rgba(24,26,34,.92), rgba(14,15,20,.92)));
-    border: 2px solid var(--accent-soft, rgba(200,168,110,.55));
-    border-radius: 14px;
+    border: 1px solid var(--accent-soft, rgba(200,168,110,.55));
+    border-radius: 22px;
     text-shadow: 0 2px 6px rgba(0,0,0,.8);
+    /* top inner highlight = light from above; contact shadow grounds it */
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.07),
+      0 1vh 2.2vh -0.6vh rgba(0,0,0,.5);
+  }
+  /* The gilded edge — the card's signature. A thin accent line across the
+     top, like the gilt page-edge of a rulebook, in the table's own colour. */
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 11%; right: 11%;
+    height: 3px; border-radius: 0 0 6px 6px;
+    background: linear-gradient(90deg, transparent,
+                var(--accent, #c8a86e) 20%,
+                var(--accent-text, #e8d7ac) 50%,
+                var(--accent, #c8a86e) 80%, transparent);
+    opacity: .9;
+  }
+  /* The deep ambient shadow, on its own layer so it can BREATHE — the
+     stream's stand-in for a hover effect, since no cursor ever visits a
+     broadcast. Slow enough to feel like candlelight, not a blink. */
+  .card::after {
+    content: ''; position: absolute; inset: 0; z-index: -1;
+    border-radius: inherit;
+    box-shadow: 0 3.2vh 5.8vh -1.4vh rgba(0,0,0,.75);
+    animation: card-breathe 9s ease-in-out infinite;
+    animation-delay: var(--breathe-delay, 0s);
+  }
+  @keyframes card-breathe {
+    0%, 100% { opacity: .55; }
+    50%      { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card::after { animation: none; }
   }
   .portrait {
     /* Driven by HEIGHT so a short tile can't let the portrait crowd out the
        name; width follows to keep it circular. */
-    height: 40%; width: auto; max-width: 38%; aspect-ratio: 1;
+    height: 34%; width: auto; max-width: 34%; aspect-ratio: 1;
     border-radius: 50%;
     object-fit: cover;
     border: 3px solid var(--accent-strong, rgba(200,168,110,.75));
-    box-shadow: 0 6px 18px rgba(0,0,0,.55);
+    /* the halo: a soft accent glow that ties the portrait to the theme */
+    box-shadow: 0 6px 18px rgba(0,0,0,.55),
+                0 0 2.4vh var(--accent-glow, rgba(200,168,110,.28));
   }
   .portrait.placeholder {
     display: flex; align-items: center; justify-content: center;
     background: #23242c; font-size: min(3.4vw, 9vh); color: var(--accent, #c8a86e);
   }
+  /* The DM's badge doubles the players' glyph: their card has no HP bar or
+     conditions competing for the space, so the icon carries the identity. */
+  .portrait.placeholder.dm { font-size: min(6.8vw, 18vh); }
   .name {
     /* Readable from the couch: sized off whichever tile dimension is tighter
        so it scales with the party size instead of being fixed to the width. */
-    font-size: min(7vw, 15vh); font-weight: 700; letter-spacing: .01em;
+    font-size: min(6vw, 12vh); font-weight: 700; letter-spacing: .01em;
     color: var(--accent-text, #e8d7ac); text-align: center;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .player { font-size: min(3.4vw, 7vh); opacity: .72; margin-top: -.4vh;
+  .player { font-size: min(3vw, 6vh); opacity: .72; margin-top: -.4vh;
             max-width: 100%; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; }
   .hp-row { width: 86%; }
@@ -76,7 +120,45 @@
   }
   /* "No camera" is a quiet hint, not an error — most tables have a few
      players who never turn a camera on. */
-  .nocam { font-size: min(1.6vw, 4vh); opacity: .5; }
+  /* The text column: neutral in the classic layout, the right-hand column
+     in banner, and the bottom block in trading. */
+  .who { display: flex; flex-direction: column; align-items: center;
+         gap: 1.6vh; min-width: 0; max-width: 100%; }
+
+  /* ── design: banner — portrait left, identity right, gilt spine ── */
+  body.design-banner .card { flex-direction: row; text-align: left;
+                             justify-content: flex-start;
+                             gap: 4vw; padding: 3vh 4.5vw; }
+  body.design-banner .who { align-items: flex-start; flex: 1 1 auto; }
+  body.design-banner .portrait { height: 58%; max-width: 30%; }
+  body.design-banner .name { font-size: min(5.4vw, 13vh); }
+  body.design-banner .hp-row { width: 100%; }
+  body.design-banner .conds { justify-content: flex-start; }
+  body.design-banner .nocam { left: auto; right: 3vw; text-align: right; }
+  body.design-banner .card::before {
+    left: 0; right: auto; top: 12%; bottom: 12%; width: 3px; height: auto;
+    border-radius: 0 6px 6px 0;
+    background: linear-gradient(180deg, transparent,
+                var(--accent, #c8a86e) 20%,
+                var(--accent-text, #e8d7ac) 50%,
+                var(--accent, #c8a86e) 80%, transparent);
+  }
+
+  /* ── design: trading — token-frame portrait, HP as the card's baseline ── */
+  body.design-trading .card { padding-bottom: 8.5vh; }
+  body.design-trading .portrait { height: 44%; max-width: 44%;
+                                  border-radius: 16%; }
+  body.design-trading .name { letter-spacing: .04em; }
+  body.design-trading .hp-row { position: absolute; left: 7%; right: 7%;
+                                bottom: 2.2vh; width: auto; }
+  body.design-trading .nocam { bottom: auto; top: 1.5vh; }
+
+  /* Pinned to the card's bottom edge so it never competes with the
+     name/HP column for flex room on a squat tile. */
+  .nocam { position: absolute; bottom: 1.4vh; left: 0; right: 0;
+           text-align: center;
+           font-size: min(1.5vw, 3.6vh); opacity: .45;
+           text-transform: uppercase; letter-spacing: .22em; }
 </style>
 
 <div class="card">
@@ -84,23 +166,25 @@
   <img class="portrait" id="pc-portrait" alt=""
        src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}">
   {% else %}
-  <div class="portrait placeholder">&#9876;</div>
+  <div class="portrait placeholder{% if is_dm %} dm{% endif %}">{% if is_dm %}{{ theme.dm_icon }}{% else %}&#9876;{% endif %}</div>
   {% endif %}
 
-  <div class="name" id="pc-name">{{ char.name }}</div>
-  {# Who is playing them. Same line the camera tile carries, so a player
-     reads the same whether their camera is up or their card is standing in. #}
-  <div class="player" id="pc-player">{{ player | default('') }}</div>
+  <div class="who">
+    <div class="name" id="pc-name">{{ char.name }}</div>
+    {# Who is playing them. Same line the camera tile carries, so a player
+       reads the same whether their camera is up or their card is standing in. #}
+    <div class="player" id="pc-player">{{ player | default('') }}</div>
 
-  {% if not is_dm %}
-  <div class="hp-row">
-    <div class="hp-bar"><div class="hp-fill" id="pc-hp-fill"></div></div>
-    <div class="hp-text" id="pc-hp-text">{{ char.hp_current }} / {{ char.hp_max }}</div>
+    {% if not is_dm %}
+    <div class="hp-row">
+      <div class="hp-bar"><div class="hp-fill" id="pc-hp-fill"></div></div>
+      <div class="hp-text" id="pc-hp-text">{{ char.hp_current }} / {{ char.hp_max }}</div>
+    </div>
+    <div class="conds" id="pc-conds"></div>
+    {% else %}
+    <div class="hp-text" id="dm-title-line" style="opacity:.75;">{{ theme.dm_title }}</div>
+    {% endif %}
   </div>
-  <div class="conds" id="pc-conds"></div>
-  {% else %}
-  <div class="hp-text" style="opacity:.75;">Dungeon Master</div>
-  {% endif %}
   {# Only true when this card IS the source. As an overlay it is covering a
      camera that is still running (and still audible), so the label would be
      a lie. #}
@@ -123,6 +207,7 @@ function applyTheme(t) {
   s.setProperty('--accent-text', `rgb(${light.join(',')})`);
   s.setProperty('--accent-soft', `rgba(${r},${g},${b},.55)`);
   s.setProperty('--accent-strong', `rgba(${r},${g},${b},.75)`);
+  s.setProperty('--accent-glow', `rgba(${r},${g},${b},.3)`);
   const base = /^#[0-9a-fA-F]{6}$/.test(t.base || '') ? t.base : '#08090d';
   const [br, bg2, bb] = [1, 3, 5].map(i => parseInt(base.slice(i, i + 2), 16));
   const hi = [br, bg2, bb].map(v => Math.round(v + (255 - v) * 0.06));
@@ -134,8 +219,24 @@ function applyTheme(t) {
     ? `radial-gradient(ellipse at 50% 40%, rgba(${hi.join(',')},.92), rgba(${cr},${cg},${cb},.92) 78%)`
     : `linear-gradient(${parseInt(t.dir, 10) || 160}deg, rgba(${hi.join(',')},.92), rgba(${cr},${cg},${cb},.92))`;
   s.setProperty('--sfc-card', grad);
+  // The DM's card design pick — a body class so the layout can swap live.
+  document.body.className = 'design-' + (t.card || 'classic');
+  // DM badge + title follow the theme too.
+  const dmPh = document.querySelector('.portrait.placeholder.dm');
+  if (dmPh && t.dm_icon) dmPh.textContent = t.dm_icon;
+  const dmLine = document.getElementById('dm-title-line');
+  if (dmLine && t.dm_title) dmLine.textContent = t.dm_title;
 }
 applyTheme({{ theme | tojson }});
+
+// De-sync the ambient breathing: nine cards pulsing in unison reads as a
+// glitch; each character gets a phase of their own, stable across reloads.
+{
+  const seed = {{ char.name | tojson }}.split('')
+    .reduce((a, c) => a + c.charCodeAt(0), 0);
+  document.querySelector('.card')
+    .style.setProperty('--breathe-delay', -(seed % 90) / 10 + 's');
+}
 
 function apply(d) {
   if (d && d.theme) applyTheme(d.theme);

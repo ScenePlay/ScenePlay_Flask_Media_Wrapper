@@ -84,6 +84,8 @@ def _obs_cfg():
         'title_h':       ('%g' % title_height()),
         'panel_title':   (appsettingGet('obs_panel_title', '') or ''),
         'info_text':     (appsettingGet('obs_info_text', '') or ''),
+        'panel_notes':   panel_note_rows(),
+        'yt':            _yt_cfg(),
         'party_bg':      art_setting('obs_party_bg'),
         'portal_url':    portal_login_url(),
         'feed_noaudio':  (appsettingGet('obs_feed_noaudio', '0') or '0'),
@@ -99,6 +101,16 @@ def _obs_cfg():
         'base_dir':      theme_base_dir(),
         'bezel':         bezel_shape(),
         'bezel_shapes':  BEZEL_SHAPES,
+        'plate':         theme_plate(),
+        'plate2':        theme_plate2(),
+        'plate_dir':     theme_plate_dir(),
+        'card_design':   card_design(),
+        'card_designs':  CARD_DESIGNS,
+        'tile_design':   tile_design(),
+        'tile_designs':  TILE_DESIGNS,
+        'dm_icon':       dm_icon(),
+        'dm_icons':      DM_ICONS,
+        'dm_title':      dm_title(),
         'theme_own':     _theme_session_own(),
         'music_capture': ('1' if music_capture_on() else '0'),
         'music_device':  music_device_id(),
@@ -494,7 +506,11 @@ def rebind_music_if_stale():
 DICE_REFLOW_HOLD_S = 5          # quiet seconds before the panel slides away
 DICE_REFLOW_ANIM_S = 0.6
 _dice_state = {'shown': False, 'last_id': None, 'last_roll_at': 0.0,
-               'threads': []}
+               'threads': [],
+               # The DM's panel note is a pop trigger too: a fresh note slides
+               # the panel in just like a roll, and whichever of the two
+               # happened LAST is what the panel shows.
+               'note_text': None, 'note_stamp': 0.0, 'roll_stamp': 0.0}
 _dice_timer = None
 _dice_lock = threading.Lock()
 
@@ -619,18 +635,43 @@ def _dice_tick(now):
     if st['threads']:
         return
     newest = _newest_roll_id()
+    note = '\n'.join(_info_lines())
     if st['last_id'] is None:
         # First look: whatever is already in the feed is history, not an
-        # event — coming up mid-session must not slide the panel in.
+        # event — coming up mid-session must not slide the panel in. The
+        # note text already on record is history for the same reason.
         st['last_id'] = newest
+        st['note_text'] = note
         return
+    changed = False
     if newest != st['last_id']:
         st['last_id'] = newest
+        st['roll_stamp'] = now
+        changed = True
+    if note != st['note_text']:
+        st['note_text'] = note
+        # An emptied note is not an announcement — it just stops showing.
+        if note.strip():
+            st['note_stamp'] = now
+            changed = True
+    # A roll or a fresh note is an EVENT: it slides the panel in and restarts
+    # the hold. Text still sitting in the box is STATE: it keeps the panel on
+    # screen indefinitely — the hold only sends the panel away once the box
+    # is empty.
+    standing = bool(note.strip())
+    if changed:
         st['last_roll_at'] = now
+    if changed or standing:
         if not st['shown'] and _dice_reflow(True):
             st['shown'] = True
-    elif st['shown'] and now - st['last_roll_at'] > DICE_REFLOW_HOLD_S:
-        if _dice_reflow(False):
+    if (st['shown'] and not changed
+            and now - st['last_roll_at'] > DICE_REFLOW_HOLD_S):
+        if standing:
+            # The roll's moment has passed: the standing note takes the
+            # panel back rather than the panel sliding away.
+            if st['note_stamp'] < st['roll_stamp']:
+                st['note_stamp'] = now
+        elif _dice_reflow(False):
             st['shown'] = False
 
 
@@ -1093,19 +1134,55 @@ def save_config():
     # THAT session's; with none it edits the shared default they inherit.
     _sid = _active_session_id()
     _sfx = f':s{_sid}' if _sid is not None else ''
-    for key in ('obs_accent_color', 'obs_base_color', 'obs_base_color2'):
+    for key in ('obs_accent_color', 'obs_base_color', 'obs_base_color2',
+                'obs_plate_color', 'obs_plate_color2'):
         colour = (request.form.get(key, '') or '').strip()
         if re.fullmatch(r'#[0-9a-fA-F]{6}', colour):
             appsettingSet(f'{key}{_sfx}', colour)
-    direction = (request.form.get('obs_base_dir', '') or '').strip().lower()
-    if direction in BASE_DIRS:
-        appsettingSet(f'obs_base_dir{_sfx}', direction)
+    for key in ('obs_base_dir', 'obs_plate_dir'):
+        direction = (request.form.get(key, '') or '').strip().lower()
+        if direction in BASE_DIRS:
+            appsettingSet(f'{key}{_sfx}', direction)
     shape = (request.form.get('obs_bezel_shape', '') or '').strip().lower()
     if shape in BEZEL_SHAPES:
         appsettingSet(f'obs_bezel_shape{_sfx}', shape)
+    design = (request.form.get('obs_card_design', '') or '').strip().lower()
+    if design in CARD_DESIGNS:
+        appsettingSet(f'obs_card_design{_sfx}', design)
+    tdesign = (request.form.get('obs_tile_design', '') or '').strip().lower()
+    if tdesign in TILE_DESIGNS:
+        appsettingSet(f'obs_tile_design{_sfx}', tdesign)
+    icon = (request.form.get('obs_dm_icon', '') or '').strip()
+    if icon in DM_ICONS:
+        appsettingSet(f'obs_dm_icon{_sfx}', icon)
+    if 'obs_dm_title' in request.form:
+        appsettingSet(f'obs_dm_title{_sfx}',
+                      (request.form.get('obs_dm_title', '') or '').strip()[:40])
     # Kept verbatim, newlines and all: each line is one row in the panel.
     appsettingSet('obs_info_text',
                   (request.form.get('obs_info_text', '') or '')[:4000])
+    # YouTube go-live front matter. Guarded on the client-id field so a
+    # partial post (tests, older pages) cannot blank the lot; the secret
+    # keeps the blank-means-keep rule the other passwords use.
+    if 'yt_client_id' in request.form:
+        import youtube_live as yt
+        appsettingSet('yt_client_id',
+                      (request.form.get('yt_client_id', '') or '').strip()[:200])
+        secret = (request.form.get('yt_client_secret', '') or '').strip()
+        if secret:
+            appsettingSet('yt_client_secret', secret[:200])
+        appsettingSet('yt_title',
+                      (request.form.get('yt_title', '') or '').strip()[:100])
+        appsettingSet('yt_description',
+                      (request.form.get('yt_description', '') or '')[:5000])
+        privacy = (request.form.get('yt_privacy', '') or '').strip().lower()
+        if privacy in yt.PRIVACIES:
+            appsettingSet('yt_privacy', privacy)
+        category = (request.form.get('yt_category', '') or '').strip()
+        if category in dict(yt.CATEGORIES):
+            appsettingSet('yt_category', category)
+        appsettingSet('yt_kids',
+                      '1' if request.form.get('yt_kids') else '0')
     # Only when the form actually carries it. The mode is a live shot call made
     # from the mode buttons, and this form does not post it — writing a default
     # here would silently snap the stream back every time the DM saved an
@@ -1152,6 +1229,236 @@ def save_config():
 
 
 # ── JSON API ──────────────────────────────────────────────────────────────────
+
+# ── going live on YouTube ─────────────────────────────────────────────────────
+# The stream's front matter — title, description, privacy, category,
+# made-for-kids, thumbnail — set HERE instead of in OBS's "Manage Broadcast"
+# dialog on the streaming machine. youtube_live.py does the API work; these
+# routes wire it to the page and to OBS.
+
+def _yt_cfg():
+    import youtube_live as yt
+    return {
+        'linked':      yt.linked(),
+        'channel':     yt.channel_name(),
+        'client_id':   (appsettingGet('yt_client_id', '') or '').strip(),
+        'has_secret':  bool((appsettingGet('yt_client_secret', '') or '').strip()),
+        'title':       (appsettingGet('yt_title', '') or '').strip(),
+        'description': appsettingGet('yt_description', '') or '',
+        'privacy':     (appsettingGet('yt_privacy', '') or '').strip()
+                       or 'unlisted',
+        'category':    (appsettingGet('yt_category', '') or '').strip() or '20',
+        'kids':        (appsettingGet('yt_kids', '0') or '0') == '1',
+        'categories':  yt.CATEGORIES,
+        'privacies':   yt.PRIVACIES,
+    }
+
+
+@obs_bp.route('/api/yt/link', methods=['POST'])
+@login_required
+@dm_required
+def api_yt_link():
+    import youtube_live as yt
+    try:
+        return jsonify({'ok': True, **yt.link_start()})
+    except yt.YtError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    except Exception as exc:                     # noqa: BLE001 - network
+        log.info('YT link start failed: %s', exc)
+        return jsonify({'ok': False,
+                        'error': 'Could not reach Google to start '
+                                 'linking — is this machine online?'}), 502
+
+
+@obs_bp.route('/api/yt/link/poll', methods=['POST'])
+@login_required
+@dm_required
+def api_yt_link_poll():
+    import youtube_live as yt
+    try:
+        return jsonify({'ok': True, **yt.link_poll()})
+    except yt.YtError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    except Exception as exc:                     # noqa: BLE001 - network
+        log.info('YT link poll failed: %s', exc)
+        return jsonify({'ok': True, 'state': 'pending'})
+
+
+@obs_bp.route('/api/yt/unlink', methods=['POST'])
+@login_required
+@dm_required
+def api_yt_unlink():
+    import youtube_live as yt
+    yt.unlink()
+    return jsonify({'ok': True})
+
+
+def _yt_thumb():
+    """The uploaded thumbnail as (bytes, mime), or None. Silently skipped
+    when it is missing, a video, or over YouTube's 2 MB cap — a bad
+    thumbnail must never stop the stream."""
+    name = art_setting('obs_yt_thumb')
+    ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    if ext not in ('jpg', 'jpeg', 'png'):
+        return None
+    try:
+        with open(os.path.join(BG_DIR, name), 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    if len(data) > 2 * 1024 * 1024:
+        return None
+    return (data, 'image/png' if ext == 'png' else 'image/jpeg')
+
+
+@obs_bp.route('/api/yt/golive', methods=['POST'])
+@login_required
+@dm_required
+def api_yt_golive():
+    """One click: create the broadcast with tonight's front matter, point
+    OBS's stream output at its ingestion, start streaming. enableAutoStart
+    flips the broadcast live once frames arrive; the existing Stop-streaming
+    button ends it (enableAutoStop)."""
+    import obs_ws
+    import youtube_live as yt
+    if not obs_ws.connected():
+        return jsonify({'ok': False, 'error': 'OBS is not connected.'}), 503
+    title = (appsettingGet('yt_title', '') or '').strip()
+    if not title:
+        # Same derivation the title strip uses, so an unset title still
+        # names the video after tonight's campaign or session.
+        sess = tblSessions.query.filter_by(status='active').first()
+        tp = _title_payload(sess)
+        title = tp['campaign'] or tp['session'] or 'ScenePlay stream'
+    try:
+        res = yt.go_live(
+            title,
+            appsettingGet('yt_description', '') or '',
+            (appsettingGet('yt_privacy', '') or '').strip() or 'unlisted',
+            (appsettingGet('yt_category', '') or '').strip() or '20',
+            (appsettingGet('yt_kids', '0') or '0') == '1',
+            thumb=_yt_thumb(),
+            start_iso=datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
+    except yt.YtError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 502
+    except Exception as exc:                     # noqa: BLE001 - network
+        log.info('YT go-live failed: %s', exc)
+        return jsonify({'ok': False,
+                        'error': 'Could not reach YouTube — is this '
+                                 'machine online?'}), 502
+    try:
+        obs_ws.request('SetStreamServiceSettings', {
+            'streamServiceType': 'rtmp_custom',
+            'streamServiceSettings': {'server': res['server'],
+                                      'key': res['key'], 'use_auth': False}})
+        obs_ws.set_output_active('stream', True)
+    except (obs_ws.ObsRejected, obs_ws.ObsUnavailable) as exc:
+        return jsonify({'ok': False, 'watch_url': res['watch_url'],
+                        'error': f'The broadcast is ready '
+                                 f'({res["watch_url"]}) but OBS refused to '
+                                 f'start streaming: {exc}'}), 502
+    with obs_ws._cache_lock:
+        obs_ws._cache['streaming'] = True
+    return jsonify({'ok': True, 'watch_url': res['watch_url'],
+                    'thumb_warning': res.get('thumb_warning', '')})
+
+
+# ── saved panel notes ─────────────────────────────────────────────────────────
+# A library of pre-written messages for the information panel. The DM preps
+# them before the stream and pops one on with a click instead of typing live.
+# A note belongs to ONE session's prep, or — session_id NULL — to every
+# session. The library shows the ACTIVE session's notes plus the shared ones,
+# the same scoping the show art and theme use.
+
+def panel_note_rows():
+    from sqlalchemy import or_
+    from models.ttrpg import tblObsPanelNotes
+    sid = _active_session_id()
+    q = tblObsPanelNotes.query
+    if sid is not None:
+        q = q.filter(or_(tblObsPanelNotes.session_id.is_(None),
+                         tblObsPanelNotes.session_id == sid))
+    else:
+        q = q.filter(tblObsPanelNotes.session_id.is_(None))
+    rows = q.all()
+    # The session's own notes first — they are tonight's — then the shared
+    # stock, each block alphabetical.
+    rows.sort(key=lambda r: (r.session_id is None, (r.title or '').lower()))
+    return [{'id': r.note_id, 'title': r.title or '(untitled)',
+             'shared': r.session_id is None} for r in rows]
+
+
+@obs_bp.route('/api/panel-notes', methods=['POST'])
+@login_required
+@dm_required
+def api_panel_note_save():
+    """Create or update one saved note. Every reply carries the refreshed
+    library so the page never has to guess what the list looks like now."""
+    from models.ttrpg import tblObsPanelNotes
+    from routes._util import _now
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip()[:80]
+    body = (data.get('body') or '')[:4000]
+    if not title:
+        return jsonify({'ok': False, 'error': 'A note needs a name.'}), 400
+    if not body.strip():
+        return jsonify({'ok': False,
+                        'error': 'The note is empty — type the message '
+                                 'into the box first.'}), 400
+    sid = None if data.get('shared') else _active_session_id()
+    row = None
+    if data.get('note_id'):
+        try:
+            row = db.session.get(tblObsPanelNotes, int(data['note_id']))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'bad note_id'}), 400
+    if row is None:
+        row = tblObsPanelNotes(session_id=sid, title=title, body=body,
+                               created_at=_now(), updated_at=_now())
+        db.session.add(row)
+    else:
+        row.title, row.body, row.session_id = title, body, sid
+        row.updated_at = _now()
+    db.session.commit()
+    return jsonify({'ok': True, 'note_id': row.note_id,
+                    'notes': panel_note_rows()})
+
+
+@obs_bp.route('/api/panel-notes/show', methods=['POST'])
+@login_required
+@dm_required
+def api_panel_note_show():
+    """Put one saved note on stream: it becomes the panel text, and the dice
+    watcher pops the panel exactly as if the DM had typed it live."""
+    from models.ttrpg import tblObsPanelNotes
+    data = request.get_json(silent=True) or {}
+    try:
+        row = db.session.get(tblObsPanelNotes, int(data.get('note_id') or 0))
+    except (TypeError, ValueError):
+        row = None
+    if row is None:
+        return jsonify({'ok': False, 'error': 'No such saved note.'}), 404
+    appsettingSet('obs_info_text', (row.body or '')[:4000])
+    return jsonify({'ok': True, 'body': row.body or '',
+                    'notes': panel_note_rows()})
+
+
+@obs_bp.route('/api/panel-notes/delete', methods=['POST'])
+@login_required
+@dm_required
+def api_panel_note_delete():
+    from models.ttrpg import tblObsPanelNotes
+    data = request.get_json(silent=True) or {}
+    try:
+        row = db.session.get(tblObsPanelNotes, int(data.get('note_id') or 0))
+    except (TypeError, ValueError):
+        row = None
+    if row is None:
+        return jsonify({'ok': False, 'error': 'No such saved note.'}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'notes': panel_note_rows()})
+
 
 @obs_bp.route('/api/state')
 @login_required
@@ -2031,6 +2338,8 @@ IMAGE_SLOTS = {
     'intermission': ('obs_intermission_image', 'intermission',
                      'Intermission card'),
     'post':         ('obs_post_image', 'post-show', 'Post-show card'),
+    'yt_thumb':     ('obs_yt_thumb', 'yt-thumb',
+                     'YouTube thumbnail — 1280×720 JPG/PNG, under 2 MB'),
 }
 
 # Show art can also be a looping VIDEO — an animated title card or an ambient
@@ -2139,8 +2448,17 @@ BEZEL_SHAPES = ('rounded', 'square', 'circle', 'hex')
 # Gradient directions: CSS linear-gradient angles (the value points TOWARD
 # that edge/corner), plus a centred radial glow.
 BASE_DIRS = ('0', '45', '90', '135', '180', '225', '270', '315', 'radial')
+CARD_DESIGNS = ('classic', 'banner', 'trading')
+TILE_DESIGNS = ('strip', 'tag', 'third')
+# The DM's badge on cards and tiles. A fixed roster (not free text): these
+# render inside OBS's CEF, so every entry is one that build was tested with.
+DM_ICONS = ('⚔', '⚙', '🐉', '🎲', '👑',
+            '🧙', '🛡', '📜')
 THEME_KEYS = ('obs_accent_color', 'obs_base_color', 'obs_base_color2',
-              'obs_base_dir', 'obs_bezel_shape')
+              'obs_base_dir', 'obs_bezel_shape',
+              'obs_plate_color', 'obs_plate_color2', 'obs_plate_dir',
+              'obs_card_design', 'obs_tile_design',
+              'obs_dm_icon', 'obs_dm_title')
 
 
 def theme_accent():
@@ -2176,6 +2494,54 @@ def bezel_shape():
     return v if v in BEZEL_SHAPES else 'rounded'
 
 
+def theme_plate():
+    """The camera tiles' name plate (the strip under the face). Its own pair
+    so the plate can contrast the scene; unset, it follows the base pair and
+    nothing changes."""
+    v = art_setting('obs_plate_color')
+    return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else theme_base()
+
+
+def theme_plate2():
+    v = art_setting('obs_plate_color2')
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', v):
+        return v
+    # An explicit plate colour without a second one renders solid; no plate
+    # at all keeps following the base pair, like theme_plate does.
+    v1 = art_setting('obs_plate_color')
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', v1):
+        return v1
+    return theme_base2()
+
+
+def theme_plate_dir():
+    v = art_setting('obs_plate_dir').lower()
+    return v if v in BASE_DIRS else '180'
+
+
+def card_design():
+    v = art_setting('obs_card_design').lower()
+    return v if v in CARD_DESIGNS else 'classic'
+
+
+def tile_design():
+    """How the camera tiles present the name plate: the full strip, a compact
+    name-tag pill, or a broadcast lower-third."""
+    v = art_setting('obs_tile_design').lower()
+    return v if v in TILE_DESIGNS else 'strip'
+
+
+def dm_icon():
+    v = art_setting('obs_dm_icon')
+    return v if v in DM_ICONS else DM_ICONS[0]
+
+
+def dm_title():
+    """What the DM is CALLED on stream — 'Dungeon Master' by default, but a
+    sci-fi table runs a GM and Carl's table answers to an AI."""
+    return art_setting('obs_dm_title')[:40] or 'Dungeon Master'
+
+
 def _theme_session_own():
     """Whether the ACTIVE session carries its own look (vs the shared one)."""
     sid = _active_session_id()
@@ -2188,7 +2554,11 @@ def _theme_session_own():
 def _theme_payload():
     return {'accent': theme_accent(), 'base': theme_base(),
             'base2': theme_base2(), 'dir': theme_base_dir(),
-            'bezel': bezel_shape()}
+            'bezel': bezel_shape(),
+            'plate': theme_plate(), 'plate2': theme_plate2(),
+            'plate_dir': theme_plate_dir(),
+            'card': card_design(), 'tile': tile_design(),
+            'dm_icon': dm_icon(), 'dm_title': dm_title()}
 
 
 def panel_on():
@@ -2281,8 +2651,22 @@ def ensure_map_scene():
     # the map. The SAME frame_areas call the party scene uses, title strip
     # included, so the roll feed is the identical size and position in both
     # scenes and cutting between them doesn't shift it.
-    areas = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
-                                   title_h=title_height(), panel_on=True)
+    if dice_autohide_on():
+        # Pop-over dice: the panel's column belongs to the MAP, and the dice
+        # box overlays it for five seconds after a roll. Building with the
+        # column reserved left the map stuck narrow until a roll cycle
+        # finally animated it out — the build must start in the resting
+        # state: map full width, dice parked.
+        areas = _frame_areas(w, h)
+        if areas['panel'] is None:
+            # Party panel off entirely: the map's roll feed still needs its
+            # box — same forced-on derivation panel_state uses for dice_rect.
+            areas['panel'] = obs_layout.frame_areas(
+                w, h, panel_side(), panel_fraction(),
+                title_height(), True)['panel']
+    else:
+        areas = obs_layout.frame_areas(w, h, panel_side(), panel_fraction(),
+                                       title_h=title_height(), panel_on=True)
     mrect, drect = areas['tiles'], areas['panel']
 
     item_id, warnings = obs_ws.ensure_browser_input(
@@ -4180,6 +4564,12 @@ def panel_state():
         'post': show_cfg('post'),
         'image_fraction': SHOW_IMAGE_FRACTION,
         'theme': _theme_payload(),
+        # Pop-over mode: the panel slides in because of a roll OR a fresh
+        # note — it shows whichever happened last. With the panel permanently
+        # on screen, notes keep their old priority.
+        'dice_popover': dice_autohide_on(),
+        'show_notes': (_dice_state['note_stamp'] >= _dice_state['roll_stamp']
+                       and bool(_info_lines())),
     })
 
 

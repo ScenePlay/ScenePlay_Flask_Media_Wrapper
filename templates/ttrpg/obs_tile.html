@@ -53,13 +53,83 @@
     display: flex; align-items: flex-end; gap: calc(var(--u, 7px) * 2);
     padding: calc(var(--u, 7px) * 2.6) calc(var(--u, 7px) * 2.6)
              calc(var(--u, 7px) * 2.2);
-    /* A gradient, not a solid bar: it keeps the player's face readable while
-       still giving the text something to sit on. */
-    background: var(--sfc-strip,
-                    linear-gradient(180deg, rgba(8,9,13,0),
-                                    rgba(8,9,13,.82) 42%, rgba(8,9,13,.94)));
     text-shadow: 0 2px 6px rgba(0,0,0,.9);
   }
+  /* The plate's colour lives on its own layer: the DM's plate pair blends
+     along the chosen direction, and the MASK supplies the vertical fade that
+     keeps the player's face readable regardless — colour direction and
+     readability fade are independent axes. */
+  #strip::before {
+    content: ''; position: absolute; inset: 0; z-index: -1;
+    background: var(--plate-grad,
+                    linear-gradient(180deg, rgba(8,9,13,.95), rgba(8,9,13,.95)));
+    -webkit-mask-image: linear-gradient(180deg, transparent,
+                        rgba(0,0,0,.86) 42%, #000);
+    mask-image: linear-gradient(180deg, transparent,
+                rgba(0,0,0,.86) 42%, #000);
+  }
+
+  /* ── plate style: tag — a compact pill, most of the video left clear ── */
+  body.design-tag #strip {
+    left: calc(var(--u, 7px) * 1.8); right: auto;
+    bottom: calc(var(--u, 7px) * 1);
+    max-width: 72%;
+    align-items: center; gap: calc(var(--u, 7px) * 1.2);
+    padding: calc(var(--u, 7px) * 0.7) calc(var(--u, 7px) * 2.4)
+             calc(var(--u, 7px) * 0.7) calc(var(--u, 7px) * 0.9);
+  }
+  body.design-tag #strip::before {
+    border-radius: 999px;
+    border: 1px solid var(--accent-strong, rgba(200,168,110,.8));
+    -webkit-mask-image: none; mask-image: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5);
+  }
+  body.design-tag #face { width: calc(var(--u, 7px) * 5);
+                          height: calc(var(--u, 7px) * 5); }
+  body.design-tag #face.placeholder {
+    font-size: calc(var(--u, 7px) * 2.6); }
+  body.design-tag #char-name { font-size: calc(var(--u, 7px) * 3.8); }
+  body.design-tag #player-name { display: none; }
+  body.design-tag #hp-wrap { width: calc(var(--u, 7px) * 18); }
+  body.design-tag #hp-text { font-size: calc(var(--u, 7px) * 2.4);
+                             margin-top: calc(var(--u, 7px) * .3); }
+
+  /* ── plate style: third — a folder tab across the full frame width:
+     the TAB on the left holds the face/name/HP, then a 45° step down to a
+     thin band that runs hard to the right edge. No fade — a cut shape. ── */
+  body.design-third #strip {
+    /* The face rides the tall TAB; everything else sits ON the thin band
+       that runs to the right edge — the band is solid plate, so the text
+       stays backed and readable the whole way across. */
+    padding: calc(var(--u, 7px) * 1) calc(var(--u, 7px) * 2)
+             calc(var(--u, 7px) * 0.8) calc(var(--u, 7px) * 1.6);
+    align-items: flex-end; gap: calc(var(--u, 7px) * 2.4);
+  }
+  body.design-third #face { align-self: center; }
+  body.design-third #who { display: flex; flex-direction: row;
+                           align-items: baseline;
+                           gap: calc(var(--u, 7px) * 1.6);
+                           margin-bottom: calc(var(--u, 7px) * 0.2); }
+  body.design-third #strip::before {
+    -webkit-mask-image: none; mask-image: none;
+    clip-path: polygon(0 0,
+                       25% 0,
+                       calc(25% + var(--u, 7px) * 5) 64%,
+                       100% 64%,
+                       100% 100%,
+                       0 100%);
+    box-shadow: 0 4px 14px rgba(0,0,0,.5);
+  }
+  body.design-third #face { width: calc(var(--u, 7px) * 5.4);
+                            height: calc(var(--u, 7px) * 5.4); }
+  body.design-third #face.placeholder {
+    font-size: calc(var(--u, 7px) * 2.8); }
+  body.design-third #char-name { font-size: calc(var(--u, 7px) * 3.2); }
+  body.design-third #player-name { font-size: calc(var(--u, 7px) * 2.4); }
+  body.design-third #hp-wrap { max-width: calc(var(--u, 7px) * 22);
+                               margin-bottom: calc(var(--u, 7px) * 0.4); }
+  body.design-third #hp-text { font-size: calc(var(--u, 7px) * 2.4);
+                               margin-top: calc(var(--u, 7px) * .2); }
   /* The character's face, so the audience can tie the person on camera to
      the character without reading. Sized off --u like the text, and pinned
      flex-basis so a long name can never squeeze it away. */
@@ -125,7 +195,7 @@
     {% if portrait_url %}
     <img id="face" src="{{ portrait_url }}" alt="">
     {% else %}
-    <div id="face" class="placeholder">&#9876;</div>
+    <div id="face" class="placeholder{% if is_dm %} dm{% endif %}">{% if is_dm %}{{ theme.dm_icon }}{% else %}&#9876;{% endif %}</div>
     {% endif %}
     <div id="who">
       <div id="char-name">{{ char.name }}</div>
@@ -139,7 +209,7 @@
     </div>
     {% else %}
     <div id="hp-wrap" style="text-align:right;opacity:.75;
-         font-size:calc(var(--u, 7px) * 3.6);">Dungeon Master</div>
+         font-size:calc(var(--u, 7px) * 3.6);"><span id="dm-title-line">{{ theme.dm_title }}</span></div>
     {% endif %}
   </div>
 </div>
@@ -181,7 +251,10 @@ function rrectPath(w, h, r, m) {
 }
 
 function shapeGeometry(w, h) {
-  const m = 2;                                  // stroke inset from the edge
+  // The window is INSET from the tile so the frame reads as raised — the
+  // matte around it is the surface the camera 'sits on', and the shadow
+  // below the window edge is what lifts it, matching the stat cards.
+  const m = Math.max(8, w * 0.022);
   switch (THEME.bezel) {
     case 'square':
       return { path: rrectPath(w, h, 0, m) };
@@ -234,18 +307,30 @@ function drawBezel() {
   const dither = THEME.base === THEME.base2 ? '' :
     `<rect width="${w}" height="${h}" filter="url(#bzn)"` +
     ` clip-path="url(#bzc)" opacity="0.05"/>`;
+  // The raised effect: the window's own shape, dropped and blurred, painted
+  // ONLY on the matte (the evenodd clip keeps it off the video) — so the
+  // camera appears to float above the frame like the cards do.
+  const dy = Math.max(4, w * 0.009);
+  const blur = Math.max(5, w * 0.011);
+  const shadow =
+    `<path d="${g.path}" transform="translate(0 ${dy})"` +
+    ` fill="rgba(0,0,0,.6)" filter="url(#bzblur)" clip-path="url(#bzc)"/>`;
   el('bezel').innerHTML =
     `<defs>${gradDef}` +
     `<filter id="bzn"><feTurbulence type="fractalNoise" baseFrequency="0.9"` +
     ` numOctaves="2"/><feColorMatrix type="matrix"` +
     ` values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.9 0"/></filter>` +
+    `<filter id="bzblur" x="-25%" y="-25%" width="150%" height="150%">` +
+    `<feGaussianBlur stdDeviation="${blur}"/></filter>` +
     `<clipPath id="bzc"><path d="${matteHole}" clip-rule="evenodd"/></clipPath>` +
     `</defs>` +
     `<path d="${matteHole}" fill-rule="evenodd" fill="url(#bzg)"/>` +
+    shadow +
     dither +
     `<path d="${g.path}" fill="none" stroke="${rgba(THEME.accent, 0.85)}"` +
     ` stroke-width="3"/>`;
-  document.body.className = 'shape-' + THEME.bezel;
+  document.body.className =
+    'shape-' + THEME.bezel + ' design-' + (THEME.tile || 'strip');
 }
 
 // 4%-alpha tiled noise — the dither that keeps blends from banding on stream.
@@ -260,17 +345,20 @@ function applyTheme(t) {
   const base = /^#[0-9a-fA-F]{6}$/.test(t.base || '') ? t.base : '#08090d';
   const b2 = /^#[0-9a-fA-F]{6}$/.test(t.base2 || '') ? t.base2 : base;
   THEME = { accent: t.accent, base, base2: b2, dir: t.dir || '180',
-            bezel: t.bezel || 'rounded' };
+            bezel: t.bezel || 'rounded', tile: t.tile || 'strip' };
   const s = document.documentElement.style;
   s.setProperty('--accent', THEME.accent);
   s.setProperty('--accent-strong', rgba(THEME.accent, 0.8));
   s.setProperty('--accent-text', lighten(THEME.accent, 0.45));
-  // The strip keeps its VERTICAL fade whatever the scene direction is —
-  // it exists to make text readable over a face, and a sideways fade would
-  // leave one end of the name unbacked. base2 tints the opaque end.
-  s.setProperty('--sfc-strip',
-    `linear-gradient(180deg, ${rgba(base, 0)}, ${rgba(base, 0.82)} 42%, ` +
-    `${rgba(b2, 0.94)})`);
+  // The name plate: its own colour pair and direction (falling back to the
+  // base pair server-side). The vertical readability fade is the MASK on
+  // #strip::before, so any direction stays legible over a face.
+  const p1 = /^#[0-9a-fA-F]{6}$/.test(t.plate || '') ? t.plate : base;
+  const p2 = /^#[0-9a-fA-F]{6}$/.test(t.plate2 || '') ? t.plate2 : b2;
+  const pdir = t.plate_dir || '180';
+  s.setProperty('--plate-grad', (pdir === 'radial')
+    ? `radial-gradient(ellipse at 50% 100%, ${rgba(p1, 0.95)}, ${rgba(p2, 0.95)} 80%)`
+    : `linear-gradient(${parseInt(pdir, 10) || 180}deg, ${rgba(p1, 0.95)}, ${rgba(p2, 0.95)})`);
   // The field a camera-less tile shows: same pair, same dither, lifted a
   // little so it doesn't read as a dead black box.
   const lift = h => `rgb(${hexRgb(h).map(v => Math.min(255, Math.round(v * 1.5))).join(',')})`;
@@ -279,6 +367,11 @@ function applyTheme(t) {
     : `linear-gradient(${parseInt(THEME.dir, 10) || 180}deg, ${lift(base)}, ${lift(b2)})`;
   s.setProperty('--sfc-field',
     (base === b2 ? '' : NOISE_LAYER + ', ') + fieldGrad);
+  // DM badge + title follow the theme.
+  const dmPh = document.querySelector('#face.placeholder.dm');
+  if (dmPh && t.dm_icon) dmPh.textContent = t.dm_icon;
+  const dmLine = document.getElementById('dm-title-line');
+  if (dmLine && t.dm_title) dmLine.textContent = t.dm_title;
   drawBezel();
 }
 

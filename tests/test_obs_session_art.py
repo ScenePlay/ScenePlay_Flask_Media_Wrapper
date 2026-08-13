@@ -419,3 +419,212 @@ class TestSceneAudioPolicy:
                                 RuntimeError('db gone')))
         with a.app_context():
             assert ro.apply_scene_audio(25) == ''   # swallowed, logged
+
+
+class TestPanelNoteLibrary:
+    """Pre-saved messages for the information panel: prepped before the
+    stream, scoped to one session (or shared with all), shown with one click."""
+
+    def _save(self, a, dm, payload):
+        with a.test_client(user=dm) as c:
+            return c.post('/ttrpg/obs/api/panel-notes', json=payload)
+
+    def test_save_binds_the_note_to_the_active_session(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        from models.ttrpg import tblObsPanelNotes
+        with a.app_context():
+            _session(7)
+        r = self._save(a, dm, {'title': 'Break', 'body': '<b>Back in 10</b>'})
+        d = r.get_json()
+        assert r.status_code == 200 and d['ok'] is True
+        with a.app_context():
+            row = db.session.get(tblObsPanelNotes, d['note_id'])
+            assert row.session_id == 7
+            assert row.body == '<b>Back in 10</b>'
+        assert d['notes'] == [{'id': d['note_id'], 'title': 'Break',
+                               'shared': False}]
+
+    def test_shared_note_reaches_every_session(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        r = self._save(a, dm, {'title': 'BRB', 'body': 'Right back',
+                               'shared': True})
+        d = r.get_json()
+        assert d['notes'][0]['shared'] is True
+        # Visible with NO active session, and still there once one starts.
+        with a.app_context():
+            _session(7)
+            import routes.obs as ro
+            titles = [n['title'] for n in ro.panel_note_rows()]
+        assert titles == ['BRB']
+
+    def test_another_sessions_notes_stay_out_of_the_library(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        from models.ttrpg import tblObsPanelNotes
+        with a.app_context():
+            _session(7)
+            db.session.add(tblObsPanelNotes(
+                session_id=None, title='Everywhere', body='x',
+                created_at='2026-01-01 00:00:00',
+                updated_at='2026-01-01 00:00:00'))
+            db.session.add(tblObsPanelNotes(
+                session_id=99, title='Elsewhere', body='x',
+                created_at='2026-01-01 00:00:00',
+                updated_at='2026-01-01 00:00:00'))
+            db.session.commit()
+            import routes.obs as ro
+            titles = [n['title'] for n in ro.panel_note_rows()]
+        assert titles == ['Everywhere'], \
+            "another session's prep must not clutter tonight's library"
+
+    def test_show_puts_the_note_text_on_stream(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        d = self._save(a, dm, {'title': 'Break', 'body': 'Back in 10',
+                               'shared': True}).get_json()
+        with a.test_client(user=dm) as c:
+            r = c.post('/ttrpg/obs/api/panel-notes/show',
+                       json={'note_id': d['note_id']})
+        body = r.get_json()
+        assert body['ok'] is True and body['body'] == 'Back in 10'
+        assert store['obs_info_text'] == 'Back in 10', \
+            'showing a note IS setting the panel text — the watcher pops it'
+
+    def test_saving_under_the_same_id_updates_in_place(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        from models.ttrpg import tblObsPanelNotes
+        d = self._save(a, dm, {'title': 'Break', 'body': 'v1',
+                               'shared': True}).get_json()
+        d2 = self._save(a, dm, {'title': 'Break', 'body': 'v2',
+                                'shared': True,
+                                'note_id': d['note_id']}).get_json()
+        assert d2['note_id'] == d['note_id']
+        with a.app_context():
+            assert db.session.query(tblObsPanelNotes).count() == 1
+            assert db.session.get(tblObsPanelNotes, d['note_id']).body == 'v2'
+
+    def test_delete_removes_the_note(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        from models.ttrpg import tblObsPanelNotes
+        d = self._save(a, dm, {'title': 'Break', 'body': 'x',
+                               'shared': True}).get_json()
+        with a.test_client(user=dm) as c:
+            r = c.post('/ttrpg/obs/api/panel-notes/delete',
+                       json={'note_id': d['note_id']})
+        assert r.get_json()['ok'] is True
+        assert r.get_json()['notes'] == []
+        with a.app_context():
+            assert db.session.query(tblObsPanelNotes).count() == 0
+
+    def test_a_note_needs_a_name_and_a_body(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        assert self._save(a, dm, {'title': '', 'body': 'x'}).status_code == 400
+        assert self._save(a, dm, {'title': 'T', 'body': '  '}).status_code == 400
+
+
+class TestYouTubeGoLiveApi:
+    """The one-click go-live: broadcast created with the saved front matter,
+    OBS re-pointed at its ingestion, stream started."""
+
+    def test_golive_requires_obs(self, dm_app, monkeypatch):
+        import obs_ws
+        a, dm, store, _tmp = dm_app
+        monkeypatch.setattr(obs_ws, 'connected', lambda: False)
+        with a.test_client(user=dm) as c:
+            assert c.post('/ttrpg/obs/api/yt/golive').status_code == 503
+
+    def test_golive_points_obs_and_starts_the_stream(self, dm_app,
+                                                     monkeypatch):
+        import obs_ws
+        import youtube_live as yt
+        a, dm, store, _tmp = dm_app
+        store.update({'yt_title': 'Night 12', 'yt_privacy': 'public',
+                      'yt_category': '24', 'yt_kids': '1'})
+        sent = {}
+        monkeypatch.setattr(obs_ws, 'connected', lambda: True)
+        monkeypatch.setattr(obs_ws, 'request',
+                            lambda t, p=None: sent.__setitem__('svc', (t, p)))
+
+        def fake_start(kind, want):
+            sent['start'] = (kind, want)
+            return True
+        monkeypatch.setattr(obs_ws, 'set_output_active', fake_start)
+
+        def fake_golive(title, description, privacy, category, kids,
+                        thumb=None, start_iso=None):
+            sent['meta'] = {'title': title, 'privacy': privacy,
+                            'category': category, 'kids': kids}
+            return {'broadcast_id': 'B1', 'watch_url': 'https://youtu.be/B1',
+                    'server': 'rtmp://in', 'key': 'key-1',
+                    'thumb_warning': ''}
+        monkeypatch.setattr(yt, 'go_live', fake_golive)
+        with a.test_client(user=dm) as c:
+            r = c.post('/ttrpg/obs/api/yt/golive')
+        d = r.get_json()
+        assert d['ok'] is True and d['watch_url'].endswith('/B1')
+        assert sent['meta'] == {'title': 'Night 12', 'privacy': 'public',
+                                'category': '24', 'kids': True}
+        assert sent['svc'][0] == 'SetStreamServiceSettings'
+        assert sent['svc'][1]['streamServiceSettings'] == {
+            'server': 'rtmp://in', 'key': 'key-1', 'use_auth': False}
+        assert sent['start'] == ('stream', True)
+
+    def test_broadcast_survives_an_obs_refusal(self, dm_app, monkeypatch):
+        """The video exists on YouTube even if OBS balks — the error must
+        carry the watch link so the DM can start the output by hand."""
+        import obs_ws
+        import youtube_live as yt
+        a, dm, store, _tmp = dm_app
+        store['yt_title'] = 'T'
+        monkeypatch.setattr(obs_ws, 'connected', lambda: True)
+
+        def refuse(t, p=None):
+            raise obs_ws.ObsRejected(207, 'an output is active')
+        monkeypatch.setattr(obs_ws, 'request', refuse)
+        monkeypatch.setattr(yt, 'go_live',
+                            lambda *a_, **k: {'broadcast_id': 'B1',
+                                              'watch_url': 'https://youtu.be/B1',
+                                              'server': 's', 'key': 'k',
+                                              'thumb_warning': ''})
+        with a.test_client(user=dm) as c:
+            r = c.post('/ttrpg/obs/api/yt/golive')
+        d = r.get_json()
+        assert r.status_code == 502 and d['ok'] is False
+        assert d['watch_url'] == 'https://youtu.be/B1'
+        assert 'youtu.be/B1' in d['error']
+
+    def test_save_config_persists_the_front_matter(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        with a.test_client(user=dm) as c:
+            c.post('/ttrpg/obs/save-config', data={
+                'yt_client_id': 'cid', 'yt_client_secret': 's3cret',
+                'yt_title': 'Night 12', 'yt_description': 'plot',
+                'yt_privacy': 'public', 'yt_category': '24', 'yt_kids': '1'})
+        assert store['yt_client_id'] == 'cid'
+        assert store['yt_client_secret'] == 's3cret'
+        assert store['yt_title'] == 'Night 12'
+        assert store['yt_privacy'] == 'public'
+        assert store['yt_category'] == '24'
+        assert store['yt_kids'] == '1'
+        # Unticking kids clears it; a blank secret keeps the saved one.
+        with a.test_client(user=dm) as c:
+            c.post('/ttrpg/obs/save-config',
+                   data={'yt_client_id': 'cid', 'yt_client_secret': ''})
+        assert store['yt_kids'] == '0'
+        assert store['yt_client_secret'] == 's3cret'
+
+    def test_unlink_forgets_the_account(self, dm_app):
+        a, dm, store, _tmp = dm_app
+        store.update({'yt_refresh_token': 'ref', 'yt_channel': 'Me',
+                      'yt_stream_id': 'S1'})
+        import youtube_live as yt
+        # The route calls youtube_live, which reads ITS OWN appsettings
+        # import — point it at the same store this fixture stubs.
+        yt_get = yt.appsettingGet, yt.appsettingSet
+        yt.appsettingGet = lambda n, d=None: store.get(n, d)
+        yt.appsettingSet = lambda n, v: store.__setitem__(n, str(v))
+        try:
+            with a.test_client(user=dm) as c:
+                assert c.post('/ttrpg/obs/api/yt/unlink').get_json()['ok']
+        finally:
+            yt.appsettingGet, yt.appsettingSet = yt_get
+        assert store['yt_refresh_token'] == ''
+        assert store['yt_stream_id'] == ''

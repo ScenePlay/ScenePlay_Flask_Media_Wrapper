@@ -283,6 +283,21 @@ class tblSessionNotes(db.Model):
     updated_at = db.Column(db.Text, nullable=False)
 
 
+class tblObsPanelNotes(db.Model):
+    """Pre-saved messages for the stream's information panel — a library the
+    DM builds ahead of time and pops onto stream with one click. A row with
+    session_id NULL is shared: it shows in the library for EVERY session;
+    otherwise the note belongs to that one session's prep."""
+    __tablename__ = 'tblObsPanelNotes'
+
+    note_id    = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('tblSessions.session_id'), nullable=True)
+    title      = db.Column(db.Text, default='')
+    body       = db.Column(db.Text, default='')
+    created_at = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.Text, nullable=False)
+
+
 class tblSessionParty(db.Model):
     __tablename__ = 'tblSessionParty'
 

@@ -202,23 +202,233 @@
           <b>0</b> snaps instantly. Saves automatically.
         </div>
       </div>
-      <div class="row g-2 align-items-end mt-2" style="max-width:32rem;">
-        <div class="col-5">
-          <label class="form-label small mb-1">Camera bezel</label>
-          <select name="obs_bezel_shape" form="obs-cfg-form"
-                  class="form-select form-select-sm">
-            {% for s in cfg.bezel_shapes %}
-            <option value="{{ s }}"{% if cfg.bezel == s %} selected{% endif %}>
-              {{ {'rounded': 'Rounded corners', 'square': 'Square',
-                  'circle': 'Circle / oval', 'hex': 'Hexagon'}[s] }}</option>
-            {% endfor %}
-          </select>
+      <div class="mt-3" style="max-width:38rem;">
+        <label class="form-label small mb-0">Stream look
+          {% if cfg.theme_own %}
+          <span class="badge" style="background:var(--ttrpg-accent);
+                color:var(--sp-on-accent);">this session's own</span>
+          {% endif %}
+        </label>
+        <div class="form-text mt-0 mb-1">
+          Everything here re-skins a live stream within a few seconds &mdash;
+          no source reloads. Saving with a session running styles <b>that
+          session</b>; other sessions keep the shared look.
         </div>
-        <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
-          The frame around every camera tile. The name strip sits on top, so
-          no shape ever cuts it off. Saves with Connection Settings and
-          re-skins a live stream on the next poll.
+
+        <div class="small fw-bold mt-2 mb-1" style="color:var(--ttrpg-accent);
+             letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">
+          Scene colours</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-2">
+            <label class="form-label small">Accent</label>
+            <input type="color" name="obs_accent_color" id="obs-accent-input"
+                   form="obs-cfg-form" class="form-control form-control-sm"
+                   style="height:2rem;" value="{{ cfg.accent }}">
+          </div>
+          <div class="col-2">
+            <label class="form-label small">Base</label>
+            <input type="color" name="obs_base_color" id="obs-base-input"
+                   form="obs-cfg-form" class="form-control form-control-sm"
+                   style="height:2rem;" value="{{ cfg.base }}">
+          </div>
+          <div class="col-2">
+            <label class="form-label small">Base 2</label>
+            <input type="color" name="obs_base_color2" id="obs-base2-input"
+                   form="obs-cfg-form" class="form-control form-control-sm"
+                   style="height:2rem;" value="{{ cfg.base2 }}">
+          </div>
+          <div class="col-3">
+            <label class="form-label small">Direction</label>
+            <select name="obs_base_dir" id="obs-basedir-input"
+                    form="obs-cfg-form" class="form-select form-select-sm">
+              {% for v, label in [('180', 'Top → bottom'),
+                                    ('0', 'Bottom → top'),
+                                    ('90', 'Left → right'),
+                                    ('270', 'Right → left'),
+                                    ('135', 'Top-left → bottom-right'),
+                                    ('225', 'Top-right → bottom-left'),
+                                    ('45', 'Bottom-left → top-right'),
+                                    ('315', 'Bottom-right → top-left'),
+                                    ('radial', 'Center glow (radial)')] %}
+              <option value="{{ v }}"{% if cfg.base_dir == v %} selected{% endif %}>
+                {{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-3">
+            <label class="form-label small">Themes</label>
+            <div class="d-flex gap-1 flex-wrap">
+              {# Each preset is a colour STORY, not a tint swap: the base pair
+                 makes an analogous hue journey, and the plate pair sits on
+                 the accent's complement so the nameplates read against the
+                 scene instead of dissolving into it. #}
+              {% for name, a, b, b2, pl, pl2 in [
+                    ('Gilded night — gold over indigo night, brass plates',
+                     '#d2a95f', '#0b0c14', '#2a2118', '#3a2c14', '#14100a'),
+                    ('Steel — silver over gunmetal, verdigris plates',
+                     '#c2cdd6', '#0e1417', '#2e3b3f', '#232b25', '#0d1210'),
+                    ('Ember — fire over char, deep-teal plates',
+                     '#e0563f', '#140d0b', '#331c0c', '#0e2326', '#081214'),
+                    ('Verdant — leaf over forest, earthen plates',
+                     '#55b061', '#0a120c', '#26301b', '#2a1e10', '#100c07'),
+                    ('Arcane — violet over midnight, antique-gold plates',
+                     '#a678f0', '#110a20', '#2d1546', '#322608', '#131006'),
+                    ('Abyssal — sea-blue over deep water, brass-rust plates',
+                     '#52a8e8', '#06101c', '#0f3242', '#2a1a10', '#100a06')] %}
+              <button type="button" class="btn btn-sm p-0" title="{{ name }}"
+                      style="width:1.8rem;height:1.6rem;border:1px solid #0006;
+                             background:linear-gradient(135deg, {{ a }} 25%,
+                               {{ b }} 25%, {{ b2 }} 60%, {{ pl }} 60%, {{ pl2 }});"
+                      onclick="document.getElementById('obs-accent-input').value='{{ a }}';
+                               document.getElementById('obs-base-input').value='{{ b }}';
+                               document.getElementById('obs-base2-input').value='{{ b2 }}';
+                               document.getElementById('obs-plate-input').value='{{ pl }}';
+                               document.getElementById('obs-plate2-input').value='{{ pl2 }}';
+                               obsAutoSave();">
+              </button>
+              {% endfor %}
+            </div>
+          </div>
         </div>
+        <div class="form-text">
+          The <b>accent</b> paints frames, names, titles and headings.
+          <b>Base &rarr; Base 2</b> blends across every surface in the chosen
+          direction, with a faint dither so the stream encoder can't band it
+          &mdash; keep them equal for a solid look. The theme buttons set the
+          plate pair too; hover one for its colour story.
+        </div>
+
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);
+             letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">
+          Camera tiles</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-5">
+            <label class="form-label small">Camera plate style</label>
+            <select name="obs_tile_design" form="obs-cfg-form"
+                    class="form-select form-select-sm">
+              {% for d, label in [('strip', 'Full strip — face, name, HP'),
+                                  ('tag', 'Name tag — compact pill'),
+                                  ('third', 'Folder tab — full width')] %}
+              <option value="{{ d }}"{% if cfg.tile_design == d %} selected{% endif %}>
+                {{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
+            How much of the camera the plate covers. The <b>name tag</b>
+            trades the player line for a clear picture; the <b>folder tab</b> runs edge to edge with a 45° step.
+          </div>
+        </div>
+        <div class="row g-2 align-items-end mt-1">
+          <div class="col-5">
+            <label class="form-label small">Camera bezel</label>
+            <select name="obs_bezel_shape" form="obs-cfg-form"
+                    class="form-select form-select-sm">
+              {% for s in cfg.bezel_shapes %}
+              <option value="{{ s }}"{% if cfg.bezel == s %} selected{% endif %}>
+                {{ {'rounded': 'Rounded corners', 'square': 'Square',
+                    'circle': 'Circle / oval', 'hex': 'Hexagon'}[s] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
+            The frame around every camera. The plate rides on top, so no
+            shape ever cuts a name off.
+          </div>
+        </div>
+        <div class="row g-2 align-items-end mt-1">
+          <div class="col-2">
+            <label class="form-label small">Plate</label>
+            <input type="color" name="obs_plate_color" id="obs-plate-input" form="obs-cfg-form"
+                   class="form-control form-control-sm"
+                   style="height:2rem;" value="{{ cfg.plate }}">
+          </div>
+          <div class="col-2">
+            <label class="form-label small">Plate 2</label>
+            <input type="color" name="obs_plate_color2" id="obs-plate2-input" form="obs-cfg-form"
+                   class="form-control form-control-sm"
+                   style="height:2rem;" value="{{ cfg.plate2 }}">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Plate direction</label>
+            <select name="obs_plate_dir" form="obs-cfg-form"
+                    class="form-select form-select-sm">
+              {% for v, label in [('180', 'Top → bottom'),
+                                    ('0', 'Bottom → top'),
+                                    ('90', 'Left → right'),
+                                    ('270', 'Right → left'),
+                                    ('135', 'Top-left → bottom-right'),
+                                    ('225', 'Top-right → bottom-left'),
+                                    ('45', 'Bottom-left → top-right'),
+                                    ('315', 'Bottom-right → top-left'),
+                                    ('radial', 'Center glow (radial)')] %}
+              <option value="{{ v }}"{% if cfg.plate_dir == v %} selected{% endif %}>
+                {{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-4 small text-muted" style="padding-bottom:.4rem;">
+            The name plate's own pair; unset, it follows the base colours.
+          </div>
+        </div>
+
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);
+             letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">
+          The DM on stream</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-3">
+            <label class="form-label small">Badge</label>
+            <select name="obs_dm_icon" form="obs-cfg-form"
+                    class="form-select form-select-sm" style="font-size:1rem;">
+              {% for i in cfg.dm_icons %}
+              <option value="{{ i }}"{% if cfg.dm_icon == i %} selected{% endif %}>{{ i }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Title</label>
+            <input type="text" name="obs_dm_title" form="obs-cfg-form"
+                   class="form-control form-control-sm" maxlength="40"
+                   value="{{ cfg.dm_title }}" placeholder="Dungeon Master">
+          </div>
+          <div class="col-5 small text-muted" style="padding-bottom:.4rem;">
+            The symbol on the DM's portrait spot and the line under their
+            name &mdash; Game Master, Storyteller, The AI&hellip;
+          </div>
+        </div>
+
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);
+             letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">
+          Stat cards</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-5">
+            <label class="form-label small">Card design</label>
+            <select name="obs_card_design" form="obs-cfg-form"
+                    class="form-select form-select-sm">
+              {% for d, label in [('classic', 'Classic — centred'),
+                                  ('banner', 'Banner — portrait left'),
+                                  ('trading', 'Trading — token frame')] %}
+              <option value="{{ d }}"{% if cfg.card_design == d %} selected{% endif %}>
+                {{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-7 small text-muted" style="padding-bottom:.4rem;">
+            The layout a player's card uses when their camera is off.
+          </div>
+        </div>
+        {% if cfg.theme_own %}
+        {# form= binding, NOT an inline <form>: nesting a form here would
+           make the browser CLOSE obs-cfg-form early and orphan every
+           control after this point (the DM-tile checkbox stopped saving
+           exactly this way). The tiny form itself sits after the settings
+           form, outside it. #}
+        <div class="mt-2">
+          <button type="submit" form="obs-theme-shared-form"
+                  class="btn btn-sm btn-outline-secondary">
+            Back to the shared look</button>
+        </div>
+        {% endif %}
       </div>
       {% if cfg.portal_url %}
       <div class="small text-muted mt-2 d-flex align-items-center gap-2 flex-wrap">
@@ -232,6 +442,181 @@
       </div>
       {% endif %}
       {% endif %}
+    </div>
+
+    <!-- Show art: the shared backdrop, kept right under the Party Scene it
+         sits behind. The show CARDS' artwork lives with each card's title
+         and placement in "Show cards" below — one place per card, not a
+         separate art table to cross-reference. -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128247; Show art</h6>
+      <p class="small text-muted">
+        A picture or <b>looping video</b> (MP4/WEBM) that sits behind every
+        ScenePlay scene &mdash; the party grid, the battle map and the show
+        cards all render over it. With a session running the upload belongs to
+        <b>that session</b>, falling back to the shared default. Choose a file
+        or paste from the clipboard; it saves immediately. Each show card's
+        own artwork is set with the card, just below.
+      </p>
+      <div style="display:grid;grid-template-columns:88px minmax(9rem,1fr) auto auto;
+                  gap:.5rem .75rem;align-items:center;">
+        {% for img in cfg.images if img.slot == 'party_bg' %}
+        <!-- Fixed-size well so every row lines up whatever the art's aspect -->
+        <div style="width:88px;height:50px;border-radius:6px;overflow:hidden;
+                    border:1px solid var(--sp-border);background:var(--ttrpg-primary);
+                    display:flex;align-items:center;justify-content:center;">
+          {% if img.url and img.is_video %}
+          <video src="{{ img.url }}" muted loop autoplay playsinline
+                 style="max-width:100%;max-height:100%;object-fit:contain;"></video>
+          {% elif img.url %}
+          <img src="{{ img.url }}" alt=""
+               style="max-width:100%;max-height:100%;object-fit:contain;">
+          {% else %}
+          <span class="small text-muted" style="font-size:.65rem;">none</span>
+          {% endif %}
+        </div>
+        <div class="small" style="line-height:1.25;">
+          {{ img.label }}
+          {% if img.per_session %}
+          <span class="badge ms-1" style="background:var(--ttrpg-accent);
+                color:var(--sp-on-accent);font-size:.55rem;vertical-align:middle;"
+                title="This session's own art — other sessions keep theirs">this session</span>
+          {% elif img.file %}
+          <span class="badge ms-1" style="background:var(--ttrpg-primary);
+                color:var(--ttrpg-text);border:1px solid var(--sp-border);
+                font-size:.55rem;vertical-align:middle;"
+                title="The shared default — used by any session without its own">shared</span>
+          {% endif %}
+          <div class="text-muted" style="font-size:.7rem;">
+            {% if img.file %}<code>{{ img.file }}</code>{% else %}not set{% endif %}
+          </div>
+        </div>
+        <form method="post" enctype="multipart/form-data"
+              action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
+              class="d-flex align-items-center gap-1" style="margin:0;">
+          <!-- Choosing (or pasting) uploads immediately — no Upload button.
+               paste_image.js drops the clipboard blob into this input and
+               fires 'change', so both paths share the submit. -->
+          <input type="file" name="image" accept="image/*,video/mp4,video/webm"
+                 class="form-control form-control-sm" style="max-width:13rem;"
+                 onchange="if (this.files.length) this.form.submit();">
+          <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                  onclick="pasteImageNear(this)"
+                  title="Paste an image from the clipboard">&#128203;</button>
+        </form>
+        <form method="post"
+              action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
+              style="margin:0;">
+          {% if img.per_session %}
+          <button name="clear" value="1" class="btn btn-sm btn-outline-danger"
+                  title="Drop this session's art and fall back to the shared default">Clear</button>
+          {% elif img.file %}
+          <button name="clear" value="1"
+                  class="btn btn-sm btn-outline-danger">Clear</button>
+          {% else %}
+          <span class="small text-muted" style="font-size:.7rem;">&nbsp;</span>
+          {% endif %}
+        </form>
+        {% endfor %}
+      </div>
+      <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">Show cards &mdash; pre / intermission / post</div>
+      <div class="ms-3" style="max-width:44rem;">
+        <div class="form-text mb-2">
+          Three scenes to open, break and close the stream. Each shows its
+          artwork at 75% of the canvas over the shared background, with a
+          title you can place. Everything for one card lives here: its title,
+          where the title sits, and the artwork itself.
+        </div>
+          {# Each card is ONE block: title + placement + its artwork. The
+             artwork inputs are bound by form= to the tiny upload forms after
+             the settings form — nesting a real <form> here would close
+             obs-cfg-form early and orphan every control after it. #}
+          {% for kind, label, slot in [('pre', 'Pre-show', 'title'),
+                                       ('intermission', 'Intermission', 'intermission'),
+                                       ('post', 'Post-show', 'post')] %}
+          {% set c = cfg[kind] %}
+          {% set art = cfg.images | selectattr('slot', 'equalto', slot) | list | first %}
+          <div class="border rounded p-2 mb-2" style="border-color:var(--sp-border) !important;">
+            <div class="row g-2 align-items-end">
+              <div class="col-5">
+                <label class="form-label small">{{ label }} title</label>
+                <input type="text" name="obs_{{ kind }}_title" form="obs-cfg-form"
+                       class="form-control form-control-sm" maxlength="120"
+                       value="{{ c.title }}" placeholder="(no title)">
+              </div>
+              <div class="col-4">
+                <label class="form-label small">Placed</label>
+                <select name="obs_{{ kind }}_title_pos" form="obs-cfg-form"
+                        class="form-select form-select-sm">
+                  {% for p in cfg.title_positions %}
+                  <option value="{{ p }}"{% if c.pos == p %} selected{% endif %}>
+                    {{ p.replace('-', ' ') }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-3 small text-muted" style="padding-bottom:.4rem;">
+                {% if kind == 'pre' %}artwork doubles as the battle map's
+                idle screen{% endif %}
+              </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <div style="width:66px;height:38px;border-radius:5px;overflow:hidden;flex:0 0 auto;
+                          border:1px solid var(--sp-border);background:var(--ttrpg-primary);
+                          display:flex;align-items:center;justify-content:center;">
+                {% if art.url and art.is_video %}
+                <video src="{{ art.url }}" muted loop autoplay playsinline
+                       style="max-width:100%;max-height:100%;object-fit:contain;"></video>
+                {% elif art.url %}
+                <img src="{{ art.url }}" alt=""
+                     style="max-width:100%;max-height:100%;object-fit:contain;">
+                {% else %}
+                <span class="small text-muted" style="font-size:.6rem;">none</span>
+                {% endif %}
+              </div>
+              <div class="small text-muted" style="font-size:.7rem;line-height:1.25;
+                          min-width:7rem;flex:1 1 auto;">
+                {% if art.file %}<code>{{ art.file }}</code>{% else %}not set{% endif %}
+                {% if art.per_session %}
+                <span class="badge ms-1" style="background:var(--ttrpg-accent);
+                      color:var(--sp-on-accent);font-size:.55rem;vertical-align:middle;"
+                      title="This session's own art — other sessions keep theirs">this session</span>
+                {% elif art.file %}
+                <span class="badge ms-1" style="background:var(--ttrpg-primary);
+                      color:var(--ttrpg-text);border:1px solid var(--sp-border);
+                      font-size:.55rem;vertical-align:middle;"
+                      title="The shared default — used by any session without its own">shared</span>
+                {% endif %}
+              </div>
+              {# paste_image.js finds the file input via the button's PARENT,
+                 so the pair shares this div even though the form lives
+                 elsewhere. #}
+              <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                <input type="file" name="image" accept="image/*,video/mp4,video/webm"
+                       form="obs-art-{{ slot }}"
+                       class="form-control form-control-sm" style="max-width:12rem;"
+                       onchange="if (this.files.length) this.form.submit();">
+                <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                        onclick="pasteImageNear(this)"
+                        title="Paste an image from the clipboard">&#128203;</button>
+                {% if art.per_session %}
+                <button name="clear" value="1" form="obs-art-{{ slot }}"
+                        class="btn btn-sm btn-outline-danger"
+                        title="Drop this session's art and fall back to the shared default">Clear</button>
+                {% elif art.file %}
+                <button name="clear" value="1" form="obs-art-{{ slot }}"
+                        class="btn btn-sm btn-outline-danger">Clear</button>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+          <div class="form-text">
+            Titles and placement save automatically like every setting;
+            artwork uploads the moment you choose or paste a file. Pictures or
+            looping videos (MP4/WEBM); with a session running, uploads belong
+            to that session.
+          </div>
+      </div>
     </div>
 
     <!-- Battle map source -->
@@ -549,83 +934,8 @@
         </div>
       </div>
 
-      <!-- Images: every picture the broadcast uses, in one aligned table.
-           They were previously spread across three places on this page, each
-           with its own upload form, which made it impossible to see at a
-           glance what art was set and what was missing. -->
-      <div class="ttrpg-card p-3 mb-3">
-        <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128247; Show art</h6>
-        <p class="small text-muted">
-          Pictures or <b>looping videos</b> (MP4/WEBM) for the stream. With a
-          session running, uploads belong to <b>that session</b> &mdash; each
-          session keeps its own set, falling back to the shared default. Choose
-          a file or paste from the clipboard; it saves immediately &mdash; then
-          reload the affected source in OBS (or rebuild the party scene).
-        </p>
-        <div style="display:grid;grid-template-columns:88px minmax(9rem,1fr) auto auto;
-                    gap:.5rem .75rem;align-items:center;">
-          {% for img in cfg.images %}
-          <!-- Fixed-size well so every row lines up whatever the art's aspect -->
-          <div style="width:88px;height:50px;border-radius:6px;overflow:hidden;
-                      border:1px solid var(--sp-border);background:var(--ttrpg-primary);
-                      display:flex;align-items:center;justify-content:center;">
-            {% if img.url and img.is_video %}
-            <video src="{{ img.url }}" muted loop autoplay playsinline
-                   style="max-width:100%;max-height:100%;object-fit:contain;"></video>
-            {% elif img.url %}
-            <img src="{{ img.url }}" alt=""
-                 style="max-width:100%;max-height:100%;object-fit:contain;">
-            {% else %}
-            <span class="small text-muted" style="font-size:.65rem;">none</span>
-            {% endif %}
-          </div>
-          <div class="small" style="line-height:1.25;">
-            {{ img.label }}
-            {% if img.per_session %}
-            <span class="badge ms-1" style="background:var(--ttrpg-accent);
-                  color:var(--sp-on-accent);font-size:.55rem;vertical-align:middle;"
-                  title="This session's own art — other sessions keep theirs">this session</span>
-            {% elif img.file %}
-            <span class="badge ms-1" style="background:var(--ttrpg-primary);
-                  color:var(--ttrpg-text);border:1px solid var(--sp-border);
-                  font-size:.55rem;vertical-align:middle;"
-                  title="The shared default — used by any session without its own">shared</span>
-            {% endif %}
-            <div class="text-muted" style="font-size:.7rem;">
-              {% if img.file %}<code>{{ img.file }}</code>{% else %}not set{% endif %}
-            </div>
-          </div>
-          <form method="post" enctype="multipart/form-data"
-                action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
-                class="d-flex align-items-center gap-1" style="margin:0;">
-            <!-- Choosing (or pasting) uploads immediately — no Upload button.
-                 paste_image.js drops the clipboard blob into this input and
-                 fires 'change', so both paths share the submit. -->
-            <input type="file" name="image" accept="image/*,video/mp4,video/webm"
-                   class="form-control form-control-sm" style="max-width:13rem;"
-                   onchange="if (this.files.length) this.form.submit();">
-            <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
-                    onclick="pasteImageNear(this)"
-                    title="Paste an image from the clipboard">&#128203;</button>
-          </form>
-          <form method="post"
-                action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
-                style="margin:0;">
-            {% if img.per_session %}
-            <button name="clear" value="1" class="btn btn-sm btn-outline-danger"
-                    title="Drop this session's art and fall back to the shared default">Clear</button>
-            {% elif img.file %}
-            <button name="clear" value="1"
-                    class="btn btn-sm btn-outline-danger">Clear</button>
-            {% else %}
-            <span class="small text-muted" style="font-size:.7rem;">&nbsp;</span>
-            {% endif %}
-          </form>
-          {% endfor %}
-        </div>
-      </div>
-
       <form method="post" action="{{ url_for('obs_bp.save_config') }}" id="obs-cfg-form">
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">Scenes &amp; switching</div>
         <div class="row g-2 mb-3">
           <div class="col-sm-8">
             <label class="form-label small">Group shot scene
@@ -647,6 +957,32 @@
             <div class="form-text">0 = stay put.</div>
           </div>
         </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="obs-scene-link"
+                 name="obs_scene_link" value="1"
+                 {% if cfg.scene_link == '1' %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-scene-link">
+            Switch OBS when a ScenePlay scene is activated
+            <span class="text-muted">(uses the Scene Links above)</span>
+          </label>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-sm-8">
+            <label class="form-label small">Transition when switching</label>
+            <select name="obs_transition" class="form-select form-select-sm">
+              <option value="">— leave whatever OBS is set to —</option>
+              {% for t in snap.transitions %}
+              <option value="{{ t.name }}"{% if t.name == cfg.transition %} selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label small">Duration (ms)</label>
+            <input type="number" name="obs_transition_ms" class="form-control form-control-sm"
+                   min="0" max="20000" step="50" value="{{ cfg.transition_ms }}">
+          </div>
+        </div>
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">The table's camera room</div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-feed-noaudio"
                  name="obs_feed_noaudio" value="1"
@@ -730,6 +1066,21 @@
              separate on/off checkbox that meant the same thing as "Off"
              here — so it was possible to set them against each other and
              see no sign of it. -->
+        <div class="mb-3">
+          <label class="form-label small">Shared camera password
+            <span class="text-muted">— protects every player's feed</span></label>
+          <input type="password" name="obs_vdo_password" class="form-control form-control-sm"
+                 placeholder="{% if cfg.has_vdo_password %}leave blank to keep existing{% else %}recommended — one secret for the whole table{% endif %}"
+                 value="" autocomplete="new-password">
+          <div class="form-text">
+            Baked into every player's link, so a leaked link alone isn't enough to
+            watch a feed. Changing it changes everyone's links.
+            {% if cfg.has_vdo_password %}
+            <label class="ms-2"><input type="checkbox" name="obs_vdo_password_clear" value="1"> clear it</label>
+            {% endif %}
+          </div>
+        </div>
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">Music on the stream</div>
         <div class="mb-2">
           <label class="form-label small mb-1" for="obs-music-transport">
             <b>Music into OBS</b> &mdash; how it gets there</label>
@@ -799,6 +1150,7 @@
           </div>
         </div>
 
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">You — the DM's tile &amp; audio</div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-feed-monitor"
                  name="obs_feed_monitor" value="1"
@@ -824,6 +1176,44 @@
             your real mic input carry you.)</span>
           </label>
         </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="obs-dm-enabled"
+                 name="obs_dm_enabled" value="1"
+                 {% if dm_enabled %}checked{% endif %}>
+          <label class="form-check-label small" for="obs-dm-enabled">
+            Give the DM a tile in the party scene
+            <span class="text-muted">(you narrate too &mdash; turn it off to stay off camera)</span>
+          </label>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small mb-1" for="obs-dm-mic">
+            Your microphone <span class="text-muted">(optional)</span></label>
+          <div class="d-flex gap-1">
+            <input type="text" name="obs_dm_mic_label" id="obs-dm-mic"
+                   form="obs-cfg-form" class="form-control form-control-sm"
+                   value="{{ cfg.dm_mic_label }}"
+                   placeholder="leave blank to let vdo.ninja choose">
+            <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                    onclick="obsListMics(this)"
+                    title="Ask this browser for its microphone names and pick one">
+              &#127908; Find mine</button>
+          </div>
+          <select id="obs-dm-mic-list" class="form-select form-select-sm mt-1"
+                  hidden onchange="obsPickMic(this)"></select>
+          <div class="form-text small">
+            Optional &mdash; leave blank unless the wrong device gets picked.
+            Pins the device on <em>your</em> camera link, matched on its label
+            (the name your browser shows in its mic picker &mdash;
+            <b>&#127908; Find mine</b> lists them for you). Worth setting when
+            this machine also plays the music: some browsers list the same name
+            twice &mdash; once as the microphone, once as
+            <code>Monitor of&hellip;</code> the speakers &mdash; and the monitor
+            would put the music and every player's voice into your own mic
+            channel. Chrome hides those monitors, so
+            <code>{{ cfg.dm_mic_hint }}</code> is unambiguous there.
+          </div>
+        </div>
+        <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">Info panel &amp; dice</div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="obs-panel-on"
                  name="obs_panel_on" value="1"
@@ -887,204 +1277,40 @@
                     >{{ cfg.info_text }}</textarea>
           <div class="form-text">
             Shown on stream, so keep secrets in the session's DM notes instead.
-            Empty means the panel scrolls dice rolls as they land.
+            Empty means the panel scrolls dice rolls as they land. With
+            pop-over dice on, saved text keeps the panel on screen until you
+            clear it. HTML works per line &mdash; e.g.
+            <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>,
+            <code>&lt;span style="color:#f5c542"&gt;</code>.
           </div>
-        </div>
-        <div class="mb-3 ms-3" style="max-width:38rem;">
-          <label class="form-label small">Show cards</label>
-          <div class="form-text mb-2">
-            Three scenes to open, break and close the stream. Each shows its
-            image at 75% of the canvas over the shared background, with a title
-            you can place. The <b>pre-show</b> card reuses the Title card image,
-            so you only upload it once.
-          </div>
-          {% for kind, label in [('pre', 'Pre-show'), ('intermission', 'Intermission'),
-                                 ('post', 'Post-show')] %}
-          {% set c = cfg[kind] %}
-          <div class="row g-2 mb-2 align-items-end">
-            <div class="col-5">
-              <label class="form-label small">{{ label }} title</label>
-              <input type="text" name="obs_{{ kind }}_title" form="obs-cfg-form"
-                     class="form-control form-control-sm" maxlength="120"
-                     value="{{ c.title }}" placeholder="(no title)">
-            </div>
-            <div class="col-4">
-              <label class="form-label small">Placed</label>
-              <select name="obs_{{ kind }}_title_pos" form="obs-cfg-form"
-                      class="form-select form-select-sm">
-                {% for p in cfg.title_positions %}
-                <option value="{{ p }}"{% if c.pos == p %} selected{% endif %}>
-                  {{ p.replace('-', ' ') }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-3 small text-muted" style="padding-bottom:.4rem;">
-              {% if kind == 'pre' %}uses the <b>Title card</b> image
-              {% else %}artwork in <b>Images</b>{% endif %}
-            </div>
-          </div>
-          {% endfor %}
-          <div class="form-text">
-            Titles and placement save with Connection Settings; the artwork for
-            each card is set in <b>Images</b> below.
-          </div>
-        </div>
-        <div class="mb-3 ms-3" style="max-width:38rem;">
-          <label class="form-label small">Stream look
-            {% if cfg.theme_own %}
-            <span class="badge" style="background:var(--ttrpg-accent);
-                  color:var(--sp-on-accent);">this session's own</span>
-            {% endif %}
-          </label>
-          <div class="form-text mb-2">
-            The colour theme for the whole presentation, every scene: the
-            <b>accent</b> paints frames, names, titles and headings; the
-            <b>base</b> tints every surface they sit on &mdash; the title
-            strip, the info panel, tile strips and card fields. A save
-            re-skins a live stream within a few seconds; no source reloads.
-            Like the show art, saving with a session running styles <b>that
-            session</b>; other sessions keep the shared look.
-          </div>
-          <div class="row g-2 align-items-end">
-            <div class="col-2">
-              <label class="form-label small">Accent</label>
-              <input type="color" name="obs_accent_color" id="obs-accent-input"
-                     form="obs-cfg-form" class="form-control form-control-sm"
-                     style="height:2rem;" value="{{ cfg.accent }}">
-            </div>
-            <div class="col-2">
-              <label class="form-label small">Base</label>
-              <input type="color" name="obs_base_color" id="obs-base-input"
-                     form="obs-cfg-form" class="form-control form-control-sm"
-                     style="height:2rem;" value="{{ cfg.base }}">
-            </div>
-            <div class="col-2">
-              <label class="form-label small">Base 2</label>
-              <input type="color" name="obs_base_color2" id="obs-base2-input"
-                     form="obs-cfg-form" class="form-control form-control-sm"
-                     style="height:2rem;" value="{{ cfg.base2 }}">
-            </div>
-            <div class="col-3">
-              <label class="form-label small">Direction</label>
-              <select name="obs_base_dir" id="obs-basedir-input"
-                      form="obs-cfg-form" class="form-select form-select-sm">
-                {% for v, label in [('180', 'Top → bottom'),
-                                    ('0', 'Bottom → top'),
-                                    ('90', 'Left → right'),
-                                    ('270', 'Right → left'),
-                                    ('135', 'Top-left → bottom-right'),
-                                    ('225', 'Top-right → bottom-left'),
-                                    ('45', 'Bottom-left → top-right'),
-                                    ('315', 'Bottom-right → top-left'),
-                                    ('radial', 'Center glow (radial)')] %}
-                <option value="{{ v }}"{% if cfg.base_dir == v %} selected{% endif %}>
-                  {{ label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-3">
-              <label class="form-label small">Themes</label>
-              <div class="d-flex gap-1 flex-wrap">
-                {% for name, a, b, b2 in [('Gilded night', '#c8a86e', '#08090d', '#1a1408'),
-                                          ('Steel', '#aeb6c4', '#0d1117', '#1c2433'),
-                                          ('Ember', '#e05545', '#140a08', '#2c1009'),
-                                          ('Verdant', '#3fa14a', '#071009', '#0e2414'),
-                                          ('Arcane', '#9b6dff', '#0c081a', '#201040'),
-                                          ('Abyssal', '#4a9eff', '#06101c', '#0d2440')] %}
-                <button type="button" class="btn btn-sm p-0" title="{{ name }}"
-                        style="width:1.8rem;height:1.6rem;border:1px solid #0006;
-                               background:linear-gradient(135deg, {{ a }} 34%, {{ b }} 34%, {{ b2 }});"
-                        onclick="document.getElementById('obs-accent-input').value='{{ a }}';
-                                 document.getElementById('obs-base-input').value='{{ b }}';
-                                 document.getElementById('obs-base2-input').value='{{ b2 }}';
-                                 obsAutoSave();">
-                </button>
-                {% endfor %}
-              </div>
-            </div>
-          </div>
-          <div class="form-text">
-            Base &rarr; Base 2 blends across every surface in the chosen
-            direction, with a faint dither so the stream encoder can't band
-            it. Set Base 2 to the same colour as Base for the classic solid
-            look.
-          </div>
-          {% if cfg.theme_own %}
-          {# form= binding, NOT an inline <form>: nesting a form here would
-             make the browser CLOSE obs-cfg-form early and orphan every
-             control after this point (the DM-tile checkbox stopped saving
-             exactly this way). The tiny form itself sits after the settings
-             form, outside it. #}
-          <div class="mt-2">
-            <button type="submit" form="obs-theme-shared-form"
-                    class="btn btn-sm btn-outline-secondary">
-              Back to the shared look</button>
-          </div>
-          {% endif %}
-        </div>
-        <div class="form-check mb-2">
-          <input class="form-check-input" type="checkbox" id="obs-dm-enabled"
-                 name="obs_dm_enabled" value="1"
-                 {% if dm_enabled %}checked{% endif %}>
-          <label class="form-check-label small" for="obs-dm-enabled">
-            Give the DM a tile in the party scene
-            <span class="text-muted">(you narrate too &mdash; turn it off to stay off camera)</span>
-          </label>
-        </div>
-        <div class="mb-3">
-          <label class="form-label small mb-1" for="obs-dm-mic">
-            Your microphone <span class="text-muted">(optional)</span></label>
-          <input type="text" name="obs_dm_mic_label" id="obs-dm-mic"
-                 form="obs-cfg-form" class="form-control form-control-sm"
-                 value="{{ cfg.dm_mic_label }}"
-                 placeholder="leave blank to let vdo.ninja choose">
-          <div class="form-text small">
-            Pins the device on <em>your</em> camera link, matched on its label.
-            Worth setting when this machine also plays the music: some browsers
-            list the same name twice &mdash; once as the microphone, once as
-            <code>Monitor of&hellip;</code> the speakers &mdash; and the monitor
-            would put the music and every player's voice into your own mic
-            channel. Chrome hides those monitors, so
-            <code>{{ cfg.dm_mic_hint }}</code> is unambiguous there.
-          </div>
-        </div>
-        <div class="form-check mb-3">
-          <input class="form-check-input" type="checkbox" id="obs-scene-link"
-                 name="obs_scene_link" value="1"
-                 {% if cfg.scene_link == '1' %}checked{% endif %}>
-          <label class="form-check-label small" for="obs-scene-link">
-            Switch OBS when a ScenePlay scene is activated
-            <span class="text-muted">(uses the Scene Links above)</span>
-          </label>
-        </div>
-        <div class="mb-3">
-          <label class="form-label small">Shared camera password
-            <span class="text-muted">— protects every player's feed</span></label>
-          <input type="password" name="obs_vdo_password" class="form-control form-control-sm"
-                 placeholder="{% if cfg.has_vdo_password %}leave blank to keep existing{% else %}recommended — one secret for the whole table{% endif %}"
-                 value="" autocomplete="new-password">
-          <div class="form-text">
-            Baked into every player's link, so a leaked link alone isn't enough to
-            watch a feed. Changing it changes everyone's links.
-            {% if cfg.has_vdo_password %}
-            <label class="ms-2"><input type="checkbox" name="obs_vdo_password_clear" value="1"> clear it</label>
-            {% endif %}
-          </div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-sm-8">
-            <label class="form-label small">Transition when switching</label>
-            <select name="obs_transition" class="form-select form-select-sm">
-              <option value="">— leave whatever OBS is set to —</option>
-              {% for t in snap.transitions %}
-              <option value="{{ t.name }}"{% if t.name == cfg.transition %} selected{% endif %}>{{ t.name }}</option>
+          {# The saved-notes library: messages written before the stream, put
+             on with one click instead of typed live. No name= on any of these
+             — they must not trip the settings form's auto-save. #}
+          <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+            <select id="obs-note-lib" class="form-select form-select-sm w-auto"
+                    style="max-width:15rem;" onchange="obsNoteSelect(this)">
+              <option value="">&mdash; saved notes &mdash;</option>
+              {% for n in cfg.panel_notes %}
+              <option value="{{ n.id }}" data-shared="{{ '1' if n.shared else '' }}"
+                      >{{ n.title }}{{ ' (every session)' if n.shared else '' }}</option>
               {% endfor %}
             </select>
+            <button type="button" class="btn btn-outline-light btn-sm"
+                    onclick="obsNoteShow()">Show on stream</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    onclick="obsNoteSave()">Save text as note&hellip;</button>
+            <button type="button" class="btn btn-outline-danger btn-sm"
+                    onclick="obsNoteDelete()">Delete</button>
+            <label class="form-check-label small">
+              <input class="form-check-input" type="checkbox" id="obs-note-shared">
+              every session
+            </label>
           </div>
-          <div class="col-sm-4">
-            <label class="form-label small">Duration (ms)</label>
-            <input type="number" name="obs_transition_ms" class="form-control form-control-sm"
-                   min="0" max="20000" step="50" value="{{ cfg.transition_ms }}">
+          <div class="form-text">
+            Notes save to the active session; tick <i>every session</i> to keep
+            one in every session's library. Showing a note fills the box above
+            &mdash; edits there change the stream, not the saved note, until
+            you save it again under the same name.
           </div>
         </div>
         <span class="small text-muted">
@@ -1096,12 +1322,160 @@
          the outer one early and orphan the controls after them). #}
       <form method="post" action="{{ url_for('obs_bp.api_theme_shared') }}"
             id="obs-theme-shared-form"></form>
+      {# The show cards' artwork forms, same reason: the file inputs and
+         Clear buttons inside "Show cards" bind here via form=. 'title' is
+         the pre-show card's slot — the same image the map idles on. #}
+      {% for slot in ('title', 'intermission', 'post') %}
+      <form method="post" enctype="multipart/form-data"
+            action="{{ url_for('obs_bp.upload_image', slot=slot) }}"
+            id="obs-art-{{ slot }}"></form>
+      {% endfor %}
       <hr style="border-color:var(--sp-border);">
       <p class="small text-muted mb-0">
         In OBS: <b>Tools &rarr; WebSocket Server Settings</b> &rarr; tick <i>Enable WebSocket server</i>,
         then <i>Show Connect Info</i> for the port and password. If OBS runs on this
         same machine, leave the host at 127.0.0.1.
       </p>
+    </div>
+
+    <!-- Go live on YouTube from HERE: the front matter OBS keeps in its
+         "Manage Broadcast" dialog (title, privacy, category, kids flag,
+         thumbnail) set from this page instead — obs-websocket does not expose
+         that dialog, so ScenePlay talks to the YouTube Live API itself, then
+         re-points OBS at the broadcast and starts the stream. -->
+    <div class="ttrpg-card p-3 mb-3">
+      <h6 style="color:var(--ttrpg-accent);" class="mb-2">&#128250; Go Live &mdash; YouTube</h6>
+      {% set yt = cfg.yt %}
+      <p class="small text-muted">
+        Set tonight's stream info here and go live without touching the
+        streaming machine: ScenePlay creates the YouTube broadcast with
+        everything below, points OBS at it, and starts streaming. The stream
+        goes live on YouTube as soon as OBS's feed arrives, and stopping the
+        stream (&#9632; up top, or in OBS) ends the broadcast automatically.
+      </p>
+      <div class="row g-2 mb-2">
+        <div class="col-sm-7">
+          <label class="form-label small">Google OAuth client ID</label>
+          <input name="yt_client_id" form="obs-cfg-form"
+                 class="form-control form-control-sm"
+                 value="{{ yt.client_id }}"
+                 placeholder="&hellip;.apps.googleusercontent.com">
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label small">Client secret
+            {% if yt.has_secret %}<span class="text-muted">(saved &mdash; blank keeps it)</span>{% endif %}</label>
+          <input type="password" name="yt_client_secret" form="obs-cfg-form"
+                 class="form-control form-control-sm" autocomplete="new-password"
+                 placeholder="{{ '••••••••' if yt.has_secret else '' }}">
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+        {% if yt.linked %}
+        <span class="small">&#10003; Linked{% if yt.channel %} as <b>{{ yt.channel }}</b>{% endif %}</span>
+        <button type="button" class="btn btn-sm btn-outline-danger"
+                onclick="obsYtUnlink(this)">Unlink</button>
+        {% else %}
+        <button type="button" class="btn btn-sm btn-ttrpg"
+                onclick="obsYtLink(this)">&#128279; Link YouTube</button>
+        {% endif %}
+        <span id="obs-yt-link-msg" class="small"></span>
+      </div>
+      <div class="form-text mb-3">
+        One-time setup: in Google Cloud Console create a project, enable the
+        <b>YouTube Data API v3</b>, and create an OAuth client of type
+        <b>TVs and Limited Input devices</b>; paste its ID and secret above,
+        then Link &mdash; you'll type a short code at google.com/device.
+        Publish the consent screen to <i>In production</i>, or Google expires
+        the link every 7 days.
+      </div>
+
+      <div class="row g-2 mb-2">
+        <div class="col-sm-8">
+          <label class="form-label small">Stream title</label>
+          <input name="yt_title" form="obs-cfg-form" maxlength="100"
+                 class="form-control form-control-sm" value="{{ yt.title }}"
+                 placeholder="(tonight's campaign or session name)">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label small">Privacy</label>
+          <select name="yt_privacy" form="obs-cfg-form"
+                  class="form-select form-select-sm">
+            {% for p in yt.privacies %}
+            <option value="{{ p }}"{% if yt.privacy == p %} selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label small">Description</label>
+        <textarea name="yt_description" form="obs-cfg-form" rows="3"
+                  class="form-control form-control-sm"
+                  placeholder="(shown under the video)">{{ yt.description }}</textarea>
+      </div>
+      <div class="row g-2 mb-2 align-items-end">
+        <div class="col-sm-5">
+          <label class="form-label small">Category</label>
+          <select name="yt_category" form="obs-cfg-form"
+                  class="form-select form-select-sm">
+            {% for cid, cname in yt.categories %}
+            <option value="{{ cid }}"{% if yt.category == cid %} selected{% endif %}>{{ cname }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-7">
+          <div class="form-check mb-1">
+            <input class="form-check-input" type="checkbox" id="obs-yt-kids"
+                   name="yt_kids" value="1" form="obs-cfg-form"
+                   {% if yt.kids %}checked{% endif %}>
+            <label class="form-check-label small" for="obs-yt-kids">
+              Made for kids
+              <span class="text-muted">&mdash; YouTube's COPPA declaration</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      {% set art = cfg.images | selectattr('slot', 'equalto', 'yt_thumb') | list | first %}
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <div style="width:66px;height:38px;border-radius:5px;overflow:hidden;flex:0 0 auto;
+                    border:1px solid var(--sp-border);background:var(--ttrpg-primary);
+                    display:flex;align-items:center;justify-content:center;">
+          {% if art.url and not art.is_video %}
+          <img src="{{ art.url }}" alt=""
+               style="max-width:100%;max-height:100%;object-fit:contain;">
+          {% else %}
+          <span class="small text-muted" style="font-size:.6rem;">none</span>
+          {% endif %}
+        </div>
+        <div class="small text-muted" style="font-size:.7rem;min-width:7rem;flex:1 1 auto;">
+          Thumbnail &mdash; 1280&times;720 JPG/PNG under 2&nbsp;MB
+          <div>{% if art.file %}<code>{{ art.file }}</code>{% else %}not set{% endif %}</div>
+        </div>
+        <form method="post" enctype="multipart/form-data"
+              action="{{ url_for('obs_bp.upload_image', slot='yt_thumb') }}"
+              class="d-flex align-items-center gap-1" style="margin:0;">
+          <input type="file" name="image" accept="image/jpeg,image/png"
+                 class="form-control form-control-sm" style="max-width:12rem;"
+                 onchange="if (this.files.length) this.form.submit();">
+          <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                  onclick="pasteImageNear(this)"
+                  title="Paste an image from the clipboard">&#128203;</button>
+        </form>
+        {% if art.file %}
+        <form method="post"
+              action="{{ url_for('obs_bp.upload_image', slot='yt_thumb') }}"
+              style="margin:0;">
+          <button name="clear" value="1"
+                  class="btn btn-sm btn-outline-danger">Clear</button>
+        </form>
+        {% endif %}
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-ttrpg"
+                onclick="obsYtGoLive(this)" {% if not yt.linked %}disabled
+                title="Link YouTube first"{% endif %}>
+          &#9654; Go live on YouTube</button>
+        <span id="obs-yt-live-msg" class="small"></span>
+      </div>
     </div>
 
   </div>
@@ -1186,6 +1560,219 @@ function obsGroup() {
       if (!ok || !d.ok) { alert(d.error || 'Could not switch to the group shot.'); return; }
       _obsApply({current_scene: d.current_scene});
     });
+}
+
+// ── YouTube go-live ─────────────────────────────────────────────────────────
+const OBS_YT_LINK_URL   = "{{ url_for('obs_bp.api_yt_link') }}";
+const OBS_YT_POLL_URL   = "{{ url_for('obs_bp.api_yt_link_poll') }}";
+const OBS_YT_UNLINK_URL = "{{ url_for('obs_bp.api_yt_unlink') }}";
+const OBS_YT_GOLIVE_URL = "{{ url_for('obs_bp.api_yt_golive') }}";
+
+function _ytMsg(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+
+let _ytPollTimer = null;
+
+// Device flow: show the code, then poll until Google says the DM typed it.
+// The PAGE drives the polling, so closing the tab simply stops asking.
+function obsYtLink(btn) {
+  btn.disabled = true;
+  _obsPost(OBS_YT_LINK_URL, {}).then(({ok, d}) => {
+    btn.disabled = false;
+    if (!ok || !d.ok) { _ytMsg('obs-yt-link-msg', d.error || 'Could not start linking.'); return; }
+    _ytMsg('obs-yt-link-msg',
+           'On any device, open <a href="' + d.verification_url +
+           '" target="_blank" rel="noopener">' + d.verification_url +
+           '</a> and enter <b style="letter-spacing:.15em;">' + d.user_code +
+           '</b> &mdash; waiting&hellip;');
+    const interval = Math.max(3, d.interval || 5) * 1000;
+    clearTimeout(_ytPollTimer);
+    const poll = () => {
+      _obsPost(OBS_YT_POLL_URL, {}).then(({ok: pok, d: pd}) => {
+        if (!pok || !pd.ok) { _ytMsg('obs-yt-link-msg', pd.error || 'Linking failed.'); return; }
+        if (pd.state === 'ok') {
+          _ytMsg('obs-yt-link-msg', '&#10003; Linked' +
+                 (pd.channel ? ' as <b>' + pd.channel + '</b>' : '') +
+                 ' &mdash; reloading&hellip;');
+          setTimeout(() => location.reload(), 900);
+          return;
+        }
+        _ytPollTimer = setTimeout(poll, interval);
+      });
+    };
+    _ytPollTimer = setTimeout(poll, interval);
+  });
+}
+
+function obsYtUnlink(btn) {
+  if (!confirm('Unlink the YouTube account? Going live from this page will ' +
+               'stop working until it is linked again.')) return;
+  btn.disabled = true;
+  _obsPost(OBS_YT_UNLINK_URL, {}).then(() => location.reload());
+}
+
+function obsYtGoLive(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Creating broadcast…';
+  _ytMsg('obs-yt-live-msg', '');
+  _obsPost(OBS_YT_GOLIVE_URL, {}).then(({ok, d}) => {
+    btn.disabled = false; btn.innerHTML = orig;
+    if (!ok || !d.ok) {
+      _ytMsg('obs-yt-live-msg', d.error || 'Could not go live.');
+      return;
+    }
+    _ytMsg('obs-yt-live-msg',
+           '&#128308; Live &mdash; <a href="' + d.watch_url +
+           '" target="_blank" rel="noopener">' + d.watch_url + '</a>' +
+           (d.thumb_warning
+            ? ' <span class="text-muted">(thumbnail skipped: ' +
+              d.thumb_warning + ')</span>' : ''));
+  });
+}
+
+// ── DM microphone picker ────────────────────────────────────────────────────
+// Fills the mic-label field from the browser's own device list, so the DM
+// never has to guess what the browser calls their microphone. Two hard
+// browser rules shape this: device LABELS are blank until the page has mic
+// permission (so we ask via getUserMedia and immediately stop the track),
+// and navigator.mediaDevices only exists on HTTPS or localhost — over plain
+// http on a LAN address there is nothing to enumerate.
+async function obsListMics(btn) {
+  const sel = document.getElementById('obs-dm-mic-list');
+  if (!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)) {
+    alert('This page can only read device names over HTTPS or when opened ' +
+          'on this machine (localhost). Open ScenePlay that way and try ' +
+          'again — or copy the name from the mic picker on your camera ' +
+          'page, which shows the same labels.');
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = 'Asking…';
+  try {
+    // Permission unlock: labels come back empty without it. The track is
+    // stopped at once — nothing records, the browser just trusts us more.
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({audio: true});
+      s.getTracks().forEach(t => t.stop());
+    } catch (e) { /* denied — labels may still exist if granted before */ }
+    const mics = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === 'audioinput' && (d.label || '').trim());
+    if (!mics.length) {
+      alert('The browser would not share its device names — allow ' +
+            'microphone access for this site and try again.');
+      return;
+    }
+    sel.innerHTML = '';
+    const ph = document.createElement('option');
+    ph.value = ''; ph.textContent = '— pick your microphone —';
+    sel.appendChild(ph);
+    mics.forEach(d => {
+      const o = document.createElement('option');
+      o.value = d.label; o.textContent = d.label;
+      sel.appendChild(o);
+    });
+    sel.hidden = false;
+  } finally {
+    btn.disabled = false; btn.innerHTML = orig;
+  }
+}
+
+function obsPickMic(sel) {
+  if (!sel.value) return;
+  // The monitor IS what this field exists to avoid — warn, don't forbid:
+  // on a machine deliberately streaming its own output it can be right.
+  if (/^monitor of/i.test(sel.value) &&
+      !confirm('"' + sel.value + '" is the speakers’ loopback, not a ' +
+               'microphone — it would carry the music and every player’s ' +
+               'voice. Use it anyway?')) {
+    sel.value = '';
+    return;
+  }
+  const inp = document.getElementById('obs-dm-mic');
+  inp.value = sel.value;
+  sel.hidden = true;
+  obsAutoSave();          // set from JS, so the field never fires 'change'
+}
+
+// ── saved panel notes ───────────────────────────────────────────────────────
+const OBS_NOTE_SAVE_URL   = "{{ url_for('obs_bp.api_panel_note_save') }}";
+const OBS_NOTE_SHOW_URL   = "{{ url_for('obs_bp.api_panel_note_show') }}";
+const OBS_NOTE_DELETE_URL = "{{ url_for('obs_bp.api_panel_note_delete') }}";
+
+function _obsNoteSel() { return document.getElementById('obs-note-lib'); }
+function _obsNoteBox() {
+  return document.querySelector('textarea[name="obs_info_text"]');
+}
+
+// Every notes endpoint answers with the refreshed library, so the dropdown
+// is rebuilt from the server's truth rather than patched locally.
+function _obsNoteRebuild(notes, keepId) {
+  const sel = _obsNoteSel();
+  if (!sel || !notes) return;
+  sel.innerHTML = '';
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = '— saved notes —';
+  sel.appendChild(ph);
+  notes.forEach(n => {
+    const o = document.createElement('option');
+    o.value = n.id;
+    o.textContent = n.title + (n.shared ? ' (every session)' : '');
+    o.dataset.shared = n.shared ? '1' : '';
+    sel.appendChild(o);
+  });
+  if (keepId) sel.value = String(keepId);
+}
+
+function obsNoteSelect(sel) {
+  // Mirror the note's scope into the checkbox so "save under the same name"
+  // keeps it where it lives.
+  const opt = sel.options[sel.selectedIndex];
+  const shared = document.getElementById('obs-note-shared');
+  if (shared && opt) shared.checked = !!(opt.dataset && opt.dataset.shared);
+}
+
+function obsNoteShow() {
+  const sel = _obsNoteSel();
+  if (!sel || !sel.value) { alert('Pick a saved note first.'); return; }
+  _obsPost(OBS_NOTE_SHOW_URL, {note_id: +sel.value}).then(({ok, d}) => {
+    if (!ok || !d.ok) { alert(d.error || 'Could not show the note.'); return; }
+    const ta = _obsNoteBox();
+    if (ta) ta.value = d.body;      // the box mirrors what is now on stream
+    _obsNoteRebuild(d.notes, sel.value);
+    _obsSavedPill();
+  });
+}
+
+function obsNoteSave() {
+  const ta = _obsNoteBox();
+  const sel = _obsNoteSel();
+  const opt = sel && sel.value ? sel.options[sel.selectedIndex] : null;
+  const current = opt ? opt.textContent.replace(/ \(every session\)$/, '') : '';
+  const title = (prompt('Name this note', current) || '').trim();
+  if (!title) return;
+  const shared = !!document.getElementById('obs-note-shared')?.checked;
+  // The same name as the selected note means UPDATE it; a new name is a new
+  // note, so a tweaked copy never silently eats the original.
+  const body = {title, body: ta ? ta.value : '', shared};
+  if (opt && title === current) body.note_id = +sel.value;
+  _obsPost(OBS_NOTE_SAVE_URL, body).then(({ok, d}) => {
+    if (!ok || !d.ok) { alert(d.error || 'Could not save the note.'); return; }
+    _obsNoteRebuild(d.notes, d.note_id);
+    _obsSavedPill();
+  });
+}
+
+function obsNoteDelete() {
+  const sel = _obsNoteSel();
+  if (!sel || !sel.value) { alert('Pick a saved note first.'); return; }
+  const opt = sel.options[sel.selectedIndex];
+  if (!confirm('Delete "' + opt.textContent + '" from the saved notes?')) return;
+  _obsPost(OBS_NOTE_DELETE_URL, {note_id: +sel.value}).then(({ok, d}) => {
+    if (!ok || !d.ok) { alert(d.error || 'Could not delete the note.'); return; }
+    _obsNoteRebuild(d.notes, null);
+  });
 }
 
 // The address ScenePlay worked out for this machine. Preferred over reading

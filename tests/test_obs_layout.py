@@ -299,7 +299,9 @@ class TestDiceReflow:
         monkeypatch.setattr(ro, '_ordered_party', lambda *a, **k: [kara])
         monkeypatch.setattr(ro, 'featured_id', lambda: None)
         ro._dice_state.update({'shown': False, 'last_id': None,
-                               'last_roll_at': 0.0, 'threads': []})
+                               'last_roll_at': 0.0, 'threads': [],
+                               'note_text': None, 'note_stamp': 0.0,
+                               'roll_stamp': 0.0})
         ro._tile_rects.clear()
         return anims
 
@@ -361,3 +363,170 @@ class TestDiceReflow:
         assert ro._dice_state['shown'] is True, 'the hold restarts per roll'
         ro._dice_tick(105.0 + ro.DICE_REFLOW_HOLD_S + 1)
         assert ro._dice_state['shown'] is False
+
+    def test_a_fresh_note_pops_the_panel_too(self, app, settings, rig,
+                                             monkeypatch):
+        """Typing into Panel information is an announcement — it slides the
+        panel in exactly like a roll does."""
+        import routes.obs as ro
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: 1)
+        ro._dice_tick(100.0)                    # baseline: existing text is history
+        settings['obs_info_text'] = 'Dinner at 7!'
+        ro._dice_tick(101.0)
+        assert ro._dice_state['shown'] is True
+        assert ro._dice_state['note_stamp'] >= ro._dice_state['roll_stamp'], \
+            'the note is the newer event — the panel should show it'
+
+    def test_clearing_the_note_is_not_an_announcement(self, app, settings,
+                                                      rig, monkeypatch):
+        import routes.obs as ro
+        settings['obs_info_text'] = 'old note'
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: 1)
+        ro._dice_tick(100.0)                    # baseline WITH the old note
+        settings['obs_info_text'] = ''
+        ro._dice_tick(101.0)
+        assert ro._dice_state['shown'] is False, 'an emptied note stays quiet'
+
+    def test_roll_after_note_hands_the_panel_to_the_dice(self, app, settings,
+                                                         rig, monkeypatch):
+        import routes.obs as ro
+        rolls = {'v': 1}
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: rolls['v'])
+        ro._dice_tick(100.0)
+        settings['obs_info_text'] = 'note first'
+        ro._dice_tick(101.0)
+        rolls['v'] = 2
+        ro._dice_tick(102.0)
+        assert ro._dice_state['roll_stamp'] > ro._dice_state['note_stamp'], \
+            'the roll is now the newer event'
+
+    def test_a_standing_note_outlives_the_hold(self, app, settings, rig,
+                                               monkeypatch):
+        """Text sitting in the box is state, not an event: the panel stays on
+        screen for as long as the box has text, hold or no hold."""
+        import routes.obs as ro
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: 1)
+        ro._dice_tick(100.0)
+        settings['obs_info_text'] = 'Dinner at 7!'
+        ro._dice_tick(101.0)
+        assert ro._dice_state['shown'] is True
+        ro._dice_tick(101.0 + ro.DICE_REFLOW_HOLD_S + 60)
+        assert ro._dice_state['shown'] is True, \
+            'a standing note keeps the panel up indefinitely'
+
+    def test_clearing_a_standing_note_slides_the_panel_away(self, app,
+                                                            settings, rig,
+                                                            monkeypatch):
+        import routes.obs as ro
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: 1)
+        ro._dice_tick(100.0)
+        settings['obs_info_text'] = 'Dinner at 7!'
+        ro._dice_tick(101.0)
+        settings['obs_info_text'] = ''
+        ro._dice_tick(101.0 + ro.DICE_REFLOW_HOLD_S + 2)
+        assert ro._dice_state['shown'] is False, \
+            'an emptied box releases the panel'
+
+    def test_note_reclaims_the_panel_after_a_rolls_hold(self, app, settings,
+                                                        rig, monkeypatch):
+        """A roll may borrow the panel while a note stands, but once the
+        roll's hold passes the note takes it back instead of the panel
+        sliding away."""
+        import routes.obs as ro
+        rolls = {'v': 1}
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: rolls['v'])
+        ro._dice_tick(100.0)
+        settings['obs_info_text'] = 'note first'
+        ro._dice_tick(101.0)
+        rolls['v'] = 2
+        ro._dice_tick(102.0)
+        assert ro._dice_state['roll_stamp'] > ro._dice_state['note_stamp']
+        ro._dice_tick(102.0 + ro.DICE_REFLOW_HOLD_S + 1)
+        assert ro._dice_state['shown'] is True
+        assert ro._dice_state['note_stamp'] >= ro._dice_state['roll_stamp'], \
+            'the standing note is the content again once the roll expires'
+
+    def test_a_note_standing_at_startup_still_shows(self, app, settings, rig,
+                                                    monkeypatch):
+        """Restarting the server with text already saved must not strand the
+        message: history suppression is for rolls, not for standing state."""
+        import routes.obs as ro
+        settings['obs_info_text'] = 'standing order'
+        monkeypatch.setattr(ro, '_newest_roll_id', lambda: 1)
+        ro._dice_tick(100.0)                    # baseline tick
+        ro._dice_tick(101.0)
+        assert ro._dice_state['shown'] is True, \
+            'text in the box means the panel belongs on screen'
+
+
+class TestMapSceneRestingState:
+    """Pop-over dice: a BUILD must leave the map at full width with the dice
+    parked — not squeezed left as if the panel were showing (it used to stay
+    stuck that way until a roll cycle animated it out)."""
+
+    @pytest.fixture()
+    def settings(self, app, monkeypatch):
+        store = {}
+        import routes.obs as ro
+        import sql
+        fake = lambda name, default=None: store.get(name, default)  # noqa: E731
+        monkeypatch.setattr(sql, 'appsettingGet', fake)
+        monkeypatch.setattr(ro, 'appsettingGet', fake)
+        return store
+
+    @pytest.fixture()
+    def rig(self, app, monkeypatch):
+        import obs_ws
+        import routes.obs as ro
+        placed = {}
+        monkeypatch.setattr(obs_ws, 'connected', lambda: True)
+        monkeypatch.setattr(obs_ws, 'current_state',
+                            lambda: {'base_width': 1920, 'base_height': 1080})
+        monkeypatch.setattr(obs_ws, 'ensure_scene', lambda s: None)
+        monkeypatch.setattr(obs_ws, 'ensure_browser_input',
+                            lambda sc, src, url, w, h, **k: (hash(src) % 999, []))
+        monkeypatch.setattr(obs_ws, 'place_item',
+                            lambda sc, iid, box: placed.update({iid: box}))
+        monkeypatch.setattr(obs_ws, 'set_item_enabled', lambda *a: None)
+        monkeypatch.setattr(obs_ws, 'scene_list', lambda refresh=False: [])
+        monkeypatch.setattr(ro, '_raise_to_front', lambda *a, **k: None)
+        monkeypatch.setattr(ro, '_place_background', lambda *a, **k: None)
+        monkeypatch.setattr(ro, '_upsert_special_map', lambda *a, **k: None)
+        monkeypatch.setattr(ro, 'panel_url', lambda mode='info': f'u:{mode}')
+        monkeypatch.setattr(ro, 'map_url', lambda: 'u:map')
+        ro._dice_state.update({'shown': False, 'last_id': None,
+                               'last_roll_at': 0.0, 'threads': []})
+        return ro, placed
+
+    def _map_box(self, ro, placed):
+        import obs_ws
+        mid = hash(ro.MAP_SOURCE_NAME) % 999
+        return placed[mid]
+
+    def test_autohide_build_gives_the_map_full_width(self, app, settings, rig):
+        ro, placed = rig
+        settings['obs_panel_on'] = '1'
+        settings['obs_dice_autohide'] = '1'
+        ro.ensure_map_scene()
+        box = self._map_box(ro, placed)
+        assert box['x'] + box['w'] > 1900, 'map must start at FULL width'
+        did = hash(ro.DICE_SOURCE_NAME) % 999
+        assert placed[did]['x'] >= 1920, 'dice start parked off-canvas'
+
+    def test_classic_build_keeps_the_reserved_column(self, app, settings, rig):
+        ro, placed = rig
+        settings['obs_panel_on'] = '1'
+        settings['obs_dice_autohide'] = '0'
+        ro.ensure_map_scene()
+        box = self._map_box(ro, placed)
+        assert box['x'] + box['w'] < 1900, 'classic mode reserves the column'
+
+    def test_panel_off_still_gives_the_dice_a_box(self, app, settings, rig):
+        ro, placed = rig
+        settings['obs_panel_on'] = '0'
+        settings['obs_dice_autohide'] = '1'
+        ro.ensure_map_scene()
+        box = self._map_box(ro, placed)
+        assert box['x'] + box['w'] > 1900
+        did = hash(ro.DICE_SOURCE_NAME) % 999
+        assert did in placed, 'the roll feed still has a home'

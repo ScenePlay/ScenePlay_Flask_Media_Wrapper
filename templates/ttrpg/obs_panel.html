@@ -285,7 +285,11 @@ function paintNotes(lines) {
   host.innerHTML = '';
   lines.forEach(line => {
     const p = document.createElement('div');
-    p.className = 'note'; p.textContent = line;
+    // The DM's text, HTML and all — the box accepts markup (<b>, <i>,
+    // <span style=…>) so a line can carry its own type styling. Only the
+    // authenticated broadcast form writes it, so this is the DM styling
+    // their own overlay, not untrusted input.
+    p.className = 'note'; p.innerHTML = line;
     host.appendChild(p);
   });
   el('panel-head').textContent = 'Information';
@@ -367,9 +371,13 @@ function apply(d) {
   el('turn').textContent = d.turn ? '▶ ' + d.turn : '';
 
   if (!SHOW_PANEL) return;
-  // The dice source exists to show dice: notes must not displace them the way
-  // they do on the party panel.
-  const notes = MODE === 'dice' ? [] : (d.info_lines || []).filter(s => s.trim());
+  // In pop-over mode the panel shows whichever happened last — the standing
+  // note or a roll — and that applies to BOTH sources, so the map scene's
+  // dice feed carries the DM's message too. With the panel permanently on
+  // screen, the dice source keeps its old rule: dice only, notes must not
+  // displace them the way they do on the party panel.
+  const notes = (d.dice_popover ? !d.show_notes : MODE === 'dice')
+    ? [] : (d.info_lines || []).filter(s => s.trim());
   if (notes.length) {
     if (mode !== 'notes' || notes.join('\n') !== (window.__notes || '')) {
       window.__notes = notes.join('\n');

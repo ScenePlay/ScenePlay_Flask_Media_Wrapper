@@ -67,7 +67,12 @@ class TestThemeSettings:
         settings['obs_bezel_shape'] = 'circle'
         assert ro._theme_payload() == {'accent': '#4a9eff', 'base': '#06101c',
                                        'base2': '#06101c', 'dir': '180',
-                                       'bezel': 'circle'}
+                                       'bezel': 'circle',
+                                       'plate': '#06101c', 'plate2': '#06101c',
+                                       'plate_dir': '180', 'card': 'classic',
+                                       'tile': 'strip',
+                                       'dm_icon': '⚔',
+                                       'dm_title': 'Dungeon Master'}
 
     def test_base_defaults_and_validates(self, app, settings):
         import routes.obs as ro
@@ -101,7 +106,12 @@ class TestPerSessionTheme:
         settings[f'obs_bezel_shape:s{session.session_id}'] = 'hex'
         assert ro._theme_payload() == {'accent': '#9b6dff', 'base': '#0c081a',
                                        'base2': '#0c081a', 'dir': '180',
-                                       'bezel': 'hex'}
+                                       'bezel': 'hex',
+                                       'plate': '#0c081a', 'plate2': '#0c081a',
+                                       'plate_dir': '180', 'card': 'classic',
+                                       'tile': 'strip',
+                                       'dm_icon': '⚔',
+                                       'dm_title': 'Dungeon Master'}
         assert ro._theme_session_own() is True
 
     def test_a_session_without_its_own_inherits_the_shared_look(
@@ -112,7 +122,13 @@ class TestPerSessionTheme:
         assert ro._theme_payload() == {'accent': '#4a9eff',
                                        'base': ro.DEFAULT_BASE,
                                        'base2': ro.DEFAULT_BASE, 'dir': '180',
-                                       'bezel': 'circle'}
+                                       'bezel': 'circle',
+                                       'plate': ro.DEFAULT_BASE,
+                                       'plate2': ro.DEFAULT_BASE,
+                                       'plate_dir': '180', 'card': 'classic',
+                                       'tile': 'strip',
+                                       'dm_icon': '⚔',
+                                       'dm_title': 'Dungeon Master'}
         assert ro._theme_session_own() is False
 
     def test_a_blanked_override_falls_back(self, app, settings, session):
@@ -218,3 +234,61 @@ class TestArtUrlCacheBusting:
         monkeypatch.setattr(ro, '_card_base', lambda: 'http://host:8086')
         assert ro._art_url('gone.jpg').endswith('?v=0')
         assert ro._art_url('') == ''
+
+
+class TestPlateAndCardDesign:
+    """The camera tiles' name plate pair + the stat cards' layout pick."""
+
+    def test_plate_follows_the_base_pair_until_set(self, app, settings):
+        import routes.obs as ro
+        settings['obs_base_color'] = '#140a08'
+        settings['obs_base_color2'] = '#2c1009'
+        assert ro.theme_plate() == '#140a08'
+        assert ro.theme_plate2() == '#2c1009'
+
+    def test_a_plate_colour_alone_renders_solid(self, app, settings):
+        import routes.obs as ro
+        settings['obs_plate_color'] = '#123456'
+        assert ro.theme_plate() == '#123456'
+        assert ro.theme_plate2() == '#123456', 'no second colour -> solid'
+
+    def test_a_full_plate_pair_wins(self, app, settings):
+        import routes.obs as ro
+        settings['obs_plate_color'] = '#123456'
+        settings['obs_plate_color2'] = '#654321'
+        settings['obs_plate_dir'] = '90'
+        assert ro.theme_plate2() == '#654321'
+        assert ro.theme_plate_dir() == '90'
+
+    def test_card_design_validates(self, app, settings):
+        import routes.obs as ro
+        assert ro.card_design() == 'classic'
+        settings['obs_card_design'] = 'holographic'
+        assert ro.card_design() == 'classic'
+        for good in ('banner', 'trading'):
+            settings['obs_card_design'] = good
+            assert ro.card_design() == good
+
+
+    def test_tile_design_validates(self, app, settings):
+        import routes.obs as ro
+        assert ro.tile_design() == 'strip'
+        settings['obs_tile_design'] = 'billboard'
+        assert ro.tile_design() == 'strip'
+        for good in ('tag', 'third'):
+            settings['obs_tile_design'] = good
+            assert ro.tile_design() == good
+
+
+    def test_dm_icon_and_title_validate(self, app, settings):
+        import routes.obs as ro
+        assert ro.dm_icon() == '⚔'
+        settings['obs_dm_icon'] = '<script>'
+        assert ro.dm_icon() == '⚔', 'off-roster symbols are refused'
+        settings['obs_dm_icon'] = '⚙'
+        assert ro.dm_icon() == '⚙'
+        assert ro.dm_title() == 'Dungeon Master'
+        settings['obs_dm_title'] = '  The AI  '
+        assert ro.dm_title() == 'The AI'
+        settings['obs_dm_title'] = 'x' * 99
+        assert len(ro.dm_title()) == 40, 'capped'
