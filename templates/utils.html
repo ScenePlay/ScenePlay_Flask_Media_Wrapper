@@ -1,26 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-        <div id="container">
-            <div>
+        <div class="sp-page">
+            <div class="sp-page-head">
                 <h1>Utilities</h1>
             </div>
             {% with messages = get_flashed_messages() %}
               {% if messages %}
                 {% for m in messages %}
-                <div style="margin:6px 12px;padding:8px 12px;border:1px solid var(--sp-accent);
-                            border-radius:6px;background:var(--sp-surface);color:var(--sp-text);">{{ m }}</div>
+                <div class="alert alert-warning" style="margin:6px 0;">{{ m }}</div>
                 {% endfor %}
               {% endif %}
             {% endwith %}
-            <div id="content" align="left">
+            <div>
                 <form method="post" action="{{ url_for('ut.main') }}" class="form">
-                    <details style="border: 3px solid black;padding:4px 10px;">
-                    <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Youtube Import</h3></summary>
+                    <details class="sp-card">
+                    <summary><h3>Youtube Import</h3></summary>
 					 <input type="text" placeholder="Video or Playlist URL" name="URLLink" class="form-control mb-3" />
 					 <input type="text" placeholder="Optional display name — blank uses video metadata" name="FileName" class="form-control mb-3" />
-                     <div style="display: flex; align-items: center;">
-                        <label for="lblmedia" style="margin-right: 10px;">Choose Media:</label>
-                        <select name="Media" id="mediaType">
+                     <div class="sp-filter-row">
+                        <label for="mediaType">Choose Media</label>
+                        <select name="Media" id="mediaType" class="form-select">
                             <optgroup label="Music">
                                 <option value="mp3">MP3</option>
                             </optgroup>
@@ -29,32 +28,29 @@
                                 <!-- <option value="webm">WEBM</option> -->
                             </optgroup>
                         </select>
-                        <label for="lblscene" style="margin-right: 10px;">Choose Scene:</label>
-                        <select name="Scene" id="sceneType">
+                        <label for="sceneType">Choose Scene</label>
+                        <select name="Scene" id="sceneType" class="form-select">
                             {% for scene in Scenes %}
                                 <option value="{{ scene.scene_ID }}">{{ scene.sceneName }}</option>
                             {% endfor %}
                         </select>
-
                     </div>
-                     <br />
-                     <input type="submit" name="submit" value="Process Youtube"/>
+                     <input type="submit" name="submit" value="Process Youtube" class="btn btn-primary"/>
                      <br />
                      <br />
                      <label for="form">Look up missing video details (video id, title) for rows already in the media tables:</label>
-                     <input type="submit" name="submit" value="Backfill Metadata"/>
+                     <input type="submit" name="submit" value="Backfill Metadata" class="btn btn-secondary"/>
                      <br />
                      <br />
                      <label for="form">Check every media row for its file on disk, and re-download any that are missing:</label>
-                     <input type="submit" name="submit" value="Scan Media Files"/>
+                     <input type="submit" name="submit" value="Scan Media Files" class="btn btn-secondary"/>
                      <br />
                      <br />
                      </details>
                      <!-- <label for="form">Load Test Data</label>
                      <input type="submit" name="submit" value="loadtestdata"/> -->
-                     <br />
-                     <details style="border: 3px solid black;padding:4px 10px;">
-                     <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Software Update</h3></summary>
+                     <details class="sp-card">
+                     <summary><h3>Software Update</h3></summary>
                      <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0 2px;">Before updating:</p>
                      <ol style="font-size:.85em;color:var(--sp-muted);margin:2px 0 6px 22px;">
                        <li>Create a backup (Backup &amp; Restore, below).</li>
@@ -73,19 +69,18 @@
                          Leave it blank and that step is skipped — the update itself
                          still runs. The password is used once and never stored.
                        </label>
-                       <input type="password" id="update-sudo" autocomplete="new-password"
+                       <input type="password" id="update-sudo" autocomplete="new-password" class="form-control"
                               placeholder="sudo password (optional)" style="max-width:260px;">
                      </div>
                      <input type="button" id="update-btn" class="btn btn-primary" value="Update Now" style="display:none;">
-                     <pre id="update-log" style="display:none;font-size:.78em;white-space:pre-wrap;background:#111;color:#ddd;padding:8px;max-height:260px;overflow:auto;margin-top:8px;"></pre>
+                     <pre id="update-log" style="display:none;font-size:.78em;white-space:pre-wrap;background:#111;color:#ddd;padding:8px;border-radius:8px;max-height:260px;overflow:auto;margin-top:8px;"></pre>
                      </details>
-                     <br />
-                     <details style="border: 3px solid black;padding:4px 10px;">
-                     <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Backup &amp; Restore</h3></summary>
+                     <details class="sp-card">
+                     <summary><h3>Backup &amp; Restore</h3></summary>
                      <!-- Light archives: DB snapshot + uploaded images. Media
                           re-downloads through the yt-dlp pipeline on restore. -->
-                     <input type="submit" name="submit" value="Create Backup"/>
-                     <input type="submit" name="submit"
+                     <input type="submit" name="submit" value="Create Backup" class="btn btn-primary"/>
+                     <input type="submit" name="submit" class="btn btn-secondary"
                             value="{{ 'Disable Nightly Backup' if backup_auto else 'Enable Nightly Backup' }}"/>
                      <span style="font-size:.85em;color:var(--sp-muted);">
                        Nightly backup is {{ 'ON — keeps the last 7 automatic snapshots' if backup_auto else 'off' }}.
@@ -97,7 +92,7 @@
                          <td style="border:none;padding-right:12px;"><a href="{{ url_for('ut.backup_download', name=b.name) }}">{{ b.name }}</a></td>
                          <td style="border:none;padding-right:12px;color:var(--sp-muted);">{{ b.created }}</td>
                          <td style="border:none;padding-right:12px;color:var(--sp-muted);">{{ '%.1f'|format(b.size / 1048576) }} MB</td>
-                         <td style="border:none;"><input type="button" class="btn btn-primary btn-sm" value="Delete"
+                         <td style="border:none;"><input type="button" class="btn btn-outline-danger btn-sm" value="Delete"
                                 onclick="deleteBackup('{{ b.name }}')"></td>
                        </tr>
                        {% endfor %}
@@ -118,9 +113,9 @@
                        <li>Folders are searched including everything inside them, so
                            point at media folders — not whole drives.</li>
                      </ul>
-                     <input type="text" name="media_search_roots" value="{{ media_roots }}"
+                     <input type="text" name="media_search_roots" value="{{ media_roots }}" class="form-control d-inline-block mb-2"
                             placeholder="/mnt/media/Music;/mnt/media/Videos" style="width:70%;">
-                     <input type="submit" name="submit" value="Save Media Folders"/>
+                     <input type="submit" name="submit" value="Save Media Folders" class="btn btn-secondary"/>
                      </details>
                 </form>
 
@@ -129,9 +124,9 @@
                      Replace swaps the whole database (safety snapshot first). -->
                 <form method="post" action="{{ url_for('ut.backup_import') }}"
                       enctype="multipart/form-data" id="backupImportForm">
-                    <details style="border: 3px solid black;padding:4px 10px;">
-                    <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Import Backup</h3></summary>
-                    <input type="file" name="backupFile" accept=".zip" required>
+                    <details class="sp-card">
+                    <summary><h3>Import Backup</h3></summary>
+                    <input type="file" name="backupFile" accept=".zip" required class="form-control mb-2" style="max-width:420px;">
                     <br />
                     <label style="display:inline-block;margin:6px 12px 2px 0;">
                       <input type="radio" name="mode" value="merge" checked>
@@ -170,7 +165,7 @@
                       <li>If you need the images, copy the <code>static/uploads</code> folder over separately.</li>
                     </ul>
                     <br />
-                    <input type="submit" value="Import" onclick="return confirmImport();">
+                    <input type="submit" value="Import" class="btn btn-primary" onclick="return confirmImport();">
                     <script>
                     // The popup states EXACTLY what each mode imports — above all
                     // that a standard merge does NOT bring characters/sessions/maps
@@ -200,16 +195,15 @@
                     </script>
                     </details>
                 </form>
-                <br />
 
                 <!-- Own form: the restart button sits below the import section,
                      outside the main utilities form. -->
                 <form method="post" action="{{ url_for('ut.main') }}">
-                    <details style="border: 3px solid black;padding:4px 10px;">
-                    <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">This Server</h3></summary>
+                    <details class="sp-card">
+                    <summary><h3>This Server</h3></summary>
                     <!-- Deletes the yt-dlp git checkout and re-clones it — fixes a
                          stale or corrupted downloader without touching anything else. -->
-                    <input type="submit" name="submit" value="Reset yt-dlp"
+                    <input type="submit" name="submit" value="Reset yt-dlp" class="btn btn-secondary"
                            title="Delete the yt-dlp checkout and re-clone it fresh from GitHub"
                            onclick="return confirm('Delete the yt-dlp checkout and re-clone it fresh from GitHub? Use this when downloads misbehave and a normal update has not helped. May take a minute.');"/>
                     <span style="font-size:.85em;color:var(--sp-muted);">
@@ -224,21 +218,20 @@
                         leave blank if reboots already work. Used once and never stored.
                       </label>
                       <input type="password" id="restart-sudo" name="sudo_password"
-                             autocomplete="new-password"
+                             autocomplete="new-password" class="form-control"
                              placeholder="sudo password (optional)" style="max-width:260px;">
                     </div>
-                    <input type="submit" name="submit" value="Restart Computer"
+                    <input type="submit" name="submit" value="Restart Computer" class="btn btn-danger"
                            title="Requires a DM login"
                            onclick="return confirm('Are you sure you want to restart the computer? (Requires a DM login.)');"/>
                     <br />
                     <br />
                     </details>
                 </form>
-                <br />
                 <form method="post" action="{{ url_for('ut.main') }}">
                     <input type="hidden" name="submit" value="Save DM Access">
-                    <details style="border: 3px solid black;padding:4px 10px;">
-                    <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Access Control</h3></summary>
+                    <details class="sp-card">
+                    <summary><h3>Access Control</h3></summary>
                     <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">
                       Controls who can open the ScenePlay pages: the playback controls,
                       the campaign / scene / media tables, and this Utilities page.
@@ -271,9 +264,8 @@
                     </ul>
                     </details>
                 </form>
-                <br />
-                <details style="border: 3px solid black;padding:4px 10px;">
-                <summary style="cursor:pointer;"><h3 style="display:inline;margin:0;">Browser Extensions</h3></summary>
+                <details class="sp-card">
+                <summary><h3>Browser Extensions</h3></summary>
                 <p style="font-size:.85em;margin:6px 0;">
                   The extension is the easiest way to get media off youtube.com.
                   While you're on a video or playlist page, click the ScenePlay icon

@@ -487,6 +487,33 @@ button.gridjs-sort-desc {
 
 /* ── 6. Layout patterns ──────────────────────────────────────────────────── */
 
+/* Content shell: one white card per page body */
+.sp-page {
+  margin: 12px;
+  padding: 16px 20px;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  box-shadow: var(--sp-shadow-1);
+}
+@media (max-width: 767px) {
+  .sp-page { margin: 8px; padding: 12px 14px; }
+}
+
+/* Collapsible section card (utilities-style pages) */
+details.sp-card {
+  padding: 0 16px;
+  margin-bottom: 12px;
+}
+details.sp-card > summary {
+  cursor: pointer;
+  padding: 12px 0;
+  list-style-position: outside;
+}
+details.sp-card > summary h3 { display: inline; margin: 0; }
+details.sp-card[open] > summary { border-bottom: 1px solid var(--sp-border); margin-bottom: 10px; }
+details.sp-card > *:last-child { margin-bottom: 12px; }
+
 /* Page title + actions; wraps cleanly on phones */
 .sp-page-head {
   display: flex;

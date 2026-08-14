@@ -207,20 +207,54 @@
     accent-color: var(--sp-accent);
 }
 
-/* ── Legacy (used by home.html until its Phase-4 rebuild) ───────────────── */
-.flex-container {
+/* ── Home scene grid ──────────────────────────────────────────────────────
+   Each card is one activation target; --c1/--c2 arrive inline from Jinja
+   (the scene's RPi + WLED colors) and paint the band. */
+.sp-scene-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.sp-scene-card {
     display: flex;
-    flex-flow: row wrap;
-    justify-content: space-around;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-border);
+    border-radius: var(--sp-radius);
+    box-shadow: var(--sp-shadow-1);
+    padding: 10px;
+    text-decoration: none;
+    color: var(--sp-heading);
+    transition: transform .12s ease, box-shadow .12s ease;
 }
-.flex-container > div {
-    width: 200px;
-    margin: 10px;
-    text-align: center;
-    line-height: 75px;
-    font-size: 15px;
+.sp-scene-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--sp-shadow-2);
+    color: var(--sp-heading);
 }
-.fill-cell {
-    width: 100%;
-    height: 100%;
+.sp-scene-band {
+    display: block;
+    height: 34px;
+    border-radius: calc(var(--sp-radius) - 4px);
+    background: linear-gradient(120deg, rgb(var(--c1)), rgb(var(--c2)));
+}
+.sp-scene-name {
+    font-weight: 600;
+    font-size: .95rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+.sp-scene-leds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.sp-led-tag {
+    font-size: .68rem;
+    color: var(--sp-muted);
+    border: 1px solid var(--sp-border);
+    border-radius: 10px;
+    padding: 1px 7px;
+    background: var(--sp-surface-2);
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

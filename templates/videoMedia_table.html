@@ -1,18 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-  <body ><!-- onload="addButton()"> -->
-    <div>
-      <h1>Video Media Table</h1>
-      <h2><label style="display: inline-block; margin-left: 10px; min-width: 300px;" for="campaignFilterDropdown">Filter By Campaign:</label>
-          <select id="campaignFilterDropdown" onchange="campaignFilterChange()" style="display: inline-block; margin-left: 10px; min-width: 260px;">
+  <div class="sp-page">
+    <div class="sp-page-head"><h1>Video Media Table</h1></div>
+    <div class="sp-filter-row">
+      <label for="campaignFilterDropdown">Filter By Campaign</label>
+          <select id="campaignFilterDropdown" onchange="campaignFilterChange()" class="form-select">
           <option value="0">All</option>
           {% for camp in campaigns %}
             <option value="{{camp[0]}}" {% if camp[0] == campaignFilter %}selected{% endif %}>{{camp[1]}}</option>
           {% endfor %}
           </select>
-        </h2>
-      <h2><label style="display: inline-block; margin-left: 10px; min-width: 300px;" for="editSceneDropdown">Filter By Scene:</label>
-          <select id="editSceneDropdown" onchange="sceneFilterChange()" style="display: inline-block; margin-left: 10px; min-width: 260px;">
+      <label for="editSceneDropdown">Filter By Scene</label>
+          <select id="editSceneDropdown" onchange="sceneFilterChange()" class="form-select">
           <option value="0">All</option>
           {% for scene in scenes %}
             {% if scene[0] == sceneFilter %}
@@ -22,10 +21,11 @@
             {% endif %}
           {% endfor %}
           </select>
-        </h2>
-      <hr>
+    </div>
+    <div class="sp-table-scroll">
       <div id="table"></div>
     </div>
+  </div>
     <script>
       const tableDiv = document.getElementById('table');
       function addButton() {
@@ -494,5 +494,4 @@
       // }
 
     </script>
-  </body>
   {% endblock %}

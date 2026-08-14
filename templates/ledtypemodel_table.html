@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-  <body onload="addButton()">
-    <div>
-      <h1>Led Type Model Table</h1>
-      <hr>
-      <div id="table"></div>
+    <div class="sp-page">
+      <div class="sp-page-head"><h1>Led Type Model Table</h1></div>
+      <div class="sp-table-scroll">
+        <div id="table"></div>
+      </div>
     </div>
 
     <script>
@@ -191,6 +191,6 @@
       //   }
       // }
 
+      window.addEventListener('load', addButton);
     </script>
-  </body>
   {% endblock %}
