@@ -317,6 +317,15 @@ details > summary::-webkit-details-marker { color: var(--sp-accent); }
   box-shadow: 0 0 5px var(--pill);
 }
 
+/* App version tag, far right of both navbars next to the theme picker */
+.sp-version {
+  color: var(--sp-muted);
+  font-size: .72rem;
+  align-self: center;
+  flex-shrink: 0;
+  margin: 0 .35rem;
+}
+
 /* Theme picker (both navbars) */
 .sp-theme-wrap { position: relative; flex-shrink: 0; }
 #sp-theme-btn {

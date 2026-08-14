@@ -160,6 +160,13 @@ def inject_keep_music():
 
 
 @app.context_processor
+def inject_app_version():
+    """Navbar version tag — same single source of truth /api/server-info uses."""
+    from version import __version__
+    return {'sp_version': __version__}
+
+
+@app.context_processor
 def inject_relay_status():
     """Navbar 'Relay ON' badge: when the box is used purely as a media player,
     make an enabled (and possibly forgotten) relay visible at a glance.
