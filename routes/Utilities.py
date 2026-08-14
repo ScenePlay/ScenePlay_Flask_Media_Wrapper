@@ -275,7 +275,7 @@ def backup_import():
                                                    full=full, fallback_user_id=fallback_uid)
             msg = (f"Merged from {summary['from']}: {summary['campaigns']} campaigns, "
                    f"{summary['scenes']} scenes, {summary['music']} songs, {summary['video']} videos, "
-                   f"{summary['links']} scene links, {summary.get('homebrew', 0)} homebrew library entries, "
+                   f"{summary['links']} scene links, {summary.get('homebrew', 0)} library entries, "
                    f"{summary['uploads_added']} images{img_note} "
                    f"({summary['skipped_legacy']} legacy rows skipped, "
                    f"{summary.get('found_local', 0)} media files found already local).")
@@ -288,6 +288,7 @@ def backup_import():
                         f"{summary.get('map_prompts', 0)} map prompts, "
                         f"{summary.get('obs_bindings', 0)} OBS bindings, "
                         f"{summary.get('dice_rolls', 0)} dice rolls, "
+                        f"{summary.get('cron_schedules', 0)} cron schedules (imported inactive), "
                         f"{summary['notes']} notes, {summary['lighting']} lighting links.")
                 if summary.get('characters_no_owner'):
                     msg += (f" WARNING: {summary['characters_no_owner']} characters were NOT "

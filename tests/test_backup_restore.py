@@ -53,7 +53,11 @@ SCHEMA = [
     "CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, modelName TEXT, ledJSON TEXT)",
     "CREATE TABLE tblEffect (effect_ID INTEGER PRIMARY KEY, effectName TEXT, ef_ID INT)",
     "CREATE TABLE tblPallette (pallette_ID INTEGER PRIMARY KEY, palletteName TEXT, pa_ID INT)",
-    "CREATE TABLE tblServersIP (ServerIP_ID INTEGER PRIMARY KEY, serverName TEXT, ipAddress TEXT)",
+    "CREATE TABLE tblServersIP (ServerIP_ID INTEGER PRIMARY KEY, serverName TEXT, ipAddress TEXT, serverroleid INT)",
+    "CREATE TABLE tblServerRole (ID INTEGER PRIMARY KEY, name TEXT, active INT, orderBy INT)",
+    "CREATE TABLE tblObsPanelNotes (note_id INTEGER PRIMARY KEY, session_id INT, title TEXT, body TEXT, created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE tblCronSchedule (schedule_id INTEGER PRIMARY KEY, name TEXT, minute TEXT, hour TEXT, day_of_month TEXT, month TEXT, day_of_week TEXT, command TEXT, description TEXT, active INT)",
+    "CREATE TABLE tblClassLevelsLibrary (class_level_id INTEGER PRIMARY KEY, api_index TEXT, class_name TEXT, level INT, prof_bonus INT, features_text TEXT, cantrips_known INT, spells_known INT, spell_slots_json TEXT, class_specific_json TEXT, source TEXT, created_at TEXT)",
 ]
 
 
@@ -450,7 +454,8 @@ class TestOldArchiveCompat:
 class TestMergeHomebrew:
     def _archive_with_homebrew(self, env):
         """Source server: a homebrew subclass + its feature + a homebrew
-        monster, PLUS an SRD subclass that must stay behind."""
+        monster, PLUS an SRD subclass — ALL of it travels (SRD included,
+        deduped by api_index so a later API sync can't duplicate it)."""
         src = str(env['tmp'] / 'brew.db')
         make_db(src)
         x(src, "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
@@ -468,28 +473,38 @@ class TestMergeHomebrew:
         finally:
             sql.database = old
 
-    def test_homebrew_merges_srd_does_not(self, env):
+    def test_homebrew_and_srd_both_merge(self, env):
         archive = self._archive_with_homebrew(env)
         s = br.restore_merge(archive)
-        assert s['homebrew'] == 3
+        assert s['homebrew'] == 4
         assert q(env['live'], "SELECT source FROM tblSubclassesLibrary WHERE name='Way of the Storm'")[0][0] == 'homebrew'
         assert q(env['live'], "SELECT level FROM tblFeaturesLibrary WHERE name='Storm Strike'")[0][0] == 3
         assert q(env['live'], "SELECT hp_max FROM tblMonsterTemplates WHERE name='Frost Golem'")[0][0] == 90
-        # SRD subclass stays behind — each box re-syncs those itself
-        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary WHERE name='Open Hand'")[0][0] == 0
+        # SRD subclass travels too, keeping its sync identity
+        assert q(env['live'], "SELECT api_index FROM tblSubclassesLibrary WHERE name='Open Hand'") == [('open-hand',)]
+
+    def test_srd_dedups_by_api_index(self, env):
+        # destination already synced this SRD row itself (different casing)
+        x(env['live'], "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
+                       "VALUES ('open-hand', 'OPEN HAND', 'Monk', '', 'synced here', 'srd', '2025-01-01')")
+        archive = self._archive_with_homebrew(env)
+        s = br.restore_merge(archive)
+        assert s['homebrew'] == 3            # SRD subclass deduped by api_index
+        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary WHERE api_index='open-hand'")[0][0] == 1
+        assert q(env['live'], "SELECT description FROM tblSubclassesLibrary WHERE api_index='open-hand'")[0][0] == 'synced here'
 
     def test_homebrew_merge_dedups_by_name(self, env):
         x(env['live'], "INSERT INTO tblSubclassesLibrary(api_index, name, class_name, flavor, description, source, created_at) "
                        "VALUES (NULL, 'way of the storm', 'Monk', '', 'mine, edited', 'homebrew', '2025-01-01')")
         archive = self._archive_with_homebrew(env)
         s = br.restore_merge(archive)
-        assert s['homebrew'] == 2            # subclass deduped (case-insensitive); feature + monster copied
-        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary")[0][0] == 1
-        assert q(env['live'], "SELECT description FROM tblSubclassesLibrary")[0][0] == 'mine, edited'  # local wins
+        assert s['homebrew'] == 3            # subclass deduped (case-insensitive); feature + monster + SRD copied
+        assert q(env['live'], "SELECT COUNT(*) FROM tblSubclassesLibrary WHERE name LIKE '%storm%'")[0][0] == 1
+        assert q(env['live'], "SELECT description FROM tblSubclassesLibrary WHERE name LIKE '%storm%'")[0][0] == 'mine, edited'  # local wins
 
     def test_homebrew_merge_idempotent_and_tolerates_missing_tables(self, env):
         archive = self._archive_with_homebrew(env)
-        assert br.restore_merge(archive)['homebrew'] == 3
+        assert br.restore_merge(archive)['homebrew'] == 4
         assert br.restore_merge(archive)['homebrew'] == 0
         # archive from an OLDER version without library tables merges cleanly
         old_src = str(env['tmp'] / 'old.db')
@@ -1083,3 +1098,145 @@ class TestExtraSearchRoots:
                        "VALUES ('/gone/', 'vid000000001.mp4', 'https://u', 3, 'vid000000001', 'V')")
         out = br.requeue_missing_media()
         assert out == {'requeued': 0, 'found_local': 1}
+
+
+class TestMergeCoverage:
+    """Every table in the REAL app schema must have a declared merge fate —
+    covered by the merge code or deliberately excluded. A new table added to
+    the app without deciding fails here, so nothing can be left out silently."""
+
+    def test_every_table_is_classified(self, tmp_path, monkeypatch):
+        scratch = str(tmp_path / 'schema.db')
+        monkeypatch.setattr(sql, 'database', scratch)
+        sql.create_table()                      # raw-DDL tables
+        import importlib
+        for mod in ('campaigns', 'cronSchedule', 'genre', 'ledConfig',
+                    'ledTypeModel', 'mediaMetadata', 'music', 'musicScene',
+                    'scenePattern', 'scenes', 'serverIP', 'serverRole',
+                    'status', 'tblRollLog', 'tblTokenPositions', 'ttrpg',
+                    'user', 'videoMedia', 'videoScene', 'wledPattern'):
+            importlib.import_module(f'models.{mod}')   # models/video.py is dead code — not imported by the app
+        from flask import Flask
+        from extensions import db
+        app = Flask(__name__)
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + scratch
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()                     # model tables
+
+        tables = {r[0].lower() for r in q(scratch,
+                  "SELECT name FROM sqlite_master WHERE type='table'")}
+        tables.discard('sqlite_sequence')
+        classified = br.MERGE_COVERED_TABLES | br.MERGE_EXCLUDED_TABLES
+        undecided = tables - classified
+        assert not undecided, (
+            f'tables with no declared merge fate: {sorted(undecided)} — add each '
+            'to MERGE_COVERED_TABLES (and implement its merge) or to '
+            'MERGE_EXCLUDED_TABLES in backup_restore.py')
+        assert not (br.MERGE_COVERED_TABLES & br.MERGE_EXCLUDED_TABLES)
+        stale = classified - tables - {'alembic_version', 'sqlite_sequence'}
+        assert not stale, f'classified tables missing from the schema: {sorted(stale)}'
+
+
+class TestMergeGapFixes:
+    """The five coverage gaps closed in the audit: genre attributes, homebrew
+    class levels, server-role remap, OBS panel notes, cron schedules."""
+
+    def _archive(self, env, fill):
+        src = str(env['tmp'] / 'gapsrc.db')
+        make_db(src)
+        fill(src)
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='gaps')
+        finally:
+            sql.database = old
+
+    def test_genre_directory_and_order_carry(self, env):
+        snap = self._archive(env, lambda src: (
+            x(src, "INSERT INTO lutGenre(genre, directory, active, orderBy) "
+                   "VALUES ('Synthwave', '/mnt/media/synth', 1, 5)"),
+            x(src, "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName, genre) "
+                   "VALUES ('/x/', 's.mp3', 'https://u', 3, 'vidsynth0001', 'S', 1)")))
+        br.restore_merge(snap, include_uploads=False)
+        assert q(env['live'], "SELECT directory, active, orderBy FROM lutGenre "
+                              "WHERE genre='Synthwave'") == [('/mnt/media/synth', 1, 5)]
+
+    def test_class_levels_merge_with_level_identity(self, env):
+        x(env['live'], "INSERT INTO tblClassLevelsLibrary(class_name, level, prof_bonus, source) "
+                       "VALUES ('Bloodhunter', 1, 2, 'homebrew')")   # already here -> dedup
+        snap = self._archive(env, lambda src: (
+            x(src, "INSERT INTO tblClassLevelsLibrary(class_name, level, prof_bonus, source) "
+                   "VALUES ('Bloodhunter', 1, 2, 'homebrew')"),
+            x(src, "INSERT INTO tblClassLevelsLibrary(class_name, level, prof_bonus, source) "
+                   "VALUES ('Bloodhunter', 2, 2, 'homebrew')"),
+            x(src, "INSERT INTO tblClassLevelsLibrary(class_name, level, prof_bonus, source) "
+                   "VALUES ('Wizard', 1, 2, 'srd')")))
+        s = br.restore_merge(snap, include_uploads=False)
+        assert s['homebrew'] == 2                # Bloodhunter L2 + SRD Wizard L1; L1 deduped
+        got = q(env['live'], "SELECT class_name, level FROM tblClassLevelsLibrary "
+                             "ORDER BY class_name, level")
+        assert got == [('Bloodhunter', 1), ('Bloodhunter', 2), ('Wizard', 1)]
+
+    def test_server_role_remapped_and_copied(self, env):
+        # local roles sit at DIFFERENT ids than the source's
+        x(env['live'], "INSERT INTO tblServerRole(ID, name, active, orderBy) VALUES (11, 'WLED', 1, 40)")
+        snap = self._archive(env, lambda src: (
+            x(src, "INSERT INTO tblServerRole(ID, name, active, orderBy) VALUES (1, 'WLED', 1, 40)"),
+            x(src, "INSERT INTO tblServerRole(ID, name, active, orderBy) VALUES (2, 'Fog', 1, 60)"),
+            x(src, "INSERT INTO tblServersIP(serverName, ipAddress, serverroleid) "
+                   "VALUES ('wled9', '10.0.0.9', 1)"),
+            x(src, "INSERT INTO tblServersIP(serverName, ipAddress, serverroleid) "
+                   "VALUES ('fogger', '10.0.0.10', 2)"),
+            x(src, "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('Bridge', 1, 0)"),
+            x(src, "INSERT INTO tblWledPattern(scene_ID, server_ID, effect, pallette, color1, orderBy) "
+                   "VALUES (1, 1, 1, 1, '[9,9,9]', 0)"),
+            x(src, "INSERT INTO tblWledPattern(scene_ID, server_ID, effect, pallette, color1, orderBy) "
+                   "VALUES (1, 2, 1, 1, '[1,1,1]', 1)")))
+        br.restore_merge(snap, include_uploads=False, full=True)
+        # wled9 points at the LOCAL 'WLED' role id; 'Fog' was copied over
+        assert q(env['live'], "SELECT serverroleid FROM tblServersIP WHERE serverName='wled9'") == [(11,)]
+        fog = q(env['live'], "SELECT ID FROM tblServerRole WHERE name='Fog'")
+        assert fog and q(env['live'],
+            "SELECT serverroleid FROM tblServersIP WHERE serverName='fogger'") == [(fog[0][0],)]
+
+    def _panel_notes_src(self, src):
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        x(src, "INSERT INTO tblSessions(title, session_number, status, created_at) "
+               "VALUES ('Ep1', 1, 'planning', 't')")
+        x(src, "INSERT INTO tblObsPanelNotes(session_id, title, body, created_at, updated_at) "
+               "VALUES (1, 'Break', 'Back in 10', 't', 't')")
+        x(src, "INSERT INTO tblObsPanelNotes(session_id, title, body, created_at, updated_at) "
+               "VALUES (NULL, 'Welcome', 'Roll for initiative', 't', 't')")
+
+    def test_obs_panel_notes_merge_including_shared_library(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        snap = self._archive(env, self._panel_notes_src)
+        br.restore_merge(snap, include_uploads=False, full=True)
+        sid = q(env['live'], "SELECT session_id FROM tblSessions WHERE title='Ep1'")[0][0]
+        assert q(env['live'], "SELECT title FROM tblObsPanelNotes WHERE session_id=?", (sid,)) == [('Break',)]
+        assert q(env['live'], "SELECT title FROM tblObsPanelNotes WHERE session_id IS NULL") == [('Welcome',)]
+        # idempotent — a re-run adds nothing
+        br.restore_merge(snap, include_uploads=False, full=True)
+        assert q(env['live'], "SELECT COUNT(*) FROM tblObsPanelNotes") == [(2,)]
+
+    def test_cron_schedules_import_inactive_dedup_by_name(self, env):
+        x(env['live'], "INSERT INTO tblCronSchedule(name, minute, hour, command, active) "
+                       "VALUES ('Reboot', '0', '4', '/sbin/reboot-here', 1)")
+        snap = self._archive(env, lambda src: (
+            x(src, "INSERT INTO tblCronSchedule(name, minute, hour, command, active) "
+                   "VALUES ('Reboot', '0', '5', '/sbin/reboot-there', 1)"),
+            x(src, "INSERT INTO tblCronSchedule(name, minute, hour, command, active) "
+                   "VALUES ('MainStreet', '30', '19', 'curl http://old-box/activatescenes/?id=2', 1)")))
+        s = br.restore_merge(snap, include_uploads=False, full=True)
+        assert s['cron_schedules'] == 1
+        # local Reboot untouched; import arrives INACTIVE so it can't fire
+        assert q(env['live'], "SELECT command, active FROM tblCronSchedule WHERE name='Reboot'") \
+            == [('/sbin/reboot-here', 1)]
+        assert q(env['live'], "SELECT active FROM tblCronSchedule WHERE name='MainStreet'") == [(0,)]
+        # plain (non-full) merge leaves cron alone
+        x(env['live'], "DELETE FROM tblCronSchedule WHERE name='MainStreet'")
+        br.restore_merge(snap, include_uploads=False)
+        assert q(env['live'], "SELECT COUNT(*) FROM tblCronSchedule WHERE name='MainStreet'") == [(0,)]

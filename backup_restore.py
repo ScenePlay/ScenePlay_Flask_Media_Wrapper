@@ -17,11 +17,12 @@ Two restore modes:
   * restore_merge    — dedup-aware import of campaigns / scenes / media links
     from the archive into the live database (sharing between servers).
     Media dedups by videoId, scenes/campaigns/genres match by name.
-    HOMEBREW reference-library rows (custom feats, weapons, spells,
-    subclasses + their features, monsters, ...) also merge, deduped by name —
-    SRD rows never do (each box re-syncs those from the D&D API). LED
-    patterns, characters/sessions/maps and server rows are hardware/box-
-    specific and are NOT merged — use replace mode to move a whole box.
+    Reference-library rows (feats, weapons, spells, subclasses + their
+    features, monsters, class levels, ...) merge too — SRD and homebrew
+    alike, deduped by api_index then name, so a fresh box is playable
+    without a D&D API sync. LED patterns, characters/sessions/maps and
+    server rows move with full=True (see _merge_full); use replace mode
+    to move a whole box byte-for-byte.
 
 All DB work is plain sqlite3 against sql.database (same idiom as the queue
 helpers), so tests can point it at a scratch file.
@@ -41,6 +42,51 @@ from version import __version__
 
 BACKUP_FORMAT = 1
 _START_DIR = os.path.dirname(os.path.realpath(__file__))
+
+# ── Merge coverage policy ────────────────────────────────────────────────────
+# Every table in the schema must appear in exactly one of these two sets —
+# tests/test_backup_restore.py::TestMergeCoverage enforces it, so adding a
+# table to the app without deciding its merge fate fails the suite.
+# (Replace mode needs no such list: it swaps the whole database file.)
+MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
+    # standard merge
+    'lutGenre', 'tblMusic', 'tblVideoMedia', 'tblMediaMetadata',
+    'tblCampaigns', 'tblScenes', 'tblMusicScene', 'tblVideoScene',
+    'tblFeatsLibrary', 'tblWeaponsLibrary', 'tblArmorLibrary',
+    'tblSpellsLibrary', 'tblSkillsLibrary', 'tblRacesLibrary',
+    'tblEquipmentLibrary', 'tblClassesLibrary', 'tblSubclassesLibrary',
+    'tblFeaturesLibrary', 'tblMagicItemsLibrary', 'tblConditionsLibrary',
+    'tblTraitsLibrary', 'tblWeaponPropertiesLibrary', 'tblRulesLibrary',
+    'tblMonsterTemplates', 'tblClassLevelsLibrary',
+    # full merge (restore_merge(..., full=True))
+    'tblCharacters', 'tblCharacterWeapons', 'tblCharacterArmor',
+    'tblCharacterSpells', 'tblCharacterFeats', 'tblCharacterInventory',
+    'tblCharacterSkills', 'tblCharacterResources', 'tblCharacterConditions',
+    'tblCharacterNotes', 'tblSessions', 'tblSessionParty',
+    'tblSessionMonsters', 'tblBattleMaps', 'tblBattleMapTokens',
+    'tblBattleMapEffects', 'tblBattleMapFloorplans', 'tblBattleMapDoors',
+    'tblSessionNotes', 'tblBattleMapNotes', 'tblBattleMapPrompts',
+    'tblObsPanelNotes', 'tblObsSceneMap', 'tblDiceRolls', 'tblCronSchedule',
+    'tblScenePattern', 'tblLedTypeModel', 'tblWledPattern', 'tblServersIP',
+    'tblServerRole',
+))
+MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
+    'tblUsers',          # accounts/password hashes never merge; replace mode moves them
+    'tblAppSettings',    # box config + runtime flags/PIDs/secrets
+    'tblDnDAPIConfig',   # box-local API integration config
+    'tblPlaylistQueue',  # live download work queue
+    'tblRollLog',        # relay mirror log (tblDiceRolls carries the history)
+    'tblTokenPositions', # live relay token-position mirror
+    'tblLedConfig',      # THIS box's GPIO pin / strip hardware config
+    'tblEffect',         # WLED effect catalog — synced from the physical board
+    'tblPallette',       # WLED palette catalog — synced from the physical board
+    'lutStatus',         # static status lexicon, seeded by create_table
+    'tblGlobalVar',      # dormant/unused
+    'tblHours',          # dormant/unused
+    'tblLED',            # dormant/unused
+    'alembic_version',   # schema bookkeeping
+    'sqlite_sequence',   # sqlite bookkeeping
+))
 BACKUP_DIR = os.path.join(_START_DIR, 'backups')
 UPLOADS_DIR = os.path.join(_START_DIR, 'static', 'uploads')
 
@@ -413,10 +459,16 @@ def restore_replace(zip_path, include_uploads=True):
 #   notes        (parent, title, body) dedup; sort_order appended past ceiling
 #   lighting     copied only into scenes with NO local lighting of that type;
 #                LED models matched by modelName (copied if missing), WLED
-#                servers by serverName (copied if missing), effect/palette
-#                catalog ids re-matched by name (kept verbatim on any miss)
-#   excluded     dice rolls / roll log / token-position mirror / play counters
-#                (logs, not world state) and user accounts / app settings
+#                servers by serverName (copied if missing, role ids re-matched
+#                by role name), effect/palette catalog ids re-matched by name
+#                (kept verbatim on any miss)
+#   panel notes  OBS stream info-panel messages; NULL session = shared library
+#   cron         schedules dedup by name, imported INACTIVE (source-box shell)
+#   dice rolls   appended, deduped on exact identity
+#   excluded     roll-log / token-position relay mirrors, play counters,
+#                user accounts, app settings, live queues, box hardware config
+#                — the authoritative lists are MERGE_COVERED_TABLES /
+#                MERGE_EXCLUDED_TABLES above, enforced by TestMergeCoverage
 
 
 def _src_has(c, table):
@@ -447,7 +499,7 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
     s = {'characters': 0, 'characters_skipped': 0, 'characters_no_owner': 0,
          'sessions': 0, 'maps': 0, 'session_monsters': 0, 'party_links': 0,
          'tokens': 0, 'map_effects': 0, 'floorplans': 0, 'notes': 0, 'lighting': 0,
-         'map_prompts': 0, 'obs_bindings': 0, 'dice_rolls': 0}
+         'map_prompts': 0, 'obs_bindings': 0, 'dice_rolls': 0, 'cron_schedules': 0}
 
     # -- users: match only, never copy ---------------------------------------
     # Resolve the fallback owner FIRST — it seeds user_map for unmatched
@@ -721,6 +773,47 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
             _copy_row(c, 'tblBattleMapPrompts', data)
             s['map_prompts'] += 1
 
+    # -- OBS panel notes: stream info-panel messages. session_id NULL is a
+    #    shared library entry and keeps NULL; session-scoped rows follow their
+    #    session. Dedup by (session, title, body) like the other note tables. --
+    if _src_has(c, 'tblObsPanelNotes'):
+        pncols = _common_cols(c, 'tblObsPanelNotes', exclude=('note_id',))
+        for row in c.execute(f"SELECT {', '.join(pncols)} FROM src.tblObsPanelNotes").fetchall():
+            data = dict(zip(pncols, row))
+            src_sid = data.get('session_id')
+            if src_sid is None:
+                sid = None
+            else:
+                sid = session_map.get(src_sid)
+                if not sid:
+                    continue                      # session didn't survive the merge
+            if c.execute("SELECT 1 FROM tblObsPanelNotes WHERE session_id IS ? "
+                         "AND title=? AND body=?",
+                         (sid, data.get('title') or '', data.get('body') or '')).fetchone():
+                continue
+            data['session_id'] = sid
+            _copy_row(c, 'tblObsPanelNotes', data)
+            s['notes'] += 1
+
+    # -- cron schedules: dedup by name; imported rows arrive INACTIVE ---------
+    # Commands are raw shell written for the SOURCE box (its hostname, its
+    # scene ids, even sudo reboot) — they carry over for reference but must
+    # never start firing here until a human reviews and activates them
+    # (_apply_crontab only installs active rows).
+    if _src_has(c, 'tblCronSchedule'):
+        crcols = _common_cols(c, 'tblCronSchedule', exclude=('schedule_id',))
+        for row in c.execute(f"SELECT {', '.join(crcols)} FROM src.tblCronSchedule").fetchall():
+            data = dict(zip(crcols, row))
+            nm = (data.get('name') or '').strip()
+            if not nm:
+                continue
+            if c.execute("SELECT 1 FROM tblCronSchedule WHERE lower(name)=lower(?)",
+                         (nm,)).fetchone():
+                continue                          # same-named schedule exists here
+            data['active'] = 0
+            _copy_row(c, 'tblCronSchedule', data)
+            s['cron_schedules'] += 1
+
     # -- OBS scene bindings: local wins on (entity_type, entity_id, entity_key) ----
     # Rig-local DM config, but worth carrying: sort_order IS the turn rotation.
     # Player rows follow their character through char_map; the DM tile
@@ -812,6 +905,20 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
         pallette_map = _catalog_map('tblPallette', 'pallette_ID', 'palletteName')
         server_map = {}
         if _src_has(c, 'tblServersIP'):
+            # Roles are a user-editable lookup — remap by name so a copied
+            # server row points at THIS box's role ids (copy missing roles).
+            role_map = {}
+            if _src_has(c, 'tblServerRole'):
+                for rid, rname in c.execute("SELECT ID, name FROM src.tblServerRole").fetchall():
+                    hit = c.execute("SELECT ID FROM tblServerRole WHERE lower(name)=lower(?)",
+                                    (rname or '',)).fetchone()
+                    if hit:
+                        role_map[rid] = hit[0]
+                    else:
+                        rcols = _common_cols(c, 'tblServerRole', exclude=('ID',))
+                        rrow = c.execute(f"SELECT {', '.join(rcols)} FROM src.tblServerRole "
+                                         "WHERE ID=?", (rid,)).fetchone()
+                        role_map[rid] = _copy_row(c, 'tblServerRole', dict(zip(rcols, rrow)))
             for sid_, sname in c.execute(
                     "SELECT ServerIP_ID, serverName FROM src.tblServersIP").fetchall():
                 hit = c.execute("SELECT ServerIP_ID FROM tblServersIP "
@@ -822,7 +929,11 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
                     vcols = _common_cols(c, 'tblServersIP', exclude=('ServerIP_ID',))
                     row = c.execute(f"SELECT {', '.join(vcols)} FROM src.tblServersIP "
                                     "WHERE ServerIP_ID=?", (sid_,)).fetchone()
-                    server_map[sid_] = _copy_row(c, 'tblServersIP', dict(zip(vcols, row)))
+                    data = dict(zip(vcols, row))
+                    if data.get('serverroleid') is not None:
+                        data['serverroleid'] = role_map.get(data['serverroleid'],
+                                                            data['serverroleid'])
+                    server_map[sid_] = _copy_row(c, 'tblServersIP', data)
         wcols = _common_cols(c, 'tblWledPattern', exclude=('wledPattern_ID',))
         for row in c.execute(f"SELECT {', '.join(wcols)} FROM src.tblWledPattern").fetchall():
             data = dict(zip(wcols, row))
@@ -848,12 +959,15 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
 # Merge mode
 # ---------------------------------------------------------------------------
 
-# Reference libraries whose HOMEBREW rows travel in a merge: (table, pk).
-# Dedup is by lower(name) — tblFeaturesLibrary by (name, class, subclass,
-# level) since the same feature name can exist across archetypes. SRD rows
-# never merge: each box re-syncs those from the D&D API. Columns are copied
-# by NAME INTERSECTION between the two schemas, so archives from older or
-# newer versions merge cleanly.
+# Reference libraries that travel in a merge: (table, pk). ALL rows move —
+# SRD and homebrew alike — so a fresh box is fully playable straight after a
+# merge with no D&D API sync needed. Dedup order per row: exact api_index
+# match first (the same identity the SRD sync uses, so a later sync can never
+# duplicate a merged row), then the name identity — lower(name), except
+# tblFeaturesLibrary by (name, class, subclass, level) and
+# tblClassLevelsLibrary by (class_name, level). Local rows always win.
+# Columns are copied by NAME INTERSECTION between the two schemas, so
+# archives from older or newer versions merge cleanly.
 HOMEBREW_LIBS = [
     ('tblFeatsLibrary',            'feat_lib_id'),
     ('tblWeaponsLibrary',          'weapon_lib_id'),
@@ -871,13 +985,16 @@ HOMEBREW_LIBS = [
     ('tblWeaponPropertiesLibrary', 'weapon_prop_id'),
     ('tblRulesLibrary',            'rule_lib_id'),
     ('tblMonsterTemplates',        'template_id'),
+    # No 'name' column — identity is (class_name, level); special-cased below.
+    ('tblClassLevelsLibrary',      'class_level_id'),
 ]
 
 
-def _merge_homebrew_libraries(c):
-    """Copy source='homebrew' library rows from the attached src db, deduped
-    by name. Tables absent on either side (older archive / older server) are
-    skipped. Returns the number of rows copied."""
+def _merge_libraries(c):
+    """Copy reference-library rows (SRD + homebrew) from the attached src db,
+    deduped by api_index then name identity — local wins. Tables absent on
+    either side (older archive / older server) are skipped. Returns the
+    number of rows copied."""
     copied = 0
     for tbl, pk in HOMEBREW_LIBS:
         if not c.execute("SELECT 1 FROM src.sqlite_master WHERE type='table' AND lower(name)=lower(?)",
@@ -888,24 +1005,37 @@ def _merge_homebrew_libraries(c):
             continue
         src_cols  = [r[1] for r in c.execute(f"PRAGMA src.table_info({tbl})")]
         live_cols = [r[1] for r in c.execute(f"PRAGMA table_info({tbl})")]
-        if 'source' not in src_cols or 'name' not in src_cols:
+        name_col = 'class_name' if tbl == 'tblClassLevelsLibrary' else 'name'
+        if name_col not in src_cols:
             continue
         cols = [col for col in src_cols if col in live_cols and col != pk]
         col_list = ', '.join(cols)
-        rows = c.execute(f"SELECT {col_list} FROM src.{tbl} WHERE source = 'homebrew'").fetchall()
+        rows = c.execute(f"SELECT {col_list} FROM src.{tbl}").fetchall()
         for row in rows:
             data = dict(zip(cols, row))
-            name = (data.get('name') or '').strip()
+            name = (data.get(name_col) or '').strip()
             if not name:
                 continue
-            if tbl == 'tblFeaturesLibrary':
+            # exact sync identity first — a merged SRD row must look to a
+            # later D&D API sync exactly like one it wrote itself
+            api_idx = (data.get('api_index') or '').strip() if 'api_index' in data else ''
+            exists = None
+            if api_idx and 'api_index' in live_cols:
+                exists = c.execute(f"SELECT 1 FROM {tbl} WHERE api_index = ?",
+                                   (api_idx,)).fetchone()
+            if not exists and tbl == 'tblClassLevelsLibrary':
+                exists = c.execute(
+                    "SELECT 1 FROM tblClassLevelsLibrary WHERE lower(class_name)=lower(?) "
+                    "AND coalesce(level,0)=coalesce(?,0)",
+                    (name, data.get('level'))).fetchone()
+            elif not exists and tbl == 'tblFeaturesLibrary':
                 exists = c.execute(
                     "SELECT 1 FROM tblFeaturesLibrary WHERE lower(name)=lower(?) "
                     "AND lower(coalesce(class_name,''))=lower(?) "
                     "AND lower(coalesce(subclass_name,''))=lower(?) AND coalesce(level,0)=?",
                     (name, data.get('class_name') or '', data.get('subclass_name') or '',
                      data.get('level') or 0)).fetchone()
-            else:
+            elif not exists:
                 exists = c.execute(f"SELECT 1 FROM {tbl} WHERE lower(name) = lower(?)",
                                    (name,)).fetchone()
             if exists:
@@ -945,14 +1075,16 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
     try:
         c.execute("ATTACH DATABASE ? AS src", (tmp_db,))
 
-        # genres by name
+        # genres by name — new genres keep their directory/active/orderBy so a
+        # per-genre media folder survives the move
         genre_map = {}
-        for gid, gname in c.execute("SELECT genre_id, genre FROM src.lutGenre").fetchall():
+        for gid, gname, gdir, gactive, gorder in c.execute(
+                "SELECT genre_id, genre, directory, active, orderBy FROM src.lutGenre").fetchall():
             row = c.execute("SELECT genre_id FROM lutGenre WHERE lower(genre) = lower(?)",
                             (gname or '',)).fetchone()
             if row is None and (gname or '').strip():
-                c.execute("INSERT INTO lutGenre(genre, directory, active, orderBy) VALUES (?, '', 1, 0)",
-                          (gname,))
+                c.execute("INSERT INTO lutGenre(genre, directory, active, orderBy) VALUES (?, ?, ?, ?)",
+                          (gname, gdir or '', 1 if gactive is None else gactive, gorder or 0))
                 genre_map[gid] = c.lastrowid
             else:
                 genre_map[gid] = row[0] if row else 0
@@ -1099,9 +1231,10 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
                        link_order('tblVideoScene', tgt_scene, order_by), volume, loops))
             s['links'] += 1
 
-        # homebrew reference libraries (custom feats/weapons/spells/subclasses/
-        # features/monsters...) — SRD rows stay behind, they re-sync per box
-        s['homebrew'] = _merge_homebrew_libraries(c)
+        # reference libraries (feats/weapons/spells/subclasses/features/
+        # monsters...) — SRD and homebrew rows alike, deduped by api_index
+        # then name, so the destination is playable without an API sync
+        s['homebrew'] = _merge_libraries(c)
 
         # full-tree merge: characters/sessions/maps/notes + scene lighting.
         # Runs AFTER the libraries so template/lib name lookups see merged rows.
