@@ -188,3 +188,6 @@ player_debug.log
 # bring-up crashed" and auto-disables that integration.
 .relay_boot_guard
 .obs_boot_guard
+
+# FUSE artifacts: deleted-but-still-open files on this mount
+.fuse_hidden*

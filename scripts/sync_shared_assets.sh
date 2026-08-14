@@ -16,6 +16,9 @@ ASSETS=(
   "static/scripts/Tone.js:portal/Tone.js"
   "static/scripts/battlemap3d.js:portal/battlemap3d.js"
   "static/scripts/three.min.js:portal/three.min.js"
+  # Theme tokens: the portal used to carry a hand-copied fork of these, which
+  # drifted the moment the local themes changed. Synced now like the JS.
+  "static/css/themes.css:portal/themes.css"
 )
 
 for pair in "${ASSETS[@]}"; do
