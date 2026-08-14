@@ -84,9 +84,9 @@
 
     <!-- Scene mapping: the point of the page -->
     <div class="ttrpg-card p-3 mb-3">
-      <div class="d-flex align-items-center justify-content-between mb-2">
+      <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
         <h6 style="color:var(--ttrpg-accent);" class="mb-0">Party Scene</h6>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
           <button class="btn btn-sm btn-ttrpg" onclick="obsBuildParty(this)"
                   title="Create or refresh the OBS scene holding every player">
             &#9635; Build / refresh party scene</button>
@@ -109,7 +109,7 @@
       {% if not has_party %}
       <p class="small text-muted mb-0">No active session &mdash; start a session and add a party first.</p>
       {% else %}
-      <div class="d-flex align-items-center gap-2 mb-2">
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
         <span class="small text-muted">Stream audio:</span>
         <button type="button" class="btn btn-sm btn-outline-danger"
                 onclick="obsMuteAll('everyone', true)"
@@ -129,7 +129,7 @@
       </div>
       <div id="obs-rows">
         {% for r in rows %}
-        <div class="d-flex align-items-center gap-2 mb-2 obs-row" data-character-id="{{ r.character_id }}"
+        <div class="d-flex align-items-center gap-2 mb-2 obs-row flex-wrap" data-character-id="{{ r.character_id }}"
              style="{% if not r.on_stream %}opacity:.55;{% endif %}">
           <label class="mb-0 d-flex align-items-center" style="cursor:pointer;"
                  title="On the group feed. Untick to bench this player — they keep their
@@ -559,7 +559,7 @@
                 idle screen{% endif %}
               </div>
             </div>
-            <div class="d-flex align-items-center gap-2 mt-2">
+            <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
               <div style="width:66px;height:38px;border-radius:5px;overflow:hidden;flex:0 0 auto;
                           border:1px solid var(--sp-border);background:var(--ttrpg-primary);
                           display:flex;align-items:center;justify-content:center;">
@@ -637,7 +637,7 @@
       <div class="row g-2 align-items-end mb-3">
         <div class="col-sm-7">
           <label class="form-label small">Render the map as</label>
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 flex-wrap">
             <button type="button" id="obs-mode-auto" class="btn btn-sm flex-grow-1"
                     onclick="obsSetMapMode('auto')">&#127916; Auto</button>
             <button type="button" id="obs-mode-2d" class="btn btn-sm flex-grow-1"
@@ -737,7 +737,7 @@
         {% for o in snap.scenes %}<option value="{{ o }}"></option>{% endfor %}
       </datalist>
       {% for s in scene_rows %}
-      <div class="d-flex align-items-center gap-2 mb-2 obs-scene-row" data-scene-id="{{ s.scene_id }}">
+      <div class="d-flex align-items-center gap-2 mb-2 obs-scene-row flex-wrap" data-scene-id="{{ s.scene_id }}">
         <span style="min-width:11rem;">{{ s.name }}</span>
         <input type="text" class="form-control form-control-sm obs-scene-link"
                style="max-width:18rem;" list="obs-scene-names"
@@ -1188,7 +1188,7 @@
         <div class="mb-3">
           <label class="form-label small mb-1" for="obs-dm-mic">
             Your microphone <span class="text-muted">(optional)</span></label>
-          <div class="d-flex gap-1">
+          <div class="d-flex gap-1 flex-wrap">
             <input type="text" name="obs_dm_mic_label" id="obs-dm-mic"
                    form="obs-cfg-form" class="form-control form-control-sm"
                    value="{{ cfg.dm_mic_label }}"
@@ -1435,7 +1435,7 @@
         </div>
       </div>
       {% set art = cfg.images | selectattr('slot', 'equalto', 'yt_thumb') | list | first %}
-      <div class="d-flex align-items-center gap-2 mb-2">
+      <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
         <div style="width:66px;height:38px;border-radius:5px;overflow:hidden;flex:0 0 auto;
                     border:1px solid var(--sp-border);background:var(--ttrpg-primary);
                     display:flex;align-items:center;justify-content:center;">

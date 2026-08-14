@@ -17,18 +17,18 @@
     <div class="row g-2 align-items-end">
       <div class="col-sm-4">
         <label class="form-label small text-muted mb-1">Map Name</label>
-        <input type="text" name="name" class="form-control form-control-sm bg-dark text-light border-secondary"
+        <input type="text" name="name" class="form-control form-control-sm"
                placeholder="e.g. Tavern Brawl" required>
       </div>
       <div class="col-sm-2">
         <label class="form-label small text-muted mb-1">Columns</label>
         <input type="number" name="cols" min="5" max="60" value="20"
-               class="form-control form-control-sm bg-dark text-light border-secondary">
+               class="form-control form-control-sm">
       </div>
       <div class="col-sm-2">
         <label class="form-label small text-muted mb-1">Rows</label>
         <input type="number" name="rows" min="5" max="60" value="20"
-               class="form-control form-control-sm bg-dark text-light border-secondary">
+               class="form-control form-control-sm">
       </div>
       <div class="col-sm-2">
         <button class="btn btn-ttrpg btn-sm w-100">Create</button>
@@ -52,7 +52,7 @@
                 {% if m.map_id not in floorplan_info %}style="display:none;"{% endif %}>3D
             v<span id="fp-badge-v-{{ m.map_id }}">{{ floorplan_info.get(m.map_id, {}).get('version', '') }}</span></span>
           {% if m.is_active %}
-          <span class="badge ms-2" style="background:var(--ttrpg-accent);color:#1a1a2e;">Active</span>
+          <span class="badge ms-2" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);">Active</span>
           {% endif %}
         </div>
         <div class="d-flex gap-1 flex-shrink-0 flex-wrap justify-content-end">
@@ -166,9 +166,9 @@
           {% endif %}
         </div>
         <form method="POST" action="{{ url_for('battlemap_bp.map_bg', map_id=m.map_id) }}"
-              enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+              enctype="multipart/form-data" class="d-flex gap-2 align-items-center flex-wrap">
           <input type="file" name="bg_image" accept="image/*,video/mp4,video/webm,video/ogg"
-                 class="form-control form-control-sm bg-dark text-light border-secondary"
+                 class="form-control form-control-sm"
                  style="font-size:.75rem;">
           <button class="btn btn-outline-secondary btn-sm flex-shrink-0">Upload BG</button>
           <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
@@ -209,7 +209,7 @@
           <div class="small mb-2">&#9635; <b>Will this map use 3D walls/elevations?</b>
             Design the wall layout first — the art prompt will then tell the AI to
             paint a map that matches it exactly.</div>
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 flex-wrap">
             <button class="btn btn-ttrpg btn-sm" onclick="switchToLayoutDesign()">Design 3D layout first &rarr;</button>
             <button class="btn btn-outline-secondary btn-sm"
                     onclick="document.getElementById('mpt-3d-banner').style.display='none'">No 3D &mdash; just art</button>
@@ -217,7 +217,7 @@
         </div>
 
         <!-- Battle / Travel toggle: encounter-scale grid vs large-distance travel map -->
-        <div class="d-flex gap-2 mb-2">
+        <div class="d-flex gap-2 mb-2 flex-wrap">
           <button id="mpt-battle-btn" onclick="setMapScaleKind('battle')"
                   class="btn btn-sm flex-grow-1"
                   style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
@@ -231,7 +231,7 @@
         </div>
 
         <!-- Static / Live toggle -->
-        <div class="d-flex gap-2 mb-3">
+        <div class="d-flex gap-2 mb-3 flex-wrap">
           <button id="mpt-static-btn" onclick="setMapPromptType('static')"
                   class="btn btn-sm flex-grow-1"
                   style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
@@ -371,7 +371,7 @@
         <div id="mpt-output-section" style="display:none;">
           <hr style="border-color:var(--sp-border);">
           <div id="mpt-schematic-row" style="display:none;">
-          <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <img id="mpt-schematic-img" alt="floorplan schematic"
                  style="width:120px;max-height:120px;object-fit:contain;border:1px solid var(--sp-border);
                         border-radius:4px;background:#fff;">
@@ -385,7 +385,7 @@
                     onclick="downloadFpSchematic()">&#11015; PNG</button>
           </div>
           </div>
-          <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <span class="small text-muted">Copy and paste into your AI image/video tool.</span>
             <button class="btn btn-sm ms-auto"
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
@@ -431,7 +431,7 @@
         </div>
 
         <!-- Design (walls-first) vs Trace (image-first) -->
-        <div class="d-flex gap-2 mb-3">
+        <div class="d-flex gap-2 mb-3 flex-wrap">
           <button id="fp-tab-design-btn" onclick="setFp3dTab('design')"
                   class="btn btn-sm flex-grow-1"
                   style="background:var(--ttrpg-accent);color:var(--sp-on-accent);border:none;">
