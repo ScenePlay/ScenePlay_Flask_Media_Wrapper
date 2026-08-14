@@ -1,0 +1,43 @@
+/* ── ScenePlay TTRPG-side styles ─────────────────────────────────────────────
+   Loaded only by templates/ttrpg/base_ttrpg.html, after sp-core.css.
+   Shared components live in sp-core.css — this file keeps only what is
+   genuinely TTRPG-specific.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Dice glyphs render small relative to text — double them wherever used */
+.dice-ico { font-size: 2em; line-height: 1; vertical-align: -0.18em; }
+
+.btn-ttrpg {
+    background-color: var(--sp-accent);
+    color: var(--sp-on-accent);
+    font-weight: 600;
+    border-radius: var(--sp-radius-sm);
+}
+.btn-ttrpg:hover {
+    background-color: var(--sp-hover-bg);
+    border-color: var(--sp-hover-bg);
+    color: var(--sp-hover-text);
+}
+
+.hp-bar { height: 18px; border-radius: 4px; }
+
+.condition-badge {
+    font-size: 0.75rem;
+    background-color: color-mix(in srgb, var(--sp-accent) 10%, var(--sp-surface));
+    color: var(--sp-heading);
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 40%, transparent);
+    border-radius: 12px;
+    padding: 2px 8px;
+    display: inline-block;
+    margin: 2px;
+}
+
+/* DM-only relay health banner (base_ttrpg.html) */
+.sp-banner-danger {
+    background: color-mix(in srgb, var(--sp-danger) 12%, var(--sp-surface));
+    border-bottom: 2px solid var(--sp-danger);
+    color: var(--sp-text);
+    padding: 8px 16px;
+    font-size: .9rem;
+}
+.sp-banner-danger a { color: var(--sp-heading); font-weight: 600; margin-left: 8px; }

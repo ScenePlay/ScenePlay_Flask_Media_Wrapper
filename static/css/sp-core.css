@@ -1,0 +1,558 @@
+/* ── ScenePlay Core — shared component layer ─────────────────────────────────
+   Loaded by BOTH base templates, after bootstrap.min.css and before the
+   side-specific sheet (style.css / sp-ttrpg.css). Consumes only --sp-* tokens
+   from themes.css, so every rule works in all 11 themes, light and dark.
+
+   Contents:
+     1. Typography & base elements
+     2. Bootstrap variable bridge (buttons, forms, dropdowns, modals, tabs)
+     3. Navbar (.sp-nav / .ttrpg-nav) + status pills + theme picker
+     4. Cards (.sp-card / .ttrpg-card) & themed tables (.ttrpg-table)
+     5. Grid.js theme (mermaid.min.css load-order — keep !important here)
+     6. Layout patterns (.sp-page-head / .sp-filter-row / .sp-table-scroll /
+        .sp-card-grid)
+     7. Responsive & accessibility globals
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* ── 1. Typography & base ────────────────────────────────────────────────── */
+
+::selection      { background-color: var(--sp-accent); color: var(--sp-on-accent); }
+::-moz-selection { background-color: var(--sp-accent); color: var(--sp-on-accent); }
+
+body {
+  background-color: var(--sp-bg);
+  color: var(--sp-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--sp-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin: 0 0 .5rem;
+}
+h1 { font-size: 1.45rem; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1.05rem; }
+h4, h5, h6 { font-size: 1rem; }
+
+/* Inline-styled accent headings across the TTRPG templates: in light themes
+   they become ink, in dark themes --sp-heading IS the accent so they keep
+   their glow. One rule replaces the old force-black hack. */
+[style*="color:var(--ttrpg-accent)"],
+[style*="color: var(--ttrpg-accent)"] {
+  color: var(--sp-heading) !important;
+}
+
+a       { color: var(--sp-link); text-decoration: none; }
+a:hover { color: var(--sp-accent); }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
+  font-size: .85em;
+  background-color: var(--sp-surface-2);
+  border: 1px solid var(--sp-border);
+  border-radius: 6px;
+  color: var(--sp-heading);
+  padding: .1em .4em;
+}
+
+.text-muted { color: var(--sp-muted) !important; }
+
+hr { border-color: var(--sp-border); opacity: 1; }
+
+/* ── 2. Bootstrap variable bridge ────────────────────────────────────────── */
+
+body {
+  --bs-body-bg: var(--sp-bg);
+  --bs-body-color: var(--sp-text);
+  --bs-border-color: var(--sp-border);
+  --bs-secondary-color: var(--sp-muted);
+  --bs-tertiary-color: var(--sp-muted);
+  --bs-secondary-bg: var(--sp-surface-2);
+  --bs-tertiary-bg: var(--sp-surface-2);
+  --bs-emphasis-color: var(--sp-heading);
+  --bs-heading-color: var(--sp-heading);
+}
+
+/* Buttons */
+.btn {
+  --bs-btn-border-radius: var(--sp-radius-sm);
+  font-weight: 500;
+}
+.btn:focus-visible { box-shadow: 0 0 0 3px var(--sp-accent-glow); }
+
+.btn-primary {
+  --bs-btn-bg: var(--sp-accent);
+  --bs-btn-border-color: var(--sp-accent);
+  --bs-btn-color: var(--sp-on-accent);
+  --bs-btn-hover-bg: var(--sp-hover-bg);
+  --bs-btn-hover-border-color: var(--sp-hover-bg);
+  --bs-btn-hover-color: var(--sp-hover-text);
+  --bs-btn-active-bg: var(--sp-hover-bg);
+  --bs-btn-active-border-color: var(--sp-hover-bg);
+  --bs-btn-active-color: var(--sp-hover-text);
+  --bs-btn-disabled-bg: var(--sp-accent);
+  --bs-btn-disabled-border-color: var(--sp-accent);
+  --bs-btn-disabled-color: var(--sp-on-accent);
+}
+.btn-secondary {
+  --bs-btn-bg: var(--sp-surface);
+  --bs-btn-border-color: var(--sp-border);
+  --bs-btn-color: var(--sp-text);
+  --bs-btn-hover-bg: var(--sp-surface-2);
+  --bs-btn-hover-border-color: var(--sp-border);
+  --bs-btn-hover-color: var(--sp-heading);
+  --bs-btn-active-bg: var(--sp-surface-2);
+  --bs-btn-active-border-color: var(--sp-border);
+  --bs-btn-active-color: var(--sp-heading);
+  --bs-btn-disabled-bg: var(--sp-surface);
+  --bs-btn-disabled-border-color: var(--sp-border);
+  --bs-btn-disabled-color: var(--sp-muted);
+}
+.btn-outline-secondary {
+  --bs-btn-color: var(--sp-text);
+  --bs-btn-border-color: var(--sp-border);
+  --bs-btn-hover-bg: var(--sp-surface-2);
+  --bs-btn-hover-border-color: var(--sp-border);
+  --bs-btn-hover-color: var(--sp-heading);
+  --bs-btn-active-bg: var(--sp-surface-2);
+  --bs-btn-active-border-color: var(--sp-border);
+  --bs-btn-active-color: var(--sp-heading);
+}
+.btn-danger {
+  --bs-btn-bg: var(--sp-danger);
+  --bs-btn-border-color: var(--sp-danger);
+  --bs-btn-color: #fff;
+  --bs-btn-hover-bg: color-mix(in srgb, var(--sp-danger) 85%, #000);
+  --bs-btn-hover-border-color: color-mix(in srgb, var(--sp-danger) 85%, #000);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: color-mix(in srgb, var(--sp-danger) 80%, #000);
+  --bs-btn-active-border-color: color-mix(in srgb, var(--sp-danger) 80%, #000);
+  --bs-btn-active-color: #fff;
+}
+.btn-success {
+  --bs-btn-bg: var(--sp-success);
+  --bs-btn-border-color: var(--sp-success);
+  --bs-btn-color: #fff;
+  --bs-btn-hover-bg: color-mix(in srgb, var(--sp-success) 85%, #000);
+  --bs-btn-hover-border-color: color-mix(in srgb, var(--sp-success) 85%, #000);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: color-mix(in srgb, var(--sp-success) 80%, #000);
+  --bs-btn-active-border-color: color-mix(in srgb, var(--sp-success) 80%, #000);
+  --bs-btn-active-color: #fff;
+}
+.btn-warning {
+  --bs-btn-bg: var(--sp-warning);
+  --bs-btn-border-color: var(--sp-warning);
+  --bs-btn-color: #fff;
+  --bs-btn-hover-bg: color-mix(in srgb, var(--sp-warning) 85%, #000);
+  --bs-btn-hover-border-color: color-mix(in srgb, var(--sp-warning) 85%, #000);
+  --bs-btn-hover-color: #fff;
+}
+.btn-outline-danger  { --bs-btn-color: var(--sp-danger);  --bs-btn-border-color: var(--sp-danger);
+  --bs-btn-hover-bg: var(--sp-danger);  --bs-btn-hover-border-color: var(--sp-danger);  --bs-btn-hover-color: #fff; }
+.btn-outline-success { --bs-btn-color: var(--sp-success); --bs-btn-border-color: var(--sp-success);
+  --bs-btn-hover-bg: var(--sp-success); --bs-btn-hover-border-color: var(--sp-success); --bs-btn-hover-color: #fff; }
+.btn-outline-warning { --bs-btn-color: var(--sp-warning); --bs-btn-border-color: var(--sp-warning);
+  --bs-btn-hover-bg: var(--sp-warning); --bs-btn-hover-border-color: var(--sp-warning); --bs-btn-hover-color: #fff; }
+.btn-outline-primary { --bs-btn-color: var(--sp-accent);  --bs-btn-border-color: var(--sp-accent);
+  --bs-btn-hover-bg: var(--sp-accent);  --bs-btn-hover-border-color: var(--sp-accent);  --bs-btn-hover-color: var(--sp-on-accent); }
+.btn-outline-info    { --bs-btn-color: var(--sp-link);    --bs-btn-border-color: var(--sp-link);
+  --bs-btn-hover-bg: var(--sp-link);    --bs-btn-hover-border-color: var(--sp-link);    --bs-btn-hover-color: var(--sp-bg); }
+
+/* Forms */
+.form-control, .form-select {
+  background-color: var(--sp-input-bg);
+  color: var(--sp-text);
+  border-color: var(--sp-border);
+  border-radius: var(--sp-radius-sm);
+}
+.form-control:focus, .form-select:focus {
+  background-color: var(--sp-input-bg);
+  color: var(--sp-text);
+  border-color: var(--sp-accent);
+  box-shadow: 0 0 0 3px var(--sp-accent-glow);
+}
+.form-control::placeholder { color: var(--sp-muted); }
+/* Mid-gray chevron reads on both light and dark input backgrounds */
+.form-select {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23848b97' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+}
+.form-select option { background-color: var(--sp-surface); color: var(--sp-text); }
+
+.form-check-input {
+  background-color: var(--sp-input-bg);
+  border-color: var(--sp-border);
+}
+.form-check-input:checked {
+  background-color: var(--sp-accent);
+  border-color: var(--sp-accent);
+}
+.form-check-input:focus { box-shadow: 0 0 0 3px var(--sp-accent-glow); }
+.form-check-label { color: var(--sp-text); }
+
+.input-group-text {
+  background-color: var(--sp-surface-2);
+  color: var(--sp-muted);
+  border-color: var(--sp-border);
+}
+
+/* Dropdowns */
+.dropdown-menu {
+  --bs-dropdown-bg: var(--sp-surface);
+  --bs-dropdown-color: var(--sp-text);
+  --bs-dropdown-link-color: var(--sp-text);
+  --bs-dropdown-link-hover-bg: var(--sp-surface-2);
+  --bs-dropdown-link-hover-color: var(--sp-heading);
+  --bs-dropdown-link-active-bg: var(--sp-accent);
+  --bs-dropdown-link-active-color: var(--sp-on-accent);
+  --bs-dropdown-border-color: var(--sp-border);
+  --bs-dropdown-divider-bg: var(--sp-border);
+  --bs-dropdown-border-radius: var(--sp-radius);
+  box-shadow: var(--sp-shadow-2);
+}
+
+/* Modals & offcanvas */
+.modal-content {
+  background-color: var(--sp-surface);
+  color: var(--sp-text);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  box-shadow: var(--sp-shadow-2);
+}
+.modal-header, .modal-footer { border-color: var(--sp-border); }
+
+/* Tabs */
+.nav-tabs { border-bottom-color: var(--sp-border); }
+.nav-tabs .nav-link {
+  color: var(--sp-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-weight: 500;
+}
+.nav-tabs .nav-link:hover {
+  color: var(--sp-heading);
+  border-bottom-color: var(--sp-border);
+}
+.nav-tabs .nav-link.active {
+  color: var(--sp-heading);
+  background: transparent;
+  border-bottom: 2px solid var(--sp-accent);
+}
+
+/* Alerts, progress, misc */
+.alert-warning {
+  background-color: var(--sp-accent-glow);
+  border-color: var(--sp-accent);
+  color: var(--sp-text);
+  border-radius: var(--sp-radius);
+}
+.btn-close { filter: invert(var(--sp-invert)); }
+.progress { background-color: var(--sp-surface-2); }
+
+table { border-color: var(--sp-border); }
+th, td { border-color: var(--sp-border); }
+
+details > summary { color: var(--sp-text); cursor: pointer; }
+details > summary::-webkit-details-marker { color: var(--sp-accent); }
+
+/* ── 3. Navbar, status pills, theme picker ───────────────────────────────── */
+
+.navbar.sp-nav,
+.navbar.ttrpg-nav {
+  background-color: var(--sp-surface);
+  border-bottom: 1px solid var(--sp-border);
+  padding-top: .45rem;
+  padding-bottom: .45rem;
+}
+.sp-nav .navbar-brand,
+.ttrpg-nav .navbar-brand {
+  color: var(--sp-heading) !important;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.sp-nav .nav-link,
+.ttrpg-nav .nav-link {
+  color: var(--sp-text) !important;
+  border-radius: var(--sp-radius-sm);
+}
+.sp-nav .nav-link:hover,
+.sp-nav .nav-link:focus,
+.ttrpg-nav .nav-link:hover,
+.ttrpg-nav .nav-link:focus {
+  color: var(--sp-accent) !important;
+  background: var(--sp-surface-2);
+}
+.sp-nav .navbar-toggler,
+.ttrpg-nav .navbar-toggler {
+  border-color: var(--sp-border);
+}
+.sp-nav .navbar-toggler-icon,
+.ttrpg-nav .navbar-toggler-icon {
+  filter: invert(var(--sp-invert));
+}
+
+/* Relay / LED / WLED health indicators (base.html) — color arrives via the
+   inline custom property --pill so Jinja keeps choosing it. */
+.sp-status-pill {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  flex-shrink: 0;
+  font-size: .8rem;
+  color: var(--pill);
+}
+.sp-status-pill .sp-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--pill);
+  box-shadow: 0 0 5px var(--pill);
+}
+
+/* Theme picker (both navbars) */
+.sp-theme-wrap { position: relative; flex-shrink: 0; }
+#sp-theme-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.15rem;
+  color: var(--sp-accent);
+  padding: .35rem .5rem;
+}
+#sp-theme-panel {
+  display: none;               /* toggled inline by theme.js spTogglePicker() */
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 9999;
+  padding: 14px;
+  width: 250px;
+  background: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  box-shadow: var(--sp-shadow-2);
+}
+#sp-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+#sp-theme-panel .sp-panel-title {
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--sp-muted);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+/* ── 4. Cards & themed tables ────────────────────────────────────────────── */
+
+.sp-card,
+.ttrpg-card {
+  background-color: var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: var(--sp-radius);
+  box-shadow: var(--sp-shadow-1);
+}
+
+.ttrpg-table {
+  background: var(--sp-surface);
+  color: var(--sp-text);
+}
+.ttrpg-table thead th {
+  background: var(--sp-surface-2) !important;
+  color: var(--sp-heading) !important;
+  border-color: var(--sp-border) !important;
+  font-weight: 600;
+  font-size: .85rem;
+}
+.ttrpg-table td,
+.ttrpg-table th {
+  border-color: var(--sp-border) !important;
+  color: var(--sp-text) !important;
+  background-color: transparent;
+}
+.ttrpg-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--sp-accent) 8%, transparent) !important;
+}
+
+/* ── 5. Grid.js theme ────────────────────────────────────────────────────
+   mermaid.min.css (Grid.js's stock theme slot) loads before this file and
+   hardcodes light grays — keep !important so load order can't regress.     */
+
+.gridjs-container {
+  color: var(--sp-text) !important;
+  background-color: transparent !important;
+}
+.gridjs-wrapper {
+  border: 1px solid var(--sp-border) !important;
+  box-shadow: var(--sp-shadow-1) !important;
+  border-radius: var(--sp-radius) var(--sp-radius) 0 0 !important;
+  background-color: var(--sp-surface) !important;
+}
+.gridjs-wrapper:nth-last-of-type(2) {
+  border-radius: var(--sp-radius) !important;
+}
+
+th.gridjs-th {
+  background-color: var(--sp-surface-2) !important;
+  color: var(--sp-heading) !important;
+  border-color: var(--sp-border) !important;
+  font-weight: 600 !important;
+  font-size: .85rem !important;
+  letter-spacing: .02em !important;
+}
+th.gridjs-th-sort:hover,
+th.gridjs-th-sort:focus {
+  background-color: color-mix(in srgb, var(--sp-accent) 12%, var(--sp-surface-2)) !important;
+  color: var(--sp-heading) !important;
+}
+
+.gridjs-tbody,
+td.gridjs-td {
+  background-color: var(--sp-surface) !important;
+  color: var(--sp-text) !important;
+  border-color: var(--sp-border) !important;
+}
+.gridjs-tr:nth-child(even) td.gridjs-td {
+  background-color: var(--sp-surface-2) !important;
+}
+.gridjs-tr:hover td.gridjs-td {
+  background-color: color-mix(in srgb, var(--sp-accent) 8%, var(--sp-surface)) !important;
+  color: var(--sp-text) !important;
+}
+.gridjs-tr-selected td {
+  background-color: color-mix(in srgb, var(--sp-accent) 18%, var(--sp-surface)) !important;
+}
+
+.gridjs-footer {
+  background-color: var(--sp-surface) !important;
+  border-color: var(--sp-border) !important;
+  color: var(--sp-text) !important;
+  box-shadow: none !important;
+}
+.gridjs-pagination { color: var(--sp-text) !important; }
+.gridjs-pagination .gridjs-summary { color: var(--sp-muted) !important; }
+.gridjs-pagination .gridjs-pages button {
+  background-color: var(--sp-surface) !important;
+  border-color: var(--sp-border) !important;
+  color: var(--sp-text) !important;
+}
+.gridjs-pagination .gridjs-pages button:hover {
+  background-color: var(--sp-surface-2) !important;
+  border-color: var(--sp-border) !important;
+  color: var(--sp-heading) !important;
+}
+.gridjs-pagination .gridjs-pages button.gridjs-currentPage {
+  background-color: var(--sp-accent) !important;
+  color: var(--sp-on-accent) !important;
+  font-weight: 600 !important;
+}
+.gridjs-pagination .gridjs-pages button:disabled,
+.gridjs-pagination .gridjs-pages button:hover:disabled {
+  background-color: var(--sp-surface) !important;
+  color: var(--sp-muted) !important;
+  border-color: var(--sp-border) !important;
+}
+
+input.gridjs-input {
+  background-color: var(--sp-input-bg) !important;
+  color: var(--sp-text) !important;
+  border-color: var(--sp-border) !important;
+  border-radius: var(--sp-radius-sm) !important;
+}
+input.gridjs-input:focus {
+  border-color: var(--sp-accent) !important;
+  box-shadow: 0 0 0 3px var(--sp-accent-glow) !important;
+}
+input.gridjs-input::placeholder { color: var(--sp-muted) !important; }
+
+.gridjs-loading-bar { background-color: var(--sp-surface) !important; }
+td.gridjs-message { color: var(--sp-muted) !important; }
+
+button.gridjs-sort-neutral,
+button.gridjs-sort-asc,
+button.gridjs-sort-desc {
+  filter: invert(var(--sp-invert)) opacity(.55) !important;
+}
+
+/* ── 6. Layout patterns ──────────────────────────────────────────────────── */
+
+/* Page title + actions; wraps cleanly on phones */
+.sp-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin: 1rem 0;
+}
+.sp-page-head h1,
+.sp-page-head h2 { margin: 0; }
+
+/* Row of label+select filter pairs */
+.sp-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.sp-filter-row label {
+  color: var(--sp-muted);
+  font-size: .85rem;
+  font-weight: 500;
+  margin: 0;
+}
+.sp-filter-row select {
+  min-width: 200px;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+/* Horizontal-scroll shell for wide tables */
+.sp-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+/* Card grid: scenes, dashboards, map overviews */
+.sp-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+/* ── 7. Responsive & accessibility globals ───────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--sp-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  /* Fingers, not cursors */
+  .btn { min-height: 42px; }
+  /* 16px stops iOS from zooming the page on focus */
+  .form-control, .form-select, input.gridjs-input { font-size: 16px; }
+  /* Grid.js cells scroll sideways instead of wrapping into slivers */
+  td.gridjs-td { white-space: nowrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

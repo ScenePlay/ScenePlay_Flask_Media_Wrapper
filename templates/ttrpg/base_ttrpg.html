@@ -5,231 +5,21 @@
        encoding, and battlemap.js uses non-ASCII identifiers (θ) that become
        a SyntaxError under a windows-1252 fallback. #}
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}ScenePlay — TTRPG{% endblock %}</title>
     <!-- themes.css first — defines --sp-* and --ttrpg-* aliases for all themes -->
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/themes.css') }}">
     <!-- theme.js sets data-theme immediately (no FOUC) and builds the swatch picker -->
     <script src="{{ url_for('static', filename='scripts/theme.js') }}"></script>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <!-- sp-core after bootstrap so the shared component layer wins -->
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/sp-core.css') }}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/sp-ttrpg.css') }}">
     <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
-    <style>
-        /* Dice glyphs render small relative to text — double them wherever used */
-        .dice-ico { font-size: 2em; line-height: 1; vertical-align: -0.18em; }
-        body {
-            background-color: var(--ttrpg-bg);
-            color: var(--ttrpg-text);
-            font-family: sans-serif;
-        }
-        .ttrpg-nav {
-            background-color: var(--ttrpg-surface);
-            border-bottom: 1px solid var(--sp-border);
-        }
-        .ttrpg-nav .navbar-brand {
-            color: var(--ttrpg-accent) !important;
-        }
-        .ttrpg-nav .nav-link {
-            color: var(--ttrpg-text) !important;
-        }
-        .ttrpg-nav .nav-link:hover,
-        .ttrpg-nav .nav-link:focus {
-            color: var(--sp-hover-bg) !important;
-        }
-        .ttrpg-card {
-            background-color: var(--ttrpg-surface);
-            border: 1px solid var(--sp-border);
-            border-radius: 6px;
-        }
-        .btn-ttrpg {
-            background-color: var(--ttrpg-accent);
-            color: var(--sp-on-accent);
-            font-weight: bold;
-        }
-        .btn-ttrpg:hover {
-            background-color: var(--sp-hover-bg);
-            border-color: var(--sp-hover-bg);
-            color: var(--sp-hover-text);
-        }
-        .hp-bar { height: 18px; border-radius: 4px; }
-        .condition-badge {
-            font-size: 0.75rem;
-            background-color: var(--ttrpg-primary);
-            color: var(--ttrpg-accent);
-            border: 1px solid var(--ttrpg-accent);
-            border-radius: 12px;
-            padding: 2px 8px;
-            display: inline-block;
-            margin: 2px;
-        }
-
-        /* ── Dark-theme Bootstrap overrides ──────────────────────────────── */
-
-        .text-muted { color: var(--sp-muted) !important; }
-
-        .form-control,
-        .form-select {
-            background-color: var(--sp-input-bg) !important;
-            color: var(--ttrpg-text) !important;
-            border-color: var(--sp-border) !important;
-        }
-        .form-control:focus,
-        .form-select:focus {
-            background-color: var(--sp-input-bg) !important;
-            color: var(--ttrpg-text) !important;
-            border-color: var(--ttrpg-accent) !important;
-            box-shadow: 0 0 0 .2rem var(--sp-accent-glow) !important;
-        }
-        .form-control::placeholder { color: var(--sp-muted); }
-        .form-select option { background-color: var(--sp-input-bg); color: var(--sp-text); }
-
-        .btn-outline-secondary {
-            color: var(--sp-text) !important;
-            border-color: var(--sp-border) !important;
-        }
-        .btn-outline-secondary:hover,
-        .btn-outline-secondary:focus,
-        .btn-outline-secondary:active,
-        .btn-outline-secondary.active {
-            background-color: var(--sp-hover-bg) !important;
-            border-color: var(--sp-hover-bg) !important;
-            color: var(--sp-hover-text) !important;
-        }
-
-        .btn-outline-danger:hover,
-        .btn-outline-danger:focus,
-        .btn-outline-success:hover,
-        .btn-outline-success:focus,
-        .btn-outline-warning:hover,
-        .btn-outline-warning:focus,
-        .btn-outline-primary:hover,
-        .btn-outline-primary:focus,
-        .btn-outline-info:hover,
-        .btn-outline-info:focus {
-            background-color: var(--sp-hover-bg) !important;
-            border-color: var(--sp-hover-bg) !important;
-            color: var(--sp-hover-text) !important;
-        }
-
-        .nav-tabs { border-bottom-color: var(--sp-border) !important; }
-        .nav-tabs .nav-link {
-            color: var(--ttrpg-accent) !important;
-            border-color: transparent !important;
-            background: transparent;
-        }
-        .nav-tabs .nav-link:hover {
-            background: color-mix(in srgb, var(--sp-accent) 12%, transparent) !important;
-            border-color: color-mix(in srgb, var(--sp-accent) 35%, transparent)
-                          color-mix(in srgb, var(--sp-accent) 35%, transparent)
-                          transparent !important;
-        }
-        .nav-tabs .nav-link.active {
-            background-color: var(--ttrpg-surface) !important;
-            color: var(--ttrpg-accent) !important;
-            border-color: var(--ttrpg-accent) var(--ttrpg-accent) var(--ttrpg-surface) !important;
-        }
-
-        .alert-warning {
-            background-color: var(--sp-accent-glow) !important;
-            border-color: var(--ttrpg-accent) !important;
-            color: var(--ttrpg-text) !important;
-        }
-        .alert-warning .btn-close { filter: invert(1) opacity(.7); }
-
-        .progress { background-color: var(--sp-surface) !important; }
-
-        details > summary { color: var(--ttrpg-text); cursor: pointer; }
-        details > summary::-webkit-details-marker { color: var(--ttrpg-accent); }
-
-        .form-check-input {
-            background-color: var(--sp-input-bg);
-            border-color: var(--sp-border);
-        }
-        .form-check-input:checked {
-            background-color: var(--ttrpg-accent);
-            border-color: var(--ttrpg-accent);
-        }
-        .form-check-label { color: var(--ttrpg-text); }
-
-        .navbar-toggler { border-color: var(--ttrpg-accent); }
-        .navbar-toggler-icon { filter: invert(1); }
-
-        /* ── Attributes dropdown dark theme ────────────────────────── */
-        .ttrpg-nav .dropdown-menu {
-            background-color: var(--ttrpg-surface);
-            border: 1px solid var(--sp-border);
-            border-radius: 6px;
-        }
-        .ttrpg-nav .dropdown-item {
-            color: var(--ttrpg-text);
-        }
-        .ttrpg-nav .dropdown-item:hover,
-        .ttrpg-nav .dropdown-item:focus {
-            background-color: color-mix(in srgb, var(--sp-accent) 18%, transparent);
-            color: var(--ttrpg-accent);
-        }
-
-        /* ── Themed table (replaces table-dark everywhere) ─────────── */
-        .ttrpg-table {
-            background: var(--sp-surface);
-            color: var(--sp-text);
-        }
-        .ttrpg-table thead th {
-            background: var(--sp-primary) !important;
-            color: var(--sp-accent) !important;
-            border-color: var(--sp-border) !important;
-        }
-        .ttrpg-table td,
-        .ttrpg-table th {
-            border-color: var(--sp-border) !important;
-            color: var(--sp-text) !important;
-            background-color: transparent;
-        }
-        .ttrpg-table tbody tr:hover td {
-            background: color-mix(in srgb, var(--sp-accent) 8%, transparent) !important;
-        }
-
-        /* ── Theme picker panel ─────────────────────────────────────────── */
-        #sp-theme-panel {
-            background: var(--ttrpg-surface);
-            border: 1px solid var(--ttrpg-accent);
-            border-radius: 8px;
-            box-shadow: 0 4px 24px rgba(0,0,0,.8);
-        }
-        #sp-theme-panel .sp-panel-title {
-            font-size: .72rem;
-            font-weight: bold;
-            letter-spacing: .08em;
-            color: var(--ttrpg-accent);
-            margin-bottom: 12px;
-            text-transform: uppercase;
-        }
-
-        /* ── Dark, high-contrast fonts ────────────────────────────────────────
-           Text vars are text-only, so blacken them. --ttrpg-accent is reused for
-           button/border fills, so only the accent-as-TEXT usages are forced black
-           (incl. the ~hundreds of inline color:var(--ttrpg-accent) titles, matched
-           by attribute selector). Semantic colours use explicit hex, so untouched. */
-        :root {
-            --sp-text:  #000;
-            --sp-muted: #000;
-            --sp-link:  #000;
-        }
-        h1, h2, h3, h4, h5, h6,
-        [style*="color:var(--ttrpg-accent)"],
-        [style*="color: var(--ttrpg-accent)"],
-        .ttrpg-nav .navbar-brand,
-        .ttrpg-nav .nav-link,
-        .ttrpg-nav .dropdown-item,
-        .nav-tabs .nav-link,
-        .nav-tabs .nav-link.active,
-        .condition-badge,
-        #sp-theme-panel .sp-panel-title {
-            color: #000 !important;
-        }
-    </style>
     {% block head %}{% endblock %}
 </head>
 <body>
-<nav class="navbar navbar-expand-sm ttrpg-nav">
+<nav class="navbar navbar-expand-lg ttrpg-nav">
     <div class="container-fluid">
         {% if current_user.is_authenticated and current_user.is_dm() %}
         <a class="navbar-brand" href="{{ url_for('main.home') }}">&#9654; ScenePlay</a>
@@ -288,19 +78,12 @@
         </div>
 
         <!-- Theme picker — after collapse so it sits at far right and is never clipped -->
-        <div style="position:relative;flex-shrink:0;">
+        <div class="sp-theme-wrap">
             <button id="sp-theme-btn" onclick="spTogglePicker()"
-                    class="btn nav-link" title="Color theme"
-                    style="background:none;border:none;cursor:pointer;
-                           font-size:1.15rem;color:var(--ttrpg-accent);padding:.35rem .5rem;">
-                &#9670;
-            </button>
-            <div id="sp-theme-panel"
-                 style="display:none;position:absolute;right:0;top:calc(100% + 4px);
-                        z-index:9999;padding:14px;width:290px;">
+                    class="btn nav-link" title="Color theme">&#9670;</button>
+            <div id="sp-theme-panel">
                 <div class="sp-panel-title">Color Theme</div>
-                <div id="sp-swatches"
-                     style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;"></div>
+                <div id="sp-swatches"></div>
             </div>
         </div>
     </div>
@@ -309,11 +92,10 @@
 {% if current_user.is_authenticated and current_user.is_dm() %}
 <!-- DM-only relay health banner: appears on every TTRPG page when the relay
      is enabled but syncing has stalled or a push was dropped. -->
-<div id="relay-health-banner" style="display:none;background:#5c1a1a;border-bottom:2px solid #dc3545;
-     color:#ffd7d7;padding:8px 16px;font-size:.9rem;">
+<div id="relay-health-banner" class="sp-banner-danger" style="display:none;">
   <span style="font-weight:700;">&#9888; Relay problem:</span>
   <span id="relay-health-msg"></span>
-  <a href="{{ url_for('relay_admin_bp.status') }}" style="color:#fff;font-weight:600;margin-left:8px;">Open Relay admin &rarr;</a>
+  <a href="{{ url_for('relay_admin_bp.status') }}">Open Relay admin &rarr;</a>
 </div>
 <script>
 (function () {

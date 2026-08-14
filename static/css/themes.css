@@ -1,238 +1,326 @@
 /* ── ScenePlay Theme System ──────────────────────────────────────────────────
-   bg/surface formula:  channel = round(255 × 0.90 + primary_channel × 0.10)
-                        (90% white + 10% primary tint)
-   surface is 85/15 split, slightly more tinted than bg.
-   Primary (navbar) keeps its full colour.
-   Text flips dark since backgrounds are now near-white.
+   Tokens only — no component rules live here (those are in sp-core.css).
+
+   Every theme block must define the FULL token set:
+     --sp-bg / -surface / -surface-2   page ground, cards, inset panels
+     --sp-primary                      chrome tint (table heads, zebra mix)
+     --sp-accent / -on-accent          the one brand color + text on it
+                                       (-on-accent is recomputed inline by
+                                        theme.js for contrast — value here is
+                                        just the no-JS fallback)
+     --sp-hover-bg / -hover-text       accent hover state
+     --sp-text / -heading / -muted     ink; heading is ink in light themes,
+                                       the accent in dark themes
+     --sp-border / -input-bg
+     --sp-accent-glow                  focus rings
+     --sp-link
+     --sp-shadow-1 / -shadow-2         card / popover elevation
+     --sp-danger / -success / -warning
+     --sp-invert                       0 light / 1 dark — recolors baked-in
+                                       dark icon images (toggler, btn-close)
+     color-scheme                      native controls follow the theme
    ──────────────────────────────────────────────────────────────────────── */
 
-/* ── 1. Classic ─────────────────────────────────────────────────────────── */
+/* Shared, theme-independent tokens */
+:root {
+  --sp-radius:    10px;
+  --sp-radius-sm: 8px;
+  /* Battle maps read better on a dark ground in every theme */
+  --sp-map-bg:    #10141c;
+
+  /* Aliases used by inline styles across ~35 TTRPG templates — resolution is
+     lazy, so one definition serves every theme. Do not remove. */
+  --ttrpg-primary: var(--sp-surface);
+  --ttrpg-accent:  var(--sp-accent);
+  --ttrpg-bg:      var(--sp-bg);
+  --ttrpg-surface: var(--sp-surface);
+  --ttrpg-text:    var(--sp-text);
+}
+
+/* ── 1. Daylight (default) ─────────────────────────────────────────────────
+   Clean & light: cool paper ground, white cards, one confident blue. */
 :root,
-[data-theme="ttrpg-classic"] {
-  --sp-bg:          #f6f2ef;
-  --sp-surface:     #f1ece7;
-  --sp-primary:     #a08060;
-  --sp-accent:      #c9a84c;
-  --sp-text:        #2a1a08;
-  --sp-muted:       rgba(42,26,8,.72);
-  --sp-border:      #d9ccbf;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #111118;
-  --sp-hover-bg:    #a06828;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(201,168,76,.30);
-  --sp-link:        #504030;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 2. Midnight ────────────────────────────────────────────────────────── */
-[data-theme="midnight"] {
-  --sp-bg:          #ededf6;
-  --sp-surface:     #e4e4f1;
-  --sp-primary:     #4d4da4;
-  --sp-accent:      #00e5c8;
-  --sp-text:        #0a0a2a;
-  --sp-muted:       rgba(10,10,42,.72);
-  --sp-border:      #b8b8db;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #061412;
-  --sp-hover-bg:    #00a890;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(0,229,200,.30);
-  --sp-link:        #272752;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 3. Forest ──────────────────────────────────────────────────────────── */
-[data-theme="forest"] {
-  --sp-bg:          #edf2f0;
-  --sp-surface:     #e4ece8;
-  --sp-primary:     #4d8066;
-  --sp-accent:      #6ecf80;
-  --sp-text:        #0a1e10;
-  --sp-muted:       rgba(10,30,16,.72);
-  --sp-border:      #b8ccc2;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #071208;
-  --sp-hover-bg:    #419952;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(110,207,128,.30);
-  --sp-link:        #274033;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 4. Crimson ─────────────────────────────────────────────────────────── */
-[data-theme="crimson"] {
-  --sp-bg:          #f3e9e9;
-  --sp-surface:     #ecdede;
-  --sp-primary:     #832424;
-  --sp-accent:      #f05050;
-  --sp-text:        #1a0808;
-  --sp-muted:       rgba(26,8,8,.72);
-  --sp-border:      #cda7a7;
-  --sp-input-bg:    #ffffff;
+[data-theme="daylight"] {
+  --sp-bg:          #f7f8fa;
+  --sp-surface:     #ffffff;
+  --sp-surface-2:   #f0f2f5;
+  --sp-primary:     #e9edf3;
+  --sp-accent:      #2f6fed;
   --sp-on-accent:   #ffffff;
-  --sp-hover-bg:    #b01818;
+  --sp-hover-bg:    #1e56c4;
   --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(240,80,80,.30);
-  --sp-link:        #421212;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
+  --sp-text:        #1a2233;
+  --sp-heading:     #10192e;
+  --sp-muted:       rgba(26,34,51,.62);
+  --sp-border:      #e3e7ee;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(47,111,237,.22);
+  --sp-link:        #2456b8;
+  --sp-shadow-1:    0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+  --sp-shadow-2:    0 8px 24px rgba(16,24,40,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
 }
 
-/* ── 5. Ocean ───────────────────────────────────────────────────────────── */
+/* ── 2. Classic — warm oak & gold, light ─────────────────────────────────── */
+[data-theme="ttrpg-classic"] {
+  --sp-bg:          #f8f5f0;
+  --sp-surface:     #fffdfa;
+  --sp-surface-2:   #f1ebe2;
+  --sp-primary:     #eae2d5;
+  --sp-accent:      #a5762a;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #845c1d;
+  --sp-hover-text:  #ffffff;
+  --sp-text:        #2b2013;
+  --sp-heading:     #211809;
+  --sp-muted:       rgba(43,32,19,.64);
+  --sp-border:      #e2d8c9;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(165,118,42,.22);
+  --sp-link:        #7c5a1f;
+  --sp-shadow-1:    0 1px 2px rgba(60,45,20,.06), 0 1px 3px rgba(60,45,20,.10);
+  --sp-shadow-2:    0 8px 24px rgba(60,45,20,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
+}
+
+/* ── 3. Forest — light ───────────────────────────────────────────────────── */
+[data-theme="forest"] {
+  --sp-bg:          #f4f8f5;
+  --sp-surface:     #ffffff;
+  --sp-surface-2:   #eaf1ec;
+  --sp-primary:     #e2ece5;
+  --sp-accent:      #2e7d4f;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #22603c;
+  --sp-hover-text:  #ffffff;
+  --sp-text:        #182420;
+  --sp-heading:     #0e1a14;
+  --sp-muted:       rgba(24,36,32,.62);
+  --sp-border:      #dbe6de;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(46,125,79,.22);
+  --sp-link:        #256641;
+  --sp-shadow-1:    0 1px 2px rgba(16,40,24,.06), 0 1px 3px rgba(16,40,24,.10);
+  --sp-shadow-2:    0 8px 24px rgba(16,40,24,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
+}
+
+/* ── 4. Ocean — light ────────────────────────────────────────────────────── */
 [data-theme="ocean"] {
-  --sp-bg:          #e9eef6;
-  --sp-surface:     #dde5f1;
-  --sp-primary:     #1e51a4;
-  --sp-accent:      #18c8e8;
-  --sp-text:        #081428;
-  --sp-muted:       rgba(8,20,40,.72);
-  --sp-border:      #a5b9db;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #041018;
-  --sp-hover-bg:    #0090b0;
+  --sp-bg:          #f3f7fb;
+  --sp-surface:     #ffffff;
+  --sp-surface-2:   #e9f0f7;
+  --sp-primary:     #e0eaf4;
+  --sp-accent:      #0e6ba8;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #0a527f;
   --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(24,200,232,.30);
-  --sp-link:        #0f2952;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
+  --sp-text:        #152230;
+  --sp-heading:     #0c1927;
+  --sp-muted:       rgba(21,34,48,.62);
+  --sp-border:      #d9e4ef;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(14,107,168,.22);
+  --sp-link:        #0d5c90;
+  --sp-shadow-1:    0 1px 2px rgba(10,40,70,.06), 0 1px 3px rgba(10,40,70,.10);
+  --sp-shadow-2:    0 8px 24px rgba(10,40,70,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
 }
 
-/* ── 6. Ember ───────────────────────────────────────────────────────────── */
-[data-theme="ember"] {
-  --sp-bg:          #f0ebe6;
-  --sp-surface:     #e9e1d9;
-  --sp-primary:     #6c3600;
-  --sp-accent:      #ffa020;
-  --sp-text:        #180a00;
-  --sp-muted:       rgba(24,10,0,.72);
-  --sp-border:      #c4af99;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #100800;
-  --sp-hover-bg:    #c06800;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(255,160,32,.30);
-  --sp-link:        #361b00;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 7. Royal ───────────────────────────────────────────────────────────── */
-[data-theme="royal"] {
-  --sp-bg:          #efebf6;
-  --sp-surface:     #e7e0f1;
-  --sp-primary:     #6233a4;
-  --sp-accent:      #b888ff;
-  --sp-text:        #180a2a;
-  --sp-muted:       rgba(24,10,42,.72);
-  --sp-border:      #c0addb;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #0e0818;
-  --sp-hover-bg:    #7840d0;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(184,136,255,.30);
-  --sp-link:        #311a52;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 8. Frost ───────────────────────────────────────────────────────────── */
+/* ── 5. Frost — light ────────────────────────────────────────────────────── */
 [data-theme="frost"] {
-  --sp-bg:          #ebeff4;
-  --sp-surface:     #e1e7ee;
-  --sp-primary:     #385c8f;
-  --sp-accent:      #90d8f8;
-  --sp-text:        #0a1828;
-  --sp-muted:       rgba(10,24,40,.72);
-  --sp-border:      #afbed2;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #060e1a;
-  --sp-hover-bg:    #4898c8;
+  --sp-bg:          #f4f7fa;
+  --sp-surface:     #ffffff;
+  --sp-surface-2:   #eaf0f6;
+  --sp-primary:     #e2eaf2;
+  --sp-accent:      #2f86c1;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #256a99;
   --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(144,216,248,.30);
-  --sp-link:        #1c2e48;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
+  --sp-text:        #16222e;
+  --sp-heading:     #0d1926;
+  --sp-muted:       rgba(22,34,46,.62);
+  --sp-border:      #dbe4ed;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(47,134,193,.22);
+  --sp-link:        #25689a;
+  --sp-shadow-1:    0 1px 2px rgba(15,40,65,.06), 0 1px 3px rgba(15,40,65,.10);
+  --sp-shadow-2:    0 8px 24px rgba(15,40,65,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
 }
 
-/* ── 9. Steel ───────────────────────────────────────────────────────────── */
-[data-theme="steel"] {
-  --sp-bg:          #eef0f2;
-  --sp-surface:     #e6e8eb;
-  --sp-primary:     #57667b;
-  --sp-accent:      #9abcd4;
-  --sp-text:        #101820;
-  --sp-muted:       rgba(16,24,32,.72);
-  --sp-border:      #bcc2ca;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #080c10;
-  --sp-hover-bg:    #4a7090;
-  --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(154,188,212,.30);
-  --sp-link:        #2c333e;
-
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
-}
-
-/* ── 10. Parchment ──────────────────────────────────────────────────────── */
+/* ── 6. Parchment — light ────────────────────────────────────────────────── */
 [data-theme="parchment"] {
-  --sp-bg:          #f0eeeb;
-  --sp-surface:     #e9e5e1;
-  --sp-primary:     #6c5136;
-  --sp-accent:      #e0b860;
-  --sp-text:        #1c1008;
-  --sp-muted:       rgba(28,16,8,.72);
-  --sp-border:      #c4b9af;
-  --sp-input-bg:    #ffffff;
-  --sp-on-accent:   #120c04;
-  --sp-hover-bg:    #906820;
+  --sp-bg:          #f7f4ee;
+  --sp-surface:     #fffefb;
+  --sp-surface-2:   #efe9de;
+  --sp-primary:     #e9e1d2;
+  --sp-accent:      #8a6a2f;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #6d5223;
   --sp-hover-text:  #ffffff;
-  --sp-accent-glow: rgba(224,184,96,.30);
-  --sp-link:        #36291b;
+  --sp-text:        #2a2115;
+  --sp-heading:     #1f180c;
+  --sp-muted:       rgba(42,33,21,.64);
+  --sp-border:      #e0d6c4;
+  --sp-input-bg:    #ffffff;
+  --sp-accent-glow: rgba(138,106,47,.22);
+  --sp-link:        #6b5326;
+  --sp-shadow-1:    0 1px 2px rgba(55,42,20,.06), 0 1px 3px rgba(55,42,20,.10);
+  --sp-shadow-2:    0 8px 24px rgba(55,42,20,.14);
+  --sp-danger:      #d92d20;
+  --sp-success:     #12805c;
+  --sp-warning:     #b54708;
+  --sp-invert:      0;
+  color-scheme: light;
+}
 
-  --ttrpg-primary: var(--sp-surface);
-  --ttrpg-accent:  var(--sp-accent);
-  --ttrpg-bg:      var(--sp-bg);
-  --ttrpg-surface: var(--sp-surface);
-  --ttrpg-text:    var(--sp-text);
+/* ── 7. Midnight — dark ──────────────────────────────────────────────────── */
+[data-theme="midnight"] {
+  --sp-bg:          #131320;
+  --sp-surface:     #1b1b2c;
+  --sp-surface-2:   #232338;
+  --sp-primary:     #262640;
+  --sp-accent:      #00e5c8;
+  --sp-on-accent:   #061412;
+  --sp-hover-bg:    #00c9b0;
+  --sp-hover-text:  #06231e;
+  --sp-text:        #e8e8f2;
+  --sp-heading:     var(--sp-accent);
+  --sp-muted:       rgba(232,232,242,.62);
+  --sp-border:      #32324a;
+  --sp-input-bg:    #12121d;
+  --sp-accent-glow: rgba(0,229,200,.25);
+  --sp-link:        #7ee9db;
+  --sp-shadow-1:    0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.50);
+  --sp-shadow-2:    0 8px 24px rgba(0,0,0,.60);
+  --sp-danger:      #f97066;
+  --sp-success:     #4ade80;
+  --sp-warning:     #fbbf24;
+  --sp-invert:      1;
+  color-scheme: dark;
+}
+
+/* ── 8. Crimson — dark ───────────────────────────────────────────────────── */
+[data-theme="crimson"] {
+  --sp-bg:          #191012;
+  --sp-surface:     #221518;
+  --sp-surface-2:   #2c1b1f;
+  --sp-primary:     #301d22;
+  --sp-accent:      #f05050;
+  --sp-on-accent:   #ffffff;
+  --sp-hover-bg:    #d13c3c;
+  --sp-hover-text:  #ffffff;
+  --sp-text:        #f2e6e8;
+  --sp-heading:     var(--sp-accent);
+  --sp-muted:       rgba(242,230,232,.62);
+  --sp-border:      #46282e;
+  --sp-input-bg:    #170e10;
+  --sp-accent-glow: rgba(240,80,80,.28);
+  --sp-link:        #f28b8b;
+  --sp-shadow-1:    0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.50);
+  --sp-shadow-2:    0 8px 24px rgba(0,0,0,.60);
+  --sp-danger:      #f97066;
+  --sp-success:     #4ade80;
+  --sp-warning:     #fbbf24;
+  --sp-invert:      1;
+  color-scheme: dark;
+}
+
+/* ── 9. Ember — dark ─────────────────────────────────────────────────────── */
+[data-theme="ember"] {
+  --sp-bg:          #191108;
+  --sp-surface:     #22180c;
+  --sp-surface-2:   #2c2012;
+  --sp-primary:     #322515;
+  --sp-accent:      #ffa020;
+  --sp-on-accent:   #1c1204;
+  --sp-hover-bg:    #e08a10;
+  --sp-hover-text:  #1c1204;
+  --sp-text:        #f2ead9;
+  --sp-heading:     var(--sp-accent);
+  --sp-muted:       rgba(242,234,217,.62);
+  --sp-border:      #463619;
+  --sp-input-bg:    #170f07;
+  --sp-accent-glow: rgba(255,160,32,.28);
+  --sp-link:        #ffc46e;
+  --sp-shadow-1:    0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.50);
+  --sp-shadow-2:    0 8px 24px rgba(0,0,0,.60);
+  --sp-danger:      #f97066;
+  --sp-success:     #4ade80;
+  --sp-warning:     #fbbf24;
+  --sp-invert:      1;
+  color-scheme: dark;
+}
+
+/* ── 10. Royal — dark ────────────────────────────────────────────────────── */
+[data-theme="royal"] {
+  --sp-bg:          #161020;
+  --sp-surface:     #1f172c;
+  --sp-surface-2:   #281e38;
+  --sp-primary:     #2d2240;
+  --sp-accent:      #b888ff;
+  --sp-on-accent:   #14081f;
+  --sp-hover-bg:    #9c64f0;
+  --sp-hover-text:  #14081f;
+  --sp-text:        #ece5f6;
+  --sp-heading:     var(--sp-accent);
+  --sp-muted:       rgba(236,229,246,.62);
+  --sp-border:      #3d2f52;
+  --sp-input-bg:    #130d1c;
+  --sp-accent-glow: rgba(184,136,255,.28);
+  --sp-link:        #cdabff;
+  --sp-shadow-1:    0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.50);
+  --sp-shadow-2:    0 8px 24px rgba(0,0,0,.60);
+  --sp-danger:      #f97066;
+  --sp-success:     #4ade80;
+  --sp-warning:     #fbbf24;
+  --sp-invert:      1;
+  color-scheme: dark;
+}
+
+/* ── 11. Steel — dark ────────────────────────────────────────────────────── */
+[data-theme="steel"] {
+  --sp-bg:          #12161b;
+  --sp-surface:     #1a2027;
+  --sp-surface-2:   #222a33;
+  --sp-primary:     #27303a;
+  --sp-accent:      #9abcd4;
+  --sp-on-accent:   #0d141a;
+  --sp-hover-bg:    #7fa9c6;
+  --sp-hover-text:  #0d141a;
+  --sp-text:        #e6ecf2;
+  --sp-heading:     var(--sp-accent);
+  --sp-muted:       rgba(230,236,242,.62);
+  --sp-border:      #33404d;
+  --sp-input-bg:    #101419;
+  --sp-accent-glow: rgba(154,188,212,.25);
+  --sp-link:        #b6d2e6;
+  --sp-shadow-1:    0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.50);
+  --sp-shadow-2:    0 8px 24px rgba(0,0,0,.60);
+  --sp-danger:      #f97066;
+  --sp-success:     #4ade80;
+  --sp-warning:     #fbbf24;
+  --sp-invert:      1;
+  color-scheme: dark;
 }

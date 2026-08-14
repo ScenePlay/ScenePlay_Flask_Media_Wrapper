@@ -5,6 +5,7 @@
    ──────────────────────────────────────────────────────────────────────── */
 
 const SP_THEMES = [
+  { id: 'daylight',      name: 'Daylight',  swatch: '#2f6fed' },
   { id: 'ttrpg-classic', name: 'Classic',   swatch: '#c9a84c' },
   { id: 'midnight',      name: 'Midnight',  swatch: '#00e5c8' },
   { id: 'forest',        name: 'Forest',    swatch: '#6ecf80' },
@@ -48,7 +49,7 @@ function _spApplyOnAccent() {
 
 /* ── IIFE: apply theme synchronously before first paint ─────────────────── */
 (function () {
-  var saved = localStorage.getItem('sp-theme') || 'ttrpg-classic';
+  var saved = localStorage.getItem('sp-theme') || 'daylight';
   document.documentElement.setAttribute('data-theme', saved);
 }());
 
@@ -66,13 +67,13 @@ function spTogglePicker() {
   if (!p) return;
   var open = p.style.display === 'block';
   p.style.display = open ? 'none' : 'block';
-  if (!open) _spUpdateSwatchStates(localStorage.getItem('sp-theme') || 'ttrpg-classic');
+  if (!open) _spUpdateSwatchStates(localStorage.getItem('sp-theme') || 'daylight');
 }
 
 function _spUpdateSwatchStates(activeId) {
   document.querySelectorAll('[data-sp-swatch]').forEach(function (el) {
     var on = el.dataset.spSwatch === activeId;
-    el.style.outline       = on ? '3px solid #fff'   : '2px solid transparent';
+    el.style.outline       = on ? '3px solid var(--sp-accent)' : '2px solid transparent';
     el.style.outlineOffset = on ? '2px'              : '0';
     el.style.transform     = on ? 'scale(1.22)'      : 'scale(1)';
   });
@@ -86,7 +87,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var container = document.getElementById('sp-swatches');
   if (!container) return;
 
-  var active = localStorage.getItem('sp-theme') || 'ttrpg-classic';
+  var active = localStorage.getItem('sp-theme') || 'daylight';
 
   SP_THEMES.forEach(function (t) {
     var labelColor = spContrastText(t.swatch);
