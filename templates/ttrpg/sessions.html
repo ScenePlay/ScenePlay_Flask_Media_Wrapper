@@ -1,13 +1,14 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="sp-page-head">
   <h3 style="color:var(--ttrpg-accent);">Sessions</h3>
   <a href="{{ url_for('ttrpg.session_new') }}" class="btn btn-ttrpg btn-sm">+ New Session</a>
 </div>
 
 {% if sessions %}
 <div class="ttrpg-card p-0">
+  <div class="sp-table-scroll">
   <table class="table table-hover mb-0 ttrpg-table">
     <thead>
       <tr><th>#</th><th>Title</th><th>Campaign</th><th>Date</th><th>Party</th><th>Status</th><th colspan="2"></th></tr>
@@ -43,6 +44,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% else %}
 <div class="ttrpg-card p-4 text-center">

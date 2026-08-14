@@ -24,7 +24,7 @@
   <div class="row g-2 align-items-end">
     <div class="col-sm-3">
       <label class="form-label small text-muted mb-1">Type</label>
-      <select id="filter-type" class="form-select form-select-sm bg-dark text-light border-secondary"
+      <select id="filter-type" class="form-select form-select-sm"
               onchange="doSearch()">
         <option value="">All Types</option>
         {% for t in monster_types %}
@@ -34,7 +34,7 @@
     </div>
     <div class="col-sm-3">
       <label class="form-label small text-muted mb-1">Size</label>
-      <select id="filter-size" class="form-select form-select-sm bg-dark text-light border-secondary"
+      <select id="filter-size" class="form-select form-select-sm"
               onchange="doSearch()">
         <option value="">All Sizes</option>
         <option>Tiny</option><option>Small</option><option>Medium</option>
@@ -43,7 +43,7 @@
     </div>
     <div class="col-sm-2">
       <label class="form-label small text-muted mb-1">Source</label>
-      <select id="filter-source" class="form-select form-select-sm bg-dark text-light border-secondary"
+      <select id="filter-source" class="form-select form-select-sm"
               onchange="doSearch()">
         <option value="">All</option>
         <option value="srd">SRD</option>
@@ -75,7 +75,7 @@
   <div class="col-lg-5">
     <div class="ttrpg-card p-3">
       <div class="mb-3">
-        <input id="search-input" type="text" class="form-control bg-dark text-light border-secondary"
+        <input id="search-input" type="text" class="form-control"
                placeholder="Search by name…" autocomplete="off">
       </div>
       <div id="search-results" style="max-height:60vh;overflow-y:auto;">
@@ -131,7 +131,7 @@
         <div class="row g-2 align-items-end">
           <div class="col-sm-5">
             <label class="form-label small text-muted mb-1">Session</label>
-            <select id="session-select" class="form-select form-select-sm bg-dark text-light border-secondary">
+            <select id="session-select" class="form-select form-select-sm">
               <option value="">Select session…</option>
               {% for s in sessions %}
               <option value="{{ s.session_id }}">{{ s.title }}</option>
@@ -141,12 +141,12 @@
           <div class="col-sm-2">
             <label class="form-label small text-muted mb-1">Count</label>
             <input id="add-count" type="number" min="1" max="20" value="1"
-                   class="form-control form-control-sm bg-dark text-light border-secondary">
+                   class="form-control form-control-sm">
           </div>
           <div class="col-sm-3">
             <label class="form-label small text-muted mb-1">HP Override</label>
             <input id="hp-override" type="number" min="1" placeholder="Default"
-                   class="form-control form-control-sm bg-dark text-light border-secondary">
+                   class="form-control form-control-sm">
           </div>
           <div class="col-sm-2">
             <button class="btn btn-ttrpg btn-sm w-100" onclick="addToSession()">Add</button>
@@ -159,7 +159,7 @@
       <div id="homebrew-delete-wrap" class="mt-2" style="display:none;">
         <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
           <input type="file" id="hb-img-file" accept="image/png,image/jpeg,image/gif,image/webp"
-                 class="form-control form-control-sm bg-dark text-light border-secondary" style="max-width:240px;">
+                 class="form-control form-control-sm" style="max-width:240px;">
           <button type="button" class="btn btn-outline-secondary btn-sm"
                   onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadMonsterImage()">Set Picture</button>

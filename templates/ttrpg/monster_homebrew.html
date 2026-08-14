@@ -11,7 +11,7 @@
   'wis_val': st.get('wisdom', 10),      'cha_val': st.get('charisma', 10)
 } %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="sp-page-head">
   <h3 style="color:var(--ttrpg-accent);">{{ 'Edit Homebrew — Monsters &amp; Assets' if is_edit else 'New Homebrew — Monsters &amp; Assets' }}</h3>
   <a href="{{ url_for('monsters_bp.library') }}" class="btn btn-sm btn-outline-secondary">&larr; Library</a>
 </div>
@@ -76,7 +76,7 @@
           <div class="col-sm-6">
             <label class="form-label small text-muted">Name *</label>
             <input type="text" name="name" value="{{ m.name if is_edit else '' }}"
-                   class="form-control bg-dark text-light border-secondary" required>
+                   class="form-control" required>
           </div>
           <div class="col-sm-6">
             <label class="form-label small text-muted">Picture <span class="text-muted">(token art — png/jpg/gif/webp)</span></label>
@@ -87,7 +87,7 @@
                           border:1px solid var(--sp-border);flex-shrink:0;">
               {% endif %}
               <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
-                     class="form-control bg-dark text-light border-secondary">
+                     class="form-control">
               <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
                       onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
               <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
@@ -101,7 +101,7 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label small text-muted">Size</label>
-            <select name="size" class="form-select bg-dark text-light border-secondary">
+            <select name="size" class="form-select">
               {% for sz in ['Tiny','Small','Medium','Large','Huge','Gargantuan'] %}
               <option value="{{ sz }}"{% if sz == cur_size %} selected{% endif %}>{{ sz }}</option>
               {% endfor %}
@@ -111,28 +111,28 @@
             <label class="form-label small text-muted">Type</label>
             <input type="text" name="monster_type" placeholder="beast, undead…"
                    value="{{ m.monster_type if is_edit else '' }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-4">
             <label class="form-label small text-muted">Alignment</label>
             <input type="text" name="alignment" placeholder="chaotic evil…"
                    value="{{ st.get('alignment', '') }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-4">
             <label class="form-label small text-muted">Speed</label>
             <input type="text" name="speed" value="{{ cur_speed }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-2">
             <label class="form-label small text-muted">CR</label>
             <input type="text" name="cr" value="{{ m.cr if is_edit else '1' }}"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-sm-2">
             <label class="form-label small text-muted">XP</label>
             <input type="number" name="xp" value="{{ st.get('xp', 0) }}" min="0"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
         </div>
       </div>
@@ -146,12 +146,12 @@
           <div class="col-6">
             <label class="form-label small text-muted">Max HP</label>
             <input type="number" name="hp_max" value="{{ m.hp_max if is_edit else 10 }}" min="1"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
           <div class="col-6">
             <label class="form-label small text-muted">AC</label>
             <input type="number" name="ac" value="{{ m.ac if is_edit else 10 }}" min="1"
-                   class="form-control bg-dark text-light border-secondary">
+                   class="form-control">
           </div>
         </div>
       </div>
@@ -167,7 +167,7 @@
           <div class="col-4 col-sm-2">
             <label class="form-label small text-muted mb-1">{{ label }}</label>
             <input type="number" name="{{ stat }}" value="{{ A[stat] }}" min="0" max="30"
-                   class="form-control form-control-sm bg-dark text-light border-secondary text-center">
+                   class="form-control form-control-sm text-center">
           </div>
           {% endfor %}
         </div>
@@ -182,12 +182,12 @@
           <label class="form-label small text-muted">Languages</label>
           <input type="text" name="languages" placeholder="Common, Draconic…"
                  value="{{ st.get('languages', '') }}"
-                 class="form-control bg-dark text-light border-secondary">
+                 class="form-control">
         </div>
         <div>
           <label class="form-label small text-muted">Notes / Special Abilities</label>
           <textarea name="notes" rows="4"
-                    class="form-control bg-dark text-light border-secondary"
+                    class="form-control"
                     placeholder="Describe traits, actions, reactions…">{{ st.get('notes', '') }}</textarea>
         </div>
       </div>

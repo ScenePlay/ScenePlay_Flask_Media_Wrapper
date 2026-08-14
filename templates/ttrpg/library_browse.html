@@ -21,7 +21,7 @@
     <div id="lib-{{ key }}" class="accordion-collapse collapse" data-bs-parent="#libAccordion">
       <div class="accordion-body">
         {% if items %}
-        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary mb-2"
+        <input type="text" class="form-control form-control-sm mb-2"
                placeholder="Search {{ label }}&hellip;" oninput="filterLib('list-{{ key }}', this.value)">
         <div id="list-{{ key }}">
           {% for it in items %}

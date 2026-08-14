@@ -197,17 +197,17 @@
             {% endif %}
             <!-- SFX control — docked in the header toolbar to match the battlemap -->
             <div id="sfx-ctrl" style="display:inline-flex;align-items:center;gap:6px;
-              background:rgba(20,18,12,.5);border:1px solid var(--ttrpg-border,#3a3420);
+              background:var(--sp-surface-2);border:1px solid var(--sp-border);
               border-radius:16px;padding:2px 8px;font:600 12px system-ui,sans-serif;user-select:none;">
               <button id="sfx-toggle" type="button" title="Sound is on by default — click to mute / unmute"
                 style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
-                white-space:nowrap;color:#c9a84c;">&#128266; Sound: ON</button>
+                white-space:nowrap;color:var(--sp-heading);">&#128266; Sound: ON</button>
               <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
-                style="width:64px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
+                style="width:64px;accent-color:var(--sp-accent);cursor:pointer;">
               <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
                 onclick="if(window.SFX)SFX.openChooser()"
-                style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
-                cursor:pointer;font:inherit;line-height:1;padding:2px 8px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
+                style="background:none;border:1px solid var(--sp-accent);border-radius:12px;
+                cursor:pointer;font:inherit;line-height:1;padding:2px 8px;white-space:nowrap;color:var(--sp-heading);">&#9881; Sounds</button>
             </div>
           </div>
         </div>

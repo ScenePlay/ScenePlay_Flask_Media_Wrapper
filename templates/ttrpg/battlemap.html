@@ -223,7 +223,7 @@
     right: 16px;
     z-index: 400;
     width: 268px;
-    max-height: calc(100vh - 100px);
+    max-height: calc(100dvh - 100px);
     overflow-y: auto;
     background: color-mix(in srgb, var(--ttrpg-primary) 75%, white);
     border: 1px solid var(--ttrpg-accent);
@@ -267,7 +267,7 @@
     z-index: 401;
     width: 450px;                       /* 50% wider than the dice-panel base */
     max-width: calc(100vw - 48px);      /* never wider than the viewport */
-    max-height: calc(100vh - 120px);
+    max-height: calc(100dvh - 120px);
     overflow-y: auto;
     background: color-mix(in srgb, var(--ttrpg-primary) 75%, white);
     border: 1px solid var(--ttrpg-accent);
@@ -307,12 +307,26 @@
   .map-die-val.nat20   { background:#856404;border-color:#ffc107;color:#fff200; }
   .map-die-val.nat1    { background:#6b1a1a;border-color:#dc3545;color:#ffaaaa; }
   .map-die-val.kept    { background:#0d2e0d;border-color:#28a745;color:#7deb7d;font-weight:bold; }
-  .map-feed-entry { font-size:.75rem;padding:4px 0;border-bottom:1px solid #333; }
+  .map-feed-entry { font-size:.75rem;padding:4px 0;border-bottom:1px solid var(--sp-border); }
   .map-feed-entry .tot { color:var(--ttrpg-accent);font-weight:bold; }
 
   #sidebar-wrap {
     position: relative;
     flex-shrink: 0;
+  }
+  /* Phones: the sidebar rides OVER the map as a drawer instead of splitting
+     the width — the existing ◀ toggle still opens/closes it. */
+  @media (max-width: 767px) {
+    #sidebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      z-index: 500;
+      width: min(260px, 78vw);
+      box-shadow: var(--sp-shadow-2);
+    }
+    #sidebar.sb-collapsed { box-shadow: none; }
   }
 
   #sidebar {
@@ -342,7 +356,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .08em;
-    color: color-mix(in srgb, var(--ttrpg-accent) 50%, black);
+    color: var(--sp-heading);
     padding: 4px 0 2px;
     border-bottom: 1px solid var(--sp-border);
     margin-bottom: 4px;
@@ -351,7 +365,7 @@
   .sidebar-entity {
     padding: 4px 0;
     font-size: .78rem;
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid var(--sp-border);
   }
   .sidebar-entity-row {
     display: flex;
@@ -404,7 +418,7 @@
 {% endblock %}
 
 {% block content %}
-<div style="margin:-1rem -1rem 0; display:flex; flex-direction:column; height:calc(100vh - 58px);">
+<div style="margin:-1rem -1rem 0; display:flex; flex-direction:column; height:calc(100dvh - 58px);">
 
   <!-- Top bar -->
   <div class="d-flex justify-content-between align-items-center px-3 py-2 flex-wrap gap-2"
@@ -447,17 +461,17 @@
 
       <!-- SFX control — docked in the top bar so it stays out of the map -->
       <div id="sfx-ctrl" style="display:inline-flex;align-items:center;gap:6px;
-        background:rgba(20,18,12,.5);border:1px solid var(--ttrpg-border,#3a3420);
+        background:var(--sp-surface-2);border:1px solid var(--sp-border);
         border-radius:16px;padding:2px 8px;font:600 12px system-ui,sans-serif;user-select:none;">
         <button id="sfx-toggle" type="button" title="Sound is on by default — click to mute / unmute"
           style="background:none;border:none;cursor:pointer;font:inherit;line-height:1;padding:0;
-          white-space:nowrap;color:#c9a84c;">&#128266; Sound: ON</button>
+          white-space:nowrap;color:var(--sp-heading);">&#128266; Sound: ON</button>
         <input type="range" id="sfx-vol" min="0" max="100" value="80" title="SFX volume"
-          style="width:64px;accent-color:var(--ttrpg-accent,#c9a84c);cursor:pointer;">
+          style="width:64px;accent-color:var(--sp-accent);cursor:pointer;">
         <button id="sfx-choose" type="button" title="Choose which sound plays for each action"
           onclick="if(window.SFX)SFX.openChooser()"
-          style="background:none;border:1px solid var(--ttrpg-accent,#c9a84c);border-radius:12px;
-          cursor:pointer;font:inherit;line-height:1;padding:2px 8px;white-space:nowrap;color:#c9a84c;">&#9881; Sounds</button>
+          style="background:none;border:1px solid var(--sp-accent);border-radius:12px;
+          cursor:pointer;font:inherit;line-height:1;padding:2px 8px;white-space:nowrap;color:var(--sp-heading);">&#9881; Sounds</button>
       </div>
     </div>
   </div>
@@ -492,13 +506,13 @@
           <div class="d-flex align-items-center gap-1 mt-1">
             <button class="btn btn-sm btn-outline-danger py-0 px-1"
                     onclick="adjustSidebarHp('monster', {{ sm.monster_id }}, -sbAmt(this))">&#9660;</button>
-            <input type="number" class="sb-amt form-control form-control-sm bg-dark text-light border-secondary text-center"
+            <input type="number" class="sb-amt form-control form-control-sm text-center"
                    value="1" min="1" style="width:34px;padding:1px 0;font-size:.7rem;">
             <button class="btn btn-sm btn-outline-success py-0 px-1"
                     onclick="adjustSidebarHp('monster', {{ sm.monster_id }}, +sbAmt(this))">&#9650;</button>
             <span class="sb-hp" style="color:var(--ttrpg-accent);font-size:.72rem;margin-left:2px;">{{ sm.hp_current }}/{{ sm.hp_max }}</span>
           </div>
-          <div style="height:3px;background:#333;border-radius:2px;margin-top:3px;">
+          <div style="height:3px;background:var(--sp-border);border-radius:2px;margin-top:3px;">
             <div class="sb-bar" style="height:100%;border-radius:2px;transition:width .3s;
                  width:{{ sm.hp_pct() }}%;
                  background:{% if sm.hp_pct() > 50 %}#28a745{% elif sm.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};"></div>
@@ -541,13 +555,13 @@
           <div class="d-flex align-items-center gap-1 mt-1">
             <button class="btn btn-sm btn-outline-danger py-0 px-1"
                     onclick="adjustSidebarHp('player', {{ char.character_id }}, -sbAmt(this))">&#9660;</button>
-            <input type="number" class="sb-amt form-control form-control-sm bg-dark text-light border-secondary text-center"
+            <input type="number" class="sb-amt form-control form-control-sm text-center"
                    value="1" min="1" style="width:34px;padding:1px 0;font-size:.7rem;">
             <button class="btn btn-sm btn-outline-success py-0 px-1"
                     onclick="adjustSidebarHp('player', {{ char.character_id }}, +sbAmt(this))">&#9650;</button>
             <span class="sb-hp" style="color:var(--ttrpg-accent);font-size:.72rem;margin-left:2px;">{{ char.hp_current }}/{{ char.hp_max }}</span>
           </div>
-          <div style="height:3px;background:#333;border-radius:2px;margin-top:3px;">
+          <div style="height:3px;background:var(--sp-border);border-radius:2px;margin-top:3px;">
             <div class="sb-bar" style="height:100%;border-radius:2px;transition:width .3s;
                  width:{{ char.hp_pct() }}%;
                  background:{% if char.hp_pct() > 50 %}#28a745{% elif char.hp_pct() > 20 %}#ffc107{% else %}#dc3545{% endif %};"></div>
@@ -847,7 +861,7 @@
   <div class="d-flex align-items-center gap-2 mb-2">
     <label class="fx-label">Size</label>
     <input type="number" id="fx-size" value="20" min="5" step="5"
-           class="form-control form-control-sm bg-dark text-light border-secondary"
+           class="form-control form-control-sm"
            style="width:62px;"
            oninput="fxSizeFt = Math.max(5, parseInt(this.value)||20); updateFxCellLabel()">
     <span id="fx-cell-label" class="fx-label">= 4 cells</span>
@@ -886,7 +900,7 @@
   <div class="d-flex align-items-center gap-2 mb-2">
     <label class="fx-label" style="min-width:36px;">Label</label>
     <input type="text" id="fx-label-input"
-           class="form-control form-control-sm bg-dark text-light border-secondary"
+           class="form-control form-control-sm"
            placeholder="e.g. Fireball" maxlength="40"
            oninput="fxLabel = this.value">
   </div>
@@ -951,13 +965,13 @@
     <div class="d-flex align-items-center gap-2 mb-1">
       <label class="fx-label">Height</label>
       <input type="number" id="fp-wall-height" value="10" min="1" max="100" step="5"
-             class="form-control form-control-sm bg-dark text-light border-secondary"
+             class="form-control form-control-sm"
              style="width:62px;" oninput="BMFP.setWallHeight(this.value)">
       <span class="fx-label">ft</span>
     </div>
     <div class="d-flex align-items-center gap-2 mb-1">
       <label class="fx-label">Texture</label>
-      <select id="fp-wall-style" class="form-select form-select-sm bg-dark text-light border-secondary"
+      <select id="fp-wall-style" class="form-select form-select-sm"
               style="width:auto;flex:1;" onchange="BMFP.setWallStyle(this.value)"
               title="Surface finish for 3D walls and elevation sides — tinted by the map art">
         <option value="none">Smooth</option>
@@ -988,7 +1002,7 @@
     <div class="d-flex align-items-center gap-2 mb-1">
       <label class="fx-label">Height</label>
       <input type="number" id="fp-elev-height" value="-10" min="-50" max="100" step="5"
-             class="form-control form-control-sm bg-dark text-light border-secondary"
+             class="form-control form-control-sm"
              style="width:70px;" oninput="BMFP.setElevHeight(this.value)"
              title="Applied to elevation shapes as you draw them — remembered for next time">
       <span class="fx-label">ft</span>
@@ -1085,7 +1099,7 @@
       <button class="btn btn-sm btn-outline-secondary px-2 py-0"
               onclick="stepMapDiceCount(-1)" style="line-height:1.6;">&#8722;</button>
       <input type="number" id="map-dice-count" value="1" min="1" max="20"
-             class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+             class="form-control form-control-sm text-center"
              style="width:52px;">
       <button class="btn btn-sm btn-outline-secondary px-2 py-0"
               onclick="stepMapDiceCount(1)" style="line-height:1.6;">&#43;</button>
@@ -1106,12 +1120,12 @@
     <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
             onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)-1">&#8722;</button>
     <input type="number" id="map-dice-mod" value="0"
-           class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+           class="form-control form-control-sm text-center"
            style="width:72px;">
     <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
             onclick="var i=document.getElementById('map-dice-mod');i.value=(parseInt(i.value)||0)+1">+</button>
     <input type="text" id="map-dice-label" autocomplete="off"
-           class="form-control form-control-sm bg-dark text-light border-secondary"
+           class="form-control form-control-sm"
            placeholder="Label…" style="flex:1;">
   </div>
   <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
@@ -1122,7 +1136,7 @@
   <div class="d-flex align-items-center gap-2 mb-2" id="map-roller-row" style="display:none!important;">
     <label class="fx-label mb-0" style="flex-shrink:0;">Rolling as</label>
     <select id="map-roller-sel" onchange="mapRollerChanged()"
-            class="form-select form-select-sm bg-dark text-light border-secondary"
+            class="form-select form-select-sm"
             style="flex:1;font-size:.78rem;"></select>
   </div>
 
@@ -1175,9 +1189,9 @@
   <!-- Editor view -->
   <div id="map-notes-editor" style="display:none;">
     <input id="map-note-title" maxlength="120" placeholder="Title"
-           class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
+           class="form-control form-control-sm mb-2">
     <textarea id="map-note-body" rows="15" placeholder="Write your note&#8230;"
-              class="form-control form-control-sm bg-dark text-light border-secondary mb-2"
+              class="form-control form-control-sm mb-2"
               style="resize:vertical;"></textarea>
     <div class="d-flex gap-2 align-items-center">
       <button class="btn btn-sm btn-ttrpg" onclick="mapNoteSave()">Save</button>

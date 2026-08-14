@@ -11,21 +11,21 @@
         <div class="row g-3">
           <div class="col-sm-8">
             <label class="form-label">Session Title *</label>
-            <input type="text" name="title" class="form-control bg-dark text-light border-secondary"
+            <input type="text" name="title" class="form-control"
                    placeholder="The Dragon's Lair" required autofocus>
           </div>
           <div class="col-sm-4">
             <label class="form-label">Session #</label>
-            <input type="number" name="session_number" class="form-control bg-dark text-light border-secondary"
+            <input type="number" name="session_number" class="form-control"
                    value="1" min="1">
           </div>
           <div class="col-sm-6">
             <label class="form-label">Date</label>
-            <input type="date" name="session_date" value="{{ today }}" class="form-control bg-dark text-light border-secondary">
+            <input type="date" name="session_date" value="{{ today }}" class="form-control">
           </div>
           <div class="col-sm-6">
             <label class="form-label">Link to Campaign (optional)</label>
-            <select name="campaign_id" class="form-select bg-dark text-light border-secondary">
+            <select name="campaign_id" class="form-select">
               <option value="">— None —</option>
               {% for c in campaigns %}
               <option value="{{ c.campaign_id }}">{{ c.campaign_name }}</option>

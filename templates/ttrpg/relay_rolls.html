@@ -18,6 +18,7 @@
     <div class="ttrpg-card p-3 text-muted">No rolls recorded for this session yet.</div>
     {% else %}
     <div class="ttrpg-card p-0">
+      <div class="sp-table-scroll">
       <table class="table ttrpg-table mb-0" style="font-size:.9rem;">
         <thead>
           <tr>
@@ -40,6 +41,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
     <div class="small text-muted mt-2">Showing up to 200 most recent rolls. Max 500 stored per session.</div>
     {% endif %}

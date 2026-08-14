@@ -15,15 +15,15 @@
         <div class="d-flex align-items-center gap-1">
           <span class="text-muted" style="font-size:.75rem;">Level</span>
           <input type="number" id="rand-min-level" value="1" min="1" max="20"
-                 class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                 class="form-control form-control-sm text-center"
                  style="width:58px;" title="Minimum random level">
           <span class="text-muted">&ndash;</span>
           <input type="number" id="rand-max-level" value="20" min="1" max="20"
-                 class="form-control form-control-sm bg-dark text-light border-secondary text-center"
+                 class="form-control form-control-sm text-center"
                  style="width:58px;" title="Maximum random level">
         </div>
         <select id="rand-genre" onchange="syncGenre()"
-                class="form-select form-select-sm bg-dark text-light border-secondary"
+                class="form-select form-select-sm"
                 style="width:auto;" title="Genre skin for names, traits, and portrait style">
           {% for key, label in genre_options %}
           <option value="{{ key }}">{{ label }}</option>
@@ -40,13 +40,13 @@
         <div class="row g-3">
           <div class="col-sm-6">
             <label class="form-label">Character Name *</label>
-            <input type="text" name="name" class="form-control bg-dark text-light border-secondary" required autofocus>
+            <input type="text" name="name" class="form-control" required autofocus>
           </div>
           <div class="col-sm-3">
             <label class="form-label">Class</label>
             <div style="position:relative;">
               <input type="text" name="char_class" id="new-char-class"
-                     class="form-control bg-dark text-light border-secondary"
+                     class="form-control"
                      placeholder="Fighter, Wizard…" autocomplete="off"
                      oninput="newLibSearch('class', this.value)"
                      onfocus="newLibSearch('class', this.value)">
@@ -61,7 +61,7 @@
             <label class="form-label">Race</label>
             <div style="position:relative;">
               <input type="text" name="race" id="new-race"
-                     class="form-control bg-dark text-light border-secondary"
+                     class="form-control"
                      placeholder="Human, Elf…" autocomplete="off"
                      oninput="newLibSearch('race', this.value)"
                      onfocus="newLibSearch('race', this.value)">
@@ -74,20 +74,20 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label">Level</label>
-            <input type="number" name="level" class="form-control bg-dark text-light border-secondary" value="1" min="1" max="30">
+            <input type="number" name="level" class="form-control" value="1" min="1" max="30">
           </div>
           <div class="col-sm-3">
             <label class="form-label">Subclass</label>
-            <input type="text" name="subclass" class="form-control bg-dark text-light border-secondary" placeholder="Champion… (level 3+)">
+            <input type="text" name="subclass" class="form-control" placeholder="Champion… (level 3+)">
           </div>
           <div class="col-sm-6">
             <label class="form-label">Background</label>
-            <input type="text" name="background" class="form-control bg-dark text-light border-secondary" placeholder="Soldier, Noble…">
+            <input type="text" name="background" class="form-control" placeholder="Soldier, Noble…">
           </div>
           <div class="col-sm-3">
             <label class="form-label">Portrait</label>
             <input type="file" name="portrait" id="new-portrait-input"
-                   class="form-control bg-dark text-light border-secondary"
+                   class="form-control"
                    accept="image/png,image/jpeg,image/gif,image/webp"
                    onchange="previewNewPortrait(this)">
             <div id="new-portrait-preview" style="display:none;margin-top:4px;">
@@ -108,7 +108,7 @@
           {% if open_sessions %}
           <div class="col-sm-3">
             <label class="form-label">Add to Session</label>
-            <select name="add_session_id" class="form-select bg-dark text-light border-secondary">
+            <select name="add_session_id" class="form-select">
               <option value="">&mdash; none &mdash;</option>
               {% for s in open_sessions %}
               <option value="{{ s.session_id }}">
@@ -126,23 +126,23 @@
         <div class="row g-3">
           <div class="col-4 col-sm-2">
             <label class="form-label">HP Max</label>
-            <input type="number" name="hp_max" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+            <input type="number" name="hp_max" class="form-control" value="0" min="0">
           </div>
           <div class="col-4 col-sm-2">
             <label class="form-label">AC</label>
-            <input type="number" name="ac" class="form-control bg-dark text-light border-secondary" value="10" min="0">
+            <input type="number" name="ac" class="form-control" value="10" min="0">
           </div>
           <div class="col-4 col-sm-2">
             <label class="form-label">Speed</label>
-            <input type="number" name="speed" class="form-control bg-dark text-light border-secondary" value="30" min="0">
+            <input type="number" name="speed" class="form-control" value="30" min="0">
           </div>
           <div class="col-4 col-sm-3">
             <label class="form-label">Initiative Bonus</label>
-            <input type="number" name="initiative_bonus" class="form-control bg-dark text-light border-secondary" value="0">
+            <input type="number" name="initiative_bonus" class="form-control" value="0">
           </div>
           <div class="col-4 col-sm-3">
             <label class="form-label">Passive Perc.</label>
-            <input type="number" name="passive_perception" class="form-control bg-dark text-light border-secondary" value="10">
+            <input type="number" name="passive_perception" class="form-control" value="10">
           </div>
         </div>
 
@@ -152,7 +152,7 @@
           {% for label, field in [('STR','str_val'),('DEX','dex_val'),('CON','con_val'),('INT','int_val'),('WIS','wis_val'),('CHA','cha_val')] %}
           <div class="col-4 col-sm-2">
             <label class="form-label">{{ label }}</label>
-            <input type="number" name="{{ field }}" class="form-control bg-dark text-light border-secondary text-center"
+            <input type="number" name="{{ field }}" class="form-control text-center"
                    value="10" min="1" max="30">
           </div>
           {% endfor %}
@@ -161,7 +161,7 @@
         <!-- Personality -->
         <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Personality &amp; Traits</h6>
         <textarea name="traits_note" id="traits-note" rows="4"
-                  class="form-control bg-dark text-light border-secondary"
+                  class="form-control"
                   placeholder="Personality, ideal, bond, flaw — filled by Randomize, or write your own. Saved as the character's first note."></textarea>
 
         <!-- Currency -->
@@ -169,15 +169,15 @@
         <div class="row g-3">
           <div class="col-4 col-sm-2">
             <label class="form-label">Gold</label>
-            <input type="number" name="gold" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+            <input type="number" name="gold" class="form-control" value="0" min="0">
           </div>
           <div class="col-4 col-sm-2">
             <label class="form-label">Silver</label>
-            <input type="number" name="silver" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+            <input type="number" name="silver" class="form-control" value="0" min="0">
           </div>
           <div class="col-4 col-sm-2">
             <label class="form-label">Copper</label>
-            <input type="number" name="copper" class="form-control bg-dark text-light border-secondary" value="0" min="0">
+            <input type="number" name="copper" class="form-control" value="0" min="0">
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="sp-page-head">
     <h2 style="color: var(--ttrpg-accent);">&#9876; DM Dashboard</h2>
     <div>
         <a href="{{ url_for('ttrpg.session_new') }}" class="btn btn-ttrpg btn-sm me-2">+ New Session</a>
@@ -25,6 +25,7 @@
         <div class="ttrpg-card p-3 h-100">
             <h5 style="color: var(--ttrpg-accent);">Campaigns</h5>
             {% if campaigns %}
+            <div class="sp-table-scroll">
             <table class="table table-sm table-hover mb-0 ttrpg-table" id="campaignTable">
                 <thead><tr><th>Name</th><th>Status</th></tr></thead>
                 <tbody>
@@ -44,6 +45,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <p class="text-muted small">No campaigns yet. Create one in the main ScenePlay tables.</p>
             {% endif %}
@@ -124,6 +126,7 @@
                 <a href="{{ url_for('ttrpg.sessions_list') }}" class="btn btn-sm btn-outline-secondary">All Sessions</a>
             </div>
             {% if sessions %}
+            <div class="sp-table-scroll">
             <table class="table table-sm table-hover mb-0 ttrpg-table" id="sessionsTable">
                 <thead>
                     <tr>
@@ -158,6 +161,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <p class="text-muted small">No sessions yet. <a href="{{ url_for('ttrpg.session_new') }}" style="color:var(--ttrpg-accent);">Create the first one.</a></p>
             {% endif %}

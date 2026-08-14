@@ -1,7 +1,7 @@
 {% extends 'ttrpg/base_ttrpg.html' %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="sp-page-head">
   <h3 style="color:var(--ttrpg-accent);">All Characters</h3>
   <div class="d-flex align-items-center gap-2">
     {% if sessions %}
@@ -21,6 +21,7 @@
 
 {% if characters %}
 <div class="ttrpg-card p-0">
+  <div class="sp-table-scroll">
   <table class="table table-hover mb-0 ttrpg-table">
     <thead>
       <tr>
@@ -70,6 +71,7 @@
       </tr>
     </tbody>
   </table>
+  </div>
 </div>
 
 <script>

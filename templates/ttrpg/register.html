@@ -16,19 +16,19 @@
             <form method="POST">
                 <div class="mb-3">
                     <label class="form-label">Username</label>
-                    <input type="text" name="username" class="form-control bg-dark text-light border-secondary" required>
+                    <input type="text" name="username" class="form-control" required>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Display Name</label>
-                    <input type="text" name="display_name" class="form-control bg-dark text-light border-secondary" required>
+                    <input type="text" name="display_name" class="form-control" required>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Password</label>
-                    <input type="password" name="password" class="form-control bg-dark text-light border-secondary" required>
+                    <input type="password" name="password" class="form-control" required>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Role</label>
-                    <select name="role" class="form-select bg-dark text-light border-secondary">
+                    <select name="role" class="form-select">
                         <option value="player">Player</option>
                         <option value="dm">Dungeon Master</option>
                     </select>
@@ -98,7 +98,7 @@
 <!-- Reset Password Modal -->
 <div class="modal fade" id="resetPwModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-sm">
-        <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-content">
             <div class="modal-header border-secondary">
                 <h5 class="modal-title" style="color:var(--ttrpg-accent);">Reset Password</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -109,7 +109,7 @@
                     <div class="mb-3">
                         <label class="form-label">New Password</label>
                         <input type="password" name="new_password" id="resetPwInput"
-                               class="form-control bg-dark text-light border-secondary" required>
+                               class="form-control" required>
                     </div>
                 </div>
                 <div class="modal-footer border-secondary">
@@ -124,7 +124,7 @@
 <!-- Edit User Modal -->
 <div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-sm">
-        <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-content">
             <div class="modal-header border-secondary">
                 <h5 class="modal-title" style="color:var(--ttrpg-accent);">Edit Account</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -134,14 +134,14 @@
                     <div class="mb-3">
                         <label class="form-label">Username <span class="text-secondary">(login)</span></label>
                         <input type="text" name="username" id="editUsernameInput"
-                               class="form-control bg-dark text-light border-secondary" required>
+                               class="form-control" required>
                         <div class="form-text">They log in with the new name from
                             their next login; nobody is logged out now.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Display Name</label>
                         <input type="text" name="display_name" id="editDisplayInput"
-                               class="form-control bg-dark text-light border-secondary" required>
+                               class="form-control" required>
                         <div class="form-text">What the stream overlays show.</div>
                     </div>
                 </div>
