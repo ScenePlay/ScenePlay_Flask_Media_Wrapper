@@ -76,6 +76,21 @@
               </a>
               {% endif %}
 
+              {% if obs_on %}
+              <!-- OBS indicator, paired with the relay's: green = websocket
+                   connected, amber = integration enabled but OBS unreachable
+                   (not running, or wrong host/port). Amber is why a stream
+                   is black, so it earns navbar space; click through to the
+                   Broadcast page to see the full rig summary. -->
+              <a href="{{ url_for('obs_bp.broadcast') }}"
+                 class="nav-link sp-status-pill"
+                 style="--pill: {{ '#28a745' if obs_connected else '#e0a800' }};"
+                 title="{% if obs_connected %}OBS is connected — click for the Broadcast console{% else %}OBS integration is enabled but OBS is not connected — launch OBS, or check the host/port on the Broadcast page{% endif %}">
+                <span class="sp-status-dot"></span>
+                {% if obs_connected %}OBS&nbsp;ON{% else %}OBS&nbsp;OFFLINE{% endif %}
+              </a>
+              {% endif %}
+
               {% if led_remote_failing %}
               <!-- LAN LED-remote transfer failing: each dead Remote box costs
                    a 4 s timeout on EVERY scene switch. Click through to the

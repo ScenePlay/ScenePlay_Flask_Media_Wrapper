@@ -77,6 +77,32 @@
             </ul>
         </div>
 
+        {% if current_user.is_authenticated and current_user.is_dm() %}
+        <!-- Same relay/OBS pills as the media pages' header, so the whole
+             site answers "is my table online?" in the same place. DM-only
+             here: both link to admin pages players cannot open, and a
+             player's navbar shouldn't carry the rig's health. Outside the
+             collapse so they stay visible on a phone during play. -->
+        {% if relay_on %}
+        {% set _rcolor = '#dc3545' if relay_failing else ('#e0a800' if relay_stale else '#28a745') %}
+        <a href="{{ url_for('relay_admin_bp.status') }}"
+           class="nav-link sp-status-pill" style="--pill: {{ _rcolor }};"
+           title="{% if relay_failing %}Relay UNREACHABLE — API pushes are failing ({{ relay_fail_msg }}). Scene switches will lag; disable the relay if you're not using it.{% elif relay_stale %}Relay is enabled but not syncing — click to manage{% else %}Remote-play relay is running — click to manage{% endif %}">
+          <span class="sp-status-dot"></span>
+          {% if relay_failing %}<span data-sp-alert="1">Relay&nbsp;FAILING</span>{% else %}Relay&nbsp;ON{% endif %}
+        </a>
+        {% endif %}
+        {% if obs_on %}
+        <a href="{{ url_for('obs_bp.broadcast') }}"
+           class="nav-link sp-status-pill"
+           style="--pill: {{ '#28a745' if obs_connected else '#e0a800' }};"
+           title="{% if obs_connected %}OBS is connected — click for the Broadcast console{% else %}OBS integration is enabled but OBS is not connected — launch OBS, or check the host/port on the Broadcast page{% endif %}">
+          <span class="sp-status-dot"></span>
+          {% if obs_connected %}OBS&nbsp;ON{% else %}OBS&nbsp;OFFLINE{% endif %}
+        </a>
+        {% endif %}
+        {% endif %}
+
         <span class="sp-version" title="ScenePlay version">v{{ sp_version }}</span>
 
         <!-- Theme picker — after collapse so it sits at far right and is never clipped -->

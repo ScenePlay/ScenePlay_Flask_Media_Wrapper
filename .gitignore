@@ -191,3 +191,7 @@ player_debug.log
 
 # FUSE artifacts: deleted-but-still-open files on this mount
 .fuse_hidden*
+
+# yt-dlp test downloads (media + .info.json) dropped in the repo root by
+# extractor test runs. Anchored to the root so tests/test_*.py stays tracked.
+/test_*

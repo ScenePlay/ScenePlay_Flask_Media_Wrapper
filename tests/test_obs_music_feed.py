@@ -57,6 +57,15 @@ class TestMusicUrls:
         assert '&proaudio' in url
         assert '&audiodevice=ScenePlay-Music' in url
 
+    def test_push_never_opens_a_camera(self, app, settings):
+        """The page promises "music only, no camera or microphone" — but
+        &autostart alone also switches on the default webcam. &videodevice=0
+        is what actually keeps that promise."""
+        import routes.obs as ro
+        assert '&videodevice=0' in ro.music_push_url()
+        assert 'videodevice' not in ro.music_view_url(), \
+            'the viewer captures nothing; the param is a publisher concern'
+
     def test_push_never_joins_the_table_room(self, app, settings):
         """Players already get the music through the portal; in the room too
         they would hear it twice, out of sync with itself."""

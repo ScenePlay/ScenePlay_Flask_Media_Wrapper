@@ -125,6 +125,12 @@ def _obs_cfg():
                           or 'auto') != 'auto'),
         'music_label':   music_device_label(),
         'music_push':    music_push_url(),
+        # The cable half of the feed path — Windows only, where there is no
+        # sink for mpv to play into and nothing for the push tab to capture.
+        'music_cable':   music_cable_platform(),
+        'music_out':     music_output_device(),
+        'music_outs':    music_output_options(),
+        'music_label_opts': music_label_options(),
         'obs_local':     obs_is_local(),
         'rig':           rig_summary(),
         'dm_mic_label':  (appsettingGet('obs_dm_mic_label', '') or ''),
@@ -1080,6 +1086,12 @@ def save_config():
     label = (request.form.get('obs_music_device_label') or '').strip()
     if label:
         appsettingSet('obs_music_device_label', label[:120])
+    # Same disabled-field rule, but an empty value here is a real choice
+    # ("just use the default output"), so presence — not truthiness — decides.
+    if 'music_output_device' in request.form:
+        appsettingSet('music_output_device',
+                      (request.form.get('music_output_device', '')
+                       or '').strip()[:200])
     # Checkbox is "players SEE each other" — the inverse of the stored flag,
     # so an unticked (absent) box lands on the safe audio-only default.
     appsettingSet('obs_room_audio_only',
@@ -3281,6 +3293,182 @@ def music_device_label():
             or DEFAULT_MUSIC_LABEL)
 
 
+def music_cable_platform():
+    """Does the machine playing the music need a virtual cable to publish it?
+
+    Windows does: it has no null sink to build and no monitor source, so the
+    vdo.ninja push tab can only capture a real recording device. Asked as its
+    own question so the page and the warnings agree, and so a test can put
+    either platform in front of them."""
+    return os.name == 'nt'
+
+
+def music_output_device():
+    """The device the music player plays INTO on this machine (mpv's
+    --audio-device), or '' for whatever Windows/mpv picks by default.
+
+    Only meaningful on Windows. Linux builds the capture sink itself and mpv
+    is pointed at it automatically; Windows has no sink to build, so the feed
+    path needs a virtual cable the DM installs and names here. See
+    relay_audio_stream.win_device."""
+    return (appsettingGet('music_output_device', '') or '').strip()
+
+
+_MPV_DEVICES = {'at': 0.0, 'list': []}
+_MPV_DEVICES_TTL = 60      # a cable is installed once; re-probing per render
+                           # spawns mpv on every Broadcast poll for nothing
+
+
+def music_output_choices(refresh=False):
+    """Audio outputs mpv can actually play into on this machine.
+
+    Asked of mpv rather than of Windows: the id in the box IS an mpv
+    --audio-device value, and mpv's WASAPI ids are opaque GUIDs. Typing one
+    correctly from a Windows sound panel is not something to ask of anyone, so
+    the page offers the list mpv itself prints.
+
+    Returns [(device_id, human label)], default-output first. Empty list of
+    devices (no mpv on PATH, probe failed) still yields that first entry, so
+    the control degrades to "default output" rather than vanishing.
+
+    Never probes on a platform with no cable to pick: Linux builds its own
+    sink and hides this control entirely, so spawning mpv there would be a
+    subprocess per render feeding a dropdown nobody sees."""
+    import subprocess
+    out = [('', 'Default output device')]
+    if not music_cable_platform():
+        return out
+    if refresh or (time.time() - _MPV_DEVICES['at']) > _MPV_DEVICES_TTL:
+        found = []
+        try:
+            res = subprocess.run(
+                ['mpv', '--audio-device=help'], capture_output=True,
+                text=True, timeout=8,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            for line in (res.stdout or '').splitlines():
+                m = re.match(r"\s*'([^']+)'\s+\((.*)\)\s*$", line)
+                # 'auto' is mpv's own default pick — the blank entry above
+                # already means that, and two ways to say it read as two
+                # different choices.
+                if m and m.group(1) != 'auto':
+                    label = m.group(2)
+                    # VB-CABLE ships two near-twin playback ends: "CABLE
+                    # Input" (stereo, pairs with the "CABLE Output" the feed
+                    # captures) and "CABLE In 16ch" (multichannel; what goes
+                    # in there does not arrive at the stereo output). Four
+                    # characters apart in a dropdown, and picking the wrong
+                    # one is a silent dead feed — say so on the option
+                    # itself, where the choice is being made.
+                    if re.search(r'CABLE In 16\s*ch', label, re.I):
+                        label += ' — wrong end for the feed; use "CABLE Input"'
+                    found.append((m.group(1), label))
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            log.info('Could not list mpv audio devices: %s', exc)
+        # A failed probe keeps the last good list rather than emptying the
+        # box: the DM's chosen cable would otherwise disappear from the select
+        # mid-session and the next autosave would write it away as "default".
+        if found:
+            _MPV_DEVICES['list'] = found
+        _MPV_DEVICES['at'] = time.time()
+    return out + list(_MPV_DEVICES['list'])
+
+
+_CAPTURE_DEVICES = {'at': 0.0, 'list': []}
+
+
+def music_capture_choices(refresh=False):
+    """Capture-device labels this machine could offer the vdo.ninja push tab —
+    suggestions for the "device vdo.ninja should send" box, not a closed list.
+
+    The box stays free text because the MATCH happens in the browser, against
+    whatever labels IT enumerates; this list exists so the DM picks the right
+    device instead of transcribing it. Each platform is asked in its own
+    language: Windows via ffmpeg's DirectShow enumeration (ffmpeg already
+    ships with the relay), Linux via pactl's source descriptions — the labels
+    a browser shows — with the app-built ScenePlay-Music source pinned first,
+    because it is the one right answer there. Monitor sources are left out:
+    "Monitor of <your speakers>" would capture the players and loop them
+    back, and the safe monitor carries the same audio as ScenePlay-Music.
+    Cached and kept-on-failure like the mpv probe; a machine with neither
+    enumerator (macOS) gets no suggestions rather than wrong ones."""
+    import shutil
+    import subprocess
+    if not music_cable_platform() and not shutil.which('pactl'):
+        return []
+    if refresh or (time.time() - _CAPTURE_DEVICES['at']) > _MPV_DEVICES_TTL:
+        found = []
+        try:
+            if music_cable_platform():
+                res = subprocess.run(
+                    ['ffmpeg', '-hide_banner', '-list_devices', 'true',
+                     '-f', 'dshow', '-i', 'dummy'],
+                    capture_output=True, text=True, timeout=8,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                # The list rides on stderr (the "input" itself fails, by
+                # design), one device per line: "Name" (audio)
+                for line in ((res.stderr or '')
+                             + (res.stdout or '')).splitlines():
+                    m = re.search(r'"([^"]+)"\s+\(audio\)\s*$', line)
+                    if m:
+                        found.append(m.group(1))
+            else:
+                # The default label leads even if the probe finds nothing:
+                # the remap source only exists once music has played, and
+                # the DM configures this page before pressing play.
+                found.append(DEFAULT_MUSIC_LABEL)
+                res = subprocess.run(
+                    ['pactl', 'list', 'sources'],
+                    capture_output=True, text=True, timeout=8)
+                for line in (res.stdout or '').splitlines():
+                    m = re.match(r'\s*Description:\s*(.+?)\s*$', line)
+                    if m:
+                        lbl = m.group(1)
+                        if (lbl != DEFAULT_MUSIC_LABEL
+                                and not lbl.startswith('Monitor of ')):
+                            found.append(lbl)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            log.info('Could not list capture devices: %s', exc)
+            # A failed probe keeps the last good list; with nothing to keep,
+            # the seeded default (Linux) still makes it into the box.
+            if _CAPTURE_DEVICES['list']:
+                found = []
+        if found:
+            _CAPTURE_DEVICES['list'] = found
+        _CAPTURE_DEVICES['at'] = time.time()
+    return list(_CAPTURE_DEVICES['list'])
+
+
+def music_output_options():
+    """The choices the page shows, with the DM's saved device guaranteed to be
+    among them.
+
+    A device missing from the probe (mpv absent, cable unplugged, USB
+    interface asleep) would otherwise leave the select sitting on "default" —
+    and the page autosaves, so simply LOOKING at it would erase the setting
+    and take the music off the cable."""
+    chosen = music_output_device()
+    opts = music_output_choices()
+    if chosen and not any(dev == chosen for dev, _lbl in opts):
+        opts.append((chosen, chosen + ' — saved, not detected right now'))
+    return opts
+
+
+def music_label_options():
+    """The choices the vdo.ninja label select shows, with the saved label
+    guaranteed among them — same autosave trap as music_output_options: a
+    saved label the probe misses would leave the select on its first entry,
+    and merely opening the page would save that entry back.
+
+    A select, not free text, since music_capture_choices learned to answer
+    per-platform: each machine now lists its own right devices, and the match
+    string no longer needs to be typable from memory."""
+    chosen = music_device_label()
+    opts = [(lbl, lbl) for lbl in music_capture_choices()]
+    if not any(val == chosen for val, _lbl in opts):
+        opts.append((chosen, chosen + ' — saved, not detected right now'))
+    return opts
+
+
 def repush_feeds(reason=''):
     """Tell the relay portal that the camera links changed.
 
@@ -3372,7 +3560,10 @@ def _music_vdo_url(kind):
         base += '/'
     sid = quote(music_stream_id(), safe='')
     if kind == 'push':
-        url = (f'{base}?push={sid}&proaudio&autostart'
+        # &videodevice=0: audio only. Without it, &autostart also switches on
+        # the machine's default webcam — the page promises "no camera", and
+        # the DM's camera already reaches the stream through their tile.
+        url = (f'{base}?push={sid}&proaudio&autostart&videodevice=0'
                f'&audiodevice={quote(music_device_label(), safe="")}')
     else:
         url = f'{base}?view={sid}&proaudio&cleanoutput&transparent&autostart'
@@ -3474,6 +3665,26 @@ def rig_summary():
                 'Outside the table room, because they use a custom feed URL '
                 'ScenePlay cannot add the room to: ' + ', '.join(outside) +
                 '. Clear the custom URL on their camera page to bring them in.')
+    # The feed's publishing half, which lives on THIS machine and is invisible
+    # from OBS: the source there is created, unmuted and correct whether or not
+    # anything is being published into it. On Windows both halves of the cable
+    # have to be named, and neither has a default that works — the shipped
+    # label is a PulseAudio device that exists on Linux only.
+    if transport == 'feed' and music_cable_platform():
+        if not music_output_device():
+            problems.append(
+                'The music player is not playing into a virtual cable, so the '
+                'feed has nothing to send. Windows has no capture sink: pick '
+                'the cable\'s INPUT under "Music output device" below (install '
+                'VB-CABLE first if the list has none), and tick "Listen to '
+                'this device" on its output in Windows Sound so you still '
+                'hear the music yourself.')
+        if music_device_label() == DEFAULT_MUSIC_LABEL:
+            problems.append(
+                f'The feed is set to send "{DEFAULT_MUSIC_LABEL}", which is a '
+                f'Linux-only device and does not exist on this machine — the '
+                f'browser matches nothing and publishes silence. Use the '
+                f'cable\'s OUTPUT instead (e.g. "CABLE Output").')
     if transport == 'feed':
         steps.append('Open the music feed on the machine playing the music '
                      'and leave the tab running.')

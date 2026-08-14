@@ -1125,18 +1125,73 @@
 
         <!-- vdo.ninja feed: needs a tab open on the music machine. -->
         <div class="ttrpg-card p-2 mb-2" id="obs-music-feed-block">
-          <div class="small fw-bold mb-1" style="color:var(--ttrpg-accent);">
-            Sending it as a vdo.ninja feed</div>
+          <div class="small fw-bold mb-1 d-flex justify-content-between align-items-baseline"
+               style="color:var(--ttrpg-accent);">
+            <span>Sending it as a vdo.ninja feed</span>
+            {% if cfg.music_cable %}
+            <!-- The trigger lives in the block (it is a feed concern), the
+                 modal itself below it: obsPaintMusicPath disables every
+                 field and link inside an inactive block, and the guide must
+                 still open once the block is active again. -->
+            <a href="#" class="small fw-normal" data-bs-toggle="modal"
+               data-bs-target="#obs-music-win-help">Windows setup guide</a>
+            {% endif %}
+          </div>
+          {% if cfg.music_cable %}
+          <!-- Windows: no capture sink exists, so the music has to be routed
+               out through a virtual cable before anything can send it. Both
+               ends are named here — the input mpv plays into, the output the
+               browser captures. -->
+          <div class="mb-2">
+            <label class="form-label small mb-1" for="obs-music-out">
+              Music output device <span class="text-muted">(this machine)</span></label>
+            <select name="music_output_device" id="obs-music-out"
+                    form="obs-cfg-form" class="form-select form-select-sm">
+              {% for dev, lbl in cfg.music_outs %}
+              <option value="{{ dev }}"
+                      {% if cfg.music_out == dev %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text small">
+              Where the music player sends its sound. Windows cannot capture a
+              speaker output, so pick your cable's <b>input</b> (e.g.
+              <code>CABLE Input (VB-Audio Virtual Cable)</code>) &mdash; then
+              tick <b>Listen to this device</b> on <code>CABLE Output</code> in
+              Windows Sound &rarr; Recording, or you will stop hearing the
+              music yourself. Takes effect on the next track.
+            </div>
+          </div>
+          {% endif %}
           <div class="row g-2 align-items-end">
             <div class="col-sm-7">
               <label class="form-label small mb-1" for="obs-music-label">
                 Audio device vdo.ninja should send</label>
-              <input type="text" name="obs_music_device_label" id="obs-music-label"
-                     form="obs-cfg-form" class="form-control form-control-sm"
-                     value="{{ cfg.music_label }}" placeholder="ScenePlay-Music">
+              <!-- A select of this machine's own devices, per platform:
+                   pactl sources on Linux (ScenePlay-Music first — the app
+                   builds it, so it is preselected out of the box), DirectShow
+                   devices on Windows. A saved label the probe misses stays as
+                   an extra option, or the autosave would erase it on sight
+                   (see music_label_options). -->
+              <select name="obs_music_device_label" id="obs-music-label"
+                      form="obs-cfg-form" class="form-select form-select-sm">
+                {% for val, lbl in cfg.music_label_opts %}
+                <option value="{{ val }}"
+                        {% if cfg.music_label == val %}selected{% endif %}>{{ lbl }}</option>
+                {% endfor %}
+              </select>
               <div class="form-text small">
-                Matched on the device <em>label</em>. On Windows or macOS this
-                is your virtual cable instead (e.g. <code>CABLE Output</code>).
+                Matched on the device <em>label</em>.
+                {% if cfg.music_cable %}
+                On this machine that is the cable's <b>output</b> &mdash;
+                <code>CABLE Output</code> &mdash; the recording end of what you
+                picked above. <code>ScenePlay-Music</code> is Linux-only and
+                will match nothing here.
+                {% else %}
+                On this machine <code>ScenePlay-Music</code> &mdash; the
+                source ScenePlay builds itself &mdash; is already the right
+                answer; leave it unless you route the music through a real
+                device.
+                {% endif %}
               </div>
             </div>
             <div class="col-sm-5">
@@ -1149,6 +1204,97 @@
             </div>
           </div>
         </div>
+
+        {% if cfg.music_cable %}
+        <!-- The Windows walkthrough (docs/OBS_MUSIC_WINDOWS.md, condensed).
+             In a modal because it is needed exactly once, at setup, on the
+             machine this page is already open on. -->
+        <div class="modal fade" id="obs-music-win-help" tabindex="-1"
+             aria-labelledby="obs-music-win-help-title" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content"
+                 style="background:var(--sp-surface);color:var(--sp-text);border:1px solid var(--sp-border);">
+              <div class="modal-header" style="border-color:var(--sp-border);">
+                <h5 class="modal-title fs-6" id="obs-music-win-help-title"
+                    style="color:var(--ttrpg-accent);">
+                  Music &rarr; OBS from Windows</h5>
+                <button type="button" class="btn-close btn-close-white"
+                        data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body small">
+                <p class="mb-2">Windows has no capture sink for the music, so
+                it travels through a <b>virtual audio cable</b>: the player
+                sends sound into one end, the feed tab captures the other.
+                Every step is one-time setup.</p>
+                <pre class="p-2 mb-3" style="background:var(--sp-surface-2);color:var(--sp-text);border:1px solid var(--sp-border);border-radius:var(--sp-radius);overflow-x:auto;">music player &rarr; CABLE Input &#9655; CABLE Output &rarr; feed tab &rarr; OBS
+                                    &#9584;&rarr; "Listen" &rarr; your speakers</pre>
+
+                <div class="fw-bold mb-1" style="color:var(--ttrpg-accent);">
+                  1. Install VB-CABLE <span class="text-muted fw-normal">(once)</span></div>
+                <p class="mb-2">Download from
+                <a href="https://vb-audio.com/Cable/" target="_blank"
+                   rel="noopener">vb-audio.com/Cable</a>, run the installer
+                <b>as administrator</b>, reboot. Do <b>not</b> make the cable
+                the Windows default output &mdash; only the music belongs in
+                it.</p>
+
+                <div class="fw-bold mb-1" style="color:var(--ttrpg-accent);">
+                  2. Point both ends at it <span class="text-muted fw-normal">(this page, below)</span></div>
+                <p class="mb-2"><b>Music output device</b> &rarr;
+                <code>CABLE Input</code>. <b>Device vdo.ninja should send</b>
+                &rarr; <code>CABLE Output</code>. The player picks up the
+                device on the <b>next track</b>, so skip one after changing
+                it. (<code>ScenePlay-Music</code> is the Linux default and
+                matches nothing on Windows.)</p>
+
+                <div class="fw-bold mb-1" style="color:var(--ttrpg-accent);">
+                  3. Keep hearing it yourself</div>
+                <p class="mb-2">The cable takes the music off your speakers.
+                Mirror it back: <kbd>Win</kbd>+<kbd>R</kbd> &rarr;
+                <code>mmsys.cpl</code> &rarr; <b>Recording</b> &rarr;
+                double-click <b>CABLE Output</b> &rarr; <b>Listen</b> tab
+                &rarr; tick <b>Listen to this device</b> &rarr; play back
+                through your real speakers. It cannot echo into the stream
+                &mdash; the feed reads the cable, not the speakers.</p>
+
+                <div class="fw-bold mb-1" style="color:var(--ttrpg-accent);">
+                  4. Start the feed</div>
+                <p class="mb-2">Click <b>&#9835; Start the music feed</b> and
+                leave the tab open (audio only &mdash; no camera). Allow the
+                microphone prompt: the "microphone" is the cable. Reopen the
+                link after changing settings &mdash; the device name is baked
+                into it. In OBS, the <b>ScenePlay Music Feed</b> meter should
+                move.</p>
+
+                <div class="fw-bold mb-1" style="color:var(--ttrpg-accent);">
+                  If it is silent, walk the chain</div>
+                <div class="table-responsive">
+                  <table class="table table-sm ttrpg-table mb-1">
+                    <thead><tr><th>Check</th><th>If dead</th></tr></thead>
+                    <tbody>
+                      <tr><td>Green bar on <b>CABLE Output</b> in
+                        <code>mmsys.cpl</code> &rarr; Recording</td>
+                        <td>Step 2's output device &mdash; then skip to the
+                        next track.</td></tr>
+                      <tr><td>Audio meter in the feed tab</td>
+                        <td>Step 2's send label &mdash; then close and reopen
+                        the tab.</td></tr>
+                      <tr><td>Mixer meter in OBS</td>
+                        <td>Rebuild scenes; check the OBS machine reaches
+                        vdo.ninja.</td></tr>
+                      <tr><td>Your speakers</td>
+                        <td>Step 3's "Listen to this device".</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="text-muted">Full guide with details:
+                  <code>docs/OBS_MUSIC_WINDOWS.md</code> in the ScenePlay
+                  folder.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
 
         <div class="small fw-bold mt-3 mb-1" style="color:var(--ttrpg-accent);letter-spacing:.08em;text-transform:uppercase;font-size:.68rem;">You — the DM's tile &amp; audio</div>
         <div class="form-check mb-2">

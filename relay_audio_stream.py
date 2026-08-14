@@ -286,6 +286,40 @@ def sink_name():
     return SINK_NAME if (not _IS_WIN and _graph_ready) else None
 
 
+# Windows has no null sink to build — this module captures the mpv PROCESS for
+# the relay instead, which needs no device at all. But OBS's music feed does:
+# the vdo.ninja push tab can only publish what Windows offers it as a CAPTURE
+# device, and a plain speaker output is not one. So the DM installs a virtual
+# cable (VB-CABLE), mpv plays into its input, and the browser sends its output
+# back. This setting holds the mpv --audio-device value they picked; run
+# `mpv --audio-device=help` to see the list.
+WIN_DEVICE_SETTING = "music_output_device"
+
+
+def win_device():
+    """The virtual cable mpv should play into on Windows, or None.
+
+    None means mpv's default output — the music reaches the GM's speakers and
+    nothing else, which is correct for a table not using the OBS music feed
+    and is exactly the silent failure when it IS: the feed tab finds no cable
+    to capture, so the OBS source is live, unmuted and carries nothing."""
+    if not _IS_WIN:
+        return None
+    try:
+        from sql import appsettingGet
+        return (appsettingGet(WIN_DEVICE_SETTING, "") or "").strip() or None
+    except Exception:      # settings unreachable — play, just not into a cable
+        return None
+
+
+def output_device():
+    """Device mpv should play into on THIS platform, or None for the default.
+
+    One call site in play_mp3_local, two answers: the capture sink on Linux
+    (once the graph is up), the DM's virtual cable on Windows."""
+    return win_device() if _IS_WIN else sink_name()
+
+
 # ── capture processes ─────────────────────────────────────────────────────────
 
 def _bitrate():

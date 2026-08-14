@@ -213,6 +213,26 @@ def inject_relay_status():
 
 
 @app.context_processor
+def inject_obs_status():
+    """Navbar 'OBS' badge, paired with the relay one: enabled-and-connected
+    is green, enabled-but-unreachable amber. Amber is not an error state —
+    OBS simply may not be running yet — but it IS the answer to "why is my
+    stream black", so it belongs where the DM already looks for the relay.
+    connected() is an in-memory flag; no OBS round trip on any render."""
+    out = {'obs_on': False, 'obs_connected': False}
+    try:
+        from sql import appsettingGet
+        if appsettingGet('obs_enabled', '0') != '1':
+            return out
+        out['obs_on'] = True
+        import obs_ws
+        out['obs_connected'] = obs_ws.connected()
+    except Exception:
+        pass
+    return out
+
+
+@app.context_processor
 def inject_remote_led_status():
     """Navbar red 'LED Remote FAILING' badge: an LED transfer to another
     ScenePlay box failed within the last 2 minutes. Each dead Remote stalls

@@ -29,18 +29,26 @@ def play_mp3_local(fi,vol, a, loop=0):
       # a console window for every track (--no-terminal only mutes the output).
       # --force-window=no: Windows mpv builds force-window ON, which
       # opens a player window for audio even with --no-video.
-      p = subprocess.Popen(['mpv', fi, '--no-terminal', '--no-video',
-                            '--force-window=no',
-                            '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
-                            '--loop-file=' + loops,
-                            '--volume=' + str(vol),
-                            '--af=lavfi=[afade=type=in:duration=2]'], shell=False,
+      args = ['mpv', fi, '--no-terminal', '--no-video',
+              '--force-window=no',
+              '--input-ipc-server=\\\\.\\pipe\\mpvsocket-music',
+              '--loop-file=' + loops,
+              '--volume=' + str(vol),
+              '--af=lavfi=[afade=type=in:duration=2]']
+      # Windows has no null sink, so OBS's music feed rides a virtual cable the
+      # DM picks on the Broadcast page: mpv plays into it, the vdo.ninja push
+      # tab captures it back. Unset -> the default output, as before. The relay
+      # stream is unaffected either way — it captures this PID, not a device.
+      device = _relay_audio.output_device() or ''
+      if device:
+         args.append('--audio-device=' + device)
+      p = subprocess.Popen(args, shell=False,
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
       # When the relay stream's capture sink is up, mpv plays into it (the
       # loopback module mirrors it to the real speakers, so the GM hears the
       # same thing). Empty sink -> mpvAudio.sh omits --audio-device.
-      sink = _relay_audio.sink_name() or ''
+      sink = _relay_audio.output_device() or ''
       p = subprocess.Popen(['./mpvAudio.sh', str(vol), fi, sink, loops],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    appsettingAudioPlayFlagUpdatePID(p.pid)

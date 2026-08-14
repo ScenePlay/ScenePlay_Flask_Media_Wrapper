@@ -409,6 +409,7 @@ Layout, briefly:
 | `ChromeExt/`, `FireFoxExt/` | Browser extensions |
 | `tests/` | pytest suite (URL parsing, queue backoff, dedup rules) |
 | `docs/MQTT_LIGHTING.md` | Remote lighting pathways (diagram) + WLED-over-MQTT setup guide |
+| `docs/OBS_MUSIC_WINDOWS.md` | Music → OBS from a Windows server: VB-CABLE setup, hearing it locally, troubleshooting |
 
 ---
 
@@ -427,6 +428,10 @@ Layout, briefly:
   backup zip) on an older install — the nginx upload cap needs lifting once:
   `sudo bash ~/ScenePlay/supportFiles/fixNginxUploadSize.sh`. New installs
   already have it.
+- **No music in OBS from a Windows server** (or the music vanished from the
+  server's own speakers) — Windows needs a virtual cable and a one-time
+  "Listen to this device" tick; the full chain and a meter-by-meter
+  troubleshooting table are in `docs/OBS_MUSIC_WINDOWS.md`.
 - **A remote player's home WLED/Pi lights don't react** — expected on an
   HTTPS-hosted relay: browsers block HTTPS pages from calling HTTP LAN
   devices (mixed content). Self-host the relay over plain HTTP (the current,
