@@ -1722,6 +1722,7 @@ function mapInitRoller() {
   // hides it with !important to beat Bootstrap's d-flex, so match that here.)
   if (sel.options.length > 1) row.style.removeProperty('display');
   else row.style.setProperty('display', 'none', 'important');
+  mapRenderStatMods();
   mapRenderQuickRef();
 }
 
@@ -1730,8 +1731,32 @@ function mapRollerChanged() {
   _mapRollerId = sel.value;
   try { sessionStorage.setItem('bm_roller', sel.value); } catch (e) {}
   mapResetDice();       // fresh character, fresh roller: 1d20 +0, no label
+  mapRenderStatMods();
   mapRenderQuickRef();
 }
+
+// Ability-mod buttons (STR/DEX/… + PROF) for the "Rolling as" character —
+// same behaviour as the sheet's stat row: click loads the Mod box.
+function mapRenderStatMods() {
+  const host = document.getElementById('map-dice-statmods');
+  if (!host) return;
+  const c = _mapRollerChar();
+  if (!c || !c.mods) { host.style.display = 'none'; host.innerHTML = ''; return; }
+  const sign = n => (n >= 0 ? '+' : '') + n;
+  const entries = ['STR','DEX','CON','INT','WIS','CHA']
+    .map(k => [k, c.mods[k] || 0]).concat([['PROF', c.prof || 2]]);
+  host.innerHTML = entries.map(([label, val]) =>
+    `<button type="button" class="btn btn-sm btn-outline-secondary stat-mod-btn"
+             data-mod="${val}" title="${label}: ${sign(val)}">${label}<br>
+       <span style="font-size:.62rem;">${sign(val)}</span></button>`).join('');
+  host.style.display = '';
+}
+
+document.getElementById('map-dice-statmods').addEventListener('click', e => {
+  const btn = e.target.closest('[data-mod]');
+  if (!btn) return;
+  document.getElementById('map-dice-mod').value = parseInt(btn.dataset.mod, 10) || 0;
+});
 
 function mapRenderQuickRef() {
   const host = document.getElementById('map-dice-quickref');

@@ -625,6 +625,15 @@ def map_view(map_id):
         return {
             'id':   char.character_id,
             'name': char.name,
+            # Ability modifiers + proficiency bonus, so the map roller can
+            # offer the same STR/DEX/… quick-mod buttons as the sheet.
+            'mods': {'STR': char.modifier(char.str_val),
+                     'DEX': char.modifier(char.dex_val),
+                     'CON': char.modifier(char.con_val),
+                     'INT': char.modifier(char.int_val),
+                     'WIS': char.modifier(char.wis_val),
+                     'CHA': char.modifier(char.cha_val)},
+            'prof': ((char.level - 1) // 4) + 2,
             'skills': [{'name': s.skill_name, 'bonus': s.bonus or 0,
                         'proficient': bool(s.proficient)}
                        for s in sorted(char.skills, key=lambda x: x.order_by)],

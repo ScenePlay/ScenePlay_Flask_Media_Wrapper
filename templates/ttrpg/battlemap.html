@@ -297,6 +297,7 @@
                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .map-note-row .mn-when  { color: var(--sp-muted); font-size: .64rem; }
   .map-dice-btn        { min-width: 36px; padding: 6px 4px; font-size: .78rem; }
+  .stat-mod-btn        { min-width: 40px; line-height: 1.1; padding: 2px 4px; font-size: .72rem; }
   .sidebar-btn         { min-height: 36px; min-width: 36px; }
   .map-dice-btn.active { background: var(--ttrpg-accent) !important;
                          border-color: var(--ttrpg-accent) !important;
@@ -1128,6 +1129,10 @@
            class="form-control form-control-sm"
            placeholder="Label…" style="flex:1;">
   </div>
+  <!-- Ability-mod buttons for the "Rolling as" character (STR/DEX/… + PROF),
+       same semantics as the sheet's stat row: click loads the Mod box. -->
+  <div id="map-dice-statmods" class="d-flex gap-1 mb-2 flex-wrap" style="display:none;"></div>
+
   <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
   <div id="map-dice-quicklabels" class="d-flex gap-1 mb-2 flex-wrap"></div>
 
