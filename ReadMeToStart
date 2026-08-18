@@ -35,6 +35,11 @@ Windows
 3. Double-click startApp.bat, allow it through the firewall if asked, then
    open http://localhost:8086
 
+Uninstalling
+------------
+Linux: run ./uninstall.sh from ~/ScenePlay.  Windows: double-click
+uninstall.bat.  Both ask before removing shared tools or your media/database.
+
 Importing music/video from YouTube
 ----------------------------------
 Use the Utilities page, or install the browser extension (see "Browser

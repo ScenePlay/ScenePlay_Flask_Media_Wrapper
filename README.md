@@ -195,6 +195,18 @@ Scheduled jobs on Windows install into **Task Scheduler** (the Apply button /
 wizard handle it); schedules the wizard creates map exactly, hand-written
 cron patterns that Task Scheduler can't express are skipped with a count.
 
+### Uninstalling
+
+- **Linux / Raspberry Pi:** run `./uninstall.sh` from `~/ScenePlay`. It stops
+  the app and watchdog, removes the autostart entries and restores the stock
+  nginx config, then **asks** before touching anything shared (nginx, the apt
+  tools) or deleting the folder — `ScenePlay.db` and your downloaded media
+  live in that folder, so nothing of yours is deleted without a prompt.
+- **Windows:** double-click `uninstall.bat`. It stops the app, removes the
+  autostart task, desktop shortcut, firewall rules and `.venv-win`, and asks
+  before removing shared tools (mpv, ffmpeg, Python). The folder itself —
+  with your database and media — is left for you to delete manually.
+
 ---
 
 ## Feature Tour

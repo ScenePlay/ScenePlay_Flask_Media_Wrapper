@@ -14,6 +14,9 @@ sudo apt-get -y install socat
 # pactl: relay_audio_stream's pulse backend (works against pipewire-pulse too;
 # desktop images ship it, Lite/server images don't)
 sudo apt-get -y install pulseaudio-utils
+# requests for SYSTEM python3: sceneplay_watchdog_service.py runs outside the
+# venv (systemd user service), and Lite images don't ship python3-requests
+sudo apt-get -y install python3-requests
 
 is_raspberry_pi() {
     local CPUINFO_PATH="/proc/cpuinfo"
