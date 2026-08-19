@@ -223,6 +223,11 @@ window.BMFP = (function () {
     if (!panel) return;
     const open = panel.style.display === 'block';
     if (open) { closePanel(); return; }
+    // FX and Walls each arm a map-wide pointer overlay — with both open the
+    // overlays fight over the same clicks, so opening one closes the other.
+    const fxPanel = document.getElementById('fx-panel');
+    if (fxPanel && fxPanel.style.display !== 'none' && fxPanel.style.display !== '' &&
+        typeof closeFxPanel === 'function') closeFxPanel();
     panel.style.display = 'block';
     const btn = document.getElementById('fp-toggle-btn');
     if (btn) { btn.classList.add('btn-ttrpg'); btn.classList.remove('btn-outline-secondary'); }

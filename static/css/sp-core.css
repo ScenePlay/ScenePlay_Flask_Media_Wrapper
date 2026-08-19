@@ -40,8 +40,9 @@ h3 { font-size: 1.05rem; }
 h4, h5, h6 { font-size: 1rem; }
 
 /* Inline-styled accent headings across the TTRPG templates: in light themes
-   they become ink, in dark themes --sp-heading IS the accent so they keep
-   their glow. One rule replaces the old force-black hack. */
+   they become ink, in dark themes --sp-heading is a pale accent tint —
+   themed, but distinct from accent-filled buttons so headings don't blend
+   into them. One rule replaces the old force-black hack. */
 [style*="color:var(--ttrpg-accent)"],
 [style*="color: var(--ttrpg-accent)"] {
   color: var(--sp-heading) !important;
@@ -99,29 +100,48 @@ body {
   --bs-btn-disabled-border-color: var(--sp-accent);
   --bs-btn-disabled-color: var(--sp-on-accent);
 }
+/* Secondary/selection buttons: filled with --sp-btn-tint (themes.css) — the
+   surface pushed a few steps toward the theme accent — so they read as
+   controls on any surface without per-theme tuning. */
 .btn-secondary {
-  --bs-btn-bg: var(--sp-surface);
-  --bs-btn-border-color: var(--sp-border);
+  --bs-btn-bg: var(--sp-btn-tint);
+  --bs-btn-border-color: var(--sp-btn-tint-border);
   --bs-btn-color: var(--sp-text);
-  --bs-btn-hover-bg: var(--sp-surface-2);
-  --bs-btn-hover-border-color: var(--sp-border);
+  --bs-btn-hover-bg: var(--sp-btn-tint-hover);
+  --bs-btn-hover-border-color: var(--sp-btn-tint-border);
   --bs-btn-hover-color: var(--sp-heading);
-  --bs-btn-active-bg: var(--sp-surface-2);
-  --bs-btn-active-border-color: var(--sp-border);
+  --bs-btn-active-bg: var(--sp-btn-tint-hover);
+  --bs-btn-active-border-color: var(--sp-btn-tint-border);
   --bs-btn-active-color: var(--sp-heading);
   --bs-btn-disabled-bg: var(--sp-surface);
   --bs-btn-disabled-border-color: var(--sp-border);
   --bs-btn-disabled-color: var(--sp-muted);
 }
 .btn-outline-secondary {
+  --bs-btn-bg: var(--sp-btn-tint);
   --bs-btn-color: var(--sp-text);
-  --bs-btn-border-color: var(--sp-border);
-  --bs-btn-hover-bg: var(--sp-surface-2);
-  --bs-btn-hover-border-color: var(--sp-border);
+  --bs-btn-border-color: var(--sp-btn-tint-border);
+  --bs-btn-hover-bg: var(--sp-btn-tint-hover);
+  --bs-btn-hover-border-color: var(--sp-btn-tint-border);
   --bs-btn-hover-color: var(--sp-heading);
-  --bs-btn-active-bg: var(--sp-surface-2);
-  --bs-btn-active-border-color: var(--sp-border);
+  --bs-btn-active-bg: var(--sp-btn-tint-hover);
+  --bs-btn-active-border-color: var(--sp-btn-tint-border);
   --bs-btn-active-color: var(--sp-heading);
+}
+
+/* Native submit buttons on the older pages (control, utils, scene management)
+   carry no .btn class — give them the same tinted-button face. */
+input[type="submit"]:not([class*="btn"]) {
+  background: var(--sp-btn-tint);
+  color: var(--sp-text);
+  border: 1px solid var(--sp-btn-tint-border);
+  border-radius: var(--sp-radius-sm);
+  padding: .25rem .75rem;
+  cursor: pointer;
+}
+input[type="submit"]:not([class*="btn"]):hover {
+  background: var(--sp-btn-tint-hover);
+  color: var(--sp-heading);
 }
 .btn-danger {
   --bs-btn-bg: var(--sp-danger);
@@ -378,7 +398,9 @@ details > summary::-webkit-details-marker { color: var(--sp-accent); }
   color: var(--sp-text);
 }
 .ttrpg-table thead th {
-  background: var(--sp-surface-2) !important;
+  /* --sp-primary, not -surface-2: header rows must read as chrome, not as
+     another card surface, or the table blends into the page. */
+  background: var(--sp-primary) !important;
   color: var(--sp-heading) !important;
   border-color: var(--sp-border) !important;
   font-weight: 600;
@@ -413,7 +435,7 @@ details > summary::-webkit-details-marker { color: var(--sp-accent); }
 }
 
 th.gridjs-th {
-  background-color: var(--sp-surface-2) !important;
+  background-color: var(--sp-primary) !important;
   color: var(--sp-heading) !important;
   border-color: var(--sp-border) !important;
   font-weight: 600 !important;
@@ -422,7 +444,7 @@ th.gridjs-th {
 }
 th.gridjs-th-sort:hover,
 th.gridjs-th-sort:focus {
-  background-color: color-mix(in srgb, var(--sp-accent) 12%, var(--sp-surface-2)) !important;
+  background-color: color-mix(in srgb, var(--sp-accent) 12%, var(--sp-primary)) !important;
   color: var(--sp-heading) !important;
 }
 

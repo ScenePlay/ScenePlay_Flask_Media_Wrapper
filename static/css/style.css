@@ -125,9 +125,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    background: var(--sp-input-bg);
+    background: var(--sp-btn-tint);
     color: var(--sp-text);
-    border: 1px solid var(--sp-border);
+    border: 1px solid var(--sp-btn-tint-border);
     border-radius: var(--sp-radius-sm);
     padding: 3px 8px;
     cursor: pointer;
@@ -215,8 +215,10 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    background: var(--sp-surface);
-    border: 1px solid var(--sp-border);
+    /* tinted like every other selection button — plain --sp-surface made the
+       cards vanish into the page background on light themes */
+    background: var(--sp-btn-tint);
+    border: 1px solid var(--sp-btn-tint-border);
     border-radius: var(--sp-radius);
     box-shadow: var(--sp-shadow-1);
     padding: 10px;
@@ -227,6 +229,7 @@
 .sp-scene-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--sp-shadow-2);
+    background: var(--sp-btn-tint-hover);
     color: var(--sp-heading);
 }
 .sp-scene-band {

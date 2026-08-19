@@ -1443,6 +1443,11 @@ function toggleFxPanel() {
   if (open) {
     closeFxPanel();
   } else {
+    // FX and Walls each arm a map-wide pointer overlay — with both open the
+    // overlays fight over the same clicks, so opening one closes the other.
+    const fpPanel = document.getElementById('fp-panel');
+    if (fpPanel && fpPanel.style.display === 'block' &&
+        typeof closeFpPanel === 'function') closeFpPanel();
     panel.style.display = 'block';
     effectsSvg.style.pointerEvents = 'all';
     document.getElementById('fx-toggle-btn').classList.add('btn-ttrpg');

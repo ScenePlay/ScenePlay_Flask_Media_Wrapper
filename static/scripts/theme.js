@@ -4,18 +4,20 @@
    DOMContentLoaded.
    ──────────────────────────────────────────────────────────────────────── */
 
+/* Picker order: all light themes first, then all dark — the `dark` flag
+   draws the group label, so keep each group contiguous. */
 const SP_THEMES = [
   { id: 'daylight',      name: 'Daylight',  swatch: '#2f6fed' },
   { id: 'ttrpg-classic', name: 'Classic',   swatch: '#c9a84c' },
-  { id: 'midnight',      name: 'Midnight',  swatch: '#00e5c8' },
   { id: 'forest',        name: 'Forest',    swatch: '#6ecf80' },
-  { id: 'crimson',       name: 'Crimson',   swatch: '#f05050' },
   { id: 'ocean',         name: 'Ocean',     swatch: '#18c8e8' },
-  { id: 'ember',         name: 'Ember',     swatch: '#ffa020' },
-  { id: 'royal',         name: 'Royal',     swatch: '#b888ff' },
   { id: 'frost',         name: 'Frost',     swatch: '#90d8f8' },
-  { id: 'steel',         name: 'Steel',     swatch: '#9abcd4' },
   { id: 'parchment',     name: 'Parchment', swatch: '#e0b860' },
+  { id: 'midnight',      name: 'Midnight',  swatch: '#00e5c8', dark: true },
+  { id: 'crimson',       name: 'Crimson',   swatch: '#f05050', dark: true },
+  { id: 'ember',         name: 'Ember',     swatch: '#ffa020', dark: true },
+  { id: 'royal',         name: 'Royal',     swatch: '#b888ff', dark: true },
+  { id: 'steel',         name: 'Steel',     swatch: '#9abcd4', dark: true },
 ];
 
 /* ── Contrast utility ────────────────────────────────────────────────────────
@@ -89,8 +91,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var active = localStorage.getItem('sp-theme') || 'daylight';
 
+  function addGroupLabel(text) {
+    var el = document.createElement('div');
+    el.textContent = text;
+    el.style.cssText = 'grid-column:1/-1;font-size:.62rem;font-weight:600;' +
+                       'letter-spacing:.08em;text-transform:uppercase;' +
+                       'color:var(--sp-muted);border-bottom:1px solid var(--sp-border);' +
+                       'padding-bottom:3px;margin-bottom:-4px;';
+    container.appendChild(el);
+  }
+
+  var darkStarted = false;
+  addGroupLabel('Light');
   SP_THEMES.forEach(function (t) {
-    var labelColor = spContrastText(t.swatch);
+    if (t.dark && !darkStarted) { darkStarted = true; addGroupLabel('Dark'); }
 
     var btn = document.createElement('button');
     btn.title            = t.name;

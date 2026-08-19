@@ -3,14 +3,20 @@
 
    Every theme block must define the FULL token set:
      --sp-bg / -surface / -surface-2   page ground, cards, inset panels
-     --sp-primary                      chrome tint (table heads, zebra mix)
+     --sp-primary                      chrome tint (table heads, zebra mix) —
+                                       an accent-tinted surface, visibly
+                                       stronger than -surface-2 so header
+                                       rows stand apart from cards
      --sp-accent / -on-accent          the one brand color + text on it
                                        (-on-accent is recomputed inline by
                                         theme.js for contrast — value here is
                                         just the no-JS fallback)
      --sp-hover-bg / -hover-text       accent hover state
      --sp-text / -heading / -muted     ink; heading is ink in light themes,
-                                       the accent in dark themes
+                                       a PALE accent tint in dark themes —
+                                       never the raw accent, or headings
+                                       become indistinguishable from
+                                       accent-filled buttons
      --sp-border / -input-bg
      --sp-accent-glow                  focus rings
      --sp-link
@@ -28,6 +34,15 @@
   /* Battle maps read better on a dark ground in every theme */
   --sp-map-bg:    #10141c;
 
+  /* Neutral-button tint: surface pushed a few steps toward the theme accent.
+     Every "selection" button (secondary/outline buttons, scene cards, picker
+     faces, bare submits) fills with this so it never matches the surface it
+     sits on. color-mix resolves lazily, so one definition serves every
+     theme — light themes tint darker-than-card, dark themes lighter. */
+  --sp-btn-tint:        color-mix(in srgb, var(--sp-accent) 12%, var(--sp-surface));
+  --sp-btn-tint-hover:  color-mix(in srgb, var(--sp-accent) 22%, var(--sp-surface));
+  --sp-btn-tint-border: color-mix(in srgb, var(--sp-accent) 40%, var(--sp-border));
+
   /* Aliases used by inline styles across ~35 TTRPG templates — resolution is
      lazy, so one definition serves every theme. Do not remove. */
   --ttrpg-primary: var(--sp-surface);
@@ -44,7 +59,7 @@
   --sp-bg:          #f7f8fa;
   --sp-surface:     #ffffff;
   --sp-surface-2:   #f0f2f5;
-  --sp-primary:     #e9edf3;
+  --sp-primary:     #dce6f9;
   --sp-accent:      #2f6fed;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #1e56c4;
@@ -70,7 +85,7 @@
   --sp-bg:          #f8f5f0;
   --sp-surface:     #fffdfa;
   --sp-surface-2:   #f1ebe2;
-  --sp-primary:     #eae2d5;
+  --sp-primary:     #e9dcbf;
   --sp-accent:      #a5762a;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #845c1d;
@@ -96,7 +111,7 @@
   --sp-bg:          #f4f8f5;
   --sp-surface:     #ffffff;
   --sp-surface-2:   #eaf1ec;
-  --sp-primary:     #e2ece5;
+  --sp-primary:     #d3e8db;
   --sp-accent:      #2e7d4f;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #22603c;
@@ -122,7 +137,7 @@
   --sp-bg:          #f3f7fb;
   --sp-surface:     #ffffff;
   --sp-surface-2:   #e9f0f7;
-  --sp-primary:     #e0eaf4;
+  --sp-primary:     #cfe2f1;
   --sp-accent:      #0e6ba8;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #0a527f;
@@ -148,7 +163,7 @@
   --sp-bg:          #f4f7fa;
   --sp-surface:     #ffffff;
   --sp-surface-2:   #eaf0f6;
-  --sp-primary:     #e2eaf2;
+  --sp-primary:     #d4e6f3;
   --sp-accent:      #2f86c1;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #256a99;
@@ -174,7 +189,7 @@
   --sp-bg:          #f7f4ee;
   --sp-surface:     #fffefb;
   --sp-surface-2:   #efe9de;
-  --sp-primary:     #e9e1d2;
+  --sp-primary:     #e6d9bd;
   --sp-accent:      #8a6a2f;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #6d5223;
@@ -200,13 +215,13 @@
   --sp-bg:          #131320;
   --sp-surface:     #1b1b2c;
   --sp-surface-2:   #232338;
-  --sp-primary:     #262640;
+  --sp-primary:     #1d4550;
   --sp-accent:      #00e5c8;
   --sp-on-accent:   #061412;
   --sp-hover-bg:    #00c9b0;
   --sp-hover-text:  #06231e;
   --sp-text:        #e8e8f2;
-  --sp-heading:     var(--sp-accent);
+  --sp-heading:     #a9f5ea;
   --sp-muted:       rgba(232,232,242,.62);
   --sp-border:      #32324a;
   --sp-input-bg:    #12121d;
@@ -226,13 +241,13 @@
   --sp-bg:          #191012;
   --sp-surface:     #221518;
   --sp-surface-2:   #2c1b1f;
-  --sp-primary:     #301d22;
+  --sp-primary:     #4f2528;
   --sp-accent:      #f05050;
   --sp-on-accent:   #ffffff;
   --sp-hover-bg:    #d13c3c;
   --sp-hover-text:  #ffffff;
   --sp-text:        #f2e6e8;
-  --sp-heading:     var(--sp-accent);
+  --sp-heading:     #f8b0b0;
   --sp-muted:       rgba(242,230,232,.62);
   --sp-border:      #46282e;
   --sp-input-bg:    #170e10;
@@ -252,13 +267,13 @@
   --sp-bg:          #191108;
   --sp-surface:     #22180c;
   --sp-surface-2:   #2c2012;
-  --sp-primary:     #322515;
+  --sp-primary:     #523715;
   --sp-accent:      #ffa020;
   --sp-on-accent:   #1c1204;
   --sp-hover-bg:    #e08a10;
   --sp-hover-text:  #1c1204;
   --sp-text:        #f2ead9;
-  --sp-heading:     var(--sp-accent);
+  --sp-heading:     #ffd9a3;
   --sp-muted:       rgba(242,234,217,.62);
   --sp-border:      #463619;
   --sp-input-bg:    #170f07;
@@ -278,13 +293,13 @@
   --sp-bg:          #161020;
   --sp-surface:     #1f172c;
   --sp-surface-2:   #281e38;
-  --sp-primary:     #2d2240;
+  --sp-primary:     #42315c;
   --sp-accent:      #b888ff;
   --sp-on-accent:   #14081f;
   --sp-hover-bg:    #9c64f0;
   --sp-hover-text:  #14081f;
   --sp-text:        #ece5f6;
-  --sp-heading:     var(--sp-accent);
+  --sp-heading:     #e0d0ff;
   --sp-muted:       rgba(236,229,246,.62);
   --sp-border:      #3d2f52;
   --sp-input-bg:    #130d1c;
@@ -304,13 +319,13 @@
   --sp-bg:          #12161b;
   --sp-surface:     #1a2027;
   --sp-surface-2:   #222a33;
-  --sp-primary:     #27303a;
+  --sp-primary:     #384450;
   --sp-accent:      #9abcd4;
   --sp-on-accent:   #0d141a;
   --sp-hover-bg:    #7fa9c6;
   --sp-hover-text:  #0d141a;
   --sp-text:        #e6ecf2;
-  --sp-heading:     var(--sp-accent);
+  --sp-heading:     #d3e7f6;
   --sp-muted:       rgba(230,236,242,.62);
   --sp-border:      #33404d;
   --sp-input-bg:    #101419;
