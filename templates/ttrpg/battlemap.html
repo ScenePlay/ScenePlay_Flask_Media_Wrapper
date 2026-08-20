@@ -169,6 +169,24 @@
     color: var(--ttrpg-text);
     box-shadow: 0 4px 24px rgba(0,0,0,.7);
   }
+  /* The floorplan panel grew past most screens (walls/lights/props/zones/
+     select) — cap it to the viewport and scroll. The drag handle stays
+     pinned so a scrolled panel can still be moved and closed. */
+  #fp-panel {
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  #fp-panel .fx-panel-header {
+    position: sticky;
+    top: -10px;                      /* counters the panel's own top padding */
+    margin: -10px -12px 10px;        /* full-bleed: content can't peek past it */
+    padding: 10px 12px 8px;
+    background: var(--ttrpg-primary);
+    border-radius: 8px 8px 0 0;
+    z-index: 1;
+  }
   .fx-panel-header {
     display: flex;
     justify-content: space-between;
@@ -952,6 +970,22 @@
     Walls &amp; doors drawn here are what 3D mode extrudes. Players never see this layer.
   </div>
 
+  <!-- Snap + undo/redo -->
+  <div class="d-flex align-items-center gap-1 mb-2">
+    <label class="fx-label" for="fp-snap">Snap</label>
+    <select id="fp-snap" class="form-select form-select-sm" style="width:auto;flex:1;"
+            onchange="BMFP.setSnap(this.value)"
+            title="Grid snap for drawing — 1 ft allows fine geometry detail; character movement always stays on 5-ft squares">
+      <option value="1">5 ft</option>
+      <option value="0.5" selected>2&frac12; ft</option>
+      <option value="0.2">1 ft</option>
+    </select>
+    <button id="fp-undo-btn" class="btn btn-sm btn-outline-secondary px-2" disabled
+            onclick="BMFP.undo()" title="Undo (Ctrl+Z)">&#8630;</button>
+    <button id="fp-redo-btn" class="btn btn-sm btn-outline-secondary px-2" disabled
+            onclick="BMFP.redo()" title="Redo (Ctrl+Y)">&#8631;</button>
+  </div>
+
   <!-- Walls group: line / square / circle + height + surface texture -->
   <div class="fx-label mb-1" style="letter-spacing:.05em;">&#9635; Walls</div>
   <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
@@ -1011,12 +1045,187 @@
     <div class="fx-label" style="color:#666;font-size:.68rem;">Negative feet = pit, positive = platform.</div>
   </div>
 
-  <!-- Door / erase -->
+  <!-- Lights group: torch/brazier/lantern/candle/glow fixtures for 3D mode -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#128294; Lights</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="d-flex align-items-center gap-1 mb-1">
+      <button id="fp-tool-light" class="btn btn-sm btn-outline-secondary"
+              onclick="BMFP.setTool('light')"
+              title="Click the map to place a light — 3D renders a glow, a warm pool, and (on Medium/High quality) real flickering light">&#128294; Place</button>
+      <select id="fp-light-type" class="form-select form-select-sm" style="width:auto;flex:1;"
+              onchange="BMFP.setLightType(this.value)">
+        <option value="torch">Torch</option>
+        <option value="brazier">Brazier</option>
+        <option value="lantern">Lantern</option>
+        <option value="candle">Candle</option>
+        <option value="glow">Magical glow</option>
+      </select>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <label class="fx-label" for="fp-light-color">Color</label>
+      <input type="color" id="fp-light-color" value="#ff9a3c"
+             class="form-control form-control-sm" style="width:44px;padding:2px;"
+             oninput="BMFP.setLightColor(this.value)"
+             title="Light color — defaults per type">
+      <label class="fx-label" for="fp-light-radius">Reach</label>
+      <input type="number" id="fp-light-radius" min="5" max="120" step="5" placeholder="auto"
+             class="form-control form-control-sm" style="width:64px;"
+             oninput="BMFP.setLightRadius(this.value)"
+             title="Light reach in feet — leave blank for the type's default">
+      <span class="fx-label">ft</span>
+    </div>
+    <div class="fx-label mt-1" style="color:#666;font-size:.68rem;">
+      The erase tool removes lights too.
+    </div>
+  </div>
+
+  <!-- Props group: procedural 3D furnishings -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#129681; Props</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="d-flex align-items-center gap-1 mb-1">
+      <button id="fp-tool-prop" class="btn btn-sm btn-outline-secondary"
+              onclick="BMFP.setTool('prop')"
+              title="Click the map to place a 3D furnishing — solid in 3D: tokens can't step into it (stairs and rubble stay walkable)">&#129681; Place</button>
+      <select id="fp-prop-type" class="form-select form-select-sm" style="width:auto;flex:1;"
+              onchange="BMFP.setPropType(this.value)">
+        <option value="crate">Crate</option>
+        <option value="barrel">Barrel</option>
+        <option value="table">Table</option>
+        <option value="chair">Chair</option>
+        <option value="chest">Chest</option>
+        <option value="bed">Bed</option>
+        <option value="shelf">Shelf</option>
+        <option value="pillar">Pillar</option>
+        <option value="statue">Statue</option>
+        <option value="altar">Altar</option>
+        <option value="stairs">Stairs</option>
+        <option value="rubble">Rubble</option>
+      </select>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label" for="fp-prop-rot">Turn</label>
+      <input type="number" id="fp-prop-rot" value="0" min="0" max="359" step="45"
+             class="form-control form-control-sm" style="width:64px;"
+             oninput="BMFP.setPropRot(this.value)" title="Rotation in degrees (clockwise)">
+      <label class="fx-label" for="fp-prop-scale">Size</label>
+      <input type="number" id="fp-prop-scale" value="1" min="0.25" max="4" step="0.25"
+             class="form-control form-control-sm" style="width:64px;"
+             oninput="BMFP.setPropScale(this.value)" title="Scale multiplier (1 = life size)">
+      <span class="fx-label">&times;</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <label class="fx-label" for="fp-prop-texture">Texture</label>
+      <select id="fp-prop-texture" class="form-select form-select-sm fp-tex-select"
+              style="width:auto;flex:1;" onchange="BMFP.setPropTexture(this.value)"
+              title="Surface texture for newly placed props — the Select tool retextures existing ones"></select>
+    </div>
+  </div>
+
+  <!-- Zones group: per-room texture regions -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#11040; Room Zones</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="d-flex align-items-center gap-1 mb-1">
+      <button id="fp-tool-zone" class="btn btn-sm btn-outline-secondary"
+              onclick="BMFP.setTool('zone')"
+              title="Drag rectangles to define the active zone's area — its textures apply to the floor and walls inside">&#9645; Paint</button>
+      <select id="fp-zone-sel" class="form-select form-select-sm" style="width:auto;flex:1;"
+              onchange="BMFP.selectZone(this.value)" disabled></select>
+      <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.newZone()"
+              title="Add a zone (a room or region with its own surfaces)">&#43;</button>
+      <button class="btn btn-sm btn-outline-secondary px-2" onclick="BMFP.deleteZone()"
+              title="Delete the selected zone">&#128465;</button>
+    </div>
+    <div id="fp-zone-fields" style="display:none;">
+      <input id="fp-zone-name" class="form-control form-control-sm mb-1" maxlength="60"
+             placeholder="room name (e.g. Great Hall)"
+             onchange="BMFP.setZoneField('name', this.value)">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <label class="fx-label" style="min-width:36px;">Floor</label>
+        <select id="fp-zone-floor_texture" class="form-select form-select-sm fp-tex-select"
+                style="width:auto;flex:1;"
+                onchange="BMFP.setZoneField('floor_texture', this.value)"></select>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <label class="fx-label" style="min-width:36px;">Walls</label>
+        <select id="fp-zone-wall_texture" class="form-select form-select-sm fp-tex-select"
+                style="width:auto;flex:1;"
+                onchange="BMFP.setZoneField('wall_texture', this.value)"></select>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <label class="fx-label" style="min-width:36px;">Finish</label>
+        <select id="fp-zone-wall_style" class="form-select form-select-sm"
+                style="width:auto;flex:1;"
+                onchange="BMFP.setZoneField('wall_style', this.value)"
+                title="Procedural finish for walls in this zone without a texture image">
+          <option value="none">(map default)</option>
+          <option value="brick">Brick</option>
+          <option value="stone">Stone</option>
+          <option value="wood">Wood</option>
+        </select>
+      </div>
+      <div class="fx-label mt-1" style="color:#666;font-size:.68rem;">
+        Mis-drawn a rect? Undo removes it.
+      </div>
+    </div>
+  </div>
+
+  <!-- Door / select / erase -->
   <div class="d-flex gap-1 mb-2">
     <button id="fp-tool-door" class="btn btn-sm btn-outline-secondary flex-grow-1"
             onclick="BMFP.setTool('door')" title="Click a wall to turn it into a door; click a door to turn it back">&#128682; Door</button>
+    <button id="fp-tool-select" class="btn btn-sm btn-outline-secondary flex-grow-1"
+            onclick="BMFP.setTool('select')" title="Click a wall, door, or prop to edit its height, texture, rotation, or size">&#128269; Select</button>
     <button id="fp-tool-erase" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('erase')" title="Click a wall / door / elevation to delete it">&#9003; Erase</button>
+            onclick="BMFP.setTool('erase')" title="Click a wall / door / elevation / light to delete it">&#9003; Erase</button>
+  </div>
+
+  <!-- Select-tool inspector -->
+  <div id="fp-sel-box" class="mb-2 p-2" style="display:none;border:1px solid #3df0c8;border-radius:6px;">
+    <div class="d-flex align-items-center mb-1">
+      <span id="fp-sel-what" class="fx-label" style="color:#3df0c8;">Wall</span>
+      <button class="btn btn-sm btn-outline-danger px-2 ms-auto" onclick="BMFP.deleteSel()"
+              title="Delete this segment">&#128465;</button>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1" id="fp-sel-hb-row">
+      <label class="fx-label">Height</label>
+      <input type="number" id="fp-sel-height" min="1" max="100" step="1" placeholder="default"
+             class="form-control form-control-sm" style="width:70px;">
+      <label class="fx-label">Base</label>
+      <input type="number" id="fp-sel-base" min="-50" max="100" step="1" placeholder="0"
+             class="form-control form-control-sm" style="width:70px;"
+             title="Feet above the floor the wall starts at (bridges, arrow slits)">
+      <span class="fx-label">ft</span>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1" id="fp-sel-prop-row" style="display:none;">
+      <label class="fx-label">Turn</label>
+      <input type="number" id="fp-sel-rot" min="0" max="359" step="45" placeholder="0"
+             class="form-control form-control-sm" style="width:64px;"
+             title="Rotation in degrees (clockwise)">
+      <label class="fx-label">Size</label>
+      <input type="number" id="fp-sel-scale" min="0.25" max="4" step="0.25" placeholder="1"
+             class="form-control form-control-sm" style="width:64px;"
+             title="Scale multiplier (1 = life size)">
+      <span class="fx-label">&times;</span>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label">Texture</label>
+      <select id="fp-sel-texture" class="form-select form-select-sm fp-tex-select"
+              style="width:auto;flex:1;"></select>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-1" id="fp-sel-style-row">
+      <label class="fx-label">Finish</label>
+      <select id="fp-sel-style" class="form-select form-select-sm" style="width:auto;flex:1;">
+        <option value="none">(default)</option>
+        <option value="brick">Brick</option>
+        <option value="stone">Stone</option>
+        <option value="wood">Wood</option>
+      </select>
+      <div class="form-check" style="margin-bottom:0;">
+        <input class="form-check-input" type="checkbox" id="fp-sel-show">
+        <label class="form-check-label fx-label" for="fp-sel-show">2D visible</label>
+      </div>
+    </div>
+    <button class="btn btn-sm btn-ttrpg w-100" onclick="BMFP.applySel()">Apply</button>
   </div>
 
   <hr style="border-color:var(--sp-border);margin:6px 0;">
@@ -1047,6 +1256,10 @@
   <div class="d-flex gap-2">
     <button id="fp-save-btn" class="btn btn-sm btn-ttrpg flex-grow-1"
             onclick="BMFP.save()">&#128190; Save</button>
+    {% if bm3d_available %}
+    <button class="btn btn-sm btn-outline-secondary" onclick="fpPreview3dDraft()"
+            title="Open 3D mode showing your UNSAVED edits — exit 3D or save/revert to release the preview">&#128065; 3D</button>
+    {% endif %}
     <button class="btn btn-sm btn-outline-secondary"
             onclick="BMFP.revert()" title="Discard unsaved edits and reload the saved floorplan">Revert</button>
   </div>
@@ -1225,6 +1438,13 @@
     <select id="bm3d-viewpoint" class="form-select form-select-sm"
             style="width:auto;{% if not current_user.is_dm() %}display:none;{% endif %}
             background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#555;"></select>
+    <select id="bm3d-quality" class="form-select form-select-sm"
+            title="Render quality — Low for old machines, High for full atmosphere. Auto-tuned from your frame rate until you pick one."
+            style="width:auto;background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:#555;">
+      <option value="low">✦ Low</option>
+      <option value="medium">✦✦ Medium</option>
+      <option value="high">✦✦✦ High</option>
+    </select>
     {% if current_user.is_dm() %}
     <button id="bm3d-fog-btn" onclick="bm3dToggleFog()"
             title="Toggle between your translucent fog and the solid fog players see (tokens inside hidden, blackout from a fogged token's eyes)"
@@ -1234,7 +1454,7 @@
     {% endif %}
     <span id="bm3d-hint" class="small text-muted flex-grow-1" style="text-align:right;">
       Click the view to look around &middot; double-click steps <span id="bm3d-step-ft">5 ft</span> where you face &middot; Esc releases the mouse
-      {%- if current_user.is_dm() %} &middot; fog shows translucent to you, solid to players{% endif %}
+      {%- if current_user.is_dm() %} &middot; free fly: hold the mouse button (or W) to fly where you look{% endif %}
     </span>
   </div>
   <div id="bm3d-crosshair"
@@ -1295,6 +1515,21 @@ const _BM3D_SRCS = ["{{ static_v('scripts/three.min.js') }}",
                     "{{ static_v('scripts/battlemap3d.js') }}"];
 let _bm3dLoading = false;
 
+// Texture-library manifest, fetched once before the first 3D open so the
+// viewer can resolve schema-v2 texture refs synchronously during builds.
+let _texManifest = null;
+function _loadTexManifest() {
+  if (_texManifest) return Promise.resolve(_texManifest);
+  return fetch('/ttrpg/textures/manifest')
+    .then(r => r.json())
+    .then(d => {
+      _texManifest = {};
+      (d.textures || []).forEach(t => { _texManifest[t.name] = t; });
+      return _texManifest;
+    })
+    .catch(() => (_texManifest = {}));   // no textures ≠ no 3D
+}
+
 function enter3d() {
   if (window.BM3D) { _bm3dOpen(); return; }
   if (_bm3dLoading) return;
@@ -1331,6 +1566,7 @@ function _bm3dOpen() {
   // floor renders it live (THREE.VideoTexture). Still maps pass the image URL.
   const bgEl  = document.getElementById('map-bg');
   const isVid = !!bgEl && bgEl.tagName === 'VIDEO';
+  if (!_texManifest) { _loadTexManifest().then(_bm3dOpen); return; }
   BM3D.open({
     overlayEl:    document.getElementById('bm3d-overlay'),
     gridCols:     GRID_COLS,
@@ -1362,10 +1598,25 @@ function _bm3dOpen() {
     // while 3D is open; each step re-reads it.
     getMoveScale: () => MOVE_SCALE,
     getState:     () => window._bmLastState || null,
+    resolveTexture: name => (_texManifest && _texManifest[name]) || null,
   });
 }
 
 function exit3d() { if (window.BM3D) BM3D.close(); }
+
+// Floorplan panel "3D" button: open the viewer showing UNSAVED editor edits.
+// Waits out the lazy script/manifest loading on first use.
+function fpPreview3dDraft() {
+  if (typeof BMFP === 'undefined') return;
+  const draft = BMFP.getDraft();
+  if (!draft) return;
+  enter3d();
+  const t0 = Date.now();
+  (function wait() {
+    if (window.BM3D && BM3D.isOpen()) { BM3D.setDraftFloorplan(draft); return; }
+    if (Date.now() - t0 < 8000) setTimeout(wait, 150);
+  })();
+}
 
 function bm3dToggleFog() {
   if (!window.BM3D) return;

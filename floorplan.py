@@ -1,30 +1,53 @@
 """Floorplan JSON validation for the battle-map 3D mode.
 
-Schema v1 (produced by a vision LLM tracing the map image, or by the DM's
-2D wall editor; consumed by battlemap3d.js on both the local pages and the
-relay portal):
+Schema v2 (produced by a vision LLM tracing the map image, by a text LLM
+designing a layout, or by the DM's 2D wall editor; consumed by battlemap3d.js
+on both the local pages and the relay portal):
 
     {
       "format": "sceneplay-floorplan",
-      "schema_version": 1,
+      "schema_version": 2,
       "grid": {"cols": 20, "rows": 20},
       "default_wall_height_ft": 10,
-      "walls":      [{"x1":3,"y1":0,"x2":3,"y2":6.5, "height_ft":15, "base_ft":0}],
-      "doors":      [{"id":"d1","x1":3,"y1":6.5,"x2":3,"y2":7.5,"open":false,"height_ft":8}],
-      "elevations": [{"x1":5,"y1":5,"x2":9,"y2":9,"floor_ft":-10,"label":"pit"}]
+      "walls":      [{"x1":3,"y1":0,"x2":3,"y2":6.5, "height_ft":15, "base_ft":0,
+                      "style":"stone", "texture":"mossy_stone"}],
+      "doors":      [{"id":"d1","x1":3,"y1":6.5,"x2":3,"y2":7.5,"open":false,
+                      "height_ft":8, "texture":"oak_planks"}],
+      "elevations": [{"x1":5,"y1":5,"x2":9,"y2":9,"floor_ft":-10,"label":"pit"}],
+      "lights":     [{"x":4,"y":6,"type":"torch","color":"#ff9a3c",
+                      "intensity":1.0,"radius_ft":30,"height_ft":6,"flicker":true}],
+      "props":      [{"type":"barrel","x":5,"y":5.4,"rot":40,"scale":1,
+                      "texture":"oak_planks"}],
+      "zones":      [{"id":"z1","name":"Great Hall",
+                      "rects":[{"x1":2,"y1":2,"x2":10,"y2":8}],
+                      "floor_texture":"flagstone","wall_texture":"castle_stone",
+                      "wall_style":"stone"}]
     }
 
+v1 documents (no lights/props/zones, no texture refs) are a strict subset and
+are accepted forever; validation stamps the current version on output.
+Texture refs are library slugs — unknown names are WARNINGS, never errors:
+the renderer falls back to art-sampled surfaces, so plans and the texture
+library may drift apart without breaking.
+
 Coordinates are grid cells: origin top-left, x = columns rightward,
-y = rows DOWNWARD, fractional allowed. Heights are D&D feet (1 cell = 5 ft).
+y = rows DOWNWARD, fractional allowed (1-ft precision = 0.2 cells). Heights
+are D&D feet (1 cell = 5 ft).
 Pure functions, no Flask imports — the routes layer owns persistence.
 """
+import re
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ACCEPTED_VERSIONS = (1, 2)
 
 MAX_WALLS      = 2000
 MAX_DOORS      = 200
 MAX_ELEVATIONS = 200
-MAX_JSON_BYTES = 512 * 1024
+MAX_LIGHTS     = 200
+MAX_PROPS      = 300
+MAX_ZONES      = 50
+MAX_ZONE_RECTS = 20
+MAX_JSON_BYTES = 1024 * 1024
 
 DEFAULT_WALL_HEIGHT_FT = 10
 # Doors default to the plan's wall height (a shorter door would leave a hole
@@ -33,9 +56,27 @@ DEFAULT_WALL_HEIGHT_FT = 10
 HEIGHT_FT_RANGE = (1, 100)     # wall/door height_ft
 LEVEL_FT_RANGE  = (-50, 100)   # base_ft / floor_ft
 
-# Optional per-map wall surface finish, drawn by the 3D renderer over the
-# colors it samples from the map art. 'none'/absent = smooth (default).
+# Optional wall surface finish (whole-plan default, per-zone, or per-segment),
+# drawn by the 3D renderer over the colors it samples from the map art.
+# 'none'/absent = smooth (default).
 WALL_STYLES = {'none', 'brick', 'stone', 'wood'}
+
+# Placeable light sources. Per-type defaults live in the renderer
+# (battlemap3d.js LIGHT_DEFAULTS — keep in sync); the validator only clamps
+# explicit overrides so stored plans stay minimal.
+LIGHT_TYPES = {'torch', 'brazier', 'lantern', 'candle', 'glow'}
+LIGHT_INTENSITY_RANGE = (0.1, 3.0)
+LIGHT_RADIUS_FT_RANGE = (5, 120)
+LIGHT_HEIGHT_FT_RANGE = (0, 50)
+
+# Procedural prop set (battlemap3d.js propGeometry — keep in sync).
+PROP_TYPES = {'pillar', 'crate', 'barrel', 'table', 'chair', 'chest', 'statue',
+              'stairs', 'rubble', 'bed', 'shelf', 'altar'}
+PROP_SCALE_RANGE = (0.25, 4.0)
+
+# Texture library slugs (see routes/textures.py). Shape-only validation here.
+TEXTURE_REF_RE = re.compile(r'^[a-z0-9_-]{1,64}$')
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
 
 
 def _num(v):
@@ -83,6 +124,34 @@ def _height(raw, key, default, errors, where):
     return round(_clamp(n, lo, hi), 1)
 
 
+def _texture_ref(raw, key, warnings, where):
+    """Shape-validate a texture library slug. Returns the slug or None.
+    Bad shapes are dropped with a warning — never an error (the renderer
+    falls back to art-sampled surfaces for anything it can't resolve)."""
+    v = raw.get(key)
+    if v is None:
+        return None
+    v = str(v).strip().lower()
+    if not v:
+        return None
+    if not TEXTURE_REF_RE.match(v):
+        warnings.append(f'{where}: invalid texture ref {v!r} ignored')
+        return None
+    return v
+
+
+def _wall_style(raw, key, warnings, where):
+    """Per-segment/zone wall style. Returns a non-'none' style or None."""
+    v = raw.get(key)
+    if v is None:
+        return None
+    v = str(v).strip().lower()
+    if v and v not in WALL_STYLES:
+        warnings.append(f'{where}: unknown style {v!r} ignored')
+        return None
+    return v if v and v != 'none' else None
+
+
 def validate_floorplan(data, grid_cols, grid_rows):
     """Validate a raw floorplan dict against a map's grid.
 
@@ -97,8 +166,9 @@ def validate_floorplan(data, grid_cols, grid_rows):
         return None, warnings, ['floorplan must be a JSON object']
 
     ver = data.get('schema_version', 1)
-    if ver != SCHEMA_VERSION:
-        return None, warnings, [f'unsupported schema_version {ver!r} (expected {SCHEMA_VERSION})']
+    if ver not in ACCEPTED_VERSIONS:
+        return None, warnings, [f'unsupported schema_version {ver!r} '
+                                f'(expected one of {list(ACCEPTED_VERSIONS)})']
 
     grid = data.get('grid')
     sx = sy = 1.0
@@ -120,12 +190,18 @@ def validate_floorplan(data, grid_cols, grid_rows):
     # default_wall_height_ft shares height bounds, not level bounds
     default_h = round(_clamp(default_h, *HEIGHT_FT_RANGE), 1)
 
-    raw_walls = data.get('walls', [])
-    raw_doors = data.get('doors', [])
-    raw_elevs = data.get('elevations', [])
+    raw_walls  = data.get('walls', [])
+    raw_doors  = data.get('doors', [])
+    raw_elevs  = data.get('elevations', [])
+    raw_lights = data.get('lights', [])
+    raw_props  = data.get('props', [])
+    raw_zones  = data.get('zones', [])
     for name, lst, cap in (('walls', raw_walls, MAX_WALLS),
                            ('doors', raw_doors, MAX_DOORS),
-                           ('elevations', raw_elevs, MAX_ELEVATIONS)):
+                           ('elevations', raw_elevs, MAX_ELEVATIONS),
+                           ('lights', raw_lights, MAX_LIGHTS),
+                           ('props', raw_props, MAX_PROPS),
+                           ('zones', raw_zones, MAX_ZONES)):
         if not isinstance(lst, list):
             errors.append(f'"{name}" must be a list')
         elif len(lst) > cap:
@@ -146,6 +222,12 @@ def validate_floorplan(data, grid_cols, grid_rows):
             seg['base_ft'] = b
         if raw.get('show'):
             seg['show'] = True    # players see this wall on the 2D map too
+        style = _wall_style(raw, 'style', warnings, f'walls[{i}]')
+        if style:
+            seg['style'] = style
+        tex = _texture_ref(raw, 'texture', warnings, f'walls[{i}]')
+        if tex:
+            seg['texture'] = tex
         walls.append(seg)
 
     doors, seen_ids, auto_n = [], set(), 0
@@ -164,6 +246,9 @@ def validate_floorplan(data, grid_cols, grid_rows):
         h = _height(raw, 'height_ft', default_h, errors, f'doors[{i}]')
         if h != default_h:
             seg['height_ft'] = h
+        tex = _texture_ref(raw, 'texture', warnings, f'doors[{i}]')
+        if tex:
+            seg['texture'] = tex
         doors.append(seg)
 
     elevs = []
@@ -205,6 +290,120 @@ def validate_floorplan(data, grid_cols, grid_rows):
             rect['label'] = str(label).strip()[:40]
         elevs.append(rect)
 
+    lights = []
+    for i, raw in enumerate(raw_lights):
+        where = f'lights[{i}]'
+        if not isinstance(raw, dict):
+            warnings.append(f'{where}: not an object — dropped')
+            continue
+        x, y = _num(raw.get('x')), _num(raw.get('y'))
+        if x is None or y is None:
+            warnings.append(f'{where}: missing/invalid x/y — dropped')
+            continue
+        ltype = str(raw.get('type') or 'torch').strip().lower()
+        if ltype not in LIGHT_TYPES:
+            warnings.append(f'{where}: unknown type {ltype!r} — treated as torch')
+            ltype = 'torch'
+        light = {'x': round(_clamp(x * sx, 0.0, float(grid_cols)), 2),
+                 'y': round(_clamp(y * sy, 0.0, float(grid_rows)), 2),
+                 'type': ltype}
+        color = raw.get('color')
+        if color is not None:
+            color = str(color).strip()
+            if _HEX_COLOR_RE.match(color):
+                light['color'] = color.lower()
+            else:
+                warnings.append(f'{where}: invalid color {color!r} ignored '
+                                f'(want "#rrggbb")')
+        for key, rng in (('intensity', LIGHT_INTENSITY_RANGE),
+                         ('radius_ft', LIGHT_RADIUS_FT_RANGE),
+                         ('height_ft', LIGHT_HEIGHT_FT_RANGE)):
+            v = raw.get(key)
+            if v is None:
+                continue
+            n = _num(v)
+            if n is None:
+                warnings.append(f'{where}: invalid "{key}" ignored')
+                continue
+            light[key] = round(_clamp(n, *rng), 2)
+        if raw.get('flicker') is not None:
+            light['flicker'] = bool(raw.get('flicker'))
+        lights.append(light)
+
+    props = []
+    for i, raw in enumerate(raw_props):
+        where = f'props[{i}]'
+        if not isinstance(raw, dict):
+            warnings.append(f'{where}: not an object — dropped')
+            continue
+        ptype = str(raw.get('type') or '').strip().lower()
+        if ptype not in PROP_TYPES:
+            warnings.append(f'{where}: unknown prop type {ptype!r} — dropped')
+            continue
+        x, y = _num(raw.get('x')), _num(raw.get('y'))
+        if x is None or y is None:
+            warnings.append(f'{where}: missing/invalid x/y — dropped')
+            continue
+        prop = {'type': ptype,
+                'x': round(_clamp(x * sx, 0.0, float(grid_cols)), 2),
+                'y': round(_clamp(y * sy, 0.0, float(grid_rows)), 2)}
+        rot = _num(raw.get('rot'))
+        if rot:
+            prop['rot'] = round(rot % 360, 1)
+        scale = _num(raw.get('scale'))
+        if scale is not None and scale > 0 and scale != 1:
+            prop['scale'] = round(_clamp(scale, *PROP_SCALE_RANGE), 2)
+        tex = _texture_ref(raw, 'texture', warnings, where)
+        if tex:
+            prop['texture'] = tex
+        props.append(prop)
+
+    zones, zone_ids, zauto = [], set(), 0
+    for i, raw in enumerate(raw_zones):
+        where = f'zones[{i}]'
+        if not isinstance(raw, dict):
+            warnings.append(f'{where}: not an object — dropped')
+            continue
+        raw_rects = raw.get('rects')
+        if not isinstance(raw_rects, list) or not raw_rects:
+            warnings.append(f'{where}: missing "rects" — dropped')
+            continue
+        if len(raw_rects) > MAX_ZONE_RECTS:
+            warnings.append(f'{where}: too many rects '
+                            f'({len(raw_rects)} > {MAX_ZONE_RECTS}) — extra dropped')
+            raw_rects = raw_rects[:MAX_ZONE_RECTS]
+        rects = []
+        for j, rr in enumerate(raw_rects):
+            seg = _segment(rr, sx, sy, grid_cols, grid_rows, errors,
+                           f'{where}.rects[{j}]')
+            if seg is None:
+                continue
+            x1, x2 = sorted((seg['x1'], seg['x2']))
+            y1, y2 = sorted((seg['y1'], seg['y2']))
+            if x1 == x2 or y1 == y2:
+                continue
+            rects.append({'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2})
+        if not rects:
+            warnings.append(f'{where}: no usable rects — dropped')
+            continue
+        zid = str(raw.get('id') or '').strip()[:32]
+        while not zid or zid in zone_ids:
+            zauto += 1
+            zid = f'z{zauto}'
+        zone_ids.add(zid)
+        zone = {'id': zid, 'rects': rects}
+        name = raw.get('name')
+        if name:
+            zone['name'] = str(name).strip()[:60]
+        for key in ('floor_texture', 'wall_texture'):
+            tex = _texture_ref(raw, key, warnings, where)
+            if tex:
+                zone[key] = tex
+        style = _wall_style(raw, 'wall_style', warnings, where)
+        if style:
+            zone['wall_style'] = style
+        zones.append(zone)
+
     if errors:
         return None, warnings, errors
 
@@ -217,6 +416,14 @@ def validate_floorplan(data, grid_cols, grid_rows):
         'doors': doors,
         'elevations': elevs,
     }
+    # v2 layers are stored only when present, so v1-era plans (and the JSON
+    # pushed to older portal viewers) stay byte-compatible.
+    if lights:
+        clean['lights'] = lights
+    if props:
+        clean['props'] = props
+    if zones:
+        clean['zones'] = zones
 
     style = str(data.get('wall_style') or '').strip().lower()
     if style and style not in WALL_STYLES:
@@ -239,6 +446,10 @@ def floorplan_summary(clean):
     n = len(clean.get('elevations', []))
     if n:
         parts.append(f'{n} elevation region{"s" if n != 1 else ""}')
+    for key, label in (('lights', 'light'), ('props', 'prop'), ('zones', 'zone')):
+        n = len(clean.get(key, []))
+        if n:
+            parts.append(f'{n} {label}{"s" if n != 1 else ""}')
     return ' · '.join(parts)
 
 
@@ -276,10 +487,13 @@ def floorplan_layout_text(clean):
              f'1 square = 5 ft. Coordinates below are (col, row) from the '
              f'top-left corner.']
 
-    walls = clean.get('walls', [])
-    doors = clean.get('doors', [])
-    elevs = clean.get('elevations', [])
-    if not walls and not doors and not elevs:
+    walls  = clean.get('walls', [])
+    doors  = clean.get('doors', [])
+    elevs  = clean.get('elevations', [])
+    lights = clean.get('lights', [])
+    props  = clean.get('props', [])
+    zones  = clean.get('zones', [])
+    if not walls and not doors and not elevs and not lights and not props:
         lines.append('No walls, doors, or elevations — open ground.')
         return '\n'.join(lines)
 
@@ -337,6 +551,43 @@ def floorplan_layout_text(clean):
     if len(elevs) > LAYOUT_TEXT_MAX_ITEMS:
         lines.append(f'...and {len(elevs) - LAYOUT_TEXT_MAX_ITEMS} more '
                      f'elevation regions (see the schematic).')
+
+    # Named rooms give the art model semantic anchors ("the Great Hall gets
+    # long tables") without any coordinates it could mis-paint.
+    named = [z for z in zones if z.get('name')]
+    for z in named[:LAYOUT_TEXT_MAX_ITEMS]:
+        r = z['rects'][0]
+        region = _region((r['x1'] + r['x2']) / 2, (r['y1'] + r['y2']) / 2,
+                         cols, rows)
+        lines.append(f'Room "{z["name"]}" occupies the {region}.')
+
+    # Light sources set the mood in the art: aggregate counts by type, plus
+    # coarse positions for the first few so pools of light land near the
+    # fixtures the 3D renderer will place.
+    if lights:
+        by_type = {}
+        for lt in lights:
+            by_type[lt['type']] = by_type.get(lt['type'], 0) + 1
+        agg = ', '.join(f'{n} {t}{"s" if n != 1 else ""}'
+                        for t, n in sorted(by_type.items()))
+        lines.append(f'Light sources to paint as warm pools of light: {agg}.')
+        for lt in lights[:LAYOUT_TEXT_MAX_ITEMS]:
+            lines.append(f'A {lt["type"]} near ({_fmt(lt["x"])},{_fmt(lt["y"])}) '
+                         f'({_region(lt["x"], lt["y"], cols, rows)}).')
+        if len(lights) > LAYOUT_TEXT_MAX_ITEMS:
+            lines.append(f'...and {len(lights) - LAYOUT_TEXT_MAX_ITEMS} more '
+                         f'light sources.')
+
+    # Props are painted subtly — the 3D renderer erects real geometry for
+    # them, so the art only needs to keep those spots plausible/uncluttered.
+    if props:
+        by_type = {}
+        for p in props:
+            by_type[p['type']] = by_type.get(p['type'], 0) + 1
+        agg = ', '.join(f'{n} {t}{"s" if n != 1 else ""}'
+                        for t, n in sorted(by_type.items()))
+        lines.append(f'Furnishings present in 3D (paint at most faint floor '
+                     f'shadows for them, never solid objects): {agg}.')
 
     if walls:
         lines.append('Everything not listed is flat open floor at ground level.')

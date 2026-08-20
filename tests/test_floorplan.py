@@ -5,8 +5,8 @@ persistence and endpoints live in routes/battlemap.py."""
 import pytest
 
 from floorplan import (validate_floorplan, floorplan_summary,
-                       floorplan_layout_text,
-                       MAX_WALLS, DEFAULT_WALL_HEIGHT_FT)
+                       floorplan_layout_text, SCHEMA_VERSION,
+                       MAX_WALLS, MAX_LIGHTS, DEFAULT_WALL_HEIGHT_FT)
 
 
 def _plan(**over):
@@ -67,7 +67,7 @@ class TestGridRescale:
 
 class TestRejections:
     @pytest.mark.parametrize('bad, needle', [
-        ({'schema_version': 2}, 'schema_version'),
+        ({'schema_version': 3}, 'schema_version'),
         ('not a dict', 'JSON object'),
         (_plan(walls='nope'), '"walls" must be a list'),
         (_plan(walls=[{'x1': 1, 'y1': 1, 'x2': 'x', 'y2': 2}]), 'invalid "x2"'),
@@ -141,6 +141,118 @@ class TestNormalization:
             20, 20)
         e = clean['elevations'][0]
         assert (e['x1'], e['y1'], e['x2'], e['y2']) == (5.0, 5.0, 9.0, 9.0)
+
+
+class TestSchemaV2:
+    def test_v1_plans_accepted_and_stamped_current(self):
+        clean, warnings, errors = validate_floorplan(_plan(), 20, 20)
+        assert errors == []
+        assert clean['schema_version'] == SCHEMA_VERSION
+        # empty v2 layers are omitted so v1-era plans stay byte-compatible
+        assert 'lights' not in clean and 'props' not in clean and 'zones' not in clean
+
+    def test_one_foot_precision_round_trips(self):
+        clean, _, errors = validate_floorplan(
+            _plan(walls=[{'x1': 3.2, 'y1': 0.4, 'x2': 3.2, 'y2': 6.8}]), 20, 20)
+        assert errors == []
+        w = clean['walls'][0]
+        assert (w['x1'], w['y1'], w['y2']) == (3.2, 0.4, 6.8)
+
+    def test_light_defaults_and_overrides(self):
+        clean, warnings, errors = validate_floorplan(_plan(lights=[
+            {'x': 4, 'y': 6, 'type': 'torch'},
+            {'x': 1, 'y': 1, 'type': 'glow', 'color': '#7FB8FF',
+             'intensity': 99, 'radius_ft': 1, 'height_ft': -5, 'flicker': True},
+        ]), 20, 20)
+        assert errors == []
+        assert clean['lights'][0] == {'x': 4.0, 'y': 6.0, 'type': 'torch'}
+        lt = clean['lights'][1]
+        assert lt['color'] == '#7fb8ff'
+        assert lt['intensity'] == 3.0 and lt['radius_ft'] == 5.0
+        assert lt['height_ft'] == 0.0 and lt['flicker'] is True
+
+    def test_light_bad_type_color_and_coords(self):
+        clean, warnings, errors = validate_floorplan(_plan(lights=[
+            {'x': 4, 'y': 6, 'type': 'lava_lamp', 'color': 'orange'},
+            {'type': 'torch'},
+        ]), 20, 20)
+        assert errors == []
+        assert len(clean['lights']) == 1               # missing x/y dropped
+        assert clean['lights'][0]['type'] == 'torch'   # unknown type coerced
+        assert 'color' not in clean['lights'][0]
+        assert any('lava_lamp' in w for w in warnings)
+        assert any('color' in w for w in warnings)
+        assert any('x/y' in w for w in warnings)
+
+    def test_light_cap(self):
+        _, _, errors = validate_floorplan(
+            _plan(lights=[{}] * (MAX_LIGHTS + 1)), 20, 20)
+        assert any('too many lights' in e for e in errors)
+
+    def test_props_validated(self):
+        clean, warnings, errors = validate_floorplan(_plan(props=[
+            {'type': 'barrel', 'x': 5, 'y': 5.4, 'rot': 400, 'scale': 99,
+             'texture': 'oak_planks'},
+            {'type': 'jacuzzi', 'x': 1, 'y': 1},
+            {'type': 'crate'},
+        ]), 20, 20)
+        assert errors == []
+        assert len(clean['props']) == 1                # unknown type + no x/y dropped
+        p = clean['props'][0]
+        assert p['rot'] == 40.0 and p['scale'] == 4.0 and p['texture'] == 'oak_planks'
+        assert any('jacuzzi' in w for w in warnings)
+
+    def test_zones_validated(self):
+        clean, warnings, errors = validate_floorplan(_plan(zones=[
+            {'name': 'Great Hall', 'rects': [{'x1': 2, 'y1': 2, 'x2': 10, 'y2': 8}],
+             'floor_texture': 'flagstone', 'wall_texture': 'BAD SLUG!',
+             'wall_style': 'stone'},
+            {'rects': []},
+        ]), 20, 20)
+        assert errors == []
+        assert len(clean['zones']) == 1
+        z = clean['zones'][0]
+        assert z['id'] == 'z1' and z['name'] == 'Great Hall'
+        assert z['floor_texture'] == 'flagstone' and 'wall_texture' not in z
+        assert z['wall_style'] == 'stone'
+        assert any('texture ref' in w for w in warnings)
+        assert any('"rects"' in w for w in warnings)
+
+    def test_segment_texture_and_style(self):
+        clean, warnings, errors = validate_floorplan(_plan(
+            walls=[{'x1': 1, 'y1': 1, 'x2': 5, 'y2': 1,
+                    'style': 'wood', 'texture': 'mossy_stone'}],
+            doors=[{'x1': 5, 'y1': 1, 'x2': 6, 'y2': 1, 'texture': 'Oak Planks'}],
+        ), 20, 20)
+        assert errors == []
+        assert clean['walls'][0]['style'] == 'wood'
+        assert clean['walls'][0]['texture'] == 'mossy_stone'
+        # texture ref with spaces/uppercase fails the slug shape -> warned, dropped
+        assert 'texture' not in clean['doors'][0]
+        assert any('texture ref' in w for w in warnings)
+
+    def test_summary_includes_v2_layers(self):
+        clean, _, _ = validate_floorplan(_plan(
+            lights=[{'x': 1, 'y': 1, 'type': 'torch'}],
+            props=[{'type': 'crate', 'x': 2, 'y': 2}],
+            zones=[{'rects': [{'x1': 0, 'y1': 0, 'x2': 5, 'y2': 5}]}],
+        ), 20, 20)
+        s = floorplan_summary(clean)
+        assert '1 light' in s and '1 prop' in s and '1 zone' in s
+
+    def test_layout_text_mentions_lights_props_rooms(self):
+        clean, _, _ = validate_floorplan(_plan(
+            lights=[{'x': 4, 'y': 6, 'type': 'torch'},
+                    {'x': 10, 'y': 10, 'type': 'brazier'}],
+            props=[{'type': 'crate', 'x': 2, 'y': 2},
+                   {'type': 'crate', 'x': 3, 'y': 2}],
+            zones=[{'name': 'Great Hall',
+                    'rects': [{'x1': 2, 'y1': 2, 'x2': 10, 'y2': 8}]}],
+        ), 20, 20)
+        text = floorplan_layout_text(clean)
+        assert '1 brazier, 1 torch' in text
+        assert '2 crates' in text
+        assert 'Room "Great Hall"' in text
 
 
 class TestLayoutText:

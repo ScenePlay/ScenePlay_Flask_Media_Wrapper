@@ -231,6 +231,24 @@ def _push_map_state(bm):
             fp_version = fp.version
             doors = {d.door_key: d.is_open
                      for d in tblBattleMapDoors.query.filter_by(map_id=bm.map_id)}
+    # Texture-library files the plan references (v2), for remote 3D viewers.
+    # Capped: a plan can name at most this many distinct textures on the relay.
+    textures = None
+    if floorplan is not None:
+        names = set()
+        for w in floorplan.get('walls', []):
+            if w.get('texture'):
+                names.add(w['texture'])
+        for dr in floorplan.get('doors', []):
+            if dr.get('texture'):
+                names.add(dr['texture'])
+        for z in floorplan.get('zones', []):
+            for key in ('floor_texture', 'wall_texture'):
+                if z.get(key):
+                    names.add(z[key])
+        if names:
+            from routes.textures import texture_paths
+            textures = texture_paths(sorted(names)[:12]) or None
     relay_broadcaster.broadcast_map_update(
         bg_url, bm.grid_cols, bm.grid_rows,
         [p for p in (_token_relay_payload(t, bm, monsters, chars) for t in bm.tokens) if p],
@@ -238,6 +256,7 @@ def _push_map_state(bm):
         movement_scale=bm.movement_scale or 1.0,
         bg_filename=bm.bg_image,
         floorplan=floorplan, floorplan_version=fp_version, doors=doors,
+        textures=textures,
     )
 
 
@@ -1087,6 +1106,28 @@ def floorplan_get(map_id):
                     'layout_text': floorplan_mod.floorplan_layout_text(plan)})
 
 
+def _unknown_texture_refs(clean):
+    """Texture slugs the plan references that the library doesn't have —
+    warnings for the preview, since the renderer just falls back on them."""
+    from routes.textures import texture_names
+    have = set(texture_names())
+    refs = set()
+    for w in clean.get('walls', []):
+        if w.get('texture'):
+            refs.add(w['texture'])
+    for d in clean.get('doors', []):
+        if d.get('texture'):
+            refs.add(d['texture'])
+    for p in clean.get('props', []):
+        if p.get('texture'):
+            refs.add(p['texture'])
+    for z in clean.get('zones', []):
+        for key in ('floor_texture', 'wall_texture'):
+            if z.get(key):
+                refs.add(z[key])
+    return sorted(refs - have)
+
+
 @battlemap_bp.route('/<int:map_id>/floorplan', methods=['POST'])
 @login_required
 @dm_required
@@ -1098,8 +1139,38 @@ def floorplan_save(map_id):
     if errors:
         return jsonify({'ok': False, 'errors': errors}), 400
 
+    # Preview mode: validate + normalize only, write nothing. The manage page
+    # renders the returned clean plan as a schematic so the DM sees what an
+    # AI paste actually contains BEFORE committing it.
+    if data.get('dry_run'):
+        unknown = _unknown_texture_refs(clean)
+        return jsonify({'ok': True, 'dry_run': True, 'warnings': warnings,
+                        'summary': floorplan_mod.floorplan_summary(clean),
+                        'unknown_textures': unknown,
+                        'floorplan': clean})
+
+    return _apply_floorplan(bm, clean, warnings)
+
+
+FLOORPLAN_HISTORY_KEEP = 10
+
+
+def _apply_floorplan(bm, clean, warnings):
+    """Store a validated plan: snapshot the outgoing JSON to history, bump the
+    version, reconcile door rows, push to the relay. Shared by save/restore."""
+    from models.ttrpg import tblBattleMapFloorplanHistory
+    map_id = bm.map_id
     fp = tblBattleMapFloorplans.query.filter_by(map_id=map_id).first()
     if fp:
+        # Snapshot the plan being replaced — the undo the editor never had.
+        db.session.add(tblBattleMapFloorplanHistory(
+            map_id=map_id, version=fp.version or 1,
+            json_data=fp.json_data, saved_at=_now()))
+        overflow = (tblBattleMapFloorplanHistory.query.filter_by(map_id=map_id)
+                    .order_by(tblBattleMapFloorplanHistory.hist_id.desc())
+                    .offset(FLOORPLAN_HISTORY_KEEP).all())
+        for row in overflow:
+            db.session.delete(row)
         fp.json_data  = json.dumps(clean)
         fp.version    = (fp.version or 1) + 1
         fp.updated_at = _now()
@@ -1128,6 +1199,50 @@ def floorplan_save(map_id):
     _push_map_state(bm)   # live map: remote 3D viewers rebuild on the next push
     return jsonify({'ok': True, 'version': fp.version, 'warnings': warnings,
                     'summary': floorplan_mod.floorplan_summary(clean)})
+
+
+@battlemap_bp.route('/<int:map_id>/floorplan/history')
+@login_required
+@dm_required
+def floorplan_history(map_id):
+    from models.ttrpg import tblBattleMapFloorplanHistory
+    tblBattleMaps.query.get_or_404(map_id)
+    out = []
+    rows = (tblBattleMapFloorplanHistory.query.filter_by(map_id=map_id)
+            .order_by(tblBattleMapFloorplanHistory.hist_id.desc()).all())
+    for row in rows:
+        try:
+            summary = floorplan_mod.floorplan_summary(json.loads(row.json_data))
+        except (ValueError, TypeError):
+            summary = '(unreadable)'
+        out.append({'hist_id': row.hist_id, 'version': row.version,
+                    'saved_at': row.saved_at, 'summary': summary})
+    return jsonify({'ok': True, 'history': out})
+
+
+@battlemap_bp.route('/<int:map_id>/floorplan/restore', methods=['POST'])
+@login_required
+@dm_required
+def floorplan_restore(map_id):
+    """Bring back a history snapshot THROUGH the normal validate/save path —
+    the grid may have changed since it was taken, and the restore itself
+    snapshots the current plan, so a restore is always undoable too."""
+    from models.ttrpg import tblBattleMapFloorplanHistory
+    bm = tblBattleMaps.query.get_or_404(map_id)
+    hist_id = (request.get_json() or {}).get('hist_id')
+    row = tblBattleMapFloorplanHistory.query.filter_by(
+        map_id=map_id, hist_id=hist_id).first()
+    if row is None:
+        return jsonify({'ok': False, 'errors': ['unknown history entry']}), 404
+    try:
+        raw = json.loads(row.json_data)
+    except (ValueError, TypeError):
+        return jsonify({'ok': False, 'errors': ['stored snapshot is unreadable']}), 400
+    clean, warnings, errors = floorplan_mod.validate_floorplan(
+        raw, bm.grid_cols, bm.grid_rows)
+    if errors:
+        return jsonify({'ok': False, 'errors': errors}), 400
+    return _apply_floorplan(bm, clean, warnings)
 
 
 @battlemap_bp.route('/<int:map_id>/floorplan/delete', methods=['POST'])

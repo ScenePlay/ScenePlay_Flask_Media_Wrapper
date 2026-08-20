@@ -1,0 +1,233 @@
+[
+ {
+  "name": "castle_brick",
+  "category": "brick",
+  "tile_ft": 5,
+  "tags": "castle keep wall",
+  "source": "ambientCG Bricks085 (CC0)"
+ },
+ {
+  "name": "old_brick",
+  "category": "brick",
+  "tile_ft": 5,
+  "tags": "aged crumbling wall",
+  "source": "ambientCG Bricks066 (CC0)"
+ },
+ {
+  "name": "red_brick",
+  "category": "brick",
+  "tile_ft": 5,
+  "tags": "worn red brick wall",
+  "source": "ambientCG Bricks097 (CC0)"
+ },
+ {
+  "name": "cobblestone",
+  "category": "floor",
+  "tile_ft": 5,
+  "tags": "street courtyard",
+  "source": "ambientCG PavingStones128 (CC0)"
+ },
+ {
+  "name": "deck_plate",
+  "category": "floor",
+  "tile_ft": 4,
+  "tags": "scifi deck engine room hangar",
+  "source": "ambientCG DiamondPlate008B (CC0)"
+ },
+ {
+  "name": "flagstone",
+  "category": "floor",
+  "tile_ft": 6,
+  "tags": "dungeon castle floor",
+  "source": "ambientCG PavingStones138 (CC0)"
+ },
+ {
+  "name": "marble_floor",
+  "category": "floor",
+  "tile_ft": 6,
+  "tags": "palace throne room",
+  "source": "ambientCG Marble012 (CC0)"
+ },
+ {
+  "name": "metal_walkway",
+  "category": "floor",
+  "tile_ft": 4,
+  "tags": "scifi catwalk grate derelict industrial",
+  "source": "ambientCG MetalWalkway014 (CC0)"
+ },
+ {
+  "name": "stone_tiles",
+  "category": "floor",
+  "tile_ft": 5,
+  "tags": "temple tiled floor",
+  "source": "ambientCG Tiles143 (CC0)"
+ },
+ {
+  "name": "cracked_asphalt",
+  "category": "ground",
+  "tile_ft": 6,
+  "tags": "wasteland road lot modern",
+  "source": "ambientCG Asphalt031 (CC0)"
+ },
+ {
+  "name": "desert_sand",
+  "category": "ground",
+  "tile_ft": 8,
+  "tags": "wasteland desert dunes dust flats",
+  "source": "ambientCG Ground054 (CC0)"
+ },
+ {
+  "name": "gravel",
+  "category": "ground",
+  "tile_ft": 5,
+  "tags": "path yard",
+  "source": "ambientCG Gravel023 (CC0)"
+ },
+ {
+  "name": "highway_road",
+  "category": "ground",
+  "tile_ft": 10,
+  "tags": "wasteland ruined highway lane markings",
+  "source": "ambientCG Road007 (CC0)"
+ },
+ {
+  "name": "mossy_grass",
+  "category": "ground",
+  "tile_ft": 6,
+  "tags": "outdoor field",
+  "source": "ambientCG Grass004 (CC0)"
+ },
+ {
+  "name": "packed_dirt",
+  "category": "ground",
+  "tile_ft": 6,
+  "tags": "path cellar floor",
+  "source": "ambientCG Ground109 (CC0)"
+ },
+ {
+  "name": "rocky_ground",
+  "category": "ground",
+  "tile_ft": 8,
+  "tags": "mountain badlands",
+  "source": "ambientCG Rock064 (CC0)"
+ },
+ {
+  "name": "scorched_earth",
+  "category": "ground",
+  "tile_ft": 8,
+  "tags": "wasteland crater burned irradiated",
+  "source": "ambientCG Ground048 (CC0)"
+ },
+ {
+  "name": "corrugated_scrap",
+  "category": "metal",
+  "tile_ft": 5,
+  "tags": "wasteland shanty scrap fort fence",
+  "source": "ambientCG CorrugatedSteel007C (CC0)"
+ },
+ {
+  "name": "hull_panels",
+  "category": "metal",
+  "tile_ft": 8,
+  "tags": "scifi starship corridor bulkhead panels",
+  "source": "ambientCG Facade001 (CC0)"
+ },
+ {
+  "name": "iron_plate",
+  "category": "metal",
+  "tile_ft": 4,
+  "tags": "dungeon door vault",
+  "source": "ambientCG Metal048A (CC0)"
+ },
+ {
+  "name": "painted_metal",
+  "category": "metal",
+  "tile_ft": 5,
+  "tags": "weathered painted metal patina colony",
+  "source": "ambientCG PaintedMetal006 (CC0)"
+ },
+ {
+  "name": "rusty_metal",
+  "category": "metal",
+  "tile_ft": 6,
+  "tags": "wasteland derelict rust scratched wall",
+  "source": "ambientCG MetalPlates013 (CC0)"
+ },
+ {
+  "name": "sheet_metal",
+  "category": "metal",
+  "tile_ft": 5,
+  "tags": "scifi derelict weathered hull white rust",
+  "source": "ambientCG Metal041B (CC0)"
+ },
+ {
+  "name": "ship_plating",
+  "category": "metal",
+  "tile_ft": 5,
+  "tags": "scifi hull armor riveted",
+  "source": "ambientCG MetalPlates006 (CC0)"
+ },
+ {
+  "name": "aged_plaster",
+  "category": "plaster",
+  "tile_ft": 6,
+  "tags": "tavern interior wall",
+  "source": "ambientCG Plaster001 (CC0)"
+ },
+ {
+  "name": "concrete_wall",
+  "category": "plaster",
+  "tile_ft": 6,
+  "tags": "scifi bunker hive-city industrial modern",
+  "source": "ambientCG Concrete046 (CC0)"
+ },
+ {
+  "name": "painted_plaster",
+  "category": "plaster",
+  "tile_ft": 6,
+  "tags": "manor interior wall",
+  "source": "ambientCG PaintedPlaster017 (CC0)"
+ },
+ {
+  "name": "cave_rock",
+  "category": "stone",
+  "tile_ft": 8,
+  "tags": "natural cavern rock",
+  "source": "ambientCG Rock051 (CC0)"
+ },
+ {
+  "name": "medieval_stone",
+  "category": "stone",
+  "tile_ft": 6,
+  "tags": "medieval fortress wall",
+  "source": "ambientCG Bricks102 (CC0)"
+ },
+ {
+  "name": "stone_blocks",
+  "category": "stone",
+  "tile_ft": 6,
+  "tags": "dark dungeon wall",
+  "source": "ambientCG Bricks089 (CC0)"
+ },
+ {
+  "name": "dark_wood_floor",
+  "category": "wood",
+  "tile_ft": 5,
+  "tags": "study library floor",
+  "source": "ambientCG WoodFloor064 (CC0)"
+ },
+ {
+  "name": "oak_planks",
+  "category": "wood",
+  "tile_ft": 5,
+  "tags": "tavern floor door",
+  "source": "ambientCG WoodFloor043 (CC0)"
+ },
+ {
+  "name": "rough_planks",
+  "category": "wood",
+  "tile_ft": 5,
+  "tags": "shack fence crate",
+  "source": "ambientCG Planks037A (CC0)"
+ }
+]

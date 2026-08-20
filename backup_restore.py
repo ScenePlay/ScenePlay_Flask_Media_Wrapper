@@ -68,7 +68,7 @@ MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
     'tblSessionNotes', 'tblBattleMapNotes', 'tblBattleMapPrompts',
     'tblObsPanelNotes', 'tblObsSceneMap', 'tblDiceRolls', 'tblCronSchedule',
     'tblScenePattern', 'tblLedTypeModel', 'tblWledPattern', 'tblServersIP',
-    'tblServerRole',
+    'tblServerRole', 'tblTextures',
 ))
 MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
     'tblUsers',          # accounts/password hashes never merge; replace mode moves them
@@ -77,6 +77,7 @@ MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
     'tblPlaylistQueue',  # live download work queue
     'tblRollLog',        # relay mirror log (tblDiceRolls carries the history)
     'tblTokenPositions', # live relay token-position mirror
+    'tblBattleMapFloorplanHistory',  # undo snapshots — only the live plan merges
     'tblLedConfig',      # THIS box's GPIO pin / strip hardware config
     'tblEffect',         # WLED effect catalog — synced from the physical board
     'tblPallette',       # WLED palette catalog — synced from the physical board
@@ -951,6 +952,24 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
                 data['pallette'] = pallette_map.get(data['pallette'], data['pallette'])
             _copy_row(c, 'tblWledPattern', data)
             s['lighting'] += 1
+
+    # -- 3D texture library (standalone, name-deduped, local wins) ----------
+    # The image files live under static/uploads/textures/ and travel with
+    # include_uploads like every other upload folder.
+    if (_src_has(c, 'tblTextures')
+            and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND lower(name)='tbltextures'").fetchone()):
+        tcols = _common_cols(c, 'tblTextures', exclude=('texture_id',))
+        for row in c.execute(f"SELECT {', '.join(tcols)} FROM src.tblTextures").fetchall():
+            data = dict(zip(tcols, row))
+            name = (data.get('name') or '').strip()
+            if not name:
+                continue
+            if c.execute("SELECT 1 FROM tblTextures WHERE lower(name)=lower(?)",
+                         (name,)).fetchone():
+                continue
+            _copy_row(c, 'tblTextures', data)
+            s['textures'] = s.get('textures', 0) + 1
 
     return s
 

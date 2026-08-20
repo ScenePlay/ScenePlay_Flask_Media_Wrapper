@@ -589,6 +589,39 @@ class tblBattleMapPrompts(db.Model):
     __table_args__ = (db.UniqueConstraint('map_id', 'kind'),)
 
 
+class tblBattleMapFloorplanHistory(db.Model):
+    """Last-N floorplan snapshots per map, written on every save just before
+    the live row is overwritten (tblBattleMapFloorplans keeps only the
+    current JSON — before this table an AI paste or a bad edit destroyed the
+    previous geometry irrecoverably). Pruned to FLOORPLAN_HISTORY_KEEP."""
+    __tablename__ = 'tblBattleMapFloorplanHistory'
+
+    hist_id    = db.Column(db.Integer, primary_key=True)
+    map_id     = db.Column(db.Integer, db.ForeignKey('tblBattleMaps.map_id'),
+                           nullable=False)
+    version    = db.Column(db.Integer, nullable=False)   # version this JSON had
+    json_data  = db.Column(db.Text, nullable=False)
+    saved_at   = db.Column(db.Text, nullable=False)
+
+
+class tblTextures(db.Model):
+    """User-added surface textures for the 3D texture library (AI-generated
+    paste-backs and uploads). Built-in textures live as files under
+    static/textures/builtin/ with a static manifest.json — the /manifest
+    endpoint serves the union. `name` is the stable slug floorplan JSON
+    references ([a-z0-9_-], unique across builtin + DB); `tile_ft` is the
+    physical size one tile covers in the 3D world."""
+    __tablename__ = 'tblTextures'
+
+    texture_id = db.Column(db.Integer, primary_key=True)
+    name       = db.Column(db.Text, nullable=False, unique=True)
+    category   = db.Column(db.Text, nullable=False, default='other')
+    source     = db.Column(db.Text, nullable=False, default='upload')  # 'ai' | 'upload'
+    filename   = db.Column(db.Text, nullable=False)   # under static/uploads/textures/
+    tile_ft    = db.Column(db.Float, nullable=False, default=5.0)
+    created_at = db.Column(db.Text, nullable=False)
+
+
 class tblBattleMapDoors(db.Model):
     """Runtime open/closed state, one row per door in the map's floorplan.
     Separate from json_data so a toggle is a one-row UPDATE and the state poll

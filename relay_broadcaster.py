@@ -331,9 +331,37 @@ def _debounced_map_enqueue(fn):
         t.start()
 
 
+_TEXTURE_CACHE = {}        # abs path -> (mtime, (data_b64, ext, sha))
+_sent_texture_shas = set()  # shas the relay accepted this process lifetime
+
+
+def _texture_data(path):
+    """(base64, ext, sha) for a texture-library file, re-encoded to ≤512px so
+    a full library reference costs the relay ~12×100 KB at most, once."""
+    import base64, hashlib, os
+    if not path or not os.path.exists(path):
+        return None, None, None
+    try:
+        mtime = os.path.getmtime(path)
+        hit = _TEXTURE_CACHE.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        ext = path.rsplit('.', 1)[-1].lower() if '.' in path else 'jpg'
+        with open(path, 'rb') as f:
+            raw = f.read()
+        out, out_ext = _downscale_image(raw, ext, max_dim=512, quality=82)
+        val = (base64.b64encode(out).decode('ascii'), out_ext,
+               hashlib.sha256(out).hexdigest()[:32])
+        _TEXTURE_CACHE[path] = (mtime, val)
+        return val
+    except Exception:
+        return None, None, None
+
+
 def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
                          movement_scale=1.0, bg_filename=None,
-                         floorplan=None, floorplan_version=None, doors=None):
+                         floorplan=None, floorplan_version=None, doors=None,
+                         textures=None):
     """POST /api/v1/session/push  body: { session_id, map: { url, ... } }
 
     When bg_filename names a still image, its bytes are embedded as base64 so a
@@ -361,6 +389,30 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
         payload['map']['floorplan'] = floorplan
         payload['map']['floorplan_version'] = floorplan_version
         payload['map']['doors'] = doors or {}
+    # Texture-library files the floorplan references (v2 texture refs). The
+    # bytes ride only until the relay has acknowledged a push containing that
+    # sha; afterwards pushes carry the tiny {sha, ext, tile_ft} stub — token
+    # nudges must not re-upload the library. If the relay lost its copy (a
+    # session reset purges its media dir), it answers need_textures with the
+    # missing names and the push is repeated with those bytes included.
+    # Portals that predate textures ignore the key and fall back to
+    # art-sampled surfaces.
+    sent_shas = []
+    tex_full = {}    # name -> (data, sha) for the need_textures re-send
+    if floorplan is not None and textures:
+        tex_payload = {}
+        for tname, info in textures.items():
+            data, ext, sha = _texture_data(info.get('path'))
+            if not data:
+                continue
+            entry = {'sha': sha, 'ext': ext, 'tile_ft': info.get('tile_ft', 5)}
+            if sha not in _sent_texture_shas:
+                entry['data'] = data
+                sent_shas.append(sha)
+            tex_full[tname] = (data, sha)
+            tex_payload[tname] = entry
+        if tex_payload:
+            payload['map']['textures'] = tex_payload
     # Two-step background transfer: the normal push carries only a content sha
     # (tiny — token moves on a video map must not re-upload megabytes each
     # nudge). If the relay doesn't have that file it answers need_image and the
@@ -382,8 +434,17 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
 
     import hashlib
     import json as _json
+    # Texture BYTES are excluded from the change hash: whether an entry
+    # carries data depends on what the relay has acknowledged, not on map
+    # state — hashing it would defeat the skip right after a byte-carrying
+    # push. The sha field still rides, so real texture changes are seen.
+    _dsrc = heavy or payload
+    _dmap = dict(_dsrc['map'])
+    if _dmap.get('textures'):
+        _dmap['textures'] = {k: {kk: vv for kk, vv in v.items() if kk != 'data'}
+                             for k, v in _dmap['textures'].items()}
     digest = hashlib.sha1(
-        _json.dumps(heavy or payload, sort_keys=True).encode()).hexdigest()
+        _json.dumps(dict(_dsrc, map=_dmap), sort_keys=True).encode()).hexdigest()
     if digest == _last_map_hash['v']:
         return   # nothing changed since the last successful push
 
@@ -393,17 +454,33 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
             return
         payload['session_id'] = c['session_id']
         resp = _post('/api/v1/session/push', payload, c, timeout=20)
-        if heavy is not None:
+        try:
+            resp_d = resp.json()
+        except Exception:
+            resp_d = {}
+        # Relay is missing texture files whose stubs we sent — patch the bytes
+        # into the shared entry dicts (heavy['map'] holds the same references,
+        # so a need_image re-send carries them too) and forget those shas.
+        need_tex = resp_d.get('need_textures') or []
+        if need_tex and tex_full:
+            tex_entries = payload['map'].get('textures') or {}
+            for tname in need_tex:
+                if tname in tex_full and tname in tex_entries:
+                    data, sha = tex_full[tname]
+                    tex_entries[tname]['data'] = data
+                    _sent_texture_shas.discard(sha)
+                    if sha not in sent_shas:
+                        sent_shas.append(sha)
+        if heavy is not None and resp_d.get('need_image'):
             heavy['session_id'] = c['session_id']
-            try:
-                need = bool(resp.json().get('need_image'))
-            except Exception:
-                need = False
-            if need:
-                # Generous window: the heavy payload can carry a video on a
-                # slow home uplink. Only happens when the relay lacks the file.
-                _post('/api/v1/session/push', heavy, c, timeout=120)
+            # Generous window: the heavy payload can carry a video on a
+            # slow home uplink. Only happens when the relay lacks the file.
+            _post('/api/v1/session/push', heavy, c, timeout=120)
+        elif need_tex:
+            # No image re-send due — repeat the normal push with the bytes.
+            _post('/api/v1/session/push', payload, c, timeout=60)
         _last_map_hash['v'] = digest   # only remember payloads that landed
+        _sent_texture_shas.update(sent_shas)
 
     _debounced_map_enqueue(_go)   # queue coalesces on 'map-state'; latest wins
 

@@ -6,8 +6,13 @@
     <h3 style="color:var(--ttrpg-accent);" class="mb-0">&#9776; Battle Maps</h3>
     <span class="small text-muted">{{ sess.title }}</span>
   </div>
-  <a href="{{ url_for('ttrpg.session_detail', session_id=sess.session_id) }}"
-     class="btn btn-sm btn-outline-secondary">&#8592; Session</a>
+  <div class="d-flex gap-2">
+    <button class="btn btn-sm btn-outline-secondary" onclick="TexturePicker.open()"
+            title="Browse, upload, and AI-generate the surface textures 3D floorplans can reference">
+      &#129521; Texture Library</button>
+    <a href="{{ url_for('ttrpg.session_detail', session_id=sess.session_id) }}"
+       class="btn btn-sm btn-outline-secondary">&#8592; Session</a>
+  </div>
 </div>
 
 <!-- Create map form -->
@@ -426,9 +431,14 @@
         <div class="d-flex align-items-center gap-2 mb-3 p-2"
              style="background:var(--ttrpg-surface);border:1px solid var(--sp-border);border-radius:6px;">
           <span id="fp-status" class="small flex-grow-1 text-muted">No floorplan yet.</span>
+          <button id="fp-history-btn" class="btn btn-outline-secondary btn-sm" style="display:none;"
+                  onclick="fpToggleHistory()"
+                  title="Earlier versions of this floorplan — every save keeps the last 10">&#128336; History</button>
           <button id="fp-delete-btn" class="btn btn-outline-danger btn-sm" style="display:none;"
                   onclick="delete3dFloorplan()">Delete Floorplan</button>
         </div>
+        <div id="fp-history-box" class="mb-3 p-2 small" style="display:none;
+             background:var(--ttrpg-surface);border:1px solid var(--sp-border);border-radius:6px;"></div>
 
         <!-- Design (walls-first) vs Trace (image-first) -->
         <div class="d-flex gap-2 mb-3 flex-wrap">
@@ -543,8 +553,9 @@
 
         <hr style="border-color:var(--sp-border);">
         <p class="small text-muted mb-2">
-          <b>Step 2</b> — paste the AI's JSON reply here and save. You can fix any
-          misaligned walls later with the Floorplan editor on the map page.
+          <b>Step 2</b> — paste the AI's JSON reply, preview it against the grid,
+          fix any offset, then save. Finer edits live in the Floorplan editor on
+          the map page.
         </p>
         <textarea id="fp-paste-text" class="form-control mb-2" rows="6"
                   placeholder='{"format": "sceneplay-floorplan", "walls": [...], ...}'
@@ -552,7 +563,29 @@
                          background:var(--ttrpg-surface);color:var(--ttrpg-text);
                          border-color:var(--sp-border);resize:vertical;"></textarea>
         <button class="btn btn-ttrpg btn-sm w-100" id="fp-save-btn"
-                onclick="save3dFloorplan()">&#128190; Save Floorplan</button>
+                onclick="preview3dFloorplan()">&#128269; Preview Floorplan</button>
+
+        <!-- Dry-run preview: schematic + summary + quick fix-ups + confirm -->
+        <div id="fp-preview" style="display:none;" class="mt-2">
+          <div style="border:1px solid var(--sp-border);border-radius:6px;overflow:hidden;">
+            <canvas id="fp-preview-canvas" style="width:100%;display:block;"></canvas>
+          </div>
+          <div id="fp-preview-info" class="small mt-2"></div>
+          <div class="d-flex align-items-center gap-1 mt-2 flex-wrap">
+            <span class="small text-muted">Fix:</span>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewNudge(-0.5,0)" title="Shift left ½ square">&#9664;</button>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewNudge(0,-0.5)" title="Shift up ½ square">&#9650;</button>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewNudge(0,0.5)" title="Shift down ½ square">&#9660;</button>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewNudge(0.5,0)" title="Shift right ½ square">&#9654;</button>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewScale(1/1.05)" title="Shrink 5%">&#8722;</button>
+            <button class="btn btn-sm btn-outline-secondary px-2" onclick="fpPreviewScale(1.05)" title="Grow 5%">&#43;</button>
+            <button class="btn btn-sm btn-outline-secondary" id="fp-strip-tex-btn"
+                    style="display:none;" onclick="fpPreviewStripUnknown()"
+                    title="Remove texture names the library doesn't have (they'd fall back to map-art surfaces anyway)">Strip unknown textures</button>
+          </div>
+          <button class="btn btn-ttrpg btn-sm w-100 mt-2" id="fp-confirm-btn"
+                  onclick="confirm3dFloorplan()">&#128190; Save Floorplan</button>
+        </div>
         <div id="fp-result" class="small mt-2"></div>
 
       </div>
@@ -567,6 +600,8 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='scripts/floorplan_prompt.js') }}"></script>
+<script src="{{ static_v('scripts/paste_image.js') }}"></script>
+<script src="{{ static_v('scripts/texture_picker.js') }}"></script>
 <script>
 // ── Per-card DM notes (read/edit/add/delete) ─────────────────────────────────
 // Same battlemap-notes backend as the map page's panel and the session page's
@@ -1391,6 +1426,14 @@ function _uploadMapBg(blob, ext, btnEl) {
 let _fp3dMapId = null, _fp3dMapName = '', _fp3dCols = 20, _fp3dRows = 20;
 let _fp3dHasBg = false, _fp3dTab = 'design';
 
+// Texture-library catalog for the "## TEXTURES" prompt block. Fetched once;
+// prompts built before it lands simply omit the block (unknown names only
+// warn on save anyway).
+let _texCatalog = [];
+fetch('/ttrpg/textures/manifest').then(r => r.json())
+  .then(d => { _texCatalog = d.textures || []; })
+  .catch(() => {});
+
 function open3dModal(mapId, mapName, cols, rows, hasBg, tab) {
   _fp3dMapId   = parseInt(mapId);
   _fp3dMapName = mapName;
@@ -1403,6 +1446,9 @@ function open3dModal(mapId, mapName, cols, rows, hasBg, tab) {
   document.getElementById('fpd-prompt-section').style.display = 'none';
   document.getElementById('fp-paste-text').value = '';
   document.getElementById('fp-result').innerHTML = '';
+  document.getElementById('fp-preview').style.display = 'none';
+  _fpPending = null;
+  _fpUnknownTex = [];
   document.getElementById('fp-trace-nobg').style.display = _fp3dHasBg ? 'none' : '';
   document.getElementById('fp-trace-gen-btn').style.display = _fp3dHasBg ? '' : 'none';
   _populateFpdGenres();
@@ -1479,18 +1525,33 @@ function _buildLayoutDesignPrompt() {
   lines.push('');
   FPPrompt.coordSystemLines(c, r).forEach(l => lines.push(l));
   lines.push('');
-  lines.push('## DESIGN GUIDANCE');
-  lines.push('- Design for tabletop combat: 2–6 distinct spaces (rooms, chambers, open yards) connected by doors and corridors, with enough open floor for 1-square tokens to maneuver.');
+  lines.push('## DESIGN GUIDANCE — ROOMS FIRST');
+  lines.push('- Think ROOM BY ROOM: invent 2–6 distinct named spaces (rooms, chambers, open yards), each with a PURPOSE (guard post, shrine, storage, feasting hall…), connected by doors and corridors with enough open floor for 1-square tokens to maneuver.');
+  lines.push('- Output each room as a "zones" entry: a short evocative "name" plus rects covering its floor area. Zones drive per-room surfaces in 3D.');
   lines.push('- Sensible sizes at the 5-ft scale: small room 10–20 ft (2–4 squares) across; large hall 20–50 ft; corridors 5–10 ft wide (1–2 squares); doors 2.5–5 ft wide (0.5–1 square).');
   lines.push('- Straight wall segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment.');
   lines.push('- Doors are separate entries, never part of a wall: leave a gap in the wall exactly the door\'s width and cover the gap with the door segment. Short unique ids ("d1", "d2"…).');
   lines.push('- Every enclosed room must be reachable — at least one door or opening.');
   lines.push('- Use "elevations" sparingly and only where they fit the scene: negative floor_ft = pit/chasm depth, positive = raised platform height. Flat ground is the default.');
   lines.push('- Use most of the ' + c + '×' + r + ' grid, but leave some open ground for the encounter to start in. Do not wall off the entire perimeter unless the scene is indoors.');
-  lines.push('- Do NOT place furniture, rubble, or decoration — walls, doors, and elevations only; the map art will add the rest.');
+  lines.push('');
+  lines.push('## LIGHTING & FURNISHINGS (they render as REAL 3D objects)');
+  lines.push('- Place "lights" the scene calls for: torches beside doorways and along corridors, a brazier or hearth in large occupied rooms, candles or lanterns on work surfaces, "glow" for magical or technological light. Rooms without a light source render DARK in 3D — light every inhabited room. Fractional coordinates put a light exactly where the fixture stands (1 ft = 0.2 squares).');
+  lines.push('- Furnish each room with a few "props" matching its purpose (a hall gets tables and chairs, storage gets crates and barrels, a shrine gets an altar and statues). Props are SOLID 3D objects that BLOCK movement (stairs and rubble stay walkable) — keep most of the floor open for tokens, never blockade a doorway or the only route through a room; roughly 2–8 props per room.');
+  const texLines = FPPrompt.textureCatalogLines(_texCatalog);
+  if (texLines.length) {
+    lines.push('- Give each zone a "floor_texture"/"wall_texture" from the TEXTURES list when one fits the room; omit the fields when nothing fits (surfaces then take their look from the painted map art).');
+    lines.push('- Doors render as WOODEN planks unless you give them a "texture" — in a non-medieval setting give doors a fitting one (e.g. iron_plate, hull_panels, sheet_metal).');
+    lines.push('');
+    texLines.forEach(l => lines.push(l));
+  }
   lines.push('');
   FPPrompt.outputFormatLines(c, r).forEach(l => lines.push(l));
-  lines.push('Before answering, verify: every door covers a gap of its own width in a wall; every room has an entrance; nothing crosses the grid edge.');
+  lines.push('');
+  lines.push('## FIELD NOTES');
+  FPPrompt.v2LayerLines().forEach(l => lines.push(l));
+  lines.push('');
+  lines.push('Before answering, verify: every door covers a gap of its own width in a wall; every room has an entrance and a light source; nothing crosses the grid edge.');
   lines.push('');
   lines.push('After you reply with the JSON, WAIT — a follow-up message will ask you to paint the matching map art.');
   return lines.join('\n');
@@ -1523,15 +1584,65 @@ function _fpUpdateStatus() {
   const info = _FP_INFO[_fp3dMapId];
   const status = document.getElementById('fp-status');
   const delBtn = document.getElementById('fp-delete-btn');
+  const histBtn = document.getElementById('fp-history-btn');
+  document.getElementById('fp-history-box').style.display = 'none';
   if (info) {
     status.innerHTML = 'Floorplan <b>v' + info.version + '</b> &mdash; ' + _mnEsc(info.summary);
     status.classList.remove('text-muted');
     delBtn.style.display = '';
+    histBtn.style.display = '';
   } else {
     status.textContent = 'No floorplan yet.';
     status.classList.add('text-muted');
     delBtn.style.display = 'none';
+    histBtn.style.display = 'none';
   }
+}
+
+// ── floorplan history (last 10 saves, server-side) ───────────────────────────
+
+function fpToggleHistory() {
+  const box = document.getElementById('fp-history-box');
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = 'Loading…';
+  fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan/history`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { box.innerHTML = 'Could not load history.'; return; }
+      if (!d.history.length) {
+        box.innerHTML = 'No earlier versions yet — history is kept from the next save on.';
+        return;
+      }
+      box.innerHTML = d.history.map(h =>
+        `<div class="d-flex align-items-center gap-2 py-1">
+           <span class="flex-grow-1">v${h.version} · ${_mnEsc(h.saved_at)} — ${_mnEsc(h.summary)}</span>
+           <button class="btn btn-sm btn-outline-secondary py-0"
+                   onclick="fpRestoreHistory(${h.hist_id}, ${h.version})">Restore</button>
+         </div>`).join('');
+    })
+    .catch(() => { box.innerHTML = 'Could not load history (network).'; });
+}
+
+function fpRestoreHistory(histId, version) {
+  if (!confirm('Restore floorplan v' + version + '? The current plan is kept in history.')) return;
+  fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan/restore`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hist_id: histId }),
+  }).then(r => r.json())
+    .then(d => {
+      if (!d.ok) {
+        _fpShowResult('<b>Restore failed:</b><br>' +
+          (d.errors || ['unknown error']).map(_mnEsc).join('<br>'), true);
+        return;
+      }
+      _FP_INFO[_fp3dMapId] = { version: d.version, summary: d.summary };
+      delete _fpPlanCache[_fp3dMapId];
+      _fpUpdateStatus();
+      _fpUpdateCardBadge();
+      _fpShowResult('<b>Restored as v' + d.version + '</b> &mdash; ' + _mnEsc(d.summary), false);
+    })
+    .catch(() => _fpShowResult('Restore failed (network).', true));
 }
 
 function _build3dTracePrompt() {
@@ -1552,12 +1663,24 @@ function _build3dTracePrompt() {
   ].concat(coord).concat([
 '',
 '## WHAT TO TRACE',
-'- "walls": solid barriers visible in the art — masonry, cave walls, cliff faces, ship hulls. Straight segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment. Do NOT trace furniture, rubble, or decoration.',
+'- "walls": solid barriers visible in the art — masonry, cave walls, cliff faces, ship hulls. Straight segments only. Prefer FEWER, LONGER segments: merge collinear runs into one segment. Do NOT trace furniture or rubble as walls — they become "props" below.',
 '- "doors": visually obvious doors, gates, or portcullises as separate entries (never part of a wall segment — leave a gap in the wall and cover it with the door). Give each a short unique id ("d1", "d2"…). "open": true only if the art clearly shows it standing open.',
 '- "elevations": ONLY where the art clearly shows a pit, chasm, ledge, platform, or balcony — axis-aligned rectangles with "floor_ft" (negative = pit/chasm depth, positive = raised platform height). When in doubt, LEAVE THE LIST EMPTY: flat ground is the default.',
+'- "lights": light sources VISIBLE in the art — wall torches, braziers, campfires, lanterns, candles, glowing runes or panels (type "glow"). Place each at the fixture\'s position; fractional coordinates are encouraged (1 ft = 0.2 squares).',
+'- "props": furniture clearly drawn in the art, using the closest type from the list below — tables, chairs, crates, barrels, chests, beds, shelves, pillars, statues, altars, stairs, rubble piles. Set "rot" so it faces the way the art draws it. Skip clutter with no matching type.',
+'- "zones": one entry per distinct room, with a short descriptive "name" ("Barracks", "Flooded Cellar"…) and rects covering its floor.',
 '- Optional per-segment fields: "height_ft" on walls (default 10); "base_ft" on walls that start above the floor. Doors default to the WALL height — give a door "height_ft" only when the art clearly shows a shorter opening (an archway, a low tunnel); the space above it is rendered as solid wall.',
 '',
-  ]).concat(FPPrompt.outputFormatLines(c, r)).concat([
+  ]).concat(FPPrompt.textureCatalogLines(_texCatalog))
+    .concat(FPPrompt.textureCatalogLines(_texCatalog).length
+      ? ['Assign a zone floor_texture/wall_texture ONLY when the art clearly matches one of those textures; otherwise omit the field.',
+         'Doors render as WOODEN planks unless you give them a "texture" — when the art shows a metal door or airlock, set one (e.g. iron_plate, hull_panels, sheet_metal).', '']
+      : [])
+    .concat(FPPrompt.outputFormatLines(c, r)).concat([
+'',
+'## FIELD NOTES',
+  ]).concat(FPPrompt.v2LayerLines()).concat([
+'',
 'Before answering, verify each wall segment against the image: does its start and end land on the barrier as drawn?',
   ]).join('\n');
 }
@@ -1593,7 +1716,15 @@ function _fpUpdateCardBadge() {
   if (v && info) v.textContent = info.version;
 }
 
-function save3dFloorplan() {
+// ── paste-back: dry-run preview, fix-ups, confirmed save ────────────────────
+// Parse → server dry-run (validate + normalize, no write) → schematic preview
+// with light/prop/zone markers → optional fix-ups (each re-runs the dry-run so
+// the server's clamping stays authoritative) → confirmed save.
+
+let _fpPending = null;       // normalized plan from the last dry-run
+let _fpUnknownTex = [];
+
+function preview3dFloorplan() {
   // LLMs love fences despite instructions — strip ```json ... ``` wrappers.
   const raw = document.getElementById('fp-paste-text').value
     .replace(/^\s*```[a-z]*\s*/i, '').replace(/\s*```\s*$/, '').trim();
@@ -1601,24 +1732,126 @@ function save3dFloorplan() {
   let parsed;
   try { parsed = JSON.parse(raw); }
   catch (e) { _fpShowResult('Not valid JSON: ' + _mnEsc(e.message), true); return; }
-
-  const fromDesign = _fp3dTab === 'design';
-  if (fromDesign) {
-    const existing = _FP_INFO[_fp3dMapId];
-    if (existing && !confirm('Replace the existing floorplan (v' + existing.version +
-        ') for "' + _fp3dMapName + '" with this new design?')) return;
+  if (_fp3dTab === 'design') {
     // The 3D wall finish is the DM's pick, not the LLM's — inject it here.
     const style = _gv('fpd-wallstyle');
     if (style && !parsed.wall_style) parsed.wall_style = style;
   }
+  _fpDryRun(parsed);
+}
 
+function _fpDryRun(parsed) {
   const btn = document.getElementById('fp-save-btn');
   btn.disabled = true;
   fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ floorplan: parsed }),
-  }).then(r => r.json().then(d => ({ status: r.status, d })))
-    .then(({ status, d }) => {
+    body: JSON.stringify({ floorplan: parsed, dry_run: true }),
+  }).then(r => r.json())
+    .then(d => {
+      btn.disabled = false;
+      if (!d.ok) {
+        document.getElementById('fp-preview').style.display = 'none';
+        _fpPending = null;
+        _fpShowResult('<b>Rejected:</b><br>' +
+          (d.errors || ['validation failed']).map(_mnEsc).join('<br>'), true);
+        return;
+      }
+      _fpPending = d.floorplan;
+      _fpUnknownTex = d.unknown_textures || [];
+      // draw the normalized plan over the grid, with light/prop/zone markers
+      const src = FPPrompt.renderSchematic(_fpPending, _fp3dCols, _fp3dRows,
+                                           { markers: true });
+      const cv = document.getElementById('fp-preview-canvas');
+      cv.width = src.width; cv.height = src.height;
+      cv.getContext('2d').drawImage(src, 0, 0);
+      let info = '<b>' + _mnEsc(d.summary) + '</b>';
+      if (d.warnings && d.warnings.length) {
+        info += '<br>&#9888; ' + d.warnings.map(_mnEsc).join('<br>&#9888; ');
+      }
+      if (_fpUnknownTex.length) {
+        info += '<br>&#9888; textures not in the library (will fall back to map-art surfaces): ' +
+                _fpUnknownTex.map(_mnEsc).join(', ');
+      }
+      document.getElementById('fp-preview-info').innerHTML = info;
+      document.getElementById('fp-strip-tex-btn').style.display =
+        _fpUnknownTex.length ? '' : 'none';
+      document.getElementById('fp-preview').style.display = '';
+      _fpShowResult('', false);
+    })
+    .catch(() => { btn.disabled = false; _fpShowResult('Preview failed (network).', true); });
+}
+
+function _fpPreviewXform(fx, fy) {
+  if (!_fpPending) return;
+  const seg = s => {
+    s.x1 = +fx(s.x1).toFixed(2); s.y1 = +fy(s.y1).toFixed(2);
+    s.x2 = +fx(s.x2).toFixed(2); s.y2 = +fy(s.y2).toFixed(2);
+  };
+  (_fpPending.walls || []).forEach(seg);
+  (_fpPending.doors || []).forEach(seg);
+  (_fpPending.elevations || []).forEach(e => {
+    if (e.shape === 'circle') {
+      e.cx = +fx(e.cx).toFixed(2); e.cy = +fy(e.cy).toFixed(2);
+      return;
+    }
+    seg(e);
+  });
+  (_fpPending.lights || []).forEach(lt => {
+    lt.x = +fx(lt.x).toFixed(2); lt.y = +fy(lt.y).toFixed(2);
+  });
+  (_fpPending.props || []).forEach(pr => {
+    pr.x = +fx(pr.x).toFixed(2); pr.y = +fy(pr.y).toFixed(2);
+  });
+  (_fpPending.zones || []).forEach(z => (z.rects || []).forEach(seg));
+  _fpDryRun(_fpPending);   // server re-clamps and the preview re-renders
+}
+
+function fpPreviewNudge(dx, dy) {
+  _fpPreviewXform(v => v + dx, v => v + dy);
+}
+
+function fpPreviewScale(factor) {
+  if (!_fpPending) return;
+  const xs = [], ys = [];
+  ['walls', 'doors', 'elevations'].forEach(k => (_fpPending[k] || []).forEach(s => {
+    if (s.shape === 'circle') { xs.push(s.cx); ys.push(s.cy); return; }
+    xs.push(s.x1, s.x2); ys.push(s.y1, s.y2);
+  }));
+  if (!xs.length) return;
+  const cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2;
+  const cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+  (_fpPending.elevations || []).forEach(e => {
+    if (e.shape === 'circle') e.r = +(e.r * factor).toFixed(2);
+  });
+  _fpPreviewXform(v => cx + (v - cx) * factor, v => cy + (v - cy) * factor);
+}
+
+function fpPreviewStripUnknown() {
+  if (!_fpPending || !_fpUnknownTex.length) return;
+  const bad = new Set(_fpUnknownTex);
+  ['walls', 'doors', 'props'].forEach(k => (_fpPending[k] || []).forEach(s => {
+    if (bad.has(s.texture)) delete s.texture;
+  }));
+  (_fpPending.zones || []).forEach(z => {
+    if (bad.has(z.floor_texture)) delete z.floor_texture;
+    if (bad.has(z.wall_texture)) delete z.wall_texture;
+  });
+  _fpDryRun(_fpPending);
+}
+
+function confirm3dFloorplan() {
+  if (!_fpPending) return;
+  const fromDesign = _fp3dTab === 'design';
+  const existing = _FP_INFO[_fp3dMapId];
+  if (existing && !confirm('Replace the existing floorplan (v' + existing.version +
+      ') for "' + _fp3dMapName + '"?')) return;
+  const btn = document.getElementById('fp-confirm-btn');
+  btn.disabled = true;
+  fetch(`/ttrpg/battlemap/${_fp3dMapId}/floorplan`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ floorplan: _fpPending }),
+  }).then(r => r.json())
+    .then(d => {
       btn.disabled = false;
       if (!d.ok) {
         _fpShowResult('<b>Rejected:</b><br>' +
@@ -1629,6 +1862,7 @@ function save3dFloorplan() {
       delete _fpPlanCache[_fp3dMapId];   // re-fetch normalized geometry on demand
       _fpUpdateStatus();
       _fpUpdateCardBadge();
+      document.getElementById('fp-preview').style.display = 'none';
       let html = '<b>Saved v' + d.version + '</b> &mdash; ' + _mnEsc(d.summary);
       if (d.warnings && d.warnings.length) {
         html += '<br>&#9888; ' + d.warnings.map(_mnEsc).join('<br>&#9888; ');

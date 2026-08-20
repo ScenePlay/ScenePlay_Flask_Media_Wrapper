@@ -4793,6 +4793,7 @@ def map_view():
         'ttrpg/obs_map.html',
         state_url=url_for('obs_bp.map_state', t=_map_token()),
         floorplan_url=url_for('obs_bp.map_floorplan', t=_map_token()),
+        textures_url=url_for('obs_bp.map_textures', t=_map_token()),
         three_url=url_for('static', filename='scripts/three.min.js'),
         bm3d_url=url_for('static', filename='scripts/battlemap3d.js'))
 
@@ -4949,6 +4950,16 @@ def map_floorplan():
     import json as _json
     return jsonify({'ok': True, 'version': fp.version,
                     'floorplan': _json.loads(fp.json_data)})
+
+
+@obs_bp.route('/map/textures')
+def map_textures():
+    """Texture-library manifest for the 3D branch — the browser source is
+    token-authed, so it can't hit the login-gated /ttrpg/textures/manifest.
+    Texture image files themselves are plain /static URLs."""
+    _check_map_token()
+    from routes.textures import texture_manifest
+    return jsonify({'ok': True, 'textures': texture_manifest()})
 
 
 def _zoom_cfg():

@@ -14,13 +14,47 @@ window.FPPrompt = (function () {
   function schemaExampleJson(cols, rows) {
     return JSON.stringify({
       format: 'sceneplay-floorplan',
-      schema_version: 1,
+      schema_version: 2,
       grid: { cols: cols, rows: rows },
       default_wall_height_ft: 10,
       walls: [ { x1: 3, y1: 0, x2: 3, y2: 6.5 } ],
       doors: [ { id: 'd1', x1: 3, y1: 6.5, x2: 3, y2: 7.5, open: false } ],
       elevations: [ { x1: 5, y1: 5, x2: 9, y2: 9, floor_ft: -10, label: 'pit' } ],
+      lights: [ { x: 3.4, y: 6, type: 'torch' } ],
+      props: [ { type: 'barrel', x: 5.2, y: 5.4, rot: 40 } ],
+      zones: [ { id: 'z1', name: 'Great Hall',
+                 rects: [ { x1: 2, y1: 2, x2: 10, y2: 8 } ] } ],
     }, null, 2);
+  }
+
+  // One line per optional v2 layer, shared by the design and trace prompts.
+  function v2LayerLines() {
+    return [
+      '- "lights": placed light sources. Types: torch, brazier, lantern, candle, glow (magical/cool). x/y in grid squares; each type has sensible built-in color/brightness — add "color" ("#rrggbb"), "radius_ft", "height_ft", "intensity" (0.1-3) only to override.',
+      '- "props": simple 3D furnishings. Types: pillar, crate, barrel, table, chair, chest, statue, stairs, rubble, bed, shelf, altar. x/y = center in grid squares; optional "rot" (degrees clockwise), "scale" (0.25-4, default 1). Props are solid and BLOCK token movement (stairs and rubble stay walkable) — never place one in a doorway or a 1-square corridor.',
+      '- "zones": named room regions as axis-aligned rects, used to theme surfaces per room. Optional "floor_texture"/"wall_texture" (texture names from the TEXTURES list if one is given — exact names only) and "wall_style" (brick|stone|wood).',
+    ];
+  }
+
+  // "## TEXTURES" block: the library slugs the AI may reference by exact
+  // name in zones/walls/doors. Capped — a huge library would bloat the
+  // prompt, and unknown names only warn anyway.
+  function textureCatalogLines(entries, cap) {
+    cap = cap || 48;
+    if (!entries || !entries.length) return [];
+    var lines = [
+      '## TEXTURES — you may reference these by EXACT name',
+      'Optional surface textures for "zones" (floor_texture/wall_texture), walls, doors, and props ("texture"). Use ONLY names from this list, or omit the field entirely:',
+    ];
+    var byCat = {};
+    entries.slice(0, cap).forEach(function (t) {
+      (byCat[t.category] = byCat[t.category] || []).push(
+        t.name + (t.tags ? ' (' + t.tags + ')' : ''));
+    });
+    Object.keys(byCat).sort().forEach(function (cat) {
+      lines.push('- ' + cat + ': ' + byCat[cat].join(', '));
+    });
+    return lines;
   }
 
   function coordSystemLines(cols, rows) {
@@ -76,7 +110,10 @@ window.FPPrompt = (function () {
   // models reproduce text as gibberish, and dark linework gets copied into
   // the art — only the walls should read as strong strokes.
 
-  function renderSchematic(plan, cols, rows) {
+  // opts.markers: also draw light/prop glyphs — the PREVIEW mode used by the
+  // paste-back dialog. The art-prompt blueprint stays glyph-free (image
+  // models copy unexplained symbols into the painting).
+  function renderSchematic(plan, cols, rows, opts) {
     const px = Math.min(48, Math.max(16, Math.floor(2048 / Math.max(cols, rows))));
     const cv = document.createElement('canvas');
     cv.width = cols * px; cv.height = rows * px;
@@ -173,6 +210,43 @@ window.FPPrompt = (function () {
       ctx.lineCap = 'round';
     });
 
+    if (opts && opts.markers) {
+      (plan.zones || []).forEach((z, zi) => {
+        ctx.strokeStyle = '#7a5fd0';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 5]);
+        (z.rects || []).forEach(r => {
+          ctx.strokeRect(r.x1 * px, r.y1 * px, (r.x2 - r.x1) * px, (r.y2 - r.y1) * px);
+        });
+        ctx.setLineDash([]);
+        if (z.rects && z.rects.length) {
+          ctx.fillStyle = '#7a5fd0';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(z.name || z.id || ('zone ' + (zi + 1)),
+                       z.rects[0].x1 * px + 4, z.rects[0].y2 * px - 5);
+        }
+      });
+      (plan.lights || []).forEach(lt => {
+        ctx.fillStyle = '#e8930c';
+        ctx.beginPath();
+        ctx.arc(lt.x * px, lt.y * px, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#e8930c';
+        ctx.beginPath();
+        ctx.arc(lt.x * px, lt.y * px, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      (plan.props || []).forEach(pr => {
+        ctx.save();
+        ctx.translate(pr.x * px, pr.y * px);
+        ctx.rotate((pr.rot || 0) * Math.PI / 180);
+        var s = 6 * (pr.scale || 1);
+        ctx.fillStyle = '#4a7a4a';
+        ctx.fillRect(-s, -s, s * 2, s * 2);
+        ctx.restore();
+      });
+    }
+
     // Outer border: the grid bounds ARE the image bounds.
     ctx.strokeStyle = '#000000';
     ctx.lineWidth = 2;
@@ -183,6 +257,8 @@ window.FPPrompt = (function () {
 
   return {
     schemaExampleJson: schemaExampleJson,
+    v2LayerLines: v2LayerLines,
+    textureCatalogLines: textureCatalogLines,
     coordSystemLines: coordSystemLines,
     outputFormatLines: outputFormatLines,
     layoutMatchLines: layoutMatchLines,

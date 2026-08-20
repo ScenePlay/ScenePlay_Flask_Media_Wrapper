@@ -383,9 +383,24 @@ function applyZoom(d, fit) {
 // mode — a 2D-only rig never pays for a WebGL context.
 
 const FLOORPLAN_URL = "{{ floorplan_url }}";
+const TEXTURES_URL = "{{ textures_url }}";
 const THREE_URL = "{{ three_url }}";
 const BM3D_URL = "{{ bm3d_url }}";
 let bm3dLoading = false, bm3dReady = false, bm3dState = null, bm3dWantToken = null;
+
+// Texture-library manifest for schema-v2 texture refs; fetched once before
+// the viewer first opens. Failure just means art-sampled fallback surfaces.
+let texManifest = null;
+function loadTexManifest() {
+  if (texManifest) return Promise.resolve(texManifest);
+  return fetch(TEXTURES_URL).then(r => r.json())
+    .then(d => {
+      texManifest = {};
+      (d.textures || []).forEach(t => { texManifest[t.name] = t; });
+      return texManifest;
+    })
+    .catch(() => (texManifest = {}));
+}
 
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -432,6 +447,10 @@ function bm3dConfigFor(d) {
     // own auto-aim stays off — two things steering one yawTarget would
     // stutter the camera on stream.
     autoAim: false,
+    // Render quality pinned per browser source via ?quality=low|medium|high
+    // (beats this machine's localStorage); absent = viewer default + FPS probe.
+    quality: new URLSearchParams(location.search).get('quality') || null,
+    resolveTexture: name => (texManifest && texManifest[name]) || null,
     onDoorToggle: null,
     getState: () => bm3dState,
   };
@@ -467,7 +486,8 @@ function ensure3d(d) {
     return;
   }
   bm3dLoading = true;
-  loadScript(THREE_URL).then(() => loadScript(BM3D_URL)).then(() => {
+  loadScript(THREE_URL).then(() => loadScript(BM3D_URL))
+    .then(loadTexManifest).then(() => {
     bm3dCfg = bm3dConfigFor(d);
     bm3dMapId = d.map_id;
     BM3D.open(bm3dCfg);
