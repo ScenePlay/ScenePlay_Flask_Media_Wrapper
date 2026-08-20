@@ -152,11 +152,13 @@ class TestSchemaV2:
         assert 'lights' not in clean and 'props' not in clean and 'zones' not in clean
 
     def test_one_foot_precision_round_trips(self):
+        # x=6.2: well clear of the base plan's door at column 3, which the
+        # doorway carve would otherwise trim against
         clean, _, errors = validate_floorplan(
-            _plan(walls=[{'x1': 3.2, 'y1': 0.4, 'x2': 3.2, 'y2': 6.8}]), 20, 20)
+            _plan(walls=[{'x1': 6.2, 'y1': 0.4, 'x2': 6.2, 'y2': 6.8}]), 20, 20)
         assert errors == []
         w = clean['walls'][0]
-        assert (w['x1'], w['y1'], w['y2']) == (3.2, 0.4, 6.8)
+        assert (w['x1'], w['y1'], w['y2']) == (6.2, 0.4, 6.8)
 
     def test_light_defaults_and_overrides(self):
         clean, warnings, errors = validate_floorplan(_plan(lights=[
@@ -253,6 +255,86 @@ class TestSchemaV2:
         assert '1 brazier, 1 torch' in text
         assert '2 crates' in text
         assert 'Room "Great Hall"' in text
+
+
+class TestDoorwayCarve:
+    """Walls running along a doorway are trimmed to the door's edges — the
+    validator enforces the gap the prompts ask for, since LLMs keep ending
+    walls mid-door or drawing the wall straight through the doorway."""
+
+    DOOR = [{'id': 'd1', 'x1': 8, 'y1': 5, 'x2': 10, 'y2': 5}]
+
+    def _carve(self, walls, doors=None):
+        clean, warnings, errors = validate_floorplan(_plan(
+            walls=walls, doors=self.DOOR if doors is None else doors,
+            elevations=[]), 20, 20)
+        assert errors == []
+        return clean, warnings
+
+    def test_wall_through_doorway_is_split_at_jambs(self):
+        clean, warnings = self._carve(
+            [{'x1': 2, 'y1': 5, 'x2': 16, 'y2': 5, 'height_ft': 15,
+              'texture': 'medieval_stone'}])
+        segs = sorted((w['x1'], w['x2']) for w in clean['walls'])
+        assert segs == [(2.0, 8.0), (10.0, 16.0)]
+        # trimmed pieces keep the wall's fields
+        for w in clean['walls']:
+            assert w['height_ft'] == 15 and w['texture'] == 'medieval_stone'
+        assert any('trimmed' in w for w in warnings)
+
+    def test_wall_ending_mid_door_is_clipped_to_jamb(self):
+        clean, _ = self._carve([{'x1': 2, 'y1': 5, 'x2': 9, 'y2': 5}])
+        assert clean['walls'] == [{'x1': 2.0, 'y1': 5.0, 'x2': 8.0, 'y2': 5.0}]
+
+    def test_wall_wholly_inside_door_is_dropped(self):
+        clean, warnings = self._carve([{'x1': 8.4, 'y1': 5, 'x2': 9.6, 'y2': 5}])
+        assert clean['walls'] == []
+        assert any('trimmed' in w for w in warnings)
+
+    def test_perpendicular_wall_is_left_alone(self):
+        clean, warnings = self._carve([{'x1': 9, 'y1': 1, 'x2': 9, 'y2': 9}])
+        assert clean['walls'] == [{'x1': 9.0, 'y1': 1.0, 'x2': 9.0, 'y2': 9.0}]
+        assert not any('trimmed' in w for w in warnings)
+
+    def test_wall_meeting_the_jamb_exactly_is_untouched(self):
+        clean, warnings = self._carve([{'x1': 2, 'y1': 5, 'x2': 8, 'y2': 5},
+                                       {'x1': 10, 'y1': 5, 'x2': 16, 'y2': 5}])
+        assert len(clean['walls']) == 2
+        assert not any('trimmed' in w for w in warnings)
+
+    def test_slightly_offset_parallel_wall_is_carved(self):
+        # 0.2 cells (1 ft) off the door line — still "the same wall" to a human
+        clean, _ = self._carve([{'x1': 2, 'y1': 5.2, 'x2': 16, 'y2': 5.2}])
+        assert len(clean['walls']) == 2
+        xs = sorted(round(w['x2'], 1) for w in clean['walls'])
+        assert 8.0 in xs   # cut lands on the jamb
+
+    def test_wall_spanning_two_doorways(self):
+        doors = [{'id': 'd1', 'x1': 5, 'y1': 5, 'x2': 6, 'y2': 5},
+                 {'id': 'd2', 'x1': 12, 'y1': 5, 'x2': 13, 'y2': 5}]
+        clean, _ = self._carve([{'x1': 2, 'y1': 5, 'x2': 18, 'y2': 5}], doors)
+        segs = sorted((w['x1'], w['x2']) for w in clean['walls'])
+        assert segs == [(2.0, 5.0), (6.0, 12.0), (13.0, 18.0)]
+
+
+class TestPropDefaultTextures:
+    def test_every_prop_type_has_a_default_bitmap(self):
+        from floorplan import PROP_TYPES, PROP_DEFAULT_TEXTURES
+        missing = PROP_TYPES - set(PROP_DEFAULT_TEXTURES)
+        assert not missing, f'prop types without a default texture: {sorted(missing)}'
+        orphans = set(PROP_DEFAULT_TEXTURES) - PROP_TYPES
+        assert not orphans, f'defaults for unknown prop types: {sorted(orphans)}'
+
+    def test_defaults_reference_builtin_textures(self):
+        import json
+        import os
+        from floorplan import PROP_DEFAULT_TEXTURES
+        manifest = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'static', 'textures', 'builtin',
+            'manifest.json')
+        names = {e['name'] for e in json.load(open(manifest))}
+        bad = {t for t in PROP_DEFAULT_TEXTURES.values() if t not in names}
+        assert not bad, f'default textures missing from the builtin library: {sorted(bad)}'
 
 
 class TestLayoutText:

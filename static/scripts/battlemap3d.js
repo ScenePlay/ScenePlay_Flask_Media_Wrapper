@@ -1133,16 +1133,43 @@ window.BM3D = (function () {
     pillar: 0x8d897c, crate: 0x8a6a42, barrel: 0x7d5c38, table: 0x7a5a38,
     chair: 0x7a5a38, chest: 0x6f4f30, statue: 0x9a968a, stairs: 0x84806f,
     rubble: 0x7d7869, bed: 0x77573a, shelf: 0x6f5236, altar: 0x8f8b7e,
+    // biome scenery — white types bake per-part vertex colors instead
+    tree: 0xffffff, pine: 0xffffff, campfire: 0xffffff, well: 0xffffff,
+    dead_tree: 0x5f4a38, bush: 0x4a6b3a, stump: 0x6b4a2f, log: 0x6b4a2f,
+    boulder: 0x7d7869, tent: 0x8a7a5c, cactus: 0x4a7a4a, cart: 0x7a5a38,
+    console: 0x4a5560, wreck: 0x6b5a4a, barricade: 0x7a6a50,
+  };
+
+  // Default surface bitmap per prop type, from the builtin texture library —
+  // every prop renders textured out of the box. An explicit prop "texture"
+  // still wins; PROP_COLORS is the last-resort fallback when the library
+  // texture can't be resolved (e.g. a portal push that predates textures).
+  // Multi-color props (tree, well…) keep their baked part colors — the
+  // texture multiplies UNDER them as a detail layer. Keep in sync with
+  // floorplan.py PROP_DEFAULT_TEXTURES (the relay pushes these files).
+  var PROP_DEFAULT_TEX = {
+    pillar: 'medieval_stone', crate: 'rough_planks', barrel: 'oak_planks',
+    table: 'dark_wood_floor', chair: 'dark_wood_floor', chest: 'oak_planks',
+    statue: 'marble_floor', stairs: 'flagstone', rubble: 'cave_rock',
+    bed: 'rough_planks', shelf: 'dark_wood_floor', altar: 'stone_blocks',
+    tree: 'mossy_grass', pine: 'mossy_grass', dead_tree: 'rough_planks',
+    bush: 'mossy_grass', stump: 'rough_planks', log: 'rough_planks',
+    boulder: 'cave_rock', campfire: 'cave_rock', tent: 'desert_sand',
+    cactus: 'mossy_grass', well: 'medieval_stone', cart: 'rough_planks',
+    console: 'hull_panels', wreck: 'rusty_metal', barricade: 'rough_planks',
   };
 
   // Movement footprint per prop type, in FEET (circle around the prop's
   // center, sized to its base geometry). A 5-ft step whose destination square
   // overlaps a footprint is blocked — tokens can't stand inside furniture.
   // Multiplied by the prop's scale; stairs are deliberately absent (they're
-  // MEANT to be walked on) and rubble stays passable as difficult ground.
+  // MEANT to be walked on) and rubble/bush stay passable as difficult ground.
   var PROP_BLOCK_FT = {
     pillar: 1.2, crate: 1.6, barrel: 1.2, table: 2.6, chair: 1.0,
     chest: 1.5, statue: 1.4, bed: 3.2, shelf: 1.6, altar: 2.2,
+    tree: 1.2, pine: 1.4, dead_tree: 1.0, stump: 1.0, log: 1.8,
+    boulder: 2.0, campfire: 1.6, tent: 3.2, cactus: 1.0, well: 2.0,
+    cart: 2.6, console: 2.2, wreck: 3.4, barricade: 2.4,
   };
 
   function _ft(v) { return v * FT; }
@@ -1162,6 +1189,31 @@ window.BM3D = (function () {
                                        seg || 10);
     g.applyMatrix4(new THREE.Matrix4().setPosition(_ft(xFt), _ft(yFt), _ft(zFt)));
     parts.push(g);
+  }
+
+  function _spherePart(parts, rFt, xFt, yFt, zFt) {
+    var g = new THREE.SphereGeometry(_ft(rFt), 9, 7);
+    g.applyMatrix4(new THREE.Matrix4().setPosition(_ft(xFt), _ft(yFt), _ft(zFt)));
+    parts.push(g);
+  }
+
+  // A freely-rotated part (Euler rx/ry/rz) for anything _boxPart's yaw-only
+  // transform can't express: leaning tent panels, lying logs, wheel axles.
+  function _rotPart(parts, g, rx, ry, rz, xFt, yFt, zFt) {
+    var m = new THREE.Matrix4()
+      .makeRotationFromEuler(new THREE.Euler(rx || 0, ry || 0, rz || 0));
+    m.setPosition(_ft(xFt), _ft(yFt), _ft(zFt));
+    g.applyMatrix4(m);
+    parts.push(g);
+  }
+
+  // Bake a per-part color (as the vertex-color attribute) so one merged prop
+  // can mix looks — brown trunk under a green canopy. A prop that colors ANY
+  // part must color ALL of them (mergeGeoms needs identical attribute sets),
+  // and its PROP_COLORS entry must be white so the material doesn't re-tint.
+  function _colorLast(parts, hex) {
+    addTintColor(parts[parts.length - 1],
+      [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]);
   }
 
   function propGeometry(type, seed) {
@@ -1241,6 +1293,129 @@ window.BM3D = (function () {
         _boxPart(p, 3.4, 2.6, 1.8, 0, 1.3, 0);
         _boxPart(p, 4.2, 0.5, 2.4, 0, 2.85, 0);          // slab
         break;
+
+      // ── biome scenery ──────────────────────────────────────────────────────
+      case 'tree':                                       // deciduous: trunk + blob canopy
+        _cylPart(p, 0.5, 0.7, 6.5, 0, 3.25, 0, 8);  _colorLast(p, 0x6b4a2f);
+        _spherePart(p, 3.2, 0, 8.2, 0);             _colorLast(p, 0x3e6b34);
+        _spherePart(p, 2.2, 1.6, 7.0, 0.9);         _colorLast(p, 0x477a3c);
+        _spherePart(p, 2.0, -1.5, 7.4, -0.7);       _colorLast(p, 0x365f2e);
+        break;
+      case 'pine':                                       // conifer: stacked cones
+        _cylPart(p, 0.35, 0.55, 3.5, 0, 1.75, 0, 8); _colorLast(p, 0x5f4130);
+        _cylPart(p, 0, 2.6, 5.0, 0, 5.0, 0, 10);     _colorLast(p, 0x2f5d3a);
+        _cylPart(p, 0, 2.0, 4.2, 0, 8.0, 0, 10);     _colorLast(p, 0x356545);
+        _cylPart(p, 0, 1.3, 3.4, 0, 10.7, 0, 10);    _colorLast(p, 0x2f5d3a);
+        break;
+      case 'dead_tree':                                  // bare trunk + two branches
+        _cylPart(p, 0.25, 0.6, 8, 0, 4, 0, 7);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.12), _ft(0.22), _ft(3.4), 6),
+                 0, 0, 0.7, 1.0, 6.2, 0);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.1), _ft(0.2), _ft(2.8), 6),
+                 0.55, 0, -0.6, -0.9, 5.4, 0.3);
+        break;
+      case 'bush':                                       // passable, like rubble
+        _spherePart(p, 1.5, 0, 1.1, 0);
+        _spherePart(p, 1.1, 1.1, 0.9, 0.6);
+        _spherePart(p, 0.9, -1.0, 0.8, -0.5);
+        break;
+      case 'stump':
+        _cylPart(p, 0.85, 1.0, 1.4, 0, 0.7, 0, 9);
+        break;
+      case 'log':                                        // fallen trunk along x
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.65), _ft(0.75), _ft(7), 9),
+                 0, 0, Math.PI / 2, 0, 0.7, 0);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.28), _ft(0.32), _ft(2.2), 7),
+                 0, 0, Math.PI / 2 - 0.5, 2.2, 1.0, 0.4);
+        break;
+      case 'boulder':                                    // big lumps, seed-jittered
+        for (var bo = 0; bo < 4; bo++) {
+          var ba = _hash01(seed + bo * 11) * Math.PI;
+          var bxx = (_hash01(seed + bo * 5) - 0.5) * 1.8;
+          var bzz = (_hash01(seed + bo * 23) - 0.5) * 1.8;
+          var bs = 1.6 + _hash01(seed + bo * 37) * 1.6;
+          _boxPart(p, bs, bs * 0.75, bs * 0.85, bxx, bs * 0.3, bzz, ba);
+        }
+        break;
+      case 'campfire':                                   // stone ring + leaning logs
+        for (var cf = 0; cf < 6; cf++) {
+          var ca = cf * Math.PI / 3 + _hash01(seed + cf) * 0.4;
+          _boxPart(p, 0.7, 0.5, 0.55, Math.cos(ca) * 1.5, 0.25,
+                   Math.sin(ca) * 1.5, ca);
+          _colorLast(p, 0x6f6b60);
+        }
+        for (var lg = 0; lg < 3; lg++) {
+          var la = lg * 2.1 + 0.3;
+          _rotPart(p, new THREE.CylinderGeometry(_ft(0.16), _ft(0.2), _ft(2.6), 6),
+                   0.9, la, 0, Math.cos(la) * 0.4, 0.75, Math.sin(la) * 0.4);
+          _colorLast(p, 0x4a382a);
+        }
+        break;
+      case 'tent':                                       // A-frame canvas + ground sheet
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.18), _ft(5.4), _ft(7)),
+                 0, 0, 0.72, -1.75, 2.15, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.18), _ft(5.4), _ft(7)),
+                 0, 0, -0.72, 1.75, 2.15, 0);
+        _boxPart(p, 4.6, 0.25, 7.4, 0, 0.12, 0);
+        break;
+      case 'cactus':                                     // saguaro: trunk + two arms
+        _cylPart(p, 0.55, 0.6, 6.2, 0, 3.1, 0, 8);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.35), _ft(0.35), _ft(1.6), 7),
+                 0, 0, Math.PI / 2, 1.15, 3.0, 0);
+        _cylPart(p, 0.35, 0.35, 2.2, 1.8, 4.0, 0, 7);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.3), _ft(0.3), _ft(1.2), 7),
+                 0, 0, Math.PI / 2, -0.9, 2.2, 0);
+        _cylPart(p, 0.3, 0.3, 1.7, -1.4, 2.9, 0, 7);
+        break;
+      case 'well':                                       // stone ring + posts + roof
+        _cylPart(p, 1.6, 1.7, 2.2, 0, 1.1, 0, 12);  _colorLast(p, 0x8d897c);
+        _boxPart(p, 0.3, 4.6, 0.3, -1.5, 2.3, 0);   _colorLast(p, 0x6b4a2f);
+        _boxPart(p, 0.3, 4.6, 0.3, 1.5, 2.3, 0);    _colorLast(p, 0x6b4a2f);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.15), _ft(2.6), _ft(3.4)),
+                 0, 0, 1.05, -1.0, 5.3, 0);         _colorLast(p, 0x5f4130);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.15), _ft(2.6), _ft(3.4)),
+                 0, 0, -1.05, 1.0, 5.3, 0);         _colorLast(p, 0x5f4130);
+        break;
+      case 'cart':                                       // hand cart: bed, rails, wheels
+        _boxPart(p, 3.2, 0.3, 5.6, 0, 1.55, 0);
+        _boxPart(p, 3.2, 1.0, 0.25, 0, 2.15, -2.7);
+        _boxPart(p, 3.2, 1.0, 0.25, 0, 2.15, 2.7);
+        _boxPart(p, 0.25, 1.0, 5.6, -1.5, 2.15, 0);
+        _boxPart(p, 0.25, 1.0, 5.6, 1.5, 2.15, 0);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(1.3), _ft(1.3), _ft(0.3), 12),
+                 0, 0, Math.PI / 2, -1.8, 1.3, 0.9);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(1.3), _ft(1.3), _ft(0.3), 12),
+                 0, 0, Math.PI / 2, 1.8, 1.3, 0.9);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.22), _ft(0.22), _ft(3.4)),
+                 0.35, 0, 0, -1.0, 1.2, -4.0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.22), _ft(0.22), _ft(3.4)),
+                 0.35, 0, 0, 1.0, 1.2, -4.0);
+        break;
+      case 'console':                                    // sci-fi control desk
+        _boxPart(p, 4, 2.4, 1.6, 0, 1.2, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(4), _ft(0.25), _ft(1.5)),
+                 -0.5, 0, 0, 0, 2.75, 0.45);
+        break;
+      case 'wreck':                                      // dead vehicle hulk
+        _boxPart(p, 6.8, 1.6, 3.0, 0, 1.3, 0);
+        _boxPart(p, 3.0, 1.3, 2.7, -0.6, 2.7, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(2.2), _ft(0.2), _ft(2.9)),
+                 0, 0, 0.35, 2.9, 2.2, 0);             // sprung hood
+        [[-2.2, 1.55], [2.2, 1.55], [-2.2, -1.55], [2.2, -1.55]].forEach(function (w) {
+          _rotPart(p, new THREE.CylinderGeometry(_ft(0.75), _ft(0.75), _ft(0.45), 10),
+                   Math.PI / 2, 0, 0, w[0], 0.75, w[1]);
+        });
+        break;
+      case 'barricade':                                  // crossed stakes + rail
+        _boxPart(p, 5.4, 0.5, 0.5, 0, 0.25, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(3.6), _ft(0.4)),
+                 0.6, 0, 0, -1.8, 1.4, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(3.6), _ft(0.4)),
+                 -0.6, 0, 0, 0, 1.4, 0);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(3.6), _ft(0.4)),
+                 0.6, 0, 0, 1.8, 1.4, 0);
+        _boxPart(p, 5.6, 0.5, 0.35, 0, 2.2, 0.5);
+        break;
       default:
         return null;
     }
@@ -1270,18 +1445,30 @@ window.BM3D = (function () {
         tint = artTint((Math.round(c[0]) << 16) | (Math.round(c[1]) << 8) |
                        Math.round(c[2]));
       }
-      addTintColor(geo, tint);
-      var key, mat = null;
-      if (pr.texture && libTexture(pr.texture)) {
-        key = 'tex:' + pr.texture;
+      if (geo.attributes.color) {
+        // multi-color prop (tree, well…): per-part colors are already baked
+        // as vertex colors — multiply the art tint in instead of overwriting
+        var ca = geo.attributes.color.array;
+        for (var vi = 0; vi < ca.length; vi += 3) {
+          ca[vi] *= tint[0]; ca[vi + 1] *= tint[1]; ca[vi + 2] *= tint[2];
+        }
       } else {
-        key = 'col:' + (PROP_COLORS[pr.type] || 0x8a8578);
+        addTintColor(geo, tint);
       }
+      // Explicit texture wins; else the type's default bitmap; flat color
+      // only when neither resolves (missing library file, stale portal push).
+      var texName = pr.texture || PROP_DEFAULT_TEX[pr.type] || null;
+      if (texName && !libTexture(texName)) texName = null;
+      var key = texName ? 'tex:' + texName
+                        : 'col:' + (PROP_COLORS[pr.type] || 0x8a8578);
       if (!buckets[key]) {
-        mat = key.slice(0, 4) === 'tex:'
-          ? libMaterial(pr.texture, { vertexColors: true })
-          : matFor({ color: PROP_COLORS[pr.type] || 0x8a8578, vertexColors: true });
-        buckets[key] = { mat: mat, geoms: [] };
+        buckets[key] = {
+          mat: texName
+            ? libMaterial(texName, { vertexColors: true })
+            : matFor({ color: PROP_COLORS[pr.type] || 0x8a8578,
+                       vertexColors: true }),
+          geoms: [],
+        };
       }
       buckets[key].geoms.push(geo);
     });

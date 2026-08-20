@@ -691,7 +691,10 @@ window.BMFP = (function () {
   function setTexOptions(entries) {
     document.querySelectorAll('select.fp-tex-select').forEach(selEl => {
       const cur = selEl.value;
-      selEl.innerHTML = '<option value="">(from map art)</option>';
+      // Empty = the surface's own default (walls/floors: sampled map art;
+      // props: the type's builtin bitmap). Overridable per select.
+      selEl.innerHTML = '<option value="">' +
+        (selEl.dataset.emptyLabel || '(from map art)') + '</option>';
       const byCat = {};
       (entries || []).forEach(t => (byCat[t.category] = byCat[t.category] || []).push(t));
       Object.keys(byCat).sort().forEach(cat => {

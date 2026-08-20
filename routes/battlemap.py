@@ -246,9 +246,16 @@ def _push_map_state(bm):
             for key in ('floor_texture', 'wall_texture'):
                 if z.get(key):
                     names.add(z[key])
+        # Props resolve textures client-side (explicit ref, else the type's
+        # default bitmap) — ship whichever file each prop will actually use.
+        for pr in floorplan.get('props', []):
+            name = pr.get('texture') or \
+                floorplan_mod.PROP_DEFAULT_TEXTURES.get(pr.get('type'))
+            if name:
+                names.add(name)
         if names:
             from routes.textures import texture_paths
-            textures = texture_paths(sorted(names)[:12]) or None
+            textures = texture_paths(sorted(names)[:20]) or None
     relay_broadcaster.broadcast_map_update(
         bg_url, bm.grid_cols, bm.grid_rows,
         [p for p in (_token_relay_payload(t, bm, monsters, chars) for t in bm.tokens) if p],

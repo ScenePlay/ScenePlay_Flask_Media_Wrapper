@@ -31,8 +31,8 @@ window.FPPrompt = (function () {
   function v2LayerLines() {
     return [
       '- "lights": placed light sources. Types: torch, brazier, lantern, candle, glow (magical/cool). x/y in grid squares; each type has sensible built-in color/brightness — add "color" ("#rrggbb"), "radius_ft", "height_ft", "intensity" (0.1-3) only to override.',
-      '- "props": simple 3D furnishings. Types: pillar, crate, barrel, table, chair, chest, statue, stairs, rubble, bed, shelf, altar. x/y = center in grid squares; optional "rot" (degrees clockwise), "scale" (0.25-4, default 1). Props are solid and BLOCK token movement (stairs and rubble stay walkable) — never place one in a doorway or a 1-square corridor.',
-      '- "zones": named room regions as axis-aligned rects, used to theme surfaces per room. Optional "floor_texture"/"wall_texture" (texture names from the TEXTURES list if one is given — exact names only) and "wall_style" (brick|stone|wood).',
+      '- "props": simple 3D furnishings and scenery. Indoor types: pillar, crate, barrel, table, chair, chest, statue, stairs, rubble, bed, shelf, altar. Outdoor/nature types: tree, pine, dead_tree, bush, stump, log, boulder, campfire, tent, cactus, well, cart. Modern/sci-fi types: console, wreck, barricade. x/y = center in grid squares; optional "rot" (degrees clockwise), "scale" (0.25-4, default 1). Props are solid and BLOCK token movement (stairs, rubble, and bush stay walkable) — never place one in a doorway or a 1-square corridor. A campfire is unlit geometry — pair it with a "brazier" light at the same x/y for its glow.',
+      '- "zones": named room regions as axis-aligned rects, used to theme surfaces per room. Optional "wall_texture" (a texture name from the TEXTURES list if one is given — exact names only) and "wall_style" (brick|stone|wood). Do NOT set "floor_texture": floors always render the painted map art itself.',
     ];
   }
 
@@ -44,7 +44,7 @@ window.FPPrompt = (function () {
     if (!entries || !entries.length) return [];
     var lines = [
       '## TEXTURES — you may reference these by EXACT name',
-      'Optional surface textures for "zones" (floor_texture/wall_texture), walls, doors, and props ("texture"). Use ONLY names from this list, or omit the field entirely:',
+      'Optional surface textures for zone walls ("wall_texture"), walls, doors, and props ("texture"). Use ONLY names from this list, or omit the field entirely. Floors are never textured — they always render the painted map art:',
     ];
     var byCat = {};
     entries.slice(0, cap).forEach(function (t) {

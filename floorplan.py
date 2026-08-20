@@ -71,8 +71,30 @@ LIGHT_HEIGHT_FT_RANGE = (0, 50)
 
 # Procedural prop set (battlemap3d.js propGeometry — keep in sync).
 PROP_TYPES = {'pillar', 'crate', 'barrel', 'table', 'chair', 'chest', 'statue',
-              'stairs', 'rubble', 'bed', 'shelf', 'altar'}
+              'stairs', 'rubble', 'bed', 'shelf', 'altar',
+              # outdoor / biome scenery
+              'tree', 'pine', 'dead_tree', 'bush', 'stump', 'log', 'boulder',
+              'campfire', 'tent', 'cactus', 'well', 'cart',
+              # modern / sci-fi
+              'console', 'wreck', 'barricade'}
 PROP_SCALE_RANGE = (0.25, 4.0)
+
+# Default surface bitmap per prop type (builtin texture-library slugs) —
+# mirrors battlemap3d.js PROP_DEFAULT_TEX (keep in sync). The renderer
+# resolves these client-side; the server's job is to ship the FILES to
+# remote viewers, so the relay push includes them for every prop type the
+# plan uses (routes/battlemap.py _push_map_state).
+PROP_DEFAULT_TEXTURES = {
+    'pillar': 'medieval_stone', 'crate': 'rough_planks', 'barrel': 'oak_planks',
+    'table': 'dark_wood_floor', 'chair': 'dark_wood_floor', 'chest': 'oak_planks',
+    'statue': 'marble_floor', 'stairs': 'flagstone', 'rubble': 'cave_rock',
+    'bed': 'rough_planks', 'shelf': 'dark_wood_floor', 'altar': 'stone_blocks',
+    'tree': 'mossy_grass', 'pine': 'mossy_grass', 'dead_tree': 'rough_planks',
+    'bush': 'mossy_grass', 'stump': 'rough_planks', 'log': 'rough_planks',
+    'boulder': 'cave_rock', 'campfire': 'cave_rock', 'tent': 'desert_sand',
+    'cactus': 'mossy_grass', 'well': 'medieval_stone', 'cart': 'rough_planks',
+    'console': 'hull_panels', 'wreck': 'rusty_metal', 'barricade': 'rough_planks',
+}
 
 # Texture library slugs (see routes/textures.py). Shape-only validation here.
 TEXTURE_REF_RE = re.compile(r'^[a-z0-9_-]{1,64}$')
@@ -138,6 +160,67 @@ def _texture_ref(raw, key, warnings, where):
         warnings.append(f'{where}: invalid texture ref {v!r} ignored')
         return None
     return v
+
+
+def _carve_doorways(walls, doors, warnings):
+    """Deterministically enforce "a door covers a GAP in the wall".
+
+    LLMs keep ending wall segments inside a doorway — or drawing the wall
+    straight through it and laying the door on top — no matter how firmly
+    the prompt forbids it. Rather than beg harder, normalize: any wall
+    running ALONG a doorway (both door endpoints within TOL of the wall's
+    line) has the doorway's span carved out, its cut ends snapped exactly to
+    the door's endpoints (the jambs). Walls that merely CROSS or touch the
+    door line at an angle (T-junctions, perpendicular walls) are left alone.
+    Carved pieces inherit the wall's fields (height, texture, show...) and
+    are re-checked against the remaining doors.
+    """
+    TOL = 0.3         # cells — how far off the wall's line a door may sit
+    MIN_PIECE = 0.15  # cells — slivers below this are dropped
+    EPS = 0.05        # cells — ignore grazing overlaps
+    out = []
+    trimmed = 0
+    queue = list(walls)
+    while queue:
+        w = queue.pop(0)
+        wx, wy = w['x2'] - w['x1'], w['y2'] - w['y1']
+        wlen = (wx * wx + wy * wy) ** 0.5
+        if wlen < 1e-9:
+            continue
+        ux, uy = wx / wlen, wy / wlen
+        carved = False
+        for d in doors:
+            def _perp(px, py):
+                return abs((px - w['x1']) * uy - (py - w['y1']) * ux)
+            if _perp(d['x1'], d['y1']) > TOL or _perp(d['x2'], d['y2']) > TOL:
+                continue      # not collinear with this wall — leave it
+            s1 = (d['x1'] - w['x1']) * ux + (d['y1'] - w['y1']) * uy
+            s2 = (d['x2'] - w['x1']) * ux + (d['y2'] - w['y1']) * uy
+            sa, sb = (s1, s2) if s1 <= s2 else (s2, s1)
+            if min(wlen, sb) - max(0.0, sa) <= EPS:
+                continue      # doorway span doesn't really overlap this wall
+            if s1 <= s2:
+                jstart, jend = (d['x1'], d['y1']), (d['x2'], d['y2'])
+            else:
+                jstart, jend = (d['x2'], d['y2']), (d['x1'], d['y1'])
+            carved = True
+            trimmed += 1
+            if sa >= MIN_PIECE:                      # piece before the door
+                before = dict(w)
+                before['x2'], before['y2'] = round(jstart[0], 2), round(jstart[1], 2)
+                queue.append(before)
+            if wlen - sb >= MIN_PIECE:               # piece after the door
+                after = dict(w)
+                after['x1'], after['y1'] = round(jend[0], 2), round(jend[1], 2)
+                queue.append(after)
+            break             # wall replaced; pieces re-run the door loop
+        if not carved:
+            out.append(w)
+    if trimmed:
+        warnings.append(
+            f'{trimmed} wall segment{"s" if trimmed != 1 else ""} overlapped a '
+            f'doorway — trimmed back to the door edges')
+    return out
 
 
 def _wall_style(raw, key, warnings, where):
@@ -250,6 +333,10 @@ def validate_floorplan(data, grid_cols, grid_rows):
         if tex:
             seg['texture'] = tex
         doors.append(seg)
+
+    # Doors must sit in a GAP: trim any wall that runs along a doorway back
+    # to the door's edges (LLM output regularly violates this — see helper).
+    walls = _carve_doorways(walls, doors, warnings)
 
     elevs = []
     for i, raw in enumerate(raw_elevs):

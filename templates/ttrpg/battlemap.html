@@ -1085,21 +1085,44 @@
     <div class="d-flex align-items-center gap-1 mb-1">
       <button id="fp-tool-prop" class="btn btn-sm btn-outline-secondary"
               onclick="BMFP.setTool('prop')"
-              title="Click the map to place a 3D furnishing — solid in 3D: tokens can't step into it (stairs and rubble stay walkable)">&#129681; Place</button>
+              title="Click the map to place a 3D furnishing — solid in 3D: tokens can't step into it (stairs, rubble, and bush stay walkable)">&#129681; Place</button>
       <select id="fp-prop-type" class="form-select form-select-sm" style="width:auto;flex:1;"
               onchange="BMFP.setPropType(this.value)">
-        <option value="crate">Crate</option>
-        <option value="barrel">Barrel</option>
-        <option value="table">Table</option>
-        <option value="chair">Chair</option>
-        <option value="chest">Chest</option>
-        <option value="bed">Bed</option>
-        <option value="shelf">Shelf</option>
-        <option value="pillar">Pillar</option>
-        <option value="statue">Statue</option>
-        <option value="altar">Altar</option>
-        <option value="stairs">Stairs</option>
-        <option value="rubble">Rubble</option>
+        <optgroup label="Furniture">
+          <option value="crate">Crate</option>
+          <option value="barrel">Barrel</option>
+          <option value="table">Table</option>
+          <option value="chair">Chair</option>
+          <option value="chest">Chest</option>
+          <option value="bed">Bed</option>
+          <option value="shelf">Shelf</option>
+        </optgroup>
+        <optgroup label="Structure">
+          <option value="pillar">Pillar</option>
+          <option value="statue">Statue</option>
+          <option value="altar">Altar</option>
+          <option value="stairs">Stairs</option>
+          <option value="rubble">Rubble</option>
+        </optgroup>
+        <optgroup label="Nature &amp; Camp">
+          <option value="tree">Tree</option>
+          <option value="pine">Pine tree</option>
+          <option value="dead_tree">Dead tree</option>
+          <option value="bush">Bush</option>
+          <option value="stump">Stump</option>
+          <option value="log">Fallen log</option>
+          <option value="boulder">Boulder</option>
+          <option value="campfire">Campfire</option>
+          <option value="tent">Tent</option>
+          <option value="cactus">Cactus</option>
+          <option value="well">Well</option>
+          <option value="cart">Cart</option>
+        </optgroup>
+        <optgroup label="Modern / Sci-fi">
+          <option value="console">Console</option>
+          <option value="wreck">Wrecked vehicle</option>
+          <option value="barricade">Barricade</option>
+        </optgroup>
       </select>
     </div>
     <div class="d-flex align-items-center gap-2 mb-1">
@@ -1116,8 +1139,9 @@
     <div class="d-flex align-items-center gap-2">
       <label class="fx-label" for="fp-prop-texture">Texture</label>
       <select id="fp-prop-texture" class="form-select form-select-sm fp-tex-select"
+              data-empty-label="(default bitmap)"
               style="width:auto;flex:1;" onchange="BMFP.setPropTexture(this.value)"
-              title="Surface texture for newly placed props — the Select tool retextures existing ones"></select>
+              title="Surface texture for newly placed props — every type has a sensible default bitmap; the Select tool retextures existing ones"></select>
     </div>
   </div>
 
@@ -1210,6 +1234,7 @@
     <div class="d-flex align-items-center gap-2 mb-1">
       <label class="fx-label">Texture</label>
       <select id="fp-sel-texture" class="form-select form-select-sm fp-tex-select"
+              data-empty-label="(default)"
               style="width:auto;flex:1;"></select>
     </div>
     <div class="d-flex align-items-center gap-2 mb-1" id="fp-sel-style-row">
