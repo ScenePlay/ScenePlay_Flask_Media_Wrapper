@@ -247,12 +247,17 @@
 
         <div id="icp-output-section" style="display:none;">
           <hr style="border-color:var(--sp-border);">
-          <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <span class="small text-muted">Paste into your image tool, then upload/paste the result as this entry's Picture.</span>
-            <button class="btn btn-sm ms-auto"
+            <button id="icp-ai-btn" class="btn btn-sm btn-ttrpg ms-auto"
+                    style="display:none;font-size:.75rem;"
+                    onclick="aiGenerateIcon(this)"
+                    title="One click: Gemini generates the token and attaches it to the form's Picture — it saves when you save the entry">&#10024; Generate with Gemini</button>
+            <button class="btn btn-sm"
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
                     onclick="copyIconPrompt()">&#128203; Copy</button>
           </div>
+          <div id="icp-ai-status" class="small mb-2"></div>
           <textarea id="icp-text" class="form-control" readonly
                     style="font-family:monospace;font-size:.78rem;min-height:260px;
                            background:var(--ttrpg-surface);color:var(--ttrpg-text);
@@ -269,6 +274,7 @@
 </div>
 
 <script src="{{ static_v('scripts/paste_image.js') }}"></script>
+<script src="{{ static_v('scripts/ai_generate.js') }}"></script>
 <script>
 // {key: {label, topdown: [...], portrait: [...]}} — art direction per genre
 const _ICON_GENRES = {{ icon_genres | tojson }};
@@ -413,6 +419,40 @@ function generateIconPrompt() {
   document.getElementById('icp-text').value = lines.join('\n');
   document.getElementById('icp-output-section').style.display = '';
 }
+
+// Gemini one-click token: uses the prompt exactly as shown, drops the image
+// into the form's Picture input — it saves with the entry like an upload.
+function aiGenerateIcon(btn) {
+  const status = document.getElementById('icp-ai-status');
+  const input = document.querySelector('input[type="file"][name="image"]');
+  if (!input) return;
+  if (!document.getElementById('icp-text').value.trim()) generateIconPrompt();
+  const prompt = document.getElementById('icp-text').value;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = '✨ Painting…';
+  status.textContent = '';
+  status.style.color = '';
+  aiImageBlob(prompt)
+    .then(blob => {
+      aiBlobToFileInput(blob, input, 'token');
+      status.textContent =
+        '✨ Token attached to the Picture field — it saves with the entry.';
+    })
+    .catch(e => {
+      status.textContent = 'Gemini: ' + e.message;
+      status.style.color = 'var(--bs-danger, #dc3545)';
+    })
+    .finally(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof aiConfigured === 'function') {
+    aiConfigured().then(on => {
+      const b = document.getElementById('icp-ai-btn');
+      if (b && on) b.style.display = '';
+    });
+  }
+});
 
 function copyIconPrompt() {
   const ta = document.getElementById('icp-text');

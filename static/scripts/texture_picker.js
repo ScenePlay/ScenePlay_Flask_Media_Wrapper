@@ -88,7 +88,10 @@ window.TexturePicker = (function () {
                        title="How many feet one tile covers in the world — also steers the prompt's scale hints">
                 <span class="input-group-text">ft</span></div></div>
             </div>
-            <div class="d-flex gap-2 mb-2">
+            <div class="d-flex gap-2 mb-2 flex-wrap">
+              <button class="btn btn-sm btn-ttrpg" id="texai-generate" style="display:none;"
+                      title="One click: Gemini generates the texture and adds it to the library">
+                &#10024; Generate with Gemini</button>
               <button class="btn btn-sm btn-ttrpg" id="texai-copy">&#128203; Copy Prompt</button>
               <button class="btn btn-sm btn-outline-secondary" id="texai-paste"
                       title="Copy the AI's finished image, then click here">
@@ -119,6 +122,14 @@ window.TexturePicker = (function () {
     root.querySelector('#texup-save').addEventListener('click', saveUpload);
     root.querySelector('#texai-copy').addEventListener('click', copyAiPrompt);
     root.querySelector('#texai-paste').addEventListener('click', pasteAiResult);
+    root.querySelector('#texai-generate').addEventListener('click', aiGenerate);
+    // The one-click Gemini path appears only when a key is configured
+    // (Utilities → Gemini AI); the copy-paste flow works either way.
+    fetch('/ttrpg/ai/status').then(r => r.json()).then(d => {
+      if (d.ok && d.configured) {
+        root.querySelector('#texai-generate').style.display = '';
+      }
+    }).catch(() => {});
     return root;
   }
 
@@ -300,6 +311,40 @@ window.TexturePicker = (function () {
       status.textContent = 'Press Ctrl+V…';
       armCtrlV(send, status);
     }
+  }
+
+  // One-click generation: same prompt as the copy flow, but Gemini renders
+  // it server-side and the result lands straight in the library.
+  function aiGenerate() {
+    const status = root.querySelector('#texai-status');
+    const btn = root.querySelector('#texai-generate');
+    if (!root.querySelector('#texai-name').value.trim()) {
+      status.textContent = 'Give it a name first.';
+      return;
+    }
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = '✨ Generating…';
+    root.querySelector('#texai-prompt').value = aiPromptText();
+    fetch('/ttrpg/ai/texture-generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt_text: aiPromptText(),
+        name: root.querySelector('#texai-name').value,
+        category: root.querySelector('#texai-cat').value,
+        tile_ft: root.querySelector('#texai-tile').value,
+      }),
+    }).then(r => r.json())
+      .then(d => {
+        btn.disabled = false; btn.innerHTML = orig;
+        if (!d.ok) { status.textContent = d.error || 'Generation failed'; return; }
+        status.textContent = '✓ Added "' + d.name + '"';
+        refresh().then(() => showTab('lib'));
+      })
+      .catch(() => {
+        btn.disabled = false; btn.innerHTML = orig;
+        status.textContent = 'Gemini request failed (network).';
+      });
   }
 
   function armCtrlV(send, status) {

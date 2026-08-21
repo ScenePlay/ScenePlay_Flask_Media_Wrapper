@@ -264,6 +264,83 @@
                     </ul>
                     </details>
                 </form>
+
+                <!-- Gemini AI: optional one-click generation for battle-map
+                     layouts, art, videos, textures, portraits and icons. The
+                     key is stored ONLY in instance/gemini_api_key on this
+                     machine (gitignored, outside DB backups) and is never
+                     shown again here — blank keeps the existing key, same
+                     rule as the relay secret. -->
+                <form method="post" action="{{ url_for('ut.main') }}" autocomplete="off">
+                    <details class="sp-card">
+                    <summary><h3>Gemini AI (optional)</h3></summary>
+                    <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">
+                      With a Google Gemini API key, every AI prompt in the battle-map
+                      tools gains a one-click <b>&#10024; Generate</b> button — map
+                      layouts, traced floorplans, map art, live video maps (Veo),
+                      textures, portraits and monster icons. The copy-paste prompt
+                      workflow keeps working either way. The key is stored only on
+                      this machine and never enters the database, backups, git, or
+                      the relay.
+                    </p>
+                    {% if is_dm %}
+                    <p style="margin:6px 0;">
+                      Status:
+                      {% if gemini_configured %}
+                        <b style="color:var(--sp-ok, #3c9a5f);">key set</b>
+                        {{ '(from GEMINI_API_KEY env var — the field below is ignored)'
+                           if gemini_key_source == 'env' }}
+                      {% else %}
+                        <b style="color:var(--sp-muted);">no key</b> — get one free at
+                        <a href="https://aistudio.google.com/apikey" target="_blank"
+                           rel="noopener">aistudio.google.com/apikey</a>
+                      {% endif %}
+                    </p>
+                    <label style="display:block;font-size:.9em;margin-bottom:2px;">
+                      <b>API key</b>
+                    </label>
+                    <input type="password" name="gemini_api_key" value=""
+                           autocomplete="new-password" class="form-control d-inline-block mb-2"
+                           placeholder="{{ 'leave blank to keep existing' if gemini_configured
+                                          else 'paste your Gemini API key' }}"
+                           style="width:70%;">
+                    {% if gemini_configured and gemini_key_source != 'env' %}
+                    <label style="display:block;font-size:.85em;margin:2px 0 6px;">
+                      <input type="checkbox" name="gemini_clear_key" value="1">
+                      Remove the stored key (turns the &#10024; buttons off)
+                    </label>
+                    {% endif %}
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:6px 0;">
+                      {% for modality, label in [('text', 'Layouts (text/JSON)'),
+                                                 ('image', 'Images'),
+                                                 ('video', 'Video (Veo)')] %}
+                      <label style="font-size:.85em;">
+                        <b>{{ label }}</b><br>
+                        <select name="gemini_model_{{ modality }}" class="form-select form-select-sm"
+                                style="width:auto;">
+                          {% for m in gemini_choices[modality] %}
+                          <option value="{{ m }}" {{ 'selected' if m == gemini_models[modality] }}>{{ m }}</option>
+                          {% endfor %}
+                        </select>
+                      </label>
+                      {% endfor %}
+                    </div>
+                    <ul style="font-size:.85em;color:var(--sp-muted);margin:2px 0 6px 18px;">
+                      <li>Images cost a few cents; a Veo video clip costs a few
+                          dollars and takes 1&ndash;6 minutes.</li>
+                      <li>The defaults are the proven models; the newer ones are
+                          offered to try &mdash; if Google rejects one, the error
+                          says so and you can switch back here.</li>
+                    </ul>
+                    <input type="submit" name="submit" value="Save Gemini Settings" class="btn btn-secondary"/>
+                    {% else %}
+                    <p style="margin:6px 0;">
+                      <a href="{{ url_for('auth.login', next=url_for('ut.main')) }}">Log
+                      in with a DM account</a> to configure AI generation.
+                    </p>
+                    {% endif %}
+                    </details>
+                </form>
                 <details class="sp-card">
                 <summary><h3>Browser Extensions</h3></summary>
                 <p style="font-size:.85em;margin:6px 0;">

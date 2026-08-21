@@ -497,6 +497,36 @@ def map_bg(map_id):
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))
 
 
+def _store_bg_bytes(bm, raw, ext):
+    """Store raw bytes as a map's background: delete the old file, downscale
+    still images to 2048px (videos pass through untouched), commit, push to
+    the relay. Shared by the clipboard paste and the AI-generation routes.
+    Returns the bg-paste response payload shape."""
+    ext = (ext or 'png').lower()
+    if ext not in ALLOWED_EXT:
+        ext = 'png'
+    _delete_bg_file(bm.bg_image)
+    folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
+    os.makedirs(folder, exist_ok=True)
+    is_video = ext in VIDEO_EXT
+    if is_video:
+        filename = f'{uuid.uuid4().hex}.{ext}'
+        with open(os.path.join(folder, filename), 'wb') as fh:
+            fh.write(raw)
+    else:
+        # Backgrounds render full-screen — keep more pixels than token art
+        from relay_broadcaster import _downscale_image
+        out, out_ext = _downscale_image(raw, ext, 2048)
+        filename = f'{uuid.uuid4().hex}.{out_ext}'
+        with open(os.path.join(folder, filename), 'wb') as fh:
+            fh.write(out)
+    bm.bg_image = filename
+    db.session.commit()
+    url = url_for('static', filename='uploads/battlemaps/' + filename)
+    _push_map_state(bm)
+    return {'ok': True, 'url': url, 'is_video': is_video, 'filename': filename}
+
+
 @battlemap_bp.route('/<int:map_id>/bg-paste', methods=['POST'])
 @login_required
 @dm_required
@@ -506,24 +536,7 @@ def map_bg_paste(map_id):
     if not f:
         return jsonify({'ok': False, 'error': 'no file'}), 400
     ext = (request.form.get('ext') or 'png').lower()
-    if ext not in ALLOWED_EXT:
-        ext = 'png'
-    _delete_bg_file(bm.bg_image)
-    folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
-    os.makedirs(folder, exist_ok=True)
-    is_video = ext in VIDEO_EXT
-    if is_video:
-        filename = f'{uuid.uuid4().hex}.{ext}'
-        f.save(os.path.join(folder, filename))
-    else:
-        # Backgrounds render full-screen — keep more pixels than token art
-        from routes._util import save_upload_downscaled
-        filename = save_upload_downscaled(f, folder, max_dim=2048)
-    bm.bg_image = filename
-    db.session.commit()
-    url = url_for('static', filename='uploads/battlemaps/' + filename)
-    _push_map_state(bm)
-    return jsonify({'ok': True, 'url': url, 'is_video': is_video, 'filename': filename})
+    return jsonify(_store_bg_bytes(bm, f.read(), ext))
 
 
 @battlemap_bp.route('/api/maps')

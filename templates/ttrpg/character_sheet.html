@@ -1892,10 +1892,21 @@
         <!-- Prompt text -->
         <div class="d-flex align-items-center gap-2 mb-2">
           <span class="small text-muted text-uppercase" style="letter-spacing:.06em;">Prompt Text</span>
+          {% if can_edit %}
+          <button id="llm-ai-btn" class="btn btn-sm btn-ttrpg ms-auto"
+                  style="display:none;font-size:.75rem;"
+                  onclick="aiGeneratePortrait(this)"
+                  title="One click: Gemini generates the portrait and sets it on this character">&#10024; Generate with Gemini</button>
+          <button class="btn btn-sm {% if not can_edit %}ms-auto{% endif %}"
+                  style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
+                  onclick="copyLlmPrompt()">&#128203; Copy</button>
+          {% else %}
           <button class="btn btn-sm ms-auto"
                   style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
                   onclick="copyLlmPrompt()">&#128203; Copy</button>
+          {% endif %}
         </div>
+        <div id="llm-ai-status" class="small mb-2"></div>
         <textarea id="llm-prompt-text" class="form-control"
                   style="font-family:monospace;font-size:.78rem;min-height:420px;
                          background:var(--ttrpg-surface);color:var(--ttrpg-text);
@@ -2044,7 +2055,36 @@ const _llmChar = {
   ],
 };
 const _pasteUploadUrl = {% if can_edit %}{{ url_for('ttrpg.portrait_paste', character_id=char.character_id) | tojson }}{% else %}null{% endif %};
+
+// Gemini one-click portrait: build the SAME prompt shown in the modal, have
+// the server generate it, then save through the existing paste-upload path.
+function aiGeneratePortrait(btn) {
+  const status = document.getElementById('llm-ai-status');
+  const prompt = document.getElementById('llm-prompt-text').value;
+  if (!prompt.trim() || !_pasteUploadUrl) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = '✨ Painting…';
+  status.textContent = '';
+  aiImageBlob(prompt)
+    .then(blob => { _uploadPortraitBlob(blob); })
+    .then(() => { status.textContent = '✨ Portrait generated and saved.'; })
+    .catch(e => {
+      status.textContent = 'Gemini: ' + e.message;
+      status.style.color = 'var(--bs-danger, #dc3545)';
+    })
+    .finally(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof aiConfigured === 'function') {
+    aiConfigured().then(on => {
+      const b = document.getElementById('llm-ai-btn');
+      if (b && on) b.style.display = '';
+    });
+  }
+});
 </script>
+<script src="{{ static_v('scripts/ai_generate.js') }}"></script>
 <script src="{{ static_v('scripts/portrait_prompt.js') }}"></script>
 <script src="{{ static_v('scripts/character_sheet.js') }}"></script>
 <script src="{{ static_v('scripts/sfx-control.js') }}"></script>

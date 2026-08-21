@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Secret guard: blocks commits that would leak local credentials.
+# Installed into .git/hooks/pre-commit (this tracked copy is the source —
+# re-install after a fresh clone with:  scripts/install_git_hooks.sh).
+#
+# Layered with tests/test_secret_hygiene.py, which fails the suite if a
+# secret ever becomes tracked or the ignore rules regress.
+set -euo pipefail
+
+# 1) Nothing under instance/ may ever be committed — that's where the
+#    Gemini API key and the Flask secret live. Catches `git add -f` too.
+staged_instance=$(git diff --cached --name-only -- 'instance/*')
+if [ -n "$staged_instance" ]; then
+  echo "COMMIT BLOCKED: files under instance/ hold local secrets:" >&2
+  echo "$staged_instance" >&2
+  echo "Unstage with: git restore --staged instance/" >&2
+  exit 1
+fi
+
+# 2) No staged ADDED line may contain something shaped like an API key
+#    (Google keys are AIza + 35 chars; sk-... covers other providers).
+if git diff --cached -U0 | grep -E '^\+' \
+     | grep -Eq 'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9_-]{32,}'; then
+  echo "COMMIT BLOCKED: staged changes contain something that looks like" >&2
+  echo "an API key. Remove the secret from the change, then commit again." >&2
+  exit 1
+fi

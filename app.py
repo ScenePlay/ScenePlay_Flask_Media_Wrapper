@@ -22,6 +22,7 @@ from routes.ttrpg import ttrpg
 from routes.monsters import monsters_bp
 from routes.battlemap import battlemap_bp
 from routes.textures import textures_bp
+from routes.ai import ai_bp
 from routes.reference import reference_bp
 from routes.relay_admin import relay_admin_bp
 from routes.obs import obs_bp
@@ -355,6 +356,7 @@ app.register_blueprint(ttrpg)
 app.register_blueprint(monsters_bp)
 app.register_blueprint(battlemap_bp)
 app.register_blueprint(textures_bp)
+app.register_blueprint(ai_bp)
 app.register_blueprint(reference_bp)
 app.register_blueprint(relay_admin_bp)
 app.register_blueprint(obs_bp)

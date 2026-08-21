@@ -392,7 +392,21 @@
           </div>
           <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             <span class="small text-muted">Copy and paste into your AI image/video tool.</span>
-            <button class="btn btn-sm ms-auto"
+            <button class="btn btn-sm btn-ttrpg ms-auto ai-gemini-btn"
+                    style="display:none;font-size:.75rem;"
+                    onclick="aiGenerateArt(this)"
+                    title="One click: static maps generate an image in seconds (painted over the schematic); live maps generate a Veo video clip (costs a few dollars, 1–6 min)">&#10024; Generate with Gemini</button>
+            <!-- Model pickers: image models for static maps, Veo for live maps.
+                 Shown/hidden by _aiUpdateModelSelects() (needs a configured key
+                 AND the matching prompt type) — deliberately NOT ai-gemini-btn,
+                 which would blanket-show both. -->
+            <select id="ai-model-image" class="form-select form-select-sm"
+                    title="Gemini image model for static maps"
+                    style="display:none;width:auto;font-size:.72rem;background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);"></select>
+            <select id="ai-model-video" class="form-select form-select-sm"
+                    title="Veo model for live/video maps — fast is ~half the cost"
+                    style="display:none;width:auto;font-size:.72rem;background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);"></select>
+            <button class="btn btn-sm"
                     style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
                     onclick="copyMapPrompt()">&#128203; Copy Prompt</button>
             <button id="map-paste-bg-btn" class="btn btn-sm"
@@ -400,6 +414,7 @@
                     onclick="pasteMapBackground()"
                     title="Made the image? Copy it, then paste it straight in as this map's background">&#128203; Paste as Background</button>
           </div>
+          <div id="ai-art-status" class="small mb-2"></div>
           <textarea id="map-prompt-text" class="form-control" readonly
                     style="font-family:monospace;font-size:.78rem;min-height:280px;
                            background:var(--ttrpg-surface);color:var(--ttrpg-text);
@@ -508,6 +523,14 @@
           </div>
           <button class="btn btn-ttrpg btn-sm w-100 mb-2"
                   onclick="generateAndShowLayoutPrompt()">&#9889; Generate Layout Prompt</button>
+          <div class="d-flex gap-2 mb-2 ai-gemini-btn" style="display:none;">
+            <button class="btn btn-sm btn-ttrpg flex-grow-1"
+                    onclick="aiGenerateFloorplan('design', this)"
+                    title="One click: Gemini designs the layout and it lands in the preview below — you still review and Save">&#10024; Gemini: Design &amp; Preview</button>
+            <select id="ai-model-text" class="form-select form-select-sm"
+                    title="Gemini model — Pro reasons better about complex layouts, Flash is faster and cheaper"
+                    style="width:auto;background:var(--ttrpg-surface);color:var(--ttrpg-text);border-color:var(--sp-border);"></select>
+          </div>
           <div id="fpd-prompt-section" style="display:none;">
             <div class="d-flex align-items-center gap-2 mb-2">
               <span class="small text-muted">Paste into an AI chat — no image needed.</span>
@@ -537,6 +560,11 @@
           </div>
           <button id="fp-trace-gen-btn" class="btn btn-ttrpg btn-sm w-100 mb-2"
                   onclick="generateAndShow3dTracePrompt()">&#9889; Generate Trace Prompt</button>
+          <div id="ai-trace-row" class="ai-gemini-btn" style="display:none;">
+            <button class="btn btn-sm btn-ttrpg w-100 mb-2"
+                    onclick="aiGenerateFloorplan('trace', this)"
+                    title="One click: Gemini reads this map's background image itself and traces the floorplan into the preview below">&#10024; Gemini: Trace &amp; Preview (attaches the map image for you)</button>
+          </div>
           <div id="fp-prompt-section" style="display:none;">
             <div class="d-flex align-items-center gap-2 mb-2">
               <span class="small text-muted">Attach the map image with this prompt.</span>
@@ -1040,6 +1068,7 @@ function setMapPromptType(type) {
     staticBtn.style.background = surface; staticBtn.style.color = text; staticBtn.style.border = '1px solid var(--sp-border)';
     fxSection.style.display = '';
   }
+  _aiUpdateModelSelects();
 }
 
 function _gv(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
@@ -1379,39 +1408,44 @@ function _uploadMapBg(blob, ext, btnEl) {
   fetch(pasteUrl, { method: 'POST', body: fd })
     .then(r => r.json())
     .then(data => {
-      if (data.ok) {
-        const preview = document.getElementById('bg-preview-' + _activeMapId);
-        const isVideo = data.is_video;
-        const imgUrl  = data.url + '?t=' + Date.now();
-        const thumbStyle = 'width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--sp-border);';
-        let media;
-        if (isVideo) {
-          media = document.createElement('video');
-          media.style.cssText = thumbStyle;
-          media.muted = true; media.loop = true; media.autoplay = true; media.playsInline = true;
-          const src = document.createElement('source');
-          src.src = imgUrl; media.appendChild(src);
-        } else {
-          media = document.createElement('img');
-          media.src = imgUrl; media.alt = '';
-          media.style.cssText = thumbStyle;
-        }
-        if (preview) {
-          const wrap = document.createElement('div');
-          wrap.className = 'd-flex align-items-center gap-2 mb-2';
-          const info = document.createElement('div');
-          info.innerHTML = '<div class="small text-muted">Background ' + (isVideo ? 'video' : 'image') + ' set</div>';
-          wrap.appendChild(media);
-          wrap.appendChild(info);
-          preview.innerHTML = '';
-          preview.appendChild(wrap);
-        }
-      }
+      _applyBgUpdate(data);
       if (btn) { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }
     })
     .catch(() => {
       if (btn) { btn.innerHTML = btn.dataset.orig; btn.disabled = false; }
     });
+}
+
+// Refresh the map card's bg thumbnail from a bg-paste-shaped response —
+// shared by the clipboard paste flow and the Gemini art/video flows.
+function _applyBgUpdate(data) {
+  if (!data || !data.ok) return;
+  const preview = document.getElementById('bg-preview-' + _activeMapId);
+  const isVideo = data.is_video;
+  const imgUrl  = data.url + '?t=' + Date.now();
+  const thumbStyle = 'width:80px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--sp-border);';
+  let media;
+  if (isVideo) {
+    media = document.createElement('video');
+    media.style.cssText = thumbStyle;
+    media.muted = true; media.loop = true; media.autoplay = true; media.playsInline = true;
+    const src = document.createElement('source');
+    src.src = imgUrl; media.appendChild(src);
+  } else {
+    media = document.createElement('img');
+    media.src = imgUrl; media.alt = '';
+    media.style.cssText = thumbStyle;
+  }
+  if (preview) {
+    const wrap = document.createElement('div');
+    wrap.className = 'd-flex align-items-center gap-2 mb-2';
+    const info = document.createElement('div');
+    info.innerHTML = '<div class="small text-muted">Background ' + (isVideo ? 'video' : 'image') + ' set</div>';
+    wrap.appendChild(media);
+    wrap.appendChild(info);
+    preview.innerHTML = '';
+    preview.appendChild(wrap);
+  }
 }
 
 // ── 3D Floorplan (design + trace prompts, JSON paste) ────────────────────────
@@ -1434,6 +1468,176 @@ fetch('/ttrpg/textures/manifest').then(r => r.json())
   .then(d => { _texCatalog = d.textures || []; })
   .catch(() => {});
 
+// ── Gemini one-click generation ──────────────────────────────────────────────
+// Optional layer over the copy-paste flows: the SAME prompt builders feed a
+// server-side Gemini call instead of the DM's clipboard. Buttons stay hidden
+// unless a key is configured (Utilities → Gemini AI), so an unconfigured box
+// looks exactly like before. JSON results run the normal preview pipeline;
+// nothing auto-saves.
+
+let _aiStatus = null;
+fetch('/ttrpg/ai/status').then(r => r.json()).then(d => {
+  if (!d.ok || !d.configured) return;
+  _aiStatus = d;
+  document.querySelectorAll('.ai-gemini-btn').forEach(b => { b.style.display = ''; });
+  const fill = (id, mod) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    (d.choices[mod] || []).forEach(m => {
+      const o = document.createElement('option');
+      o.value = m;
+      o.textContent = m.replace(/-generate|-preview|-001/g, '');
+      if (m === d.models[mod]) o.selected = true;
+      sel.appendChild(o);
+    });
+  };
+  fill('ai-model-text', 'text');
+  fill('ai-model-image', 'image');
+  fill('ai-model-video', 'video');
+  _aiUpdateModelSelects();
+}).catch(() => {});
+
+// Static maps pick a Gemini IMAGE model; live maps pick a Veo VIDEO model.
+// Only the selector matching the current prompt type is shown (and only once
+// a key is configured).
+function _aiUpdateModelSelects() {
+  const img = document.getElementById('ai-model-image');
+  const vid = document.getElementById('ai-model-video');
+  const on = !!_aiStatus;
+  if (img) img.style.display = (on && _mapPromptType !== 'live') ? '' : 'none';
+  if (vid) vid.style.display = (on && _mapPromptType === 'live') ? '' : 'none';
+}
+
+function _aiBusy(btn, label) {
+  if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = label;
+}
+function _aiDone(btn) {
+  btn.disabled = false;
+  btn.innerHTML = btn.dataset.orig;
+}
+function _aiArtMsg(msg, isErr) {
+  const el = document.getElementById('ai-art-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--bs-danger, #dc3545)' : 'var(--ttrpg-accent)';
+}
+
+// Design or trace a floorplan with Gemini. The result lands in the paste box
+// and runs preview3dFloorplan() — identical guardrails to a manual paste
+// (fence strip, wall_style inject, floor-texture strip, dry-run carve), and
+// the DM still clicks Save.
+function aiGenerateFloorplan(mode, btn) {
+  const text = mode === 'design' ? _buildLayoutDesignPrompt()
+                                 : _build3dTracePrompt();
+  if (mode === 'design') {
+    document.getElementById('fpd-prompt-text').value = text;
+    _persistPrompt(_fp3dMapId, 'layout', text, _collectLayoutSettings());
+  }
+  _fpShowResult('', false);
+  _aiBusy(btn, '✨ Generating…');
+  fetch('/ttrpg/ai/floorplan-generate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt_text: text, mode: mode, map_id: _fp3dMapId,
+                           model: _gv('ai-model-text') || undefined }),
+  }).then(r => r.json())
+    .then(d => {
+      _aiDone(btn);
+      if (!d.ok) {
+        _fpShowResult('<b>Gemini:</b> ' + _mnEsc(d.error || 'generation failed'), true);
+        return;
+      }
+      document.getElementById('fp-paste-text').value = d.json_text;
+      preview3dFloorplan();
+    })
+    .catch(() => { _aiDone(btn); _fpShowResult('Gemini request failed (network).', true); });
+}
+
+// Generate the map background. Static → image in seconds (the schematic
+// blueprint rides as the conditioning image so the art matches the walls);
+// live → a Veo video job with a cost confirm + progress polling.
+function aiGenerateArt(btn) {
+  const go = () => {
+    const text = _buildMapPrompt();
+    document.getElementById('map-prompt-text').value = text;
+    document.getElementById('mpt-output-section').style.display = '';
+    _persistPrompt(_activeMapId, 'art', text, _collectArtSettings());
+    _renderSchematicPreview();
+    if (_mapPromptType === 'live') { _aiStartVideo(text, btn); return; }
+    _aiArtMsg('', false);
+    _aiBusy(btn, '✨ Painting… (can take a minute)');
+    fetch('/ttrpg/ai/map-art/' + _activeMapId, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt_text: text,
+        model: _gv('ai-model-image') || undefined,
+        schematic_png_b64: _fpSchematicCanvas
+          ? _fpSchematicCanvas.toDataURL('image/png').split(',')[1] : null,
+      }),
+    }).then(r => r.json())
+      .then(d => {
+        _aiDone(btn);
+        if (!d.ok) { _aiArtMsg('Gemini: ' + (d.error || 'generation failed'), true); return; }
+        _applyBgUpdate(d);
+        _aiArtMsg('✨ Background set.', false);
+      })
+      .catch(() => { _aiDone(btn); _aiArtMsg('Gemini request failed (network).', true); });
+  };
+  if (_FP_INFO[_activeMapId] && !_fpPlanCache[_activeMapId]) {
+    _fpFetchPlan(_activeMapId).then(go);
+  } else {
+    go();
+  }
+}
+
+let _aiVideoTimer = null;
+
+function _aiStartVideo(text, btn) {
+  if (!confirm('Generate a live video background with Veo?\n\n' +
+               'An 8-second clip typically costs a few dollars of API credit ' +
+               'and takes 1–6 minutes. The current still background (if any) ' +
+               'is used as the starting frame.')) return;
+  _aiArtMsg('', false);
+  _aiBusy(btn, '\u{1F3AC} Starting…');
+  fetch('/ttrpg/ai/map-video/' + _activeMapId, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt_text: text,
+                           model: _gv('ai-model-video') || undefined }),
+  }).then(r => r.json())
+    .then(d => {
+      _aiDone(btn);
+      if (!d.ok) { _aiArtMsg('Veo: ' + (d.error || 'could not start'), true); return; }
+      _aiPollVideo(d.job_id, Date.now());
+    })
+    .catch(() => { _aiDone(btn); _aiArtMsg('Veo request failed (network).', true); });
+}
+
+// Page-level poll so the job survives the modal being closed; reopening the
+// art modal shows the current status line.
+function _aiPollVideo(jobId, t0) {
+  clearInterval(_aiVideoTimer);
+  _aiVideoTimer = setInterval(() => {
+    fetch('/ttrpg/ai/job/' + jobId)
+      .then(r => r.json())
+      .then(d => {
+        const secs = Math.round((Date.now() - t0) / 1000);
+        if (!d.ok || d.status === 'error') {
+          clearInterval(_aiVideoTimer);
+          _aiArtMsg('Veo: ' + (d.error || 'generation failed'), true);
+        } else if (d.status === 'done') {
+          clearInterval(_aiVideoTimer);
+          if (d.result) _applyBgUpdate(d.result);
+          _aiArtMsg('\u{1F3AC} Video background set (' + secs + 's).', false);
+        } else {
+          _aiArtMsg('\u{1F3AC} Generating video… ' + Math.floor(secs / 60) +
+                    'm ' + (secs % 60) + 's', false);
+        }
+      })
+      .catch(() => {});   // transient poll failure — keep polling
+  }, 5000);
+}
+
 function open3dModal(mapId, mapName, cols, rows, hasBg, tab) {
   _fp3dMapId   = parseInt(mapId);
   _fp3dMapName = mapName;
@@ -1452,6 +1656,8 @@ function open3dModal(mapId, mapName, cols, rows, hasBg, tab) {
   _fpFloorsStripped = 0;
   document.getElementById('fp-trace-nobg').style.display = _fp3dHasBg ? 'none' : '';
   document.getElementById('fp-trace-gen-btn').style.display = _fp3dHasBg ? '' : 'none';
+  document.getElementById('ai-trace-row').style.display =
+    (_fp3dHasBg && _aiStatus && _aiStatus.configured) ? '' : 'none';
   _populateFpdGenres();
   // Default tab: trace when the art already exists and nothing is designed
   // yet; design otherwise (walls-first is the recommended path for new maps).

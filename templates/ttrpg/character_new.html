@@ -202,10 +202,15 @@
       <div class="modal-body">
         <p class="small text-muted mb-2">Copy this prompt and paste it into an image generation tool (Midjourney, DALL-E, Stable Diffusion) or ask Claude to generate the portrait.</p>
         <div class="d-flex align-items-center gap-2 mb-2">
-          <button class="btn btn-sm ms-auto"
+          <button id="new-char-ai-btn" class="btn btn-sm btn-ttrpg ms-auto"
+                  style="display:none;font-size:.75rem;"
+                  onclick="aiGenerateNewPortrait(this)"
+                  title="One click: Gemini generates the portrait and attaches it to the form — it saves when you create the character">&#10024; Generate with Gemini</button>
+          <button class="btn btn-sm"
                   style="background:var(--ttrpg-surface);color:var(--ttrpg-accent);border:1px solid var(--ttrpg-accent);font-size:.75rem;"
                   onclick="copyNewCharPrompt()">&#128203; Copy</button>
         </div>
+        <div id="new-char-ai-status" class="small mb-2"></div>
         <textarea id="new-char-prompt-text" class="form-control"
                   style="font-family:monospace;font-size:.78rem;min-height:360px;
                          background:var(--ttrpg-surface);color:var(--ttrpg-text);
@@ -223,7 +228,40 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_v('scripts/ai_generate.js') }}"></script>
 <script src="{{ static_v('scripts/portrait_prompt.js') }}"></script>
+<script>
+// Gemini one-click portrait for the create form: the image lands in the
+// normal portrait file input, so it saves with the form like an upload.
+function aiGenerateNewPortrait(btn) {
+  const status = document.getElementById('new-char-ai-status');
+  const prompt = document.getElementById('new-char-prompt-text').value;
+  const input = document.getElementById('new-portrait-input');
+  if (!prompt.trim() || !input) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = '✨ Painting…';
+  status.textContent = '';
+  status.style.color = '';
+  aiImageBlob(prompt)
+    .then(blob => {
+      aiBlobToFileInput(blob, input, 'portrait');
+      status.textContent =
+        '✨ Portrait attached — it saves when you create the character.';
+    })
+    .catch(e => {
+      status.textContent = 'Gemini: ' + e.message;
+      status.style.color = 'var(--bs-danger, #dc3545)';
+    })
+    .finally(() => { btn.disabled = false; btn.innerHTML = orig; });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  aiConfigured().then(on => {
+    const b = document.getElementById('new-char-ai-btn');
+    if (b && on) b.style.display = '';
+  });
+});
+</script>
 <script>
 const _newLibUrls = {
   'class': "{{ url_for('reference_bp.classes_search') }}",

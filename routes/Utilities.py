@@ -128,6 +128,29 @@ def main():
                   else 'ScenePlay controls and tables are open to everyone '
                        'on the network.')
             return redirect(url_for('ut.main'))
+        elif request.form['submit'] == 'Save Gemini Settings':
+            # AI settings are DM-only, and the key follows the relay-secret
+            # masking rule: a blank submission keeps the existing key.
+            from flask_login import current_user
+            if not (current_user.is_authenticated and current_user.is_dm()):
+                flash('Changing AI settings requires a DM login.')
+                return redirect(url_for('auth.login', next=url_for('ut.main')))
+            import gemini
+            if request.form.get('gemini_clear_key'):
+                gemini.clear_api_key()
+                flash('Gemini API key removed.')
+            else:
+                key = request.form.get('gemini_api_key', '').strip()
+                if key:
+                    gemini.save_api_key(key)
+                    flash('Gemini API key saved (stored locally in '
+                          'instance/, never in the database or git).')
+            for modality in ('text', 'image', 'video'):
+                chosen = request.form.get(f'gemini_model_{modality}', '')
+                if chosen in gemini._ALLOWED[modality]:
+                    appsettingSet(f'gemini_model_{modality}', chosen)
+            flash('Gemini settings saved.')
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
             # Rebooting the box is DM-only: anyone on the LAN can reach this
             # page, and a mid-session reboot kills music, maps, and the relay.
@@ -161,10 +184,18 @@ def main():
     media_roots = appsettingGet('media_search_roots', '') or ''
     from routes._util import dm_only_sceneplay_enabled
     from flask_login import current_user
+    import gemini
     return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
                            keep_music=keep_music, backups=backups, backup_auto=backup_auto,
                            media_roots=media_roots,
                            dm_only_sceneplay=dm_only_sceneplay_enabled(),
+                           gemini_configured=gemini.configured(),
+                           gemini_key_source=gemini.key_source(),
+                           gemini_models={m: gemini.resolve_model(m)
+                                          for m in ('text', 'image', 'video')},
+                           gemini_choices={'text': gemini.TEXT_MODELS,
+                                           'image': gemini.IMAGE_MODELS,
+                                           'video': gemini.VIDEO_MODELS},
                            is_dm=(current_user.is_authenticated
                                   and current_user.is_dm()))
 
