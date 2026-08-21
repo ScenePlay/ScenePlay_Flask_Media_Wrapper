@@ -523,7 +523,7 @@
           </div>
           <button class="btn btn-ttrpg btn-sm w-100 mb-2"
                   onclick="generateAndShowLayoutPrompt()">&#9889; Generate Layout Prompt</button>
-          <div class="d-flex gap-2 mb-2 ai-gemini-btn" style="display:none;">
+          <div class="gap-2 mb-2 ai-gemini-btn" data-display="flex" style="display:none;">
             <button class="btn btn-sm btn-ttrpg flex-grow-1"
                     onclick="aiGenerateFloorplan('design', this)"
                     title="One click: Gemini designs the layout and it lands in the preview below — you still review and Save">&#10024; Gemini: Design &amp; Preview</button>
@@ -1479,7 +1479,9 @@ let _aiStatus = null;
 fetch('/ttrpg/ai/status').then(r => r.json()).then(d => {
   if (!d.ok || !d.configured) return;
   _aiStatus = d;
-  document.querySelectorAll('.ai-gemini-btn').forEach(b => { b.style.display = ''; });
+  document.querySelectorAll('.ai-gemini-btn').forEach(b => {
+    b.style.display = b.dataset.display || '';
+  });
   const fill = (id, mod) => {
     const sel = document.getElementById(id);
     if (!sel) return;

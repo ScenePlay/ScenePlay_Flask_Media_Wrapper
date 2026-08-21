@@ -292,6 +292,21 @@ window.BMFP = (function () {
           fill: '#3df0c8', 'fill-opacity': '0.25',
           stroke: '#3df0c8', 'stroke-width': 2.5,
         }));
+        // rotate handle: drag it to spin the prop (15° snaps); the prop
+        // body itself drags to move
+        const h = _propRotHandle(s);
+        svg.appendChild(svgEl('line', {
+          x1: px(s.x), y1: px(s.y), x2: px(h.x), y2: px(h.y),
+          stroke: '#3df0c8', 'stroke-width': 1.5, 'stroke-dasharray': '3 3',
+        }));
+        const knob = svgEl('circle', {
+          cx: px(h.x), cy: px(h.y), r: 6,
+          fill: '#3df0c8', stroke: '#083f33', 'stroke-width': 2,
+        });
+        const title = svgEl('title', {});
+        title.textContent = 'Drag to rotate (drag the prop itself to move it)';
+        knob.appendChild(title);
+        svg.appendChild(knob);
       } else {
         svg.appendChild(svgEl('line', {
           x1: px(s.x1), y1: px(s.y1), x2: px(s.x2), y2: px(s.y2),
@@ -591,7 +606,28 @@ window.BMFP = (function () {
     if (box) box.style.display = zn ? '' : 'none';
   }
 
-  // ── select tool (per-segment inspector) ─────────────────────────────────────
+  // ── select tool (per-segment inspector + prop direct manipulation) ────────
+
+  const ROT_HANDLE_PX = 26;   // screen px from the prop's center
+
+  // The rotate handle sits "above" the prop and turns with it, so the
+  // handle's direction IS the prop's facing.
+  function _propRotHandle(pr) {
+    const a = ((pr.rot || 0) - 90) * Math.PI / 180;
+    return { x: pr.x + Math.cos(a) * ROT_HANDLE_PX / CELL_PX,
+             y: pr.y + Math.sin(a) * ROT_HANDLE_PX / CELL_PX };
+  }
+
+  // Commit a drag's pre-state to the undo stack on its FIRST real change —
+  // a drag that never moves anything leaves no undo entry behind.
+  function _dragCommit(d) {
+    if (d.pushed) return;
+    undoStack.push(d.snap);
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    redoStack = [];
+    updateUndoButtons();
+    d.pushed = true;
+  }
 
   function selectAt(p) {
     const segDist = (list, i) =>
@@ -625,9 +661,11 @@ window.BMFP = (function () {
       isProp ? `Prop: ${s.type}`
              : sel.kind === 'door' ? `Door ${s.id || ''}` : `Wall #${sel.idx + 1}`;
     // walls/doors get the height row; props get the turn/size row
-    document.getElementById('fp-sel-hb-row').style.display = isProp ? 'none' : '';
-    document.getElementById('fp-sel-style-row').style.display = isProp ? 'none' : '';
-    document.getElementById('fp-sel-prop-row').style.display = isProp ? '' : 'none';
+    // inline flex/none (NOT the d-flex class: its !important would beat
+    // an inline display:none and the rows would never hide)
+    document.getElementById('fp-sel-hb-row').style.display = isProp ? 'none' : 'flex';
+    document.getElementById('fp-sel-style-row').style.display = isProp ? 'none' : 'flex';
+    document.getElementById('fp-sel-prop-row').style.display = isProp ? 'flex' : 'none';
     document.getElementById('fp-sel-texture').value = s.texture || '';
     if (isProp) {
       document.getElementById('fp-sel-rot').value = s.rot || 0;
@@ -815,7 +853,30 @@ window.BMFP = (function () {
     e.preventDefault();
     const p = evtCell(e);
 
-    if (tool === 'select') { selectAt(p); return; }
+    if (tool === 'select') {
+      // A selected PROP is directly manipulable: grab its rotate handle to
+      // spin it, or grab the prop itself to drag it somewhere else. The
+      // pre-drag snapshot only enters the undo stack if something actually
+      // changes, so a plain click stays a plain click.
+      const selProp = sel && sel.kind === 'prop' && plan.props[sel.idx];
+      if (selProp) {
+        const h = _propRotHandle(selProp);
+        if (Math.hypot(p.x - h.x, p.y - h.y) <= 14 / CELL_PX + 0.1) {
+          drag = { kind: 'selrotate', idx: sel.idx,
+                   snap: JSON.stringify(plan), pushed: false };
+          return;
+        }
+      }
+      selectAt(p);
+      if (sel && sel.kind === 'prop') {
+        const pr = plan.props[sel.idx];
+        drag = { kind: 'selmove', idx: sel.idx,
+                 snap: JSON.stringify(plan), pushed: false,
+                 offX: pr.x - p.x, offY: pr.y - p.y,
+                 last: pr.x + ',' + pr.y };
+      }
+      return;
+    }
 
     if (tool === 'zone') {
       if (!plan.zones || !plan.zones.length) { newZone(); }
@@ -925,6 +986,29 @@ window.BMFP = (function () {
   function onMove(e) {
     if (!drag) return;
     const p = evtCell(e);
+    if (drag.kind === 'selmove') {
+      const pr = plan.props[drag.idx];
+      const nx = snapTo(p.x + drag.offX), ny = snapTo(p.y + drag.offY);
+      if (nx + ',' + ny === drag.last) return;   // redraw only on snap steps
+      _dragCommit(drag);
+      pr.x = nx; pr.y = ny;
+      drag.last = nx + ',' + ny;
+      markDirty();
+      return;
+    }
+    if (drag.kind === 'selrotate') {
+      const pr = plan.props[drag.idx];
+      // handle sits "above" the prop at rot 0, so pointing the pointer in a
+      // direction turns the prop's front that way; snapped to 15°
+      const ang = Math.atan2(p.y - pr.y, p.x - pr.x) * 180 / Math.PI + 90;
+      const rot = ((Math.round(ang / 15) * 15) % 360 + 360) % 360;
+      if ((pr.rot || 0) === rot) return;
+      _dragCommit(drag);
+      if (rot) pr.rot = rot; else delete pr.rot;
+      markDirty();
+      renderSelUI();   // keep the inspector's Turn field live
+      return;
+    }
     if (drag.kind === 'erase') {
       const rPx = HIT_RADIUS * CELL_PX;
       drag.previewEl.style.left = (p.x * CELL_PX - rPx) + 'px';
@@ -969,6 +1053,7 @@ window.BMFP = (function () {
     if (!drag) return;
     const d = drag;
     drag = null;
+    if (d.kind === 'selmove' || d.kind === 'selrotate') return;   // no preview el
     d.previewEl.remove();
     if (!d.end) return;
 
@@ -1119,7 +1204,10 @@ window.BMFP = (function () {
     ov.addEventListener('pointermove', onMove);
     ov.addEventListener('pointerup', onUp);
     ov.addEventListener('pointerleave', () => {
-      if (drag) { drag.previewEl.remove(); drag = null; }
+      if (drag) {
+        if (drag.previewEl) drag.previewEl.remove();
+        drag = null;
+      }
     });
     window.addEventListener('beforeunload', e => {
       if (dirty) { e.preventDefault(); e.returnValue = ''; }
