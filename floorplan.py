@@ -518,6 +518,14 @@ def validate_floorplan(data, grid_cols, grid_rows):
     elif style and style != 'none':
         clean['wall_style'] = style
 
+    # Player 2D visibility switches (whole plan): show ALL walls+doors and/or
+    # all props on the players' flat map — not just per-wall "show" flags.
+    # Stored only when true, so plans without them stay byte-identical.
+    if data.get('show_walls_2d'):
+        clean['show_walls_2d'] = True
+    if data.get('show_props_2d'):
+        clean['show_props_2d'] = True
+
     import json
     if len(json.dumps(clean)) > MAX_JSON_BYTES:
         return None, warnings, [f'floorplan too large (> {MAX_JSON_BYTES // 1024} KB)']

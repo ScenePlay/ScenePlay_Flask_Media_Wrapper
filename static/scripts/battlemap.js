@@ -409,14 +409,19 @@ function renderTokens(tokens) {
   if (IS_DM) updateSidebar(tokens);
 }
 
-// ── Player-visible floorplan walls ───────────────────────────────────────────
-// Walls the DM flagged "players can see" (floorplan wall.show) render for
-// EVERYONE on the 2D map — used to block off art that's wrong, e.g. painted
-// stairs that don't actually exist. Geometry re-fetches when the poll reports
-// a new floorplan version.
+// ── Player-visible floorplan (walls / doors / props on the 2D map) ───────────
+// Two sources of visibility, rendered for EVERYONE on the flat map:
+//  - per-wall "show" flags (the classic block-off-wrong-art tool);
+//  - the plan-level show_walls_2d / show_props_2d switches, which reveal ALL
+//    walls+doors and/or all props — the DM's "players get the blueprint" mode.
+// Geometry re-fetches when the poll reports a new floorplan version; door
+// open/closed states re-render from the regular 2-second poll.
 
 let _fpvVersion = undefined;   // undefined = never synced; null = no floorplan
 let _fpvWalls = [];
+let _fpvDoors = [];            // shown only with show_walls_2d
+let _fpvProps = [];            // shown only with show_props_2d
+let _fpvDoorStates = {};       // door id -> open, from the poll
 
 function _fpvRender() {
   const svg = document.getElementById('fp-visible-layer');
@@ -433,19 +438,71 @@ function _fpvRender() {
       stroke: '#d8d2bf', 'stroke-width': 5, 'stroke-linecap': 'round', 'stroke-opacity': 0.95,
     }));
   });
+  _fpvDoors.forEach(d => {
+    const isOpen = _fpvDoorStates[d.id] !== undefined
+      ? !!_fpvDoorStates[d.id] : !!d.open;
+    svg.appendChild(svgEl('line', {
+      x1: d.x1 * CELL_PX, y1: d.y1 * CELL_PX, x2: d.x2 * CELL_PX, y2: d.y2 * CELL_PX,
+      stroke: '#14120e', 'stroke-width': 9, 'stroke-linecap': 'round', 'stroke-opacity': 0.85,
+    }));
+    svg.appendChild(svgEl('line', {
+      x1: d.x1 * CELL_PX, y1: d.y1 * CELL_PX, x2: d.x2 * CELL_PX, y2: d.y2 * CELL_PX,
+      stroke: isOpen ? '#4caf50' : '#e6a23c', 'stroke-width': 5,
+      'stroke-linecap': 'round', 'stroke-dasharray': isOpen ? '5 7' : 'none',
+    }));
+  });
+  _fpvProps.forEach(pr => {
+    const s = 9 * (pr.scale || 1);
+    const cx = pr.x * CELL_PX, cy = pr.y * CELL_PX;
+    const g = svgEl('g');
+    g.appendChild(svgEl('rect', {
+      x: cx - s, y: cy - s, width: s * 2, height: s * 2,
+      fill: '#a98d5f', 'fill-opacity': '0.85', stroke: '#3b3122',
+      'stroke-width': 1.5, rx: 2,
+      transform: `rotate(${pr.rot || 0} ${cx} ${cy})`,
+    }));
+    const label = svgEl('text', {
+      x: cx, y: cy + 3.5, fill: '#20180d', 'font-size': '10',
+      'font-weight': '700', 'text-anchor': 'middle',
+    });
+    label.textContent = pr.type.slice(0, 2);
+    g.appendChild(label);
+    const title = svgEl('title', {});
+    title.textContent = pr.type;
+    g.appendChild(title);
+    svg.appendChild(g);
+  });
 }
 
 function _fpvSync(version) {
   if (version === undefined || version === _fpvVersion) return;
   _fpvVersion = version;
-  if (!version) { _fpvWalls = []; _fpvRender(); return; }
+  if (!version) {
+    _fpvWalls = []; _fpvDoors = []; _fpvProps = [];
+    _fpvRender();
+    return;
+  }
   fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`)
     .then(r => r.json())
     .then(d => {
-      _fpvWalls = (((d || {}).floorplan || {}).walls || []).filter(w => w.show);
+      const fp = (d || {}).floorplan || {};
+      const allWalls = !!fp.show_walls_2d;
+      _fpvWalls = (fp.walls || []).filter(w => allWalls || w.show);
+      _fpvDoors = allWalls ? (fp.doors || []) : [];
+      _fpvProps = fp.show_props_2d ? (fp.props || []) : [];
       _fpvRender();
     })
     .catch(() => { _fpvVersion = undefined; });   // retry on the next poll
+}
+
+// Door toggles don't bump the floorplan version — track states from the poll
+// and re-render only when one actually flips (and only if doors are shown).
+function _fpvDoorSync(states) {
+  if (!states || !_fpvDoors.length) { _fpvDoorStates = states || {}; return; }
+  const sig = _fpvDoors.map(d => states[d.id] ? '1' : '0').join('');
+  const old = _fpvDoors.map(d => _fpvDoorStates[d.id] ? '1' : '0').join('');
+  _fpvDoorStates = states;
+  if (sig !== old) _fpvRender();
 }
 if (typeof FLOORPLAN_VERSION !== 'undefined') _fpvSync(FLOORPLAN_VERSION);
 
@@ -650,6 +707,7 @@ function pollState() {
       if (window.BM3D) BM3D.onState(d);
       if (window.BMFP) BMFP.onState(d);
       _fpvSync(d.floorplan_version);
+      _fpvDoorSync(d.doors);
       _obsSync(d.obs);
     })
     .catch(() => { _pollFails++; })

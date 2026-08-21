@@ -1255,6 +1255,27 @@
 
   <hr style="border-color:var(--sp-border);margin:6px 0;">
 
+  <!-- Player 2D view: whole-plan visibility switches for the flat map -->
+  <div class="fx-label mb-1" style="letter-spacing:.05em;">&#128065; Player 2D View</div>
+  <div class="mb-2 p-2" style="border:1px solid var(--sp-border);border-radius:6px;">
+    <div class="form-check" style="margin-bottom:2px;">
+      <input class="form-check-input" type="checkbox" id="fp-show2d-walls"
+             onchange="BMFP.setShow2d('walls', this.checked)">
+      <label class="form-check-label fx-label" for="fp-show2d-walls"
+             title="Players see ALL walls and doors on the 2D map (doors show open/closed live) — saves with the floorplan">
+        Show all walls &amp; doors (2D)
+      </label>
+    </div>
+    <div class="form-check" style="margin-bottom:0;">
+      <input class="form-check-input" type="checkbox" id="fp-show2d-props"
+             onchange="BMFP.setShow2d('props', this.checked)">
+      <label class="form-check-label fx-label" for="fp-show2d-props"
+             title="Players see all objects as labeled markers on the 2D map — saves with the floorplan">
+        Show objects (2D)
+      </label>
+    </div>
+  </div>
+
   <!-- Align: shift/scale the WHOLE floorplan to fit the art (LLM traces often
        come back offset or slightly the wrong size) -->
   <div class="fx-label mb-1">Align &mdash; fit the whole plan to the art</div>

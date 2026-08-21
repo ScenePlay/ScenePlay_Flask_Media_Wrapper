@@ -113,6 +113,20 @@ class TestNormalization:
         assert clean['walls'][0]['show'] is True
         assert 'show' not in clean['walls'][1]
 
+    def test_show_2d_switch_passthrough(self):
+        # Plan-level player-visibility switches: stored only when true.
+        clean, _, errors = validate_floorplan(
+            _plan(show_walls_2d=True, show_props_2d=True), 20, 20)
+        assert errors == []
+        assert clean['show_walls_2d'] is True
+        assert clean['show_props_2d'] is True
+        clean2, _, e2 = validate_floorplan(
+            _plan(show_walls_2d=False, show_props_2d=0), 20, 20)
+        assert e2 == []
+        assert 'show_walls_2d' not in clean2 and 'show_props_2d' not in clean2
+        clean3, _, _ = validate_floorplan(_plan(), 20, 20)
+        assert 'show_walls_2d' not in clean3 and 'show_props_2d' not in clean3
+
     def test_wall_style_passthrough(self):
         clean, warnings, errors = validate_floorplan(_plan(wall_style='brick'), 20, 20)
         assert errors == [] and clean['wall_style'] == 'brick'

@@ -85,6 +85,7 @@ window.BMFP = (function () {
     plan = JSON.parse(undoStack.pop());
     markDirty();
     updateUndoButtons();
+    syncShow2dUI();
   }
 
   function redo() {
@@ -93,6 +94,24 @@ window.BMFP = (function () {
     plan = JSON.parse(redoStack.pop());
     markDirty();
     updateUndoButtons();
+    syncShow2dUI();
+  }
+
+  // ── Plan-level player 2D visibility (all walls+doors / all props) ──────────
+
+  function setShow2d(which, on) {
+    if (!plan) return;
+    pushUndo();
+    const key = which === 'props' ? 'show_props_2d' : 'show_walls_2d';
+    if (on) plan[key] = true; else delete plan[key];
+    markDirty();
+  }
+
+  function syncShow2dUI() {
+    const w = document.getElementById('fp-show2d-walls');
+    const p = document.getElementById('fp-show2d-props');
+    if (w) w.checked = !!(plan && plan.show_walls_2d);
+    if (p) p.checked = !!(plan && plan.show_props_2d);
   }
 
   function clearHistory() {
@@ -141,6 +160,7 @@ window.BMFP = (function () {
         updateStatus();
         renderZoneUI();
         renderSelUI();
+        syncShow2dUI();
       })
       .catch(() => {});
   }
@@ -1228,7 +1248,7 @@ window.BMFP = (function () {
 
   return {
     onState, redraw, save, revert, setTool, setWallHeight, setWallStyle,
-    setWallShow, setElevHeight, setSnap, setLightType, setLightColor,
+    setWallShow, setShow2d, setElevHeight, setSnap, setLightType, setLightColor,
     setLightRadius, setPropType, setPropRot, setPropScale, setPropTexture,
     undo, redo, nudge, scalePlan,
     newZone, deleteZone, selectZone, setZoneField,
