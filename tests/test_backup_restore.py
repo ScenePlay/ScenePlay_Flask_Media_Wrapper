@@ -44,6 +44,7 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapNotes (note_id INTEGER PRIMARY KEY, map_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapFloorplans (floorplan_id INTEGER PRIMARY KEY, map_id INT UNIQUE, json_data TEXT, version INT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapDoors (row_id INTEGER PRIMARY KEY, map_id INT, door_key TEXT, is_open INT, updated_at TEXT, UNIQUE(map_id, door_key))",
+    "CREATE TABLE tblTextures (texture_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT, source TEXT, filename TEXT, tile_ft REAL, created_at TEXT)",
     # OBS-integration tables (added alongside the broadcast work)
     "CREATE TABLE tblBattleMapPrompts (prompt_id INTEGER PRIMARY KEY, map_id INT, kind TEXT, prompt_text TEXT, settings_json TEXT, updated_at TEXT)",
     "CREATE TABLE tblObsSceneMap (obs_map_id INTEGER PRIMARY KEY, entity_type TEXT, entity_id INT, entity_key TEXT, scene_name TEXT, source_name TEXT, auto_created INT, sort_order INT, updated_at TEXT)",
@@ -112,6 +113,10 @@ class TestCreateAndList:
         assert 'manifest.json' in names and 'ScenePlay.db' in names
         assert 'uploads/portraits/hero.png' in names
         assert 'uploads/obs/party-bg.png' in names
+        # STRICT contents: nothing outside manifest/db/uploads may ever ride
+        # along — in particular instance/ (Gemini API key) stays machine-local.
+        assert all(n in ('manifest.json', 'ScenePlay.db')
+                   or n.startswith('uploads/') for n in names), names
         listed = br.list_backups()
         assert len(listed) == 1 and listed[0]['name'] == os.path.basename(path)
 
@@ -1098,6 +1103,70 @@ class TestExtraSearchRoots:
                        "VALUES ('/gone/', 'vid000000001.mp4', 'https://u', 3, 'vid000000001', 'V')")
         out = br.requeue_missing_media()
         assert out == {'requeued': 0, 'found_local': 1}
+
+
+class TestTextureAndFlagMerge:
+    """3D texture library rows (+ their uploads/textures files) merge with
+    name-dedup where local wins, and floorplan JSON — including the player
+    2D visibility switches show_walls_2d/show_props_2d — rides verbatim."""
+
+    FLAG_PLAN = ('{"schema_version": 2, "walls": [{"x1": 1, "y1": 1, "x2": 5, '
+                 '"y2": 1}], "show_walls_2d": true, "show_props_2d": true}')
+
+    def _snapshot(self, env):
+        src = str(env['tmp'] / 'tex-src.db')
+        make_db(src)
+        x(src, "INSERT INTO tblScenes(sceneName, active, orderBy) VALUES ('S', 1, 0)")
+        x(src, "INSERT INTO tblTextures(name, category, source, filename, tile_ft, created_at) "
+               "VALUES ('ai_lava', 'floor', 'ai', 'ai_lava.png', 5.0, 't')")
+        x(src, "INSERT INTO tblTextures(name, category, source, filename, tile_ft, created_at) "
+               "VALUES ('stone_wall', 'wall', 'upload', 'stone_wall_src.png', 5.0, 't')")
+        x(src, "INSERT INTO tblSessions(title, session_number, status, created_at) "
+               "VALUES ('TexEp', 1, 'planning', 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, is_active, created_at) "
+               "VALUES (1, 'Cave', 1, 't')")
+        x(src, "INSERT INTO tblBattleMapFloorplans(map_id, json_data, version, updated_at) "
+               "VALUES (1, ?, 2, 't')", (self.FLAG_PLAN,))
+        src_uploads = env['tmp'] / 'tex-src-uploads'
+        (src_uploads / 'textures').mkdir(parents=True)
+        (src_uploads / 'textures' / 'ai_lava.png').write_bytes(b'LAVA')
+        (src_uploads / 'textures' / 'stone_wall_src.png').write_bytes(b'ARCHIVE-STONE')
+        old_db, old_up = sql.database, br.UPLOADS_DIR
+        sql.database, br.UPLOADS_DIR = src, str(src_uploads)
+        try:
+            return br.create_backup(label='tex')
+        finally:
+            sql.database, br.UPLOADS_DIR = old_db, old_up
+
+    def test_texture_merge_and_flag_passthrough(self, env):
+        (env['uploads'] / 'textures').mkdir()
+        (env['uploads'] / 'textures' / 'stone_wall.png').write_bytes(b'LOCAL-STONE')
+        x(env['live'], "INSERT INTO tblTextures(name, category, source, filename, tile_ft, created_at) "
+                       "VALUES ('stone_wall', 'wall', 'upload', 'stone_wall.png', 5.0, 't')")
+        snap = self._snapshot(env)
+        s = br.restore_merge(snap, include_uploads=True, full=True, fallback_user_id=1)
+
+        # new texture row + its image file arrive
+        assert s['textures'] == 1
+        assert q(env['live'], "SELECT filename, source FROM tblTextures WHERE name='ai_lava'") \
+               == [('ai_lava.png', 'ai')]
+        assert (env['uploads'] / 'textures' / 'ai_lava.png').read_bytes() == b'LAVA'
+        # name collision: the local row AND the local image file both win
+        assert q(env['live'], "SELECT filename FROM tblTextures WHERE name='stone_wall'") \
+               == [('stone_wall.png',)]
+        assert (env['uploads'] / 'textures' / 'stone_wall.png').read_bytes() == b'LOCAL-STONE'
+
+        # floorplan JSON rides byte-for-byte — the show_walls_2d/show_props_2d
+        # player-visibility switches survive the merge
+        mid = q(env['live'], "SELECT map_id FROM tblBattleMaps WHERE name='Cave'")[0][0]
+        assert q(env['live'], "SELECT json_data FROM tblBattleMapFloorplans WHERE map_id=?",
+                 (mid,)) == [(self.FLAG_PLAN,)]
+
+    def test_texture_merge_idempotent(self, env):
+        snap = self._snapshot(env)
+        br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        s2 = br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        assert s2.get('textures', 0) == 0 and s2['floorplans'] == 0
 
 
 class TestMergeCoverage:
