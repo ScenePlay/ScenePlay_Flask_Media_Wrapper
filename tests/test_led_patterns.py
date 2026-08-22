@@ -165,7 +165,8 @@ class TestBuildPayload:
         out = json.loads(reg.build_payload([('beam', '{"color": [1,2,3], "speed": 4}'),
                                             ('solid', {'color': [9, 9, 9]})]))
         assert [p['type'] for p in out['patterns']] == ['beam', 'solid']
-        assert set(out['patterns'][0]) == {'type'} | set(reg.param_keys('beam'))
+        assert set(out['patterns'][0]) == {'type', 'order'} | set(reg.param_keys('beam'))
+        assert out['patterns'][0]['order'] == 0
         assert out['patterns'][0]['speed'] == 4
         assert out['patterns'][1]['color'] == [9, 9, 9]
 
@@ -176,8 +177,14 @@ class TestBuildPayload:
 
     def test_wire_round_trips_through_normalize(self):
         for t in reg.TYPES:
-            wire = json.loads(reg.build_payload([(t, None)]))['patterns'][0]
+            wire = json.loads(reg.build_payload([(t, None, 3)]))['patterns'][0]
+            assert wire['order'] == 3
             assert reg.normalize(wire) == wire
+
+    def test_order_defaults_and_coerces(self):
+        out = json.loads(reg.build_payload([('solid', {}, '2'), ('solid', {}, 'junk'), ('solid', {})]))
+        assert [p['order'] for p in out['patterns']] == [2, 0, 0]
+        assert reg.normalize({'type': 'solid'})['order'] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +251,20 @@ class TestRoutines:
             {'type': 'disco'},
             {'type': 'color_wipe', 'color': [2, 2, 2], 'wait_ms': 10, 'iterations': 9},
         ]})
-        led_Run.run(strip, payload)
-        assert px.buf == [(0, 0, 0)] * 5          # off after the last finite pattern
+        led_Run.run(strip, payload, max_passes=1)
+        assert px.buf == [(0, 0, 0)] * 5          # off once the passes are used up
         assert clock.t >= 1.0
+
+    def test_run_repeats_the_list(self, monkeypatch):
+        strip, px, clock = make_strip(n=5)
+        started = []
+        monkeypatch.setitem(led_Run.FUNCS, 'solid', lambda s, p: started.append(p['color'][0]))
+        payload = {'patterns': [
+            {'type': 'solid', 'color': [1, 0, 0], 'duration': 1, 'order': 1},
+            {'type': 'solid', 'color': [2, 0, 0], 'duration': 1, 'order': 2},
+        ]}
+        led_Run.run(strip, payload, max_passes=3)
+        assert started == [1, 2] * 3
 
     def test_run_tolerates_garbage(self):
         strip, px, _ = make_strip(n=3)
@@ -254,6 +272,38 @@ class TestRoutines:
         led_Run.run(strip, {'patterns': 'nope'})
         led_Run.run(strip, {'patterns': [None, 3, {'type': None}]})
         assert px.buf == [(0, 0, 0)] * 3
+
+
+class TestPlan:
+    def _pats(self, spec):
+        return [{'type': 'solid', 'order': o, 'color': [i, 0, 0]} for i, o in enumerate(spec)]
+
+    def test_distinct_orders_play_in_order(self):
+        pats = self._pats([3, 1, 2])
+        for _ in range(10):
+            assert [p['order'] for p in led_Run.plan(pats)] == [1, 2, 3]
+
+    def test_equal_orders_are_shuffled(self):
+        import random
+        pats = self._pats([1, 1, 1, 1, 1, 1])
+        random.seed(1)
+        seen = {tuple(p['color'][0] for p in led_Run.plan(pats)) for _ in range(40)}
+        assert len(seen) > 1                       # not always the same order
+        assert all(sorted(s) == [0, 1, 2, 3, 4, 5] for s in seen)   # every row, once
+
+    def test_mixed_groups_keep_group_boundaries(self):
+        pats = self._pats([1, 1, 2, 3, 3])
+        for _ in range(20):
+            orders = [p['order'] for p in led_Run.plan(pats)]
+            assert orders == [1, 1, 2, 3, 3]
+
+    def test_no_back_to_back_repeat_across_passes(self):
+        pats = self._pats([1, 1, 1])
+        last = None
+        for _ in range(200):
+            seq = led_Run.plan(pats, last)
+            assert seq[0] is not last
+            last = seq[-1]
 
 
 # ---------------------------------------------------------------------------

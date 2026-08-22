@@ -23,7 +23,10 @@ brightness and duration are universal — every pattern honors them.
 
 Wire shape (LAN Remotes, relay, local tblLED mailbox) is unchanged:
   {"patterns": [{"type": "ember_rise", "color": [...], ..., "brightness": 0.6,
-                 "duration": 0}, ...]}
+                 "duration": 0, "order": 1}, ...]}
+'order' is the scene row's orderBy: the player (led_Run.run) plays rows in
+order, shuffles rows that SHARE an order, and repeats the whole list until
+the next scene. Old receivers ignore the key.
 normalize() also accepts the pre-registry keys (cdiff, wait_ms, iterations)
 so a not-yet-updated box or the portal's test button still lights this one.
 """
@@ -78,8 +81,8 @@ PARAM_DEFS = {
     'duration': {
         'label': 'Duration', 'kind': 'int', 'unit': 's', 'min': 0, 'max': 86400,
         'default': 0,
-        'hint': 'Seconds to run. 0 = until the next scene (patterns after this '
-                'one in the scene will not play).',
+        'hint': 'Seconds to run, then the next row plays. 0 = hold until the next '
+                'scene (rows after this one will not play).',
     },
 }
 
@@ -392,22 +395,33 @@ def normalize(pattern):
                                           raw.get('wait_ms', raw.get('speed')))
     out = {'type': ptype}
     out.update(coerce(ptype, raw))
+    out['order'] = _order(raw.get('order'))
     return out
+
+
+def _order(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ---------------------------------------------------------------------------
 # Payload builder (replaces remotes.prepJsonRemote)
 # ---------------------------------------------------------------------------
 def build_payload(rows):
-    """rows: iterable of (patternType, params) in scene order, params a dict
-    or JSON string. Returns the wire JSON string {"patterns": [...]}.
-    Rows with an unknown type are skipped; an empty list means lights off."""
+    """rows: iterable of (patternType, params[, orderBy]) in scene order,
+    params a dict or JSON string. Returns the wire JSON string
+    {"patterns": [...]}. Rows with an unknown type are skipped; an empty
+    list means lights off."""
     patterns = []
-    for ptype, params in rows:
+    for row in rows:
+        ptype, params = row[0], row[1]
         if ptype not in PATTERNS:
             continue
         p = {'type': ptype}
         p.update(coerce(ptype, params))
+        p['order'] = _order(row[2]) if len(row) > 2 else 0
         patterns.append(p)
     if not patterns:
         patterns = [{'type': 'solid', 'color': [0, 0, 0]}]

@@ -1310,3 +1310,157 @@ class TestMergeGapFixes:
         x(env['live'], "DELETE FROM tblCronSchedule WHERE name='MainStreet'")
         br.restore_merge(snap, include_uploads=False)
         assert q(env['live'], "SELECT COUNT(*) FROM tblCronSchedule WHERE name='MainStreet'") == [(0,)]
+
+
+class TestLedSchemaRestore:
+    """The registry-era tblScenePattern (patternType + params JSON, migration
+    0010) must survive every restore path: replacing with a NEW backup keeps
+    rows verbatim; replacing with an OLD (ledTypeModel) backup converts them
+    via the migration; full merge converts old archives and copies EVERY row
+    of a scene from new ones (the old per-row "scene already has lighting"
+    check silently dropped a scene's second row)."""
+
+    OLD_SP = ("CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, "
+              "ledTypeModel_ID INT, color TEXT, wait_ms INT, iterations INT, direction INT, "
+              "cdiff TEXT, orderBy INT, outPin INT, brightness REAL)")
+    OLD_MODEL = ("CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, "
+                 "modelName TEXT, ledJSON TEXT)")
+
+    def _old_src(self, env, name='oldled.db'):
+        """A pre-registry box: model table + fixed-column pattern rows."""
+        src = str(env['tmp'] / name)
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if 'CREATE TABLE tblScenePattern ' in stmt:
+                stmt = self.OLD_SP
+            conn.execute(stmt)
+        conn.execute(self.OLD_MODEL)
+        conn.execute("INSERT INTO tblLedTypeModel VALUES (7, 'Sparkle', '{\"type\": \"sparkle\"}')")
+        conn.execute("INSERT INTO tblLedTypeModel VALUES (9, 'ember', '{\"type\": \"ember_rise\"}')")
+        conn.execute("INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        conn.execute("INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy) VALUES (1, 'Bridge', 1, 0)")
+        conn.execute("INSERT INTO tblScenePattern VALUES (1, 1, 9, '[224,27,36]', 10, 99999999, 1, "
+                     "'[129,61,156]', 1, 2, 0.08)")
+        conn.execute("INSERT INTO tblScenePattern VALUES (2, 1, 7, '[28,113,216]', 100, 50, -1, "
+                     "'[5,6,7]', 2, 2, 0.6)")
+        conn.commit()
+        conn.close()
+        return src
+
+    NEW_ROWS = [
+        (1, 'color_chase', json.dumps(led_patterns.coerce('color_chase', {'color': [1, 2, 3], 'speed': 15}))),
+        (2, 'thunderstorm', json.dumps(led_patterns.coerce('thunderstorm', {'brightness': 0.4, 'duration': 20}))),
+    ]
+
+    def _new_src(self, env, name='newled.db', scene='Bridge'):
+        src = str(env['tmp'] / name)
+        make_db(src)
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        x(src, "INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy) VALUES (1, ?, 1, 0)", (scene,))
+        for order, ptype, params in self.NEW_ROWS:
+            x(src, "INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) VALUES (1, ?, ?, ?)",
+              (ptype, params, order))
+        return src
+
+    def _archive(self, src, label='led'):
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label=label)
+        finally:
+            sql.database = old
+
+    def _app(self, env):
+        import os as _os
+        from flask import Flask
+        from flask_migrate import Migrate
+        from extensions import db
+        app = Flask(__name__)
+        app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{env['live']}"
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        Migrate(app, db, directory=_os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'migrations'))
+        return app
+
+    @staticmethod
+    def _live_rows(env, scene_name):
+        return q(env['live'],
+                 "SELECT p.patternType, p.params, p.orderBy FROM tblScenePattern p "
+                 "JOIN tblScenes s ON s.scene_ID = p.scene_ID WHERE s.sceneName=? ORDER BY p.orderBy",
+                 (scene_name,))
+
+    # -- replace -------------------------------------------------------------
+    def test_replace_new_backup_keeps_rows_verbatim(self, env):
+        archive = self._archive(self._new_src(env))
+        br.restore_replace(archive, include_uploads=False)
+        rows = self._live_rows(env, 'Bridge')
+        assert [(r[0], r[1], r[2]) for r in rows] == \
+               [(ptype, params, order) for order, ptype, params in self.NEW_ROWS]
+        cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblScenePattern)")]
+        assert cols == ['scenePattern_ID', 'scene_ID', 'patternType', 'params', 'orderBy']
+
+    def test_replace_old_backup_converts_rows(self, env):
+        """An archive from a pre-registry box lands on the new schema via
+        migration 0010 inside the app context the restore routes run in."""
+        archive = self._archive(self._old_src(env))
+        app = self._app(env)
+        with app.app_context():
+            summary = br.restore_replace(archive, include_uploads=False)
+        assert summary['schema_upgraded'] is True
+        cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblScenePattern)")]
+        assert 'patternType' in cols and 'ledTypeModel_ID' not in cols
+        rows = self._live_rows(env, 'Bridge')
+        assert [r[0] for r in rows] == ['ember_rise', 'sparkle']
+        p1, p2 = json.loads(rows[0][1]), json.loads(rows[1][1])
+        assert p1['color'] == [224, 27, 36] and p1['color2'] == [129, 61, 156]
+        assert p1['speed'] == 10 and p1['duration'] == 0 and p1['brightness'] == 1.0
+        assert p2['variance'] == [5, 6, 7] and p2['duration'] == 5 and p2['brightness'] == 0.6
+        names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert 'tblledtypemodel' not in names
+        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0010_led_pattern_params'
+
+    # -- merge ---------------------------------------------------------------
+    def test_full_merge_old_archive_converts_every_row(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        archive = self._archive(self._old_src(env))
+        s = br.restore_merge(archive, include_uploads=False, full=True, fallback_user_id=1)
+        assert s['lighting'] == 2
+        rows = self._live_rows(env, 'Bridge')
+        assert [(r[0], r[2]) for r in rows] == [('ember_rise', 1), ('sparkle', 2)]
+        assert json.loads(rows[1][1])['variance'] == [5, 6, 7]
+        assert json.loads(rows[0][1])['brightness'] == 1.0
+
+    def test_full_merge_new_archive_all_rows_idempotent_local_wins(self, env):
+        live = env['live']
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        archive = self._archive(self._new_src(env))
+        s = br.restore_merge(archive, include_uploads=False, full=True, fallback_user_id=1)
+        assert s['lighting'] == 2                     # BOTH rows of the scene, not just the first
+        rows = self._live_rows(env, 'Bridge')
+        assert [(r[0], r[1], r[2]) for r in rows] == \
+               [(ptype, params, order) for order, ptype, params in self.NEW_ROWS]
+        # second merge: the scene now has local lighting → nothing added
+        s = br.restore_merge(archive, include_uploads=False, full=True, fallback_user_id=1)
+        assert s['lighting'] == 0
+        assert len(self._live_rows(env, 'Bridge')) == 2
+        # local wins: a scene that already has ONE local row keeps exactly it
+        x(live, "INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy) VALUES (50, 'Deck', 1, 0)")
+        x(live, "INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) "
+                "VALUES (50, 'solid', ?, 1)", (json.dumps(led_patterns.defaults('solid')),))
+        archive2 = self._archive(self._new_src(env, name='deck.db', scene='Deck'), label='deck')
+        s = br.restore_merge(archive2, include_uploads=False, full=True, fallback_user_id=1)
+        assert s['lighting'] == 0
+        assert [r[0] for r in self._live_rows(env, 'Deck')] == ['solid']
+
+    def test_merge_skips_unknown_pattern_types(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        src = str(env['tmp'] / 'junk.db')
+        make_db(src)
+        x(src, "INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy) VALUES (1, 'Bridge', 1, 0)")
+        x(src, "INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) VALUES (1, 'disco', '{}', 1)")
+        x(src, "INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) VALUES (1, 'beam', 'not json', 2)")
+        s = br.restore_merge(self._archive(src, 'junk'), include_uploads=False, full=True, fallback_user_id=1)
+        assert s['lighting'] == 1                     # beam kept (params defaulted), disco dropped
+        rows = self._live_rows(env, 'Bridge')
+        assert rows[0][0] == 'beam' and json.loads(rows[0][1]) == led_patterns.defaults('beam')

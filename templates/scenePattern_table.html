@@ -12,6 +12,9 @@
 
   <div class="sp-page">
     <div class="sp-page-head"><h1>Scene RPiLED Patterns</h1></div>
+    <p class="text-muted small mb-2">A scene's rows play in <b>Order</b> and repeat until the scene changes.
+      Rows that share the same Order play in a random order each pass. A Duration of 0 holds that
+      pattern until the next scene (rows after it won't play) — end with a black Solid to go dark on purpose.</p>
     <div class="sp-filter-row">
       <label for="campaignFilterDropdown">Filter By Campaign</label>
       <select id="campaignFilterDropdown" onchange="campaignFilterChange()" class="form-select">
@@ -209,7 +212,7 @@
             id: tblColumns[3], name: 'Settings', sort: false,
             formatter: (cell, row) => gridjs.html(summaryHtml(row.cells[2].data, cell))
           },
-          { id: tblColumns[4], name: 'Order', sort: true, 'attributes': editableCellAttributes },
+          { id: tblColumns[4], name: gridjs.html('<span title="Play order. Same number = random order each pass; the list repeats until the scene changes.">Order</span>'), sort: true, 'attributes': editableCellAttributes },
           {
             id: 'edit', name: '', sort: false,
             formatter: (cell, row) => gridjs.html(

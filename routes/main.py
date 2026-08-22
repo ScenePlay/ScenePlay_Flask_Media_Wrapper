@@ -290,7 +290,7 @@ def _activate_scene(id):
     # RPiLED payload for this scene: rows are (scenePattern_ID, scene_ID,
     # patternType, params, orderBy); no rows = lights off.
     scnPat = CRUD_tblScenePattern([id], "bySceneID")
-    ledPattern = led_patterns.build_payload((r[2], r[3]) for r in scnPat)
+    ledPattern = led_patterns.build_payload((r[2], r[3], r[4]) for r in scnPat)
     rows = get_MusicSceneSongs_BYSceneID(id)
     rowsVideo = get_VideoScene_BYSceneID(id)
     

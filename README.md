@@ -261,6 +261,8 @@ per-item from the scene link settings.
 - **RPiLED** — WS281x strips driven directly from the Pi: 23 built-in
   patterns assigned per scene via Scene RPiLED, each edited with only the
   settings it actually uses (colors, speed, duration, direction, brightness…).
+  A scene's rows play in order and repeat until the scene changes; rows that
+  share an order play in random order each pass.
   LED Config holds the strip's pin, pixel count and **max brightness** — a
   hardware cap that keeps colors true to the far end of a long strip.
 - **WLED** — network WLED controllers: per-scene effect, palette, colors,

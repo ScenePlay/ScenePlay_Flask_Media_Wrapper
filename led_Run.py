@@ -5,8 +5,9 @@ Runs as a STANDALONE process: ledPlayer.threaderLED() kills the previous copy
 and launches `sudo python3 led_Run.py` (system Python — NeoPixel needs root
 for the PWM/DMA hardware, see requirements.sh). It reads the active
 tblLEDConfig row for pin / pixel count / MAX brightness, takes the latest
-payload out of the tblLED mailbox, plays the patterns in order, and exits
-(or sleeps forever on a duration-0 pattern until the next scene kills it).
+payload out of the tblLED mailbox and plays the scene's patterns on repeat
+(in 'order', equal orders shuffled — see plan()) until the next scene kills
+it; a duration-0 pattern holds forever.
 
 Everything hardware-specific lives in main(); the routines only talk to a
 Strip, so tests drive them with a fake pixel buffer and a fake clock.
@@ -839,23 +840,50 @@ FUNCS = {
 # ---------------------------------------------------------------------------
 # Player
 # ---------------------------------------------------------------------------
-def run(strip, payload):
+def plan(patterns, last=None):
+    """One pass through a scene's patterns: rows sorted by 'order', rows that
+    SHARE an order shuffled, and the first pick nudged so the pattern that
+    just finished (`last`) doesn't play twice back-to-back."""
+    groups = {}
+    for p in patterns:
+        groups.setdefault(int(p.get('order', 0)), []).append(p)
+    seq = []
+    for order in sorted(groups):
+        g = list(groups[order])
+        random.shuffle(g)
+        if len(g) > 1 and last is not None and g[0] is last:
+            g[0], g[-1] = g[-1], g[0]
+        seq.extend(g)
+        last = seq[-1]
+    return seq
+
+
+def run(strip, payload, max_passes=None):
     """Play a wire payload ({"patterns": [...]} JSON string or dict) on
-    `strip`, in order. Each pattern runs for its duration (0 = forever, so
-    anything after it never plays); the strip goes dark after the last one.
-    Unknown types and malformed entries are skipped."""
+    `strip`. Rows play in 'order' (equal orders shuffled — see plan) and the
+    list REPEATS until the next scene kills this process. A duration-0
+    pattern holds forever, so anything after it never plays; to end dark on
+    purpose, finish the scene with a black Solid. Unknown types and
+    malformed entries are skipped; no playable pattern = lights off.
+    `max_passes` bounds the loop for tests (None = forever)."""
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
         except (TypeError, ValueError):
             payload = {}
-    patterns = (payload or {}).get('patterns') or []
-    for raw in patterns:
-        p = reg.normalize(raw)
-        if p is None:
-            continue
-        strip.begin(p)
-        FUNCS[p['type']](strip, p)
+    raw = (payload or {}).get('patterns') or []
+    patterns = [p for p in (reg.normalize(x) for x in raw) if p]
+    if not patterns:
+        strip.off()
+        return
+    last = None
+    passes = 0
+    while max_passes is None or passes < max_passes:
+        for p in plan(patterns, last):
+            strip.begin(p)
+            FUNCS[p['type']](strip, p)
+            last = p
+        passes += 1
     strip.off()
 
 
