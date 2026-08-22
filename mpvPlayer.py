@@ -1,4 +1,5 @@
 from sql import *
+import scene_end as _scene_end
 from procutil import pid_alive
 #from fileHold.volume import *
 import os
@@ -58,6 +59,7 @@ def threaderVideo():
             if len(fi) == 0:
                appsettingVideoPlayFlagUpdate(0)
                appsettingFlagUpdate('currentvideo', 0)   # queue drained — nothing playing
+               _scene_end.notify_if_scene_ended()   # both queues dry → lights off
                n.value = 0
                if a[2] != 0:
                   a[3] = a[2]

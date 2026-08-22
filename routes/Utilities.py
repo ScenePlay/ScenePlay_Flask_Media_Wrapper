@@ -4,6 +4,7 @@ from extensions import *
 
 from sql import *
 from sql import appsettingGetKeepMusicPlaying, appsettingSetKeepMusicPlaying
+from sql import lights_off_on_scene_end_enabled, appsettingSet, LIGHTS_OFF_ON_SCENE_END
 from ledPlayer import *
 from sys import platform
 import os
@@ -128,6 +129,13 @@ def main():
                   else 'ScenePlay controls and tables are open to everyone '
                        'on the network.')
             return redirect(url_for('ut.main'))
+        elif request.form['submit'] == 'Save Lighting':
+            enable = bool(request.form.get('lights_off_on_scene_end'))
+            appsettingSet(LIGHTS_OFF_ON_SCENE_END, '1' if enable else '0')
+            flash('Lights will turn off when a scene\'s media finishes.' if enable
+                  else 'Lights stay on after a scene\'s media finishes (until the '
+                       'next scene or All Stop).')
+            return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Save Gemini Settings':
             # AI settings are DM-only, and the key follows the relay-secret
             # masking rule: a blank submission keeps the existing key.
@@ -187,6 +195,7 @@ def main():
     import gemini
     return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
                            keep_music=keep_music, backups=backups, backup_auto=backup_auto,
+                           lights_off_on_end=lights_off_on_scene_end_enabled(),
                            media_roots=media_roots,
                            dm_only_sceneplay=dm_only_sceneplay_enabled(),
                            gemini_configured=gemini.configured(),

@@ -1,5 +1,6 @@
 from sql import *
 from procutil import pid_alive
+import scene_end as _scene_end
 #from fileHold.volume import *
 import os
 import subprocess
@@ -80,6 +81,7 @@ def threader(n, a):
                appsettingAudioPlayFlagUpdate(0)
                appsettingFlagUpdate('currentsong', 0)   # queue drained — nothing playing
                _relay_audio.on_playback_stopped()
+               _scene_end.notify_if_scene_ended()   # both queues dry → lights off
                n.value = 0
                if a[2] != 0:
                   a[3] = a[2]

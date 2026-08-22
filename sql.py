@@ -947,6 +947,49 @@ def appsettingGetKeepMusicPlaying():
     conn.close()
     return int(row[0]) if row else 0
 
+LIGHTS_OFF_ON_SCENE_END = 'lights_off_on_scene_end'   # '1' (default) / '0'
+
+
+def lights_off_on_scene_end_enabled():
+    return str(appsettingGet(LIGHTS_OFF_ON_SCENE_END, '1') or '1') == '1'
+
+
+def scene_media_finished():
+    """True when the current scene's media has run out — the moment its
+    lights should go dark (see scene_end.py). Deliberately strict:
+      * the scene must HAVE media links (a lighting-only scene never ends
+        this way — both queues are empty from the start);
+      * BOTH play flags must be off (a flag stays on between tracks and
+        while the other player is still working through its queue);
+      * nothing may be marked as currently playing.
+    Also False when the operator turned the feature off."""
+    if not lights_off_on_scene_end_enabled():
+        return False
+    scene = appsettingGetCurrentScene()
+    if scene <= 0:
+        return False
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        c.execute("SELECT name, value FROM tblAppSettings WHERE name IN "
+                  "('playsongswitch', 'playvideoswitch', 'currentsong', 'currentvideo')")
+        def _i(v):
+            try:
+                return int(float(v))
+            except (TypeError, ValueError):
+                return 0
+        vals = {n: _i(v) for n, v in c.fetchall()}
+        if any(vals.get(k) for k in ('playsongswitch', 'playvideoswitch',
+                                     'currentsong', 'currentvideo')):
+            return False
+        c.execute("SELECT (SELECT COUNT(*) FROM tblMusicScene WHERE scene_ID = ?) + "
+                  "(SELECT COUNT(*) FROM tblVideoScene WHERE scene_ID = ?)", (scene, scene))
+        return (c.fetchone() or [0])[0] > 0
+    finally:
+        c.close()
+        conn.close()
+
+
 def appsettingGet(name, default=None):
     conn = sqlite3.connect(database)
     c = conn.cursor()

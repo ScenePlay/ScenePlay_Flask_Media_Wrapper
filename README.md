@@ -263,6 +263,10 @@ per-item from the scene link settings.
   settings it actually uses (colors, speed, duration, direction, brightness…).
   A scene's rows play in order and repeat until the scene changes; rows that
   share an order play in random order each pass.
+- **Lights off at scene end** — when a scene's last song and video have
+  played, every light (RPiLED, Remote boxes, WLED, remote players') goes
+  dark. Utilities → Lighting turns this off; scenes with no media are never
+  affected.
   LED Config holds the strip's pin, pixel count and **max brightness** — a
   hardware cap that keeps colors true to the far end of a long strip.
 - **WLED** — network WLED controllers: per-scene effect, palette, colors,

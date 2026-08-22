@@ -271,6 +271,26 @@
                      machine (gitignored, outside DB backups) and is never
                      shown again here — blank keeps the existing key, same
                      rule as the relay secret. -->
+                <form method="post" action="{{ url_for('ut.main') }}">
+                    <input type="hidden" name="submit" value="Save Lighting">
+                    <details class="sp-card">
+                    <summary><h3>Lighting</h3></summary>
+                    <label style="display:block;margin:6px 0;">
+                      <input type="checkbox" name="lights_off_on_scene_end" value="1"
+                             {{ 'checked' if lights_off_on_end }}
+                             onchange="HTMLFormElement.prototype.submit.call(this.form)">
+                      <b>Lights off when a scene's media finishes</b> — once the scene's
+                      last song and video have played, the RPiLED strip, Remote boxes,
+                      WLED controllers and remote players' lights all go dark.
+                    </label>
+                    <ul style="font-size:.85em;color:var(--sp-muted);margin:2px 0 6px 18px;">
+                      <li>Scenes with no music or video are never affected — their
+                          lights run until the next scene or All Stop.</li>
+                      <li>With Infinite Play on, the music queue never drains, so the
+                          lights stay on for as long as it plays.</li>
+                    </ul>
+                    </details>
+                </form>
                 <form method="post" action="{{ url_for('ut.main') }}" autocomplete="off">
                     <details class="sp-card">
                     <summary><h3>Gemini AI (optional)</h3></summary>

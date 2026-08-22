@@ -370,6 +370,25 @@ def _activate_scene(id):
         appsettingAudioPlayFlagUpdate(1)
         appsettingVideoPlayFlagUpdate(1)
 
+def lights_off():
+    """Every light this box controls goes dark: the RPiLED strip here, the
+    Remote-role boxes, remote players' home devices via the relay, and the
+    WLED controllers. The Kill Queue pseudo-scene (-1) reaches the same
+    state through _activate_scene; this is the direct route for the players
+    when a scene's media runs out (scene_end.py → /api/lights-off)."""
+    dispatch_led(led_patterns.OFF_PAYLOAD)
+    wled_Off()
+    relay_broadcaster.broadcast_wled([])
+
+
+@main.route('/api/lights-off', methods=['GET', 'POST'])
+def lights_off_endpoint():
+    """Session-less on purpose: called by the forked player workers (no app
+    context of their own) the moment the current scene's media finishes."""
+    lights_off()
+    return jsonify({'message': 'lights off'})
+
+
 # Preflight headers for browser-origin LED pushes (remote players' portal
 # pages POST here across their LAN). Access-Control-Allow-Origin and
 # Allow-Headers are already ADDED to every response by the blueprint-wide
