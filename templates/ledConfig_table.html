@@ -62,17 +62,6 @@
         console.error('Error fetching data:', error);
       });
 
-      const ledmodeltypeDD = new Dropdown
-      fetch('/api/ledtypemodel')
-      .then(response => response.json())
-      .then(data => {
-        for (const item of data.data) {
-          ledmodeltypeDD.addItem(item.ledTypeModel_ID, item.modelName)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
@@ -102,7 +91,7 @@
           { id: tblColumns[0], name: 'ledConfig_ID', 'hidden': true },
           { id: tblColumns[1], name: 'Raspi Pin', sort: false},
           { id: tblColumns[2], name: 'LED Count' , sort: false, 'attributes': editableCellAttributes  },
-          { id: tblColumns[3], name: 'Default Brightness 0.0-1.0 ', sort: false, 'attributes': editableCellAttributes  },
+          { id: tblColumns[3], name: 'Max brightness 0.0–1.0 (hardware cap — lower it until colors stay true at the far end of the strip)', sort: false, 'attributes': editableCellAttributes  },
           { id: tblColumns[4], name: 'Active', sort: false,
           formatter: function (cellData, row) { 
               const selectedValue = cellData

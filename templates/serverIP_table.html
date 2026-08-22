@@ -187,17 +187,6 @@
         console.error('Error fetching data:', error);
       });
 
-      const ledmodeltypeDD = new Dropdown
-      fetch('/api/ledtypemodel')
-      .then(response => response.json())
-      .then(data => {
-        for (const item of data.data) {
-          ledmodeltypeDD.addItem(item.ledTypeModel_ID, item.modelName)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
 
       const updateUrl = (prev, query) => {
         return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
@@ -365,17 +354,6 @@
         }
       }
 
-      function modelChange(){
-        var ev = event.target;
-        id = ev.id.split("_ID_")
-        //console.log(elnt)
-        if(ev.id.toString().includes("selectModelOpt_")){
-          jsn = {[primeKey]:id[1],ledTypeModel_ID:ev.value}
-          console.log(JSON.stringify(jsn))
-          saveChange(JSON.stringify(jsn))
-          //console.log("Selected " + ev.value);
-        }
-      }
 
 
       function activeChange(){

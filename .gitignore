@@ -196,3 +196,6 @@ player_debug.log
 # yt-dlp test downloads (media + .info.json) dropped in the repo root by
 # extractor test runs. Anchored to the root so tests/test_*.py stays tracked.
 /test_*
+
+# Claude Code project instructions — kept local
+CLAUDE.md

@@ -258,8 +258,11 @@ transport commands (and kills) target exactly one player. Volume is passed
 per-item from the scene link settings.
 
 ### LED lighting
-- **RPiLED** — WS281x strips driven directly from the Pi (patterns defined in
-  the LED Type Model table, assigned per scene via Scene RPiLED).
+- **RPiLED** — WS281x strips driven directly from the Pi: 23 built-in
+  patterns assigned per scene via Scene RPiLED, each edited with only the
+  settings it actually uses (colors, speed, duration, direction, brightness…).
+  LED Config holds the strip's pin, pixel count and **max brightness** — a
+  hardware cap that keeps colors true to the far end of a long strip.
 - **WLED** — network WLED controllers: per-scene effect, palette, colors,
   speed and brightness (Scene WLED table). Multiple controllers supported via
   the Servers table.
@@ -361,7 +364,7 @@ downloads, and computer restart. (The network scan lives on the Servers page.)
 
 ### Table management
 Every data table (Scenes, Scene Music/Video/RPiLED/WLED, Music/Video Media,
-Campaigns, LED Type Model, LED Config, Servers, Cron Schedules) is browser
+Campaigns, LED Config, Servers, Cron Schedules) is browser
 -editable, with multi-select checkbox delete — select across pages, one
 confirm, done. Scene tables pick media through a searchable picker with
 thumbnails and durations.

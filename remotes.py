@@ -9,6 +9,8 @@ from sql import *
 from models.serverIP import tblserversip as IP
 from models.serverRole import tblserverrole as Role
 from sqlalchemy import select
+import relay_broadcaster
+from ledPlayer import is_raspberry_pi, threaderLED
 
 log = logging.getLogger(__name__)
 
@@ -65,73 +67,15 @@ def remoteSend(LEDPattern):
             log.warning("remoteSend to %s failed: %s", ip_address, err)
             _record_remote_fail(ip_address, err)
         
-def prepJsonRemote(ledMdl, scnPat, isLocal=False) -> str:
-    """Build the ONE RPiLED payload used everywhere: local pickup via
-    tblLED -> led_Run.py, other ScenePlay boxes via remoteSend, and remote
-    players' home Pis via the relay.
 
-    Every pattern carries the FULL field set (type, color, cdiff, wait_ms,
-    iterations, direction — plus outPinID/brightness locally) regardless of
-    pattern type; each receiver simply uses what it needs. The old builder
-    included a field only if the model's TEMPLATE happened to mention it,
-    which made every pattern type a different shape (and broke led_Run's
-    branches that hard-index missing keys), emitted invalid JSON for
-    multi-pattern scenes, and paired scene values with the wrong template
-    when models arrived out of order (IN-query order != OrderBy order).
-
-    Scene values win; the model template supplies the default for anything
-    the scene row left NULL. scnPat row shape (tblScenePattern):
-      [0] scenePattern_ID  [1] scene_ID  [2] ledTypeModel_ID  [3] color
-      [4] wait_ms  [5] iterations  [6] direction  [7] cdiff
-      [8] orderBy  [9] outPin  [10] brightness
-    """
-    models = {}                        # ledTypeModel_ID -> template dict
-    for m in ledMdl:                   # (id, modelName, ledJSON)
-        try:
-            models[m[0]] = json.loads(m[2])
-        except (ValueError, TypeError):
-            models[m[0]] = {}
-
-    def _num(v, dflt):
-        if v is None or v == '':
-            return dflt
-        try:
-            f = float(v)
-            return int(f) if f.is_integer() else f
-        except (TypeError, ValueError):
-            return dflt
-
-    def _rgb(v, dflt):
-        if isinstance(v, list):
-            return v
-        try:
-            out = json.loads(str(v))
-            return out if isinstance(out, list) else dflt
-        except (TypeError, ValueError):
-            return dflt
-
-    patterns = []
-    for sp in scnPat:                  # authoritative: scene order (OrderBy)
-        t = models.get(sp[2])
-        if not t or 'type' not in t:
-            continue                   # model row deleted — skip this pattern
-        p = {
-            'type':       t['type'],
-            'color':      _rgb(sp[3], t.get('color', [0, 0, 0])),
-            'cdiff':      _rgb(sp[7], t.get('cdiff', [0, 0, 0])),
-            'wait_ms':    _num(sp[4], t.get('wait_ms', 30)),
-            'iterations': _num(sp[5], t.get('iterations', 9999999)),
-            'direction':  _num(sp[6], t.get('direction', 1)),
-        }
-        if isLocal:
-            p['outPinID']   = _num(sp[9], 0)
-            p['brightness'] = _num(sp[10], 1.0)
-        patterns.append(p)
-
-    # After a FINITE pattern finishes, fall to lights-off (preserves the old
-    # builder's trailing solid; a no-op for the usual infinite patterns).
-    if patterns and patterns[-1]['type'] != 'solid':
-        patterns.append({'type': 'solid', 'color': [0, 0, 0],
-                         'cdiff': [0, 0, 0], 'wait_ms': 30,
-                         'iterations': 9999999, 'direction': 1})
-    return json.dumps({'patterns': patterns})
+def dispatch_led(payload, local=True):
+    """Send one wire payload ({"patterns": [...]} JSON string, see
+    led_patterns.build_payload) everywhere a scene's lighting goes: every
+    active Remote-role ScenePlay box on the LAN, the relay (remote players'
+    home Pis), and — on a Pi — this box's own strip via the tblLED mailbox.
+    One payload for all; each receiver applies its own hardware cap."""
+    remoteSend(payload)
+    relay_broadcaster.broadcast_led(payload)
+    if local and is_raspberry_pi():
+        insert_LEDJSON(payload)
+        threaderLED()

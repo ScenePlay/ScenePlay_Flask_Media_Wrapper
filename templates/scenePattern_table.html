@@ -1,8 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
+  <style>
+    .sp-led-swatch { display:inline-block; width:1.1em; height:1.1em; border-radius:3px;
+                     border:1px solid rgba(0,0,0,.35); vertical-align:middle; margin-right:.2em; }
+    .sp-led-sum { white-space:nowrap; font-size:.9em; }
+    .sp-led-sum .sep { opacity:.45; margin:0 .35em; }
+    #ledEditFields .form-label { margin-bottom:.1rem; font-weight:600; }
+    #ledEditFields .hint { font-size:.8em; opacity:.7; }
+    #ledEditFields .sp-led-universal { border-top:1px solid var(--sp-border, #ccc); margin-top:.75rem; padding-top:.5rem; }
+  </style>
 
   <div class="sp-page">
-    <div class="sp-page-head"><h1>Scene LED Pattern Table</h1></div>
+    <div class="sp-page-head"><h1>Scene RPiLED Patterns</h1></div>
     <div class="sp-filter-row">
       <label for="campaignFilterDropdown">Filter By Campaign</label>
       <select id="campaignFilterDropdown" onchange="campaignFilterChange()" class="form-select">
@@ -11,15 +20,11 @@
             <option value="{{camp[0]}}" {% if camp[0] == campaignFilter %}selected{% endif %}>{{camp[1]}}</option>
           {% endfor %}
       </select>
-      <label for="campaignDropdown">Filter By Scene</label>
+      <label for="editSceneDropdown">Filter By Scene</label>
       <select id="editSceneDropdown" onchange="sceneFilterChange()" class="form-select">
         <option value="0">All</option>
         {% for scene in scenes %}
-        {% if scene[0] == sceneFilter %}
-        <option selected value="{{scene[0]}}">{{scene[1]}}</option>
-        {% else %}
-        <option value="{{scene[0]}}">{{scene[1]}}</option>
-        {% endif %}
+        <option value="{{scene[0]}}" {% if scene[0] == sceneFilter %}selected{% endif %}>{{scene[1]}}</option>
         {% endfor %}
       </select>
     </div>
@@ -27,85 +32,106 @@
       <div id="table"></div>
     </div>
   </div>
+
+  <!-- Per-row editor: renders ONLY the parameters the chosen pattern honors -->
+  <div class="modal fade" id="ledEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit LED pattern</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label fw-bold" for="ledEditType">Pattern</label>
+            <select id="ledEditType" class="form-select"></select>
+            <div id="ledEditDesc" class="hint text-muted small mt-1"></div>
+          </div>
+          <div id="ledEditFields"></div>
+        </div>
+        <div class="modal-footer">
+          <span id="ledEditStatus" class="me-auto small text-muted"></span>
+          <button type="button" class="btn btn-outline-secondary" id="ledEditTestBtn" title="Push these settings to the lights without saving">Test</button>
+          <button type="button" class="btn btn-primary" id="ledEditSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const tableDiv = document.getElementById('table');
-    function addButton() {
-      // Select the element next to which the button should be added
-      var element = document.querySelector("div.gridjs-search");
+    const tblColumns = ['scenePattern_ID', 'scene_ID', 'patternType', 'params', 'orderBy'];
+    const primeKey = tblColumns[0];
 
-      // Create a new button element
-      var button = document.createElement("input");
-      button.textContent = "Click me";
+    // ── Pattern registry (served from led_patterns.py) ─────────────────────
+    let REG = null;
+    const REG_MAP = {};
+    let ROWS = {};          // scenePattern_ID -> row object from the last fetch
+    const regReady = fetch('/api/led/patterns')
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(j => { REG = j; j.patterns.forEach(p => { REG_MAP[p.type] = p; }); return j; });
+
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const rgbCss = v => (Array.isArray(v) && v.length >= 3) ? `rgb(${v[0]},${v[1]},${v[2]})` : 'transparent';
+    const toHex = v => '#' + (Array.isArray(v) ? v : [0, 0, 0]).slice(0, 3)
+      .map(n => Math.max(0, Math.min(255, parseInt(n, 10) || 0)).toString(16).padStart(2, '0')).join('');
+    const fromHex = h => [1, 3, 5].map(i => parseInt(String(h).slice(i, i + 2), 16) || 0);
+
+    function patternName(type) { return REG_MAP[type] ? REG_MAP[type].name : (type || '?'); }
+
+    function summaryHtml(type, params) {
+      const spec = REG_MAP[type];
+      if (!spec) return '<em>unknown pattern</em>';
+      const p = params || {};
+      const out = [];
+      spec.params.forEach(f => {
+        const v = p[f.key];
+        if (f.kind === 'rgb') {
+          out.push(`<span class="sp-led-swatch" title="${esc(f.label)}" style="background:${rgbCss(v)}"></span>`);
+        } else if (f.kind === 'choice') {
+          const c = (f.choices || []).find(x => String(x[0]) === String(v));
+          out.push(esc(c ? c[1] : v));
+        } else if (f.key === 'duration') {
+          out.push(v > 0 ? esc(v) + 's' : '&infin;');
+        } else if (f.key === 'brightness') {
+          out.push(Math.round((v || 0) * 100) + '%');
+        } else {
+          out.push(esc(f.label.toLowerCase()) + ' ' + esc(v) + (f.unit ? esc(f.unit) : ''));
+        }
+      });
+      return `<span class="sp-led-sum">${out.join('<span class="sep">&middot;</span>')}</span>`;
+    }
+
+    // ── Toolbar ────────────────────────────────────────────────────────────
+    function addButton() {
+      const element = document.querySelector("div.gridjs-search");
+      if (!element || element.parentNode.querySelector('input[type=submit]')) return;
+      const button = document.createElement("input");
       button.className = "btn btn-primary";
-      button.setAttribute("type", "submit")
-      button.setAttribute("value", "Add New Row")
+      button.setAttribute("type", "submit");
+      button.setAttribute("value", "Add New Row");
       button.style = "float: right; margin-right: 100px";
-      button.onclick = function () {
-          spAddRowPrompt('/api/scenepatternaddrow',
-              {field: 'scene_ID', kind: 'scene', dropdownId: 'editSceneDropdown',
-               contextDropdownId: 'campaignFilterDropdown', contextKind: 'campaign'});
+      // New rows start UNASSIGNED (no scene prompt); pick the scene from the
+      // row's dropdown afterwards. Unassigned rows always show in the grid,
+      // whatever the scene/campaign filter, so the new row is never hidden.
+      button.onclick = async function () {
+        try {
+          const res = await fetch('/api/scenepatternaddrow', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({scene_ID: 0}),
+          });
+          if (!res.ok) console.error(`Add row failed! Status: ${res.status}`);
+        } catch (err) {
+          console.error('Error during fetch operation:', err);
+        }
+        window.location.reload();
       };
-      // button.onclick = function () {
-      //   //alert("Button clicked!");
-      //   fetch('/api/scenepatternaddrow', {
-      //     method: 'GET',
-      //     headers: { 'Content-Type': 'application/json' },
-      //   });
-      //   window.location.reload();
-      // }
       element.parentNode.insertBefore(button, element.nextSibling);
     }
-    class Dropdown {
-      constructor() {
-        this.items = [];
-      }
-      // Method to add an item with an ID to the dropdown list
-      addItem(id, item) {
-        this.items.push({ id, item });
-      }
-      // Method to retrieve the list of items in the dropdown
-      getItems() {
-        return this.items;
-      }
-      //Method to populate the dropdown element
-      populateDropdown(dropdownElement) {
-        //const dropdownElement = document.getElementById(dropdownElementId);
-        if (!dropdownElement) {
-          console.error(`Element with id ${dropdownElementId} not found.`);
-          return;
-        }
 
-        // Clear existing options
-        dropdownElement.innerHTML = '';
-
-        // Add new options
-        this.items.forEach(({ id, item }) => {
-          const option = document.createElement('option');
-          option.value = id;
-          option.textContent = item;
-          dropdownElement.appendChild(option);
-        });
-      }
-    }
-    const directionDD = [
-      { value: "1", label: "clockwise" },
-      { value: "-1", label: "counter" }
-    ];
-    const outPin = new Dropdown
-    fetch('/api/ledconfigmodel')
-      .then(response => response.json())
-      .then(data => {
-        for (const item of data.data) {
-          outPin.addItem(item.ledConfig_ID, item.pin)
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching data:', error);
-      });
-
+    // ── Scene names (lazy dropdown, same as the other scene-link tables) ───
     let sceneCache = null;
     let sceneCachePromise = null;
-
     function fetchScenes() {
       if (!sceneCachePromise) {
         sceneCachePromise = fetch('/api/scenes')
@@ -114,30 +140,21 @@
       }
       return sceneCachePromise;
     }
-
     function sceneNameFromCache(sceneId) {
       if (!sceneCache) return null;
       const found = sceneCache.find(item => parseInt(item.scene_ID) === parseInt(sceneId));
       return found ? found.sceneName : null;
     }
-
     function updateScenePlaceholders() {
       document.querySelectorAll('select[data-current-scene-id]:not([data-loaded="true"])').forEach(el => {
         const name = sceneNameFromCache(parseInt(el.dataset.currentSceneId));
         if (name && el.options.length === 1) el.options[0].textContent = name;
       });
     }
-
     fetchScenes().then(updateScenePlaceholders).catch(err => console.error('Error fetching scenes:', err));
-
     async function loadSceneOptions(selectEl) {
       if (selectEl.dataset.loaded === 'true') return;
-      try {
-        await fetchScenes();
-      } catch (error) {
-        console.error('Error fetching scenes:', error);
-        return;
-      }
+      try { await fetchScenes(); } catch (error) { console.error('Error fetching scenes:', error); return; }
       const currentSceneId = parseInt(selectEl.dataset.currentSceneId);
       selectEl.innerHTML = '';
       const emptyOpt = document.createElement('option');
@@ -155,383 +172,278 @@
       updateScenePlaceholders();
     }
 
-    let modelCache = null;
-    let modelCachePromise = null;
+    const updateUrl = (prev, query) => prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
+    const editableCellAttributes = (data, row, col) => row ? { contentEditable: 'true', 'data-element-id': row.cells[0].data } : {};
 
-    function fetchModels() {
-      if (!modelCachePromise) {
-        modelCachePromise = fetch('/api/ledtypemodel')
-          .then(r => { if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`); return r.json(); })
-          .then(data => { modelCache = data.data; return modelCache; });
-      }
-      return modelCachePromise;
-    }
-
-    function modelNameFromCache(modelId) {
-      if (!modelCache) return null;
-      const found = modelCache.find(item => parseInt(item.ledTypeModel_ID) === parseInt(modelId));
-      return found ? found.modelName : null;
-    }
-
-    function updateModelPlaceholders() {
-      document.querySelectorAll('select[data-current-model-id]:not([data-loaded="true"])').forEach(el => {
-        const name = modelNameFromCache(parseInt(el.dataset.currentModelId));
-        if (name && el.options.length === 1) el.options[0].textContent = name;
-      });
-    }
-
-    fetchModels().then(updateModelPlaceholders).catch(err => console.error('Error fetching models:', err));
-
-    async function loadModelOptions(selectEl) {
-      if (selectEl.dataset.loaded === 'true') return;
-      try {
-        await fetchModels();
-      } catch (error) {
-        console.error('Error fetching models:', error);
-        return;
-      }
-      const currentModelId = parseInt(selectEl.dataset.currentModelId);
-      selectEl.innerHTML = '';
-      const emptyOpt = document.createElement('option');
-      emptyOpt.value = '0';
-      emptyOpt.textContent = '';
-      selectEl.appendChild(emptyOpt);
-      modelCache.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.ledTypeModel_ID;
-        opt.textContent = item.modelName;
-        if (parseInt(item.ledTypeModel_ID) === currentModelId) opt.selected = true;
-        selectEl.appendChild(opt);
-      });
-      selectEl.dataset.loaded = 'true';
-      updateModelPlaceholders();
-    }
-
-    const updateUrl = (prev, query) => {
-      return prev + (prev.indexOf('?') >= 0 ? '&' : '?') + new URLSearchParams(query).toString();
-    };
-
-    const editableCellAttributes = (data, row, col) => {
-      if (row) {
-        return { contentEditable: 'true', 'data-element-id': row.cells[0].data };
-      }
-      else {
-        return {};
-      }
-    };
-    // cid  name             type     notnull  dflt_value  pk
-    // ---  ---------------  -------  -------  ----------  --
-    // 0    scenePattern_ID  INTEGER  0                    1 
-    // 1    scene_ID         INT      0                    0 
-    // 2    ledTypeModel_ID  INT      0                    0 
-    // 3    color            TEXT     0                    0 
-    // 4    wait_ms          INT      0                    0 
-    // 5    iterations       INT      0                    0 
-    // 6    direction        INT      0                    0 
-    // 7    cdiff            TEXT     0                    0
-    // 8    orderBy          INT      0                    0
-    // 9    outPin           INT      0                    0
-    // 10   brightness       INT      0                    0
-
-    tblColumns = ['scenePattern_ID', 'scene_ID', 'ledTypeModel_ID', 'color', 'cdiff', 'wait_ms', 'iterations', 'direction', 'orderBy', 'outPin', 'brightness']
-    primeKey = tblColumns[0]
-
-    const grid = window.spGrid = new gridjs.Grid({
-      columns: [
-        { id: tblColumns[0], name: 'scenePattern_ID', 'hidden': true },
-        {
-          id: tblColumns[1], name: 'Scenes', sort: false,
-          formatter: function (cellData, row) {
-            const sceneId = row.cells[1].data;
-            const patternId = row.cells[0].data;
-            const select = document.createElement("select");
-            select.name = "scenes";
-            select.id = "selectOpt_" + patternId.toString() + "_ID_" + patternId.toString();
-            select.dataset.currentSceneId = sceneId;
-            select.setAttribute("onchange", "sceneChange()");
-            select.setAttribute("onfocus", "loadSceneOptions(this)");
-            const placeholder = document.createElement('option');
-            placeholder.value = sceneId;
-            placeholder.textContent = sceneNameFromCache(sceneId) ?? (sceneId > 0 ? 'Scene #' + sceneId : '');
-            placeholder.selected = true;
-            select.appendChild(placeholder);
-            return gridjs.html(select.outerHTML);
-          }
-        },
-        {
-          id: tblColumns[2], name: 'Model', sort: false,
-          formatter: function (cellData, row) {
-            const modelId = row.cells[2].data;
-            const patternId = row.cells[0].data;
-            const selectModel = document.createElement("select");
-            selectModel.name = "typeModel";
-            selectModel.id = "selectModelOpt_" + patternId.toString() + "_ID_" + patternId.toString();
-            selectModel.dataset.currentModelId = modelId;
-            selectModel.setAttribute("onchange", "modelChange()");
-            selectModel.setAttribute("onfocus", "loadModelOptions(this)");
-            const placeholder = document.createElement('option');
-            placeholder.value = modelId;
-            placeholder.textContent = modelNameFromCache(modelId) ?? (modelId > 0 ? 'Model #' + modelId : '');
-            placeholder.selected = true;
-            selectModel.appendChild(placeholder);
-            return gridjs.html(selectModel.outerHTML);
-          }
-        },
-        {
-          id: 'sendTest', name: 'Test', sort: false,
-          formatter: function (cellData, row) {
-            const selectedValue = cellData
-            const sTest = document.createElement("input");
-            sTest.name = "sTest"
-            console.log(row.cells[0].data.toString())
-            sTest.id = "sTest" + "_ID_" + row.cells[0].data.toString()
-            sTest.setAttribute("type", "submit")
-            sTest.setAttribute("onclick", "sTest()")
-            sTest.setAttribute("value", "Test")
-            sTest.className = "btn btn-primary";
-            return gridjs.html(sTest.outerHTML);
-          }
-        },
-        {
-          id: tblColumns[3], name: 'Prime', sort: false,
-          formatter: function (cellData, row) {
-            const colr = document.createElement("input")
-            colr.name = "colr"
-            colr.id = "colr_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            colr.setAttribute("type", "color")
-            rgb = row.cells[4].data.toString().replace("[", "").replace("]", "").split(",")
-            colr.setAttribute("value", rgbToHex(rgb[0], rgb[1], rgb[2]))
-            colr.setAttribute("onchange", "clickColor(0,-1,-1,5,'color')")
-            return gridjs.html(colr.outerHTML)
-          }
-        },
-        {
-          id: tblColumns[4], name: 'Second', sort: false,
-          formatter: function (cellData, row) {
-            const colr = document.createElement("input")
-            colr.name = "colrdiff"
-            colr.id = "colrdiff_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            colr.setAttribute("type", "color")
-            console.log(row.cells[5].data.toString())
-            rgb = row.cells[5].data.toString().replace("[", "").replace("]", "").split(",")
-            colr.setAttribute("value", rgbToHex(rgb[0], rgb[1], rgb[2]))
-            colr.setAttribute("onchange", "clickColor(0,-1,-1,5,'cdiff')")
-            return gridjs.html(colr.outerHTML)
-          }
-        },
-        { id: tblColumns[5], name: 'wait_ms', sort: false, 'attributes': editableCellAttributes },
-        { id: tblColumns[6], name: 'repeat', sort: false,'attributes': editableCellAttributes },
-        { id: tblColumns[7], name: 'direction', sort: false,
-          formatter: function (cellData, row) {
-            const selectedValue = cellData
-            const select = document.createElement("select");
-            directionDD.forEach((data) => {
-              var el = document.createElement("option");
-              el.textContent = data.label
-              el.value = data.value
-              select.appendChild(el)
-            })
-            select.name = "direction"
-            select.id = "dirOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            select.setAttribute("onchange", "directionChange()")
-            select.childNodes.forEach((node) => {
-              if (parseInt(node.value) === parseInt(row.cells[8].data)) {
-                node.outerHTML = node.outerHTML.toString().replace("<option", "<option selected")
-              }
-            });
-            return gridjs.html(select.outerHTML);
-          }
-        },
-        { id: tblColumns[8], name: 'orderBy', sort: false, 'attributes': editableCellAttributes },
-        { id: tblColumns[9], name: 'outPin', sort: false, 'attributes': editableCellAttributes,
-          formatter: function (cellData, row) {
-            const selectedValue = cellData
-            const select = document.createElement("select");
-            outPin.populateDropdown(select)
-            select.name = "outpin"
-            select.id = "outpinOpt_" + row.cells[0].data.toString() + "_ID_" + row.cells[0].data.toString()
-            select.setAttribute("onchange", "outPinChange()")
-            select.childNodes.forEach((node) => {
-              if (parseInt(node.value) === parseInt(row.cells[10].data)) {
-                node.outerHTML = node.outerHTML.toString().replace("<option", "<option selected")
-              }
-            });
-            return gridjs.html(select.outerHTML);
-          }
-        },
-        { id: tblColumns[10], name: 'brightness', sort: false, 'attributes': editableCellAttributes },
-        {id: 'dlete', name: 'Del', sort: false,
-          formatter: function (cellData, row) {
-              // Multi-select delete: checkbox feeds the shared Set in site.js;
-              // "Delete Selected" posts each id to the single-delete endpoint.
-              return gridjs.html(spCheckHtml(row.cells[0].data));
-              }
+    // ── Grid ───────────────────────────────────────────────────────────────
+    let grid = null;
+    regReady.then(() => {
+      grid = window.spGrid = new gridjs.Grid({
+        columns: [
+          { id: tblColumns[0], name: 'scenePattern_ID', hidden: true },
+          {
+            id: tblColumns[1], name: 'Scene', sort: false,
+            formatter: function (cellData, row) {
+              const sceneId = row.cells[1].data;
+              const patternId = row.cells[0].data;
+              const select = document.createElement("select");
+              select.name = "scenes";
+              select.id = "selectOpt_" + patternId + "_ID_" + patternId;
+              select.dataset.currentSceneId = sceneId;
+              select.setAttribute("onchange", "sceneChange()");
+              select.setAttribute("onfocus", "loadSceneOptions(this)");
+              const placeholder = document.createElement('option');
+              placeholder.value = sceneId;
+              placeholder.textContent = sceneNameFromCache(sceneId) ?? (sceneId > 0 ? 'Scene #' + sceneId : '');
+              placeholder.selected = true;
+              select.appendChild(placeholder);
+              return gridjs.html(select.outerHTML);
+            }
           },
-      ],
-      server: {
-        url: '/api/scenePattern',
-        then: results => results.data,
-        total: results => results.total,
-      },
-      search: {
-        enabled: true,
+          {
+            id: tblColumns[2], name: 'Pattern', sort: true,
+            formatter: (cell, row) => gridjs.html(
+              `<button type="button" class="btn btn-link p-0 text-start" onclick="openEditor(${row.cells[0].data})">${esc(patternName(cell))}</button>`)
+          },
+          {
+            id: tblColumns[3], name: 'Settings', sort: false,
+            formatter: (cell, row) => gridjs.html(summaryHtml(row.cells[2].data, cell))
+          },
+          { id: tblColumns[4], name: 'Order', sort: true, 'attributes': editableCellAttributes },
+          {
+            id: 'edit', name: '', sort: false,
+            formatter: (cell, row) => gridjs.html(
+              `<button type="button" class="btn btn-primary btn-sm" onclick="openEditor(${row.cells[0].data})">Edit</button>`)
+          },
+          {
+            id: 'sendTest', name: 'Test', sort: false,
+            formatter: (cell, row) => gridjs.html(
+              `<button type="button" class="btn btn-outline-secondary btn-sm" onclick="testRow(${row.cells[0].data})">Test</button>`)
+          },
+          {
+            id: 'dlete', name: 'Del', sort: false,
+            // Multi-select delete: checkbox feeds the shared Set in site.js;
+            // "Delete Selected" posts each id to the single-delete endpoint.
+            formatter: (cell, row) => gridjs.html(spCheckHtml(row.cells[0].data))
+          },
+        ],
         server: {
-          url: (prev, search) => {
-            return updateUrl(prev, { search });
+          url: '/api/scenePattern',
+          then: results => {
+            ROWS = {};
+            results.data.forEach(r => { ROWS[r.scenePattern_ID] = r; });
+            return results.data.map(r => [r.scenePattern_ID, r.scene_ID, r.patternType, r.params, r.orderBy, '', '', '']);
+          },
+          total: results => results.total,
+        },
+        search: { enabled: true, server: { url: (prev, search) => updateUrl(prev, { search }) } },
+        sort: {
+          enabled: true, multiColumn: true,
+          server: {
+            url: (prev, columns) => {
+              const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + tblColumns[col.index]);
+              return updateUrl(prev, { sort });
+            },
           },
         },
-      },
-      sort: {
-        enabled: true,
-        multiColumn: true,
-        server: {
-          url: (prev, columns) => {
-            const columnIds = tblColumns;
-            const sort = columns.map(col => (col.direction === 1 ? '+' : '-') + columnIds[col.index]);
-            return updateUrl(prev, { sort });
-          },
-        },
-      },
-      pagination: {
-        enabled: true,
-        server: {
-          url: (prev, page, limit) => {
-            return updateUrl(prev, { start: page * limit, length: limit });
-          },
-        },
-      },
-    }).render(tableDiv);
+        pagination: { enabled: true, server: { url: (prev, page, limit) => updateUrl(prev, { start: page * limit, length: limit }) } },
+      }).render(tableDiv);
       spInitBulkDelete('/api/scenepatterndelrow', primeKey);
-
-    grid.on('ready', () => {
-      updateScenePlaceholders();
-      updateModelPlaceholders();
+      ensureToolbar();
+    }).catch(err => {
+      console.error('LED registry failed to load:', err);
+      tableDiv.textContent = 'Could not load the LED pattern registry (' + err.message + ').';
     });
 
-    let savedValue;
+    // Grid.js renders asynchronously and this build emits no 'ready' event, so
+    // poll for the search bar (same approach as site.js restoreGridControls)
+    // and hang the Add button + scene names off it once it exists.
+    function ensureToolbar() {
+      let tries = 0;
+      const t = setInterval(() => {
+        if (document.querySelector('div.gridjs-search')) {
+          clearInterval(t);
+          addButton();
+          updateScenePlaceholders();
+        } else if (++tries > 100) {
+          clearInterval(t);
+        }
+      }, 50);
+    }
 
-    tableDiv.addEventListener('focusin', ev => {
-      if (ev.target.tagName === 'TD') {
-        savedValue = ev.target.textContent;
+    function refreshGrid() {
+      if (window.spGrid) {
+        window.spGrid.forceRender();
+        if (typeof restoreGridControls === 'function') restoreGridControls();
+        ensureToolbar();
+      } else {
+        window.location.reload();
       }
-    });
+    }
 
+    // ── Inline cell edits (Order) + scene dropdown ─────────────────────────
+    let savedValue;
+    tableDiv.addEventListener('focusin', ev => {
+      if (ev.target.tagName === 'TD') savedValue = ev.target.textContent;
+    });
     tableDiv.addEventListener('focusout', ev => {
       if (ev.target.tagName === 'TD') {
         if (savedValue !== ev.target.textContent) {
-          saveChange(JSON.stringify({
-            [primeKey]: ev.target.dataset.elementId, [ev.target.dataset.columnId]: ev.target.textContent
-          }))
+          saveChange({ [primeKey]: ev.target.dataset.elementId, [ev.target.dataset.columnId]: ev.target.textContent });
         }
         savedValue = undefined;
       }
     });
+    tableDiv.addEventListener('keydown', ev => {
+      if (ev.target.tagName === 'TD') {
+        if (ev.key === 'Escape') { ev.target.textContent = savedValue; ev.target.blur(); }
+        else if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); }
+      }
+    });
+    function saveChange(obj) {
+      return fetch('/api/scenePattern', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj),
+      });
+    }
+    function sceneChange() {
+      const ev = event.target;
+      const id = ev.id.split("_ID_");
+      if (ev.id.includes("selectOpt_")) saveChange({ [primeKey]: id[1], scene_ID: ev.value });
+    }
 
-    function saveChange(json) {
-      //console.log(json)
-      fetch('/api/scenePattern', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: json,
+    // ── Test buttons ───────────────────────────────────────────────────────
+    function postTest(body) {
+      return fetch('/api/RPiLEDTest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    }
+    function testRow(id) { postTest({ [primeKey]: id }); }
+
+    // ── Editor modal ───────────────────────────────────────────────────────
+    let edit = null;   // { id, type, params }
+
+    function openEditor(id) {
+      const r = ROWS[id];
+      if (!r || !REG) return;
+      edit = { id: id, type: r.patternType, params: Object.assign({}, r.params || {}) };
+      if (!REG_MAP[edit.type]) { edit.type = REG.patterns[0].type; edit.params = {}; }
+      const sel = $('ledEditType');
+      sel.innerHTML = '';
+      REG.patterns.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.type;
+        o.textContent = p.name;
+        if (p.type === edit.type) o.selected = true;
+        sel.appendChild(o);
+      });
+      renderFields();
+      setStatus('');
+      bootstrap.Modal.getOrCreateInstance($('ledEditModal')).show();
+    }
+
+    $('ledEditType').addEventListener('change', ev => {
+      // Switching pattern: keep values for params the new pattern also has
+      // (colors, brightness, duration survive), default the rest.
+      const current = readFields();
+      edit.type = ev.target.value;
+      const keep = {};
+      REG_MAP[edit.type].params.forEach(f => { if (f.key in current) keep[f.key] = current[f.key]; });
+      edit.params = keep;
+      renderFields();
+    });
+
+    function renderFields() {
+      const spec = REG_MAP[edit.type];
+      $('ledEditDesc').textContent = spec.desc || '';
+      const box = $('ledEditFields');
+      box.innerHTML = '';
+      let universalShown = false;
+      spec.params.forEach(f => {
+        const v = (f.key in edit.params) ? edit.params[f.key] : f.default;
+        const wrap = document.createElement('div');
+        wrap.className = 'mb-2';
+        if (!universalShown && (f.key === 'brightness' || f.key === 'duration')) {
+          wrap.classList.add('sp-led-universal');
+          universalShown = true;
+        }
+        const label = document.createElement('label');
+        label.className = 'form-label';
+        label.textContent = f.label + (f.unit ? ` (${f.unit})` : '');
+        label.htmlFor = 'ledf_' + f.key;
+        wrap.appendChild(label);
+        let input;
+        if (f.kind === 'rgb') {
+          input = document.createElement('input');
+          input.type = 'color';
+          input.className = 'form-control form-control-color';
+          input.value = toHex(v);
+        } else if (f.kind === 'choice') {
+          input = document.createElement('select');
+          input.className = 'form-select';
+          (f.choices || []).forEach(c => {
+            const o = document.createElement('option');
+            o.value = c[0];
+            o.textContent = c[1];
+            if (String(c[0]) === String(v)) o.selected = true;
+            input.appendChild(o);
+          });
+        } else {
+          input = document.createElement('input');
+          input.type = 'number';
+          input.className = 'form-control';
+          if (f.min !== undefined) input.min = f.min;
+          if (f.max !== undefined) input.max = f.max;
+          input.step = f.step !== undefined ? f.step : (f.kind === 'float' ? 0.01 : 1);
+          input.value = v;
+        }
+        input.id = 'ledf_' + f.key;
+        input.dataset.key = f.key;
+        input.dataset.kind = f.kind;
+        wrap.appendChild(input);
+        if (f.hint) {
+          const hint = document.createElement('div');
+          hint.className = 'hint';
+          hint.textContent = f.hint;
+          wrap.appendChild(hint);
+        }
+        box.appendChild(wrap);
       });
     }
 
-    function sceneChange() {
-      var ev = event.target;
-      id = ev.id.split("_ID_")
-      if (ev.id.toString().includes("selectOpt_")) {
-        jsn = { [primeKey]: id[1], scene_ID: ev.value }
-        console.log(JSON.stringify(jsn))
-        saveChange(JSON.stringify(jsn))
-        //console.log("Selected " + ev.value);
-      }
+    function readFields() {
+      const out = {};
+      document.querySelectorAll('#ledEditFields [data-key]').forEach(el => {
+        const k = el.dataset.key;
+        if (el.dataset.kind === 'rgb') out[k] = fromHex(el.value);
+        else out[k] = Number(el.value);
+      });
+      return out;
     }
 
-    function outPinChange() {
-      var ev = event.target;
-      id = ev.id.split("_ID_")
-      if (ev.id.toString().includes("outpinOpt_")) {
-        jsn = { [primeKey]: id[1], outPin: ev.value }
-        console.log(JSON.stringify(jsn))
-        saveChange(JSON.stringify(jsn))
-        //console.log("Selected " + ev.value);
-      }
-    }
-    function modelChange() {
-      var ev = event.target;
-      id = ev.id.split("_ID_")
-      //console.log(elnt)
-      if (ev.id.toString().includes("selectModelOpt_")) {
-        jsn = { [primeKey]: id[1], ledTypeModel_ID: ev.value }
-        console.log(JSON.stringify(jsn))
-        saveChange(JSON.stringify(jsn))
-        //console.log("Selected " + ev.value);
-      }
-    }
+    function setStatus(msg) { $('ledEditStatus').textContent = msg || ''; }
 
-    function directionChange() {
-      var ev = event.target;
-      id = ev.id.split("_ID_")
-      if (ev.id.toString().includes("dirOpt_")) {
-        jsn = { [primeKey]: id[1], direction: ev.value }
-        console.log(JSON.stringify(jsn))
-        saveChange(JSON.stringify(jsn))
-        //console.log("Selected " + ev.value);
-      }
-    }
-
-    tableDiv.addEventListener('keydown', ev => {
-      if (ev.target.tagName === 'TD') {
-        if (ev.key === 'Escape') {
-          ev.target.textContent = savedValue;
-          ev.target.blur();
-        }
-        else if (ev.key === 'Enter') {
-          ev.preventDefault();
-          ev.target.blur();
-        }
+    $('ledEditSaveBtn').addEventListener('click', async () => {
+      if (!edit) return;
+      setStatus('Saving…');
+      try {
+        const res = await saveChange({ [primeKey]: edit.id, patternType: edit.type, params: readFields() });
+        if (!res.ok) { setStatus('Save failed (' + res.status + ')'); return; }
+        bootstrap.Modal.getOrCreateInstance($('ledEditModal')).hide();
+        refreshGrid();
+      } catch (e) {
+        setStatus('Save failed: ' + e.message);
       }
     });
-    // function dlete() {
-    //   if (confirm('Are you sure you want to DELETE?')) {
-    //   var ev = event.target;
-    //   id = ev.id.split("_ID_")
-    //   if (ev.id.toString().includes("Dlete_")) {
-    //     jsn = { [primeKey]: id[1] }
-    //     console.log(JSON.stringify(jsn))
 
-    //       jsn = { [primeKey]: id[1] }
-    //       console.log(JSON.stringify(jsn))
-    //       fetch('/api/scenepatterndelrow', {
-    //         method: 'POST',
-    //         headers: { 'Content-Type': 'application/json' },
-    //         body: JSON.stringify(jsn),
-    //       });
-    //       window.location.reload();
-    //     } else {
-    //       // Do nothing!
-    //       console.log('Thing was not saved to the database.');
-    //     }
-    //     //saveChange(JSON.stringify(jsn))
-    //     //console.log("Selected " + jsn);
-    //   }
-    // }
-
-    function sTest() {
-      var ev = event.target;
-      id = ev.id.split("_ID_")
-      if (ev.id.toString().includes("sTest_")) {
-        jsn = { [primeKey]: id[1] }
-        console.log(JSON.stringify(jsn))
-        fetch('/api/RPiLEDTest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(jsn),
-        });
+    $('ledEditTestBtn').addEventListener('click', async () => {
+      if (!edit) return;
+      setStatus('Sending to lights…');
+      try {
+        const res = await postTest({ [primeKey]: edit.id, patternType: edit.type, params: readFields() });
+        setStatus(res.ok ? 'Sent — lights show these settings until the next scene.' : 'Test failed (' + res.status + ')');
+      } catch (e) {
+        setStatus('Test failed: ' + e.message);
       }
-    }
-
-
-    window.addEventListener('load', addButton);
+    });
   </script>
 {% endblock %}

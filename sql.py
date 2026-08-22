@@ -11,6 +11,8 @@ from unittest import case
 from extensions import *
 from collections import defaultdict
 import mpv_ipc
+import json
+import led_patterns
 
 #logging.basicConfig(filename='myapp.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 #logger=logging.getLogger(__name__)
@@ -70,10 +72,10 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblHours (  hours_id INTEGER PRIMARY KEY AUTOINCREMENT,  startDTTM TEXT,  endDTTM TEXT,  startTime TEXT,  endTime TEXT,  gmt INT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLED (  led_ID INTEGER PRIMARY KEY AUTOINCREMENT,  ledJSON TEXT,  active INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblLEDConfig (  ledConfig_ID INTEGER PRIMARY KEY AUTOINCREMENT,  pin INT,  ledCount INT, brightness Real,  active INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblLEDTypeModel (  ledTypeModel_ID INTEGER PRIMARY KEY AUTOINCREMENT,  modelName TEXT,  ledJSON TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusic (  song_id INTEGER PRIMARY KEY AUTOINCREMENT,  path TEXT,  song TEXT,  pTimes INT,  playedDTTM TEXT,  active INT,  genre INT,  que INT,  urlSource TEXT,  dnLoadStatus INT,  videoId TEXT,  displayName TEXT,  metaStatus INT DEFAULT 0,  metaNextRetry TEXT,  dnLastError TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblMusicScene (  musicScene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  song_ID INT,  orderBy INT,  volume INT, loops INT)")
-    c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  ledTypeModel_ID INT,  color TEXT,  wait_ms INT,  iterations INT,  direction INT, cdiff TEXT, orderBy INT, outPin INT, brightness Real)")
+    # RPiLED: patternType is a key in led_patterns.PATTERNS, params its JSON dict
+    c.execute("CREATE TABLE IF NOT EXISTS tblScenePattern (  scenePattern_ID INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT,  patternType TEXT,  params TEXT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblScenes (  scene_ID INTEGER PRIMARY KEY AUTOINCREMENT,  sceneName TEXT,  active INT,  orderBy INT,  campaign_id INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServerRole (  ID INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  active INT,  orderBy INT)")
     c.execute("CREATE TABLE IF NOT EXISTS tblServersIP (  ServerIP_ID INTEGER PRIMARY KEY AUTOINCREMENT,  serverName TEXT,  version TEXT,  ipAddress TEXT,  ports TEXT,  active INT,  PingTime TEXT,  serverroleid INT)")
@@ -105,16 +107,6 @@ def create_table():
 
 
 
-
-def getLEDOutPIN():
-    conn = sqlite3.connect(database)
-    c = conn.cursor()
-    c.execute("SELECT * FROM tblLEDConfig where active = 1")    
-    data = c.fetchall()
-    conn.commit()
-    c.close()
-    conn.close()
-    return data
 
 def appsettings(apparray):
     names = [a[0] for a in apparray]
@@ -1042,9 +1034,9 @@ def get_Scenes():
     
     c.row_factory = dict_factory
     
-    c.execute("select s.scene_ID, substr(s.sceneName,0,16) AS sceneName, dt.scenePattern_ID,  dt.color, UPPER(substr(dt.modelName,0,16)) as modelName , dt.wledPattern_ID,  dt.color1, UPPER(substr(dt.effectName,0,16)) as effectName,  dt.musicScene_ID,  dt.videoScene_ID, s.orderby from ( \
-                    select sp.scene_ID , sp.scenePattern_ID, substr(sp.color, 2, LENGTH(sp.color)-2) as color, l.modelName, NULL as wledPattern_ID, null as color1, NULL as effectName, NULL as musicScene_ID, NULL as videoScene_ID  from tblScenePattern sp \
-                        join tblLEDTypeModel l on SP.ledTypeModel_ID = l.ledTYpeMOdel_ID where sp.scene_ID <> 0 \
+    c.execute("select s.scene_ID, substr(s.sceneName,0,16) AS sceneName, dt.scenePattern_ID,  dt.color, dt.modelName as modelName , dt.wledPattern_ID,  dt.color1, UPPER(substr(dt.effectName,0,16)) as effectName,  dt.musicScene_ID,  dt.videoScene_ID, s.orderby from ( \
+                    select sp.scene_ID , sp.scenePattern_ID, sp.params as color, sp.patternType as modelName, NULL as wledPattern_ID, null as color1, NULL as effectName, NULL as musicScene_ID, NULL as videoScene_ID  from tblScenePattern sp \
+                        where sp.scene_ID <> 0 \
                 union \
                     select  wl.scene_ID, NULL as scenePattern_ID,null as color, NULL as modelName, wl.wledPattern_ID, substr(wl.color1, 2, LENGTH(wl.color1)-2) as color1, case when instr(effectName, '@') = 0 THEN effectName ELSE substr(effectName,1, instr(effectName, '@')-1) END  as effectName, NULL as musicScene_ID, NULL as videoScene_ID from tblwledPattern wl \
                         join tblEffect e on e.ef_ID = wl.effect where wl.scene_ID <> 0 \
@@ -1056,7 +1048,19 @@ def get_Scenes():
 
 
     dataPre = c.fetchall()
-    #print(dataPre)
+    # RPiLED rows arrive as (patternType, params JSON); turn them into the
+    # display fields home.html expects: an 'r,g,b' swatch and a short name.
+    for row in dataPre:
+        if row.get('scenePattern_ID') is None:
+            continue
+        try:
+            col = (json.loads(row.get('color') or '{}') or {}).get('color')
+        except (TypeError, ValueError):
+            col = None
+        row['color'] = (','.join(str(int(x)) for x in col[:3])
+                        if isinstance(col, list) and len(col) >= 3 else None)
+        row['modelName'] = (led_patterns.display_name(row['modelName'])[:15].upper()
+                            if row.get('modelName') else None)
     grouped_data = defaultdict(list)
     for row in dataPre:
         grouped_data[row['scene_ID']].append(row)
@@ -1358,100 +1362,38 @@ def CRUD_tblScenes(row,CRUD):
     conn.close()
 
 def CRUD_tblScenePattern(row,CRUD):
+    """RPiLED scene rows: (scenePattern_ID, scene_ID, patternType, params JSON, orderBy).
+    C: [scene_ID, patternType, params, orderBy]
+    U: [scenePattern_ID, scene_ID, patternType, params, orderBy]
+    R / D: [scenePattern_ID]   bySceneID: [scene_ID]   anything else: all rows."""
     conn = sqlite3.connect(database)
-    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
     c = conn.cursor()
-    unix = time.time()
+    data = None
     if CRUD == "C":
-        _scene_ID = row[0] 
-        _ledTypeModel_ID = row[1]
-        _color = row[2]
-        _wait_ms = row[3]
-        _iterations = row[4]
-        _direction = row[5]
-        _cdiff = row[6]
-        _OrderBy = row[7]
-        _OutPin = row[8]
-        _brightness = row[9]
-        c.execute("Insert INTO tblScenePattern(scene_ID, ledTypeModel_ID, color, wait_ms, iterations, direction, cdiff,OrderBy, OutPin, brightness) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",(_scene_ID, _ledTypeModel_ID, _color, _wait_ms, _iterations, _direction, _cdiff, _OrderBy, _OutPin, _brightness))
+        c.execute("INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) VALUES (?, ?, ?, ?)",
+                  (row[0], row[1], row[2], row[3]))
         conn.commit()
-        return c.lastrowid
+        data = c.lastrowid
     elif CRUD == "R":
-        _ScenePattern_ID = row[0]
-        c.execute("SELECT * FROM tblScenePattern where ScenePattern_ID = ?", (_ScenePattern_ID,))
+        c.execute("SELECT * FROM tblScenePattern where scenePattern_ID = ?", (row[0],))
         data = c.fetchall()
-        conn.commit()
-        return data
     elif CRUD == "bySceneID":
-        _Scene_ID = row[0]
-        c.execute("SELECT * FROM tblScenePattern where Scene_ID = ? order by OrderBy", (_Scene_ID,))
+        c.execute("SELECT * FROM tblScenePattern where scene_ID = ? order by orderBy, scenePattern_ID", (row[0],))
         data = c.fetchall()
-        conn.commit()
-        return data
     elif CRUD == "U":
-        _ScenePattern_ID = row[0]
-        _Scene_ID = row[1]
-        _ledTypeModel_ID = row[2]
-        _color = row[3]
-        _wait_ms = row[4]
-        _iterations = row[5]
-        _direction = row[6]
-        _cdiff = row[7]
-        _OrderBy = row[8]
-        _OutPin = row[9]
-        _brightness = row[10]
-        c.execute("UPDATE tblScenePattern SET Scene_ID = ?, ledTypeModel_ID = ?, color = ?, wait_ms = ?, iterations = ?, direction = ?, cdiff = ?, OrderBy = ?, OutPin = ?, brightness = ? where ScenePattern_id = ?",(_Scene_ID,  _ledTypeModel_ID,  _color, _wait_ms, _iterations, _direction, _cdiff, _OrderBy, _OutPin, _brightness, _ScenePattern_ID))
+        c.execute("UPDATE tblScenePattern SET scene_ID = ?, patternType = ?, params = ?, orderBy = ? where scenePattern_ID = ?",
+                  (row[1], row[2], row[3], row[4], row[0]))
         conn.commit()
     elif CRUD == "D":
-        _ScenePattern_ID = row[0]
-        c.execute("Delete From tblScenePattern where ScenePattern_ID = ?", (_ScenePattern_ID,))
+        c.execute("Delete From tblScenePattern where scenePattern_ID = ?", (row[0],))
         conn.commit()
     else:
         c.execute("SELECT * FROM tblScenePattern")
         data = c.fetchall()
-        conn.commit()
-        return data
     c.close()
     conn.close()
+    return data
 
-def CRUD_tblLEDTypeModel(row,CRUD):
-    conn = sqlite3.connect(database)
-    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
-    c = conn.cursor()
-    unix = time.time()
-    if CRUD == "C":
-        _modelName = row[0] 
-        _ledJSON = row[1]
-        c.execute("Insert INTO tblLEDTypeModel(modelName, ledJSON) VALUES (?, ?)",(_modelName, _ledJSON))
-        conn.commit()
-        return c.lastrowid
-    elif CRUD == "R":
-        _LEDTypeModel_ID = str(row)
-        #print("LEDTypeModel_ID = " + _LEDTypeModel_ID)
-        sql_query = f"SELECT * FROM tblLEDTypeModel WHERE LEDTypeModel_ID IN ({_LEDTypeModel_ID})"
-        #c.execute("SELECT * FROM tblLEDTypeModel where LEDTypeModel_ID in ( ? )", (_LEDTypeModel_ID,))
-        #print(sql_query)
-        c.execute(sql_query)
-        data = c.fetchall()
-        conn.commit()
-        return data
-    elif CRUD == "U":
-        _LEDTypeModel_ID = row[0] 
-        _modelName = row[1]
-        _ledJSON = row[2]
-        c.execute("UPDATE tblLEDTypeModel SET modelName = ?, ledJSON = ? where LEDTypeModel_id = ?",(_modelName,  _ledJSON,  _LEDTypeModel_ID))
-        conn.commit()
-    elif CRUD == "D":
-        _LEDTypeModel_ID = row[0]
-        c.execute("Delete From tblLEDTypeModel where LEDTypeModel_ID = ?", (_LEDTypeModel_ID,))
-        conn.commit()
-    else:
-        c.execute("SELECT * FROM tblLEDTypeModel")
-        data = c.fetchall()
-        conn.commit()
-        return data
-    c.close()
-    conn.close()
 
 def CRUD_tblMusicScene(row,CRUD):
     conn = sqlite3.connect(database)
@@ -1492,40 +1434,6 @@ def CRUD_tblMusicScene(row,CRUD):
     c.close()
     conn.close()
 
-def CRUD_tblPixel(row,CRUD):
-    conn = sqlite3.connect(database)
-    #conn.text_factory = lambda x: unicode(x, 'utf-8', 'ignore')
-    c = conn.cursor()
-    unix = time.time()
-    if CRUD == "C":
-        _pin = row[0] 
-        _ledCount = row[1]
-        c.execute("Insert INTO tblPixel(pin, ledCount) VALUES (?, ?)",(_pin, _ledCount))
-        conn.commit()
-        return c.lastrowid
-    elif CRUD == "R":
-        _pixel_ID = row[0]
-        c.execute("SELECT * FROM tblPixel where pixel_ID = ?", (_pixel_ID,))
-        data = c.fetchall()
-        conn.commit()
-        return data
-    elif CRUD == "U":
-        _pixel_ID = row[0] 
-        _pin = row[1]
-        _ledCount = row[2]
-        c.execute("UPDATE tblPixel SET pin = ?, ledCount = ? where pixel_id = ?",(_pin,  _ledCount, _pixel_ID))
-        conn.commit()
-    elif CRUD == "D":
-        pixel_ID = row[0]
-        c.execute("Delete From tblPixel where pixel_ID = ?", (pixel_ID,))
-        conn.commit()
-    else:
-        c.execute("SELECT * FROM tblPixel")
-        data = c.fetchall()
-        conn.commit()
-        return data
-    c.close()
-    conn.close()
 
 def CRUD_tblVideoScene(row,CRUD):
     conn = sqlite3.connect(database)
@@ -1575,10 +1483,7 @@ def loadDefaults():
     c = conn.cursor()
     #c.execute("insert into tblMusicScene(scene_ID,song_ID,orderBy)values(1,6,1)")
     #c.execute("insert into tblMusicScene(scene_ID,song_ID,orderBy)values(1,3,2)")
-    #c.execute("insert into tblScenePattern (scene_ID,ledTypeModel_ID,Color,wait_ms,interations ,direction) values (1,1,'[0,0,0]',10,100,1)")
     #c.execute("insert into tblScene (scenesName,orderby) values ('Sparkle',1)")
-    #c.execute("insert into tblLEDTypeModel(modelName, ledJSON) values ('sparkle','{\"type\": \"sparkle\", \"color\": [0,0,0], \"wait_ms\": 8,\"cdiff\": [0,0,0],\"iterations\": 1000000}')")
-    #c.execute("insert into tblPixel (pin,ledCount) values (26,86)")
     #c.execute("insert into tblVideoScene (scene_id,Video_ID,DisplayScreen_ID) values (1,1,1)")
     conn.commit()
     c.close()
@@ -1601,7 +1506,6 @@ def get_VideoScene_BYSceneID(_scene_ID):
     c = conn.cursor()
     c.execute("SELECT * FROM tblVideoScene where scene_ID = ?", (_scene_ID,))
     data = c.fetchall()
-    c.execute("DELETE FROM tblLED")
     conn.commit()
     c.close()
     conn.close()
@@ -1613,7 +1517,6 @@ def get_MusicSceneSongs_BYSceneID(_scene_ID):
     c = conn.cursor()
     c.execute("SELECT * FROM tblMusicScene where scene_ID = ?", (_scene_ID,))
     data = c.fetchall()
-    c.execute("DELETE FROM tblLED")
     conn.commit()
     c.close()
     conn.close()
@@ -1635,19 +1538,15 @@ def get_LEDJSON():
         row = r[0]
     return row
 
-def insert_LEDJSON(json):
+def insert_LEDJSON(payload):
+    """Drop a wire payload ({"patterns": [...]} JSON string) in the tblLED
+    mailbox for led_Run.py to pick up (it reads-and-clears; latest wins)."""
     conn = sqlite3.connect(database)
-    conn.text_factory = lambda x: unicodedata(x, 'utf-8', 'ignore')
     c = conn.cursor()
-    c.execute("INSERT INTO tblLED (ledJSON) VALUES (?)",[json])
+    c.execute("INSERT INTO tblLED (ledJSON) VALUES (?)", [payload])
     conn.commit()
-    
-# def insert_LEDJSON(json):
-#     conn = sqlite3.connect(database)
-#     conn.text_factory = lambda x: unicodedata(x, 'utf-8', 'ignore')
-#     c = conn.cursor()
-#     c.execute("INSERT INTO tblLED (ledJSON) VALUES (?)",[json])
-#     conn.commit()
+    c.close()
+    conn.close()
 
 def update_video_data_entry(row):
     conn = sqlite3.connect(database)

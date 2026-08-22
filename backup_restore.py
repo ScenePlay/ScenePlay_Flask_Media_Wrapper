@@ -31,6 +31,7 @@ helpers), so tests can point it at a scratch file.
 import gc
 import os
 import json
+import led_patterns
 import shutil
 import sqlite3
 import zipfile
@@ -67,7 +68,7 @@ MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
     'tblBattleMapEffects', 'tblBattleMapFloorplans', 'tblBattleMapDoors',
     'tblSessionNotes', 'tblBattleMapNotes', 'tblBattleMapPrompts',
     'tblObsPanelNotes', 'tblObsSceneMap', 'tblDiceRolls', 'tblCronSchedule',
-    'tblScenePattern', 'tblLedTypeModel', 'tblWledPattern', 'tblServersIP',
+    'tblScenePattern', 'tblWledPattern', 'tblServersIP',
     'tblServerRole', 'tblTextures',
 ))
 MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
@@ -862,32 +863,40 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
 
     # -- scene lighting: only into scenes with NO local lighting of that type ------
     if _src_has(c, 'tblScenePattern'):
-        model_map = {}
-        if _src_has(c, 'tblLedTypeModel'):
-            for mid, mname in c.execute(
-                    "SELECT ledTypeModel_ID, modelName FROM src.tblLedTypeModel").fetchall():
-                hit = c.execute("SELECT ledTypeModel_ID FROM tblLedTypeModel "
-                                "WHERE lower(modelName)=lower(?)", (mname or '',)).fetchone()
-                if hit:
-                    model_map[mid] = hit[0]
-                else:
-                    mcols = _common_cols(c, 'tblLedTypeModel', exclude=('ledTypeModel_ID',))
-                    row = c.execute(f"SELECT {', '.join(mcols)} FROM src.tblLedTypeModel "
-                                    "WHERE ledTypeModel_ID=?", (mid,)).fetchone()
-                    model_map[mid] = _copy_row(c, 'tblLedTypeModel', dict(zip(mcols, row)))
-        pcols = _common_cols(c, 'tblScenePattern', exclude=('scenePattern_ID',))
-        for row in c.execute(f"SELECT {', '.join(pcols)} FROM src.tblScenePattern").fetchall():
-            data = dict(zip(pcols, row))
+        cur = c.execute("SELECT * FROM src.tblScenePattern")
+        names = [d[0] for d in cur.description]
+        src_rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        # Pre-registry backups (ledTypeModel_ID + fixed columns) convert on
+        # the way in, exactly as migration 0010 did for the live database.
+        legacy = 'patternType' not in names
+        types = {}
+        if legacy and _src_has(c, 'tblLedTypeModel'):
+            for mid, js in c.execute(
+                    "SELECT ledTypeModel_ID, ledJSON FROM src.tblLedTypeModel").fetchall():
+                try:
+                    types[mid] = (json.loads(js or '{}') or {}).get('type')
+                except (TypeError, ValueError):
+                    pass
+        has_local = {r[0] for r in c.execute(
+            "SELECT DISTINCT scene_ID FROM tblScenePattern").fetchall()}
+        for data in src_rows:
             scene = scene_map.get(data.get('scene_ID'))
-            if not scene:
-                continue
-            if c.execute("SELECT 1 FROM tblScenePattern WHERE scene_ID=?", (scene,)).fetchone():
+            if not scene or scene in has_local:
                 continue                          # scene already has local LED lighting
-            data['scene_ID'] = scene
-            if 'ledTypeModel_ID' in data:
-                data['ledTypeModel_ID'] = model_map.get(data['ledTypeModel_ID'],
-                                                        data['ledTypeModel_ID'])
-            _copy_row(c, 'tblScenePattern', data)
+            if legacy:
+                ptype = types.get(data.get('ledTypeModel_ID'))
+                params = led_patterns.legacy_to_params(
+                    ptype, data.get('color'), data.get('cdiff'), data.get('wait_ms'),
+                    data.get('iterations'), data.get('direction'), data.get('brightness'))
+            else:
+                ptype = data.get('patternType')
+                params = (led_patterns.coerce(ptype, data.get('params'))
+                          if led_patterns.is_type(ptype) else None)
+            if params is None:
+                continue                          # unknown pattern type — unplayable
+            _copy_row(c, 'tblScenePattern', {
+                'scene_ID': scene, 'patternType': ptype,
+                'params': json.dumps(params), 'orderBy': data.get('orderBy')})
             s['lighting'] += 1
 
     if _src_has(c, 'tblWledPattern'):

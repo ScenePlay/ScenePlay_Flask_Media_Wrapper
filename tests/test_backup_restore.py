@@ -9,7 +9,10 @@ import os
 import sqlite3
 import zipfile
 
+import json
 import pytest
+
+import led_patterns
 
 import sql
 import backup_restore as br
@@ -49,9 +52,8 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapPrompts (prompt_id INTEGER PRIMARY KEY, map_id INT, kind TEXT, prompt_text TEXT, settings_json TEXT, updated_at TEXT)",
     "CREATE TABLE tblObsSceneMap (obs_map_id INTEGER PRIMARY KEY, entity_type TEXT, entity_id INT, entity_key TEXT, scene_name TEXT, source_name TEXT, auto_created INT, sort_order INT, updated_at TEXT)",
     "CREATE TABLE tblDiceRolls (roll_id INTEGER PRIMARY KEY, character_id INT, char_name TEXT, expression TEXT, label TEXT, dice_json TEXT, modifier INT, total INT, adv_mode TEXT, rolled_at TEXT, relay_roll_id INT)",
-    "CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, ledTypeModel_ID INT, color TEXT, wait_ms INT, iterations INT, direction INT, cdiff INT, orderBy INT, outPin INT, brightness INT)",
+    "CREATE TABLE tblScenePattern (scenePattern_ID INTEGER PRIMARY KEY, scene_ID INT, patternType TEXT, params TEXT, orderBy INT)",
     "CREATE TABLE tblWledPattern (wledPattern_ID INTEGER PRIMARY KEY, scene_ID INT, server_ID INT, effect INT, pallette INT, color1 TEXT, color2 TEXT, color3 TEXT, speed INT, brightness INT, orderBy INT)",
-    "CREATE TABLE tblLedTypeModel (ledTypeModel_ID INTEGER PRIMARY KEY, modelName TEXT, ledJSON TEXT)",
     "CREATE TABLE tblEffect (effect_ID INTEGER PRIMARY KEY, effectName TEXT, ef_ID INT)",
     "CREATE TABLE tblPallette (pallette_ID INTEGER PRIMARY KEY, palletteName TEXT, pa_ID INT)",
     "CREATE TABLE tblServersIP (ServerIP_ID INTEGER PRIMARY KEY, serverName TEXT, ipAddress TEXT, serverroleid INT)",
@@ -759,9 +761,8 @@ class TestFullMerge:
                "VALUES (1, 'Ambush', '3 goblins', 0, 't', 't')")
         # lighting: LED model + pattern, WLED server + pattern (Aurora at id 5
         # on the source, id 9 locally; Lava 3 -> 7)
-        x(src, "INSERT INTO tblLedTypeModel(modelName, ledJSON) VALUES ('strip60', '{}')")
-        x(src, "INSERT INTO tblScenePattern(scene_ID, ledTypeModel_ID, color, orderBy, outPin) "
-               "VALUES (1, 1, '[1,2,3]', 0, 2)")
+        x(src, "INSERT INTO tblScenePattern(scene_ID, patternType, params, orderBy) "
+               "VALUES (1, 'beam', '{\"color\": [1, 2, 3]}', 0)")
         x(src, "INSERT INTO tblEffect(effect_ID, effectName, ef_ID) VALUES (5, 'Aurora', 5)")
         x(src, "INSERT INTO tblPallette(pallette_ID, palletteName, pa_ID) VALUES (3, 'Lava', 3)")
         x(src, "INSERT INTO tblServersIP(serverName, ipAddress) VALUES ('wled1', '10.0.0.9')")
@@ -819,8 +820,8 @@ class TestFullMerge:
         # palette re-matched by name to the local catalog ids
         assert s['lighting'] == 2
         scene = q(env['live'], "SELECT scene_ID FROM tblScenes WHERE sceneName='Bridge'")[0][0]
-        model = q(env['live'], "SELECT ledTypeModel_ID FROM tblLedTypeModel WHERE modelName='strip60'")[0][0]
-        assert q(env['live'], "SELECT ledTypeModel_ID FROM tblScenePattern WHERE scene_ID=?", (scene,)) == [(model,)]
+        assert q(env['live'], "SELECT patternType, params FROM tblScenePattern WHERE scene_ID=?", (scene,)) \
+               == [('beam', json.dumps(led_patterns.coerce('beam', {'color': [1, 2, 3]})))]
         srv = q(env['live'], "SELECT ServerIP_ID FROM tblServersIP WHERE serverName='wled1'")[0][0]
         assert q(env['live'], "SELECT server_ID, effect, pallette FROM tblWledPattern WHERE scene_ID=?", (scene,)) \
                == [(srv, 9, 7)]
@@ -1180,7 +1181,7 @@ class TestMergeCoverage:
         sql.create_table()                      # raw-DDL tables
         import importlib
         for mod in ('campaigns', 'cronSchedule', 'genre', 'ledConfig',
-                    'ledTypeModel', 'mediaMetadata', 'music', 'musicScene',
+                    'mediaMetadata', 'music', 'musicScene',
                     'scenePattern', 'scenes', 'serverIP', 'serverRole',
                     'status', 'tblRollLog', 'tblTokenPositions', 'ttrpg',
                     'user', 'videoMedia', 'videoScene', 'wledPattern'):

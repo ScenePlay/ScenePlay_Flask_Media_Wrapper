@@ -4,7 +4,6 @@ from routes.main import main
 from routes.scenePattern_table import sp
 from routes.scenes_table import sn
 from routes.Utilities import ut
-from routes.ledtypemodel_table import ltm
 from routes.campaign_table import cp
 from routes.musicMedia_table import mu
 from routes.genre_table import ge
@@ -282,7 +281,7 @@ def inject_remote_led_status():
 # browser-extension import, and the keep-music-playing toggles.
 from routes._util import sceneplay_dm_guard, dm_only_sceneplay_enabled
 
-for _bp in (sp, ltm, cp, mu, ge, ip, sr, ms, vm, vs, wl, dls, lcf, cs):
+for _bp in (sp, cp, mu, ge, ip, sr, ms, vm, vs, wl, dls, lcf, cs):
     _bp.before_request(sceneplay_dm_guard)
 
 
@@ -338,7 +337,6 @@ app.register_blueprint(main)
 app.register_blueprint(sp)
 app.register_blueprint(sn)
 app.register_blueprint(ut)
-app.register_blueprint(ltm)
 app.register_blueprint(cp)
 app.register_blueprint(mu)
 app.register_blueprint(ge)

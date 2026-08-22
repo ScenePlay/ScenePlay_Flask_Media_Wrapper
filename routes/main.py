@@ -14,6 +14,7 @@ from remotes import *
 import relay_broadcaster
 from pathlib import Path
 from wLed.wledCommand import *
+import led_patterns
 from routes.wledPattern_table import getWledPatternBySceneID
 from flask import send_from_directory     
 import re
@@ -94,17 +95,6 @@ def mediameta(media_type, media_id):
     d['thumbnail'] = thumb_store.url(media_type, media_id) or d.get('thumbnail')
     return jsonify(d)
 
-
-def is_raspberry_pi() -> bool:
-    CPUINFO_PATH = Path("/proc/cpuinfo")
-    if not CPUINFO_PATH.exists():
-        return False
-    with open(CPUINFO_PATH) as file:
-        content = file.read()
-        if 'Raspberry Pi 5' in content:
-            #print('Raspberry Pi 5 LED not supported')
-            return False
-    return platform.machine() in('armv7l', 'armv6l', 'aarch64')
 
 @main.route('/api/server-info', methods=['GET'])
 def server_info():
@@ -297,18 +287,10 @@ def _activate_scene(id):
             apply_scene_audio(scene_id)
         except Exception as exc:
             print(f'OBS scene audio skipped: {exc}')
-    scnID = []
-    scnID.append(id)
-    scnPat = CRUD_tblScenePattern(scnID,"bySceneID")
-    #print(scnPat)
-    ledMdl = None
-    _scene_ID = []
-    _ledType_ID = []
-    if len(scnPat) > 0:
-        id_list = [str(item[2]) for item in scnPat]
-        ledTypestrIDS = ",".join(id_list)
-        ledMdl = CRUD_tblLEDTypeModel(ledTypestrIDS ,"R")
-        # #get all songs associated with scene
+    # RPiLED payload for this scene: rows are (scenePattern_ID, scene_ID,
+    # patternType, params, orderBy); no rows = lights off.
+    scnPat = CRUD_tblScenePattern([id], "bySceneID")
+    ledPattern = led_patterns.build_payload((r[2], r[3]) for r in scnPat)
     rows = get_MusicSceneSongs_BYSceneID(id)
     rowsVideo = get_VideoScene_BYSceneID(id)
     
@@ -364,29 +346,9 @@ def _activate_scene(id):
         # home WLED controllers via the relay
         relay_broadcaster.broadcast_wled(data)
 
-        if ledMdl is not None and len(ledMdl) > 0:
-                ledPattern = prepJsonRemote(ledMdl, scnPat)
-                ledPattern = ledPattern.replace("\"",'"')
-                ledPattern = json.dumps(str(ledPattern))
-                ledPattern = json.loads(ledPattern)
-                remoteSend(ledPattern)
-                relay_broadcaster.broadcast_led(ledPattern)
-                if is_raspberry_pi() == True:
-                    ledPattern = prepJsonRemote(ledMdl, scnPat, True)
-                    ledPattern = ledPattern.replace("\"",'"')
-                    ledPattern = json.dumps(str(ledPattern))
-                    ledPattern = json.loads(ledPattern)
-                    insert_LEDJSON(ledPattern)
-                    threaderLED()
-        else:
-            ledPattern = f'{{"patterns\": [{{"type": "solid", "color": [0,0,0]}}]}}'
-            ledPattern = json.dumps(str(ledPattern))
-            ledPattern = json.loads(ledPattern)
-            remoteSend(ledPattern)
-            relay_broadcaster.broadcast_led(ledPattern)
-            if is_raspberry_pi() == True:
-                insert_LEDJSON(ledPattern)
-                threaderLED()
+        # Local strip (Pi only), Remote-role boxes, and the relay all get the
+        # SAME payload; each applies its own hardware brightness cap.
+        dispatch_led(ledPattern)
 
         #added for the Kill Queue Command
         # if id == "-1":
@@ -422,22 +384,25 @@ _LED_CORS = {
 
 @main.route('/receive_led_patterns', methods=['POST', 'OPTIONS'])
 def receive_led_patterns():
+    """Another ScenePlay box (Remote role) or a remote player's portal page
+    pushing a lighting payload at THIS box's strip. Body: {"patterns": [...]}
+    in the registry vocabulary or the legacy one (led_patterns.normalize
+    accepts both). A box without a Pi strip acknowledges and does nothing."""
     if request.method == 'OPTIONS':   # CORS/PNA preflight from a portal page
         return ('', 204, _LED_CORS)
-    try:
-        json_data = json.dumps(request.get_json())
-        create_table()
-        #json_dataB = bytes(json_data, 'utf-8')
-        insert_LEDJSON(json_data)
-        threaderLED()
-        #x = threading.Thread(target=apply_patterns_from_json(json.loads(json_data))).start()
-        #apply_patterns_from_json(json.loads(json_data))
-        print("Message Received\r")
-
-        return jsonify({'message': 'LED patterns received and applied'})
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True)
+    patterns = body.get('patterns') if isinstance(body, dict) else None
+    if not isinstance(patterns, list):
+        return jsonify({'error': 'expected {"patterns": [...]}'}), 400
+    kept = [p for p in (led_patterns.normalize(x) for x in patterns) if p]
+    if patterns and not kept:
+        return jsonify({'error': 'no recognised pattern types'}), 400
+    payload = json.dumps({'patterns': kept}) if kept else led_patterns.OFF_PAYLOAD
+    if not is_raspberry_pi():
+        return jsonify({'message': 'LED patterns received; this box has no Pi strip'})
+    insert_LEDJSON(payload)
+    threaderLED()
+    return jsonify({'message': 'LED patterns received and applied'})
     
 @main.route('/api/nowplaying', methods=['GET'])
 def nowplaying():

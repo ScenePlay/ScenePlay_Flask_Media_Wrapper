@@ -488,8 +488,9 @@ def broadcast_map_update(bg_url, grid_cols, grid_rows, tokens, effects=None,
 def broadcast_led(led_pattern_json):
     """POST /api/v1/session/{id}/led — mirror the LAN LED push to remote
     players' home Pis (via the relay portal). Takes the same JSON string
-    remoteSend() takes: {"patterns": [...]}. Always the LAN variant (no
-    outPinID/brightness) — each remote Pi applies its own strip config."""
+    remoteSend() takes: {"patterns": [...]} in the led_patterns vocabulary.
+    Pattern brightness is the scene's creative level; each remote Pi applies
+    its own hardware cap (LED Config max brightness) on top."""
     cfg = _active()
     if not cfg:
         return

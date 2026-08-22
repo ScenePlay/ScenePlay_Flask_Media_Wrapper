@@ -6,7 +6,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models.campaigns import tblcampaigns
 from models.ledConfig import tblledconfig
-from models.ledTypeModel import tblledtypemodel
 from models.serverRole import tblserverrole
 from models.genre import lutgenre
 from models.status import lutstatus
@@ -101,31 +100,6 @@ def loadLedConfig():
     session.commit()
 
 
-def loadLedTypeModel():
-    """Top-up sync for the RPiLED pattern models: insert any DEFAULT model
-    missing from the live table (matched by modelName, case-insensitive).
-    Runs EVERY boot — pattern types added in updates reach existing installs
-    instead of only fresh databases; rows the user has edited or added are
-    never touched. The seed file's entries all carry the FULL field set
-    (type, color, cdiff, wait_ms, iterations, direction) so every pattern
-    passes the same information to led_Run / remotes / the relay."""
-    with open(baseDir + '/defaultData/tblLEDTypeModel.json') as file:
-        data = json.load(file)
-
-    existing = {(m.modelName or '').strip().lower()
-                for m in session.query(tblledtypemodel).all()}
-    added = 0
-    for item in data:
-        if (item['modelName'] or '').strip().lower() in existing:
-            continue
-        session.add(tblledtypemodel(
-            modelName=item['modelName'],
-            ledJSON=item['ledJSON']
-        ))
-        added += 1
-    if added:
-        session.commit()
-
 def loadServerRole():
 # Read the JSON file
     with open(baseDir + '/defaultData/tblServerRole.json') as file:
@@ -170,9 +144,6 @@ def defaultData():
     if query.count() == 0:
         loadLedConfig()
         
-    # No empty-table gate: loadLedTypeModel is a top-up (inserts only models
-    # missing by name), so updates deliver new pattern types to old installs.
-    loadLedTypeModel()
         
     query = session.query(tblserverrole)    
     if query.count() == 0:

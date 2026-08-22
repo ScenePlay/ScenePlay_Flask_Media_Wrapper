@@ -105,20 +105,3 @@ def ledconfigdelrow():
     db.session.commit()
     return 'tblledconfig row ' + str(data[primeKey]) + ' has been deleted'
 
-
-# @lcf.route('/api/ledtypemodeladdrow')
-# def ledtypemodeladdrow():
-#     row = [' ','{"type": "solid","color": [0,0,0]}']
-#     CRUD_tblLEDTypeModel(row,"C")
-#     return 'tblledtypemodel has a new row'
-
-
-# @lcf.route('/api/ledtypemodeldelrow', methods=['POST'])
-# def ledtypemodeldelrow():
-#     data = request.get_json()
-#     print(data)
-#     if primeKey not in data:
-#         abort(400)
-#     row = [data[primeKey]]
-#     CRUD_tblLEDTypeModel(row,"D")
-#     return 'tblledtypemodel row ' + data[primeKey] + ' has been deleted'
