@@ -237,6 +237,98 @@ class TestRoutines:
         led_Run.FUNCS[ptype](strip, p)
         assert px.shows > 0
 
+    def test_wave_positions_are_seamless_and_flippable(self):
+        xs = led_Run.wave_positions(9)
+        assert xs[0] == xs[-1] == 0.0 and xs[4] == 1.0            # both ends = sea, middle = shore
+        assert xs == xs[::-1]                                      # mirrored halves, no seam
+        assert led_Run.wave_positions(9, -1) == [1.0 - x for x in xs]
+        assert led_Run.wave_positions(1) == [1.0]
+
+    def test_wave_crash_breaks_on_the_far_side(self):
+        import random
+        random.seed(7)
+        strip, px, clock = make_strip(n=31)
+        p = reg.normalize({'type': 'wave_crash', 'duration': 12, 'speed': 6000})
+        frames = []
+        orig_show = px.show
+        def show():
+            orig_show()
+            frames.append(list(px.buf))
+        px.show = show
+        strip.begin(p)
+        led_Run.wave_crash(strip, p)
+        foam = lambda c: min(c)                  # whiteness = the weakest channel
+        xs = led_Run.wave_positions(31)
+        shore_side = [i for i, x in enumerate(xs) if x >= 0.6]
+        peak_shore = max(foam(f[i]) for f in frames for i in shore_side)
+        peak_seam = max(foam(f[0]) for f in frames)
+        assert peak_shore > 150 and peak_seam < 60   # foam breaks by the shore, never at the seam
+        assert all(f[i] == f[30 - i] for f in frames[:50] for i in (0, 3, 8))  # symmetric halves (pre-fizz)
+
+    def test_perimeter_distances_geometry(self):
+        import math
+        rs = led_Run.perimeter_distances(40, ratio=1.5, seam_at_corner=True)
+        assert rs[0] == pytest.approx(1.0)                         # seam = a corner, farthest
+        assert min(rs) == pytest.approx(0.5 / math.hypot(0.75, 0.5), abs=0.02)   # long-side midpoint
+        assert rs == pytest.approx([rs[(i + 20) % 40] for i in range(40)], abs=1e-9)   # opposite points match
+        side = led_Run.perimeter_distances(40, ratio=1.5, seam_at_corner=False)
+        assert side[0] == pytest.approx(min(side))                 # seam mid-side = nearest
+        sq = led_Run.perimeter_distances(8, ratio=1.0)
+        assert sq[0] == pytest.approx(1.0) and sq[1] == pytest.approx(sq[3])
+        assert led_Run.perimeter_distances(0) == []
+
+    def test_raindrop_rings_reach_near_sides_before_corners(self):
+        import random
+        random.seed(11)
+        strip, px, clock = make_strip(n=40)
+        p = reg.normalize({'type': 'raindrop', 'duration': 6, 'speed': 100000})   # one drop
+        frames = []
+        orig_show = px.show
+        def show():
+            orig_show()
+            frames.append(list(px.buf))
+        px.show = show
+        strip.begin(p)
+        led_Run.raindrop(strip, p)
+        rs = led_Run.perimeter_distances(40)
+        near, corner = rs.index(min(rs)), 0
+        def first_glint(i):
+            for k, f in enumerate(frames):
+                if min(f[i]) > 60:        # whiteness from the glint color
+                    return k
+            return None
+        assert first_glint(near) is not None and first_glint(corner) is not None
+        assert first_glint(near) < first_glint(corner)
+        assert px.buf == [(0, 0, 0)] * 40        # dark once the duration ends
+
+    def test_fire_color_ramps_ember_flame_white(self):
+        ember, flame = [140, 25, 0], [255, 130, 0]
+        assert led_Run.fire_color(ember, flame, 0.0) == (14, 2, 0)
+        assert led_Run.fire_color(ember, flame, 0.45) == (140, 25, 0)
+        assert led_Run.fire_color(ember, flame, 0.85) == (255, 130, 0)
+        assert led_Run.fire_color(ember, flame, 1.0) == (255, 255, 160)   # white-hot
+        assert led_Run.fire_color(ember, flame, 7.0) == (255, 255, 160)   # clamped
+
+    def test_bonfire_is_warm_never_dark_and_flickers(self):
+        import random
+        random.seed(3)
+        strip, px, clock = make_strip(n=40)
+        p = reg.normalize({'type': 'bonfire', 'duration': 5})
+        frames = []
+        orig_show = px.show
+        def show():
+            orig_show()
+            frames.append(list(px.buf))
+        px.show = show
+        strip.begin(p)
+        led_Run.bonfire(strip, p)
+        body = frames[10:-1]                        # skip warm-up; last frame is the off()
+        assert all(r >= g >= b for f in body for (r, g, b) in f)        # always warm
+        assert all(sum(c) > 20 for f in body for c in f)                # embers never go out
+        totals = [sum(sum(c) for c in f) for f in body]
+        assert max(totals) > min(totals) * 1.15                         # it flickers
+        assert any(min(c) > 120 for f in body for c in f)               # a white-hot spark showed up
+
     def test_solid_holds_color(self):
         strip, px, clock = make_strip(n=5)
         p = reg.normalize({'type': 'solid', 'color': [10, 20, 30], 'duration': 1})

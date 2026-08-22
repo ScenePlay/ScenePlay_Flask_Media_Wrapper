@@ -782,6 +782,250 @@ def ember_rise(s, p):
     s.off()
 
 
+def wave_positions(n, direction=1):
+    """Where each pixel sits between open sea (0.0) and shore (1.0).
+    The strip circles the table with its ends meeting, so the seam (both
+    ends) is the sea and the strip's midpoint is the shore: a wave leaves
+    the seam along both halves at once and breaks on the far side with no
+    visible join. direction -1 swaps sea and shore."""
+    if n <= 1:
+        return [1.0] * n
+    mid = (n - 1) / 2.0
+    xs = [1.0 - abs(i - mid) / mid for i in range(n)]
+    return [1.0 - x for x in xs] if direction < 0 else xs
+
+
+def wave_crash(s, p):
+    """One wave at a time: approach (swell rises and steepens as it travels
+    toward the break point), crash (flash + foam burst), wash (foam sheet
+    runs up the beach), recede (it drains back, leaving dark wet sand),
+    lull (dim water with ripples). Wave size and spacing vary naturally
+    around 'speed' (ms between waves); about one in four is a bigger set
+    wave. Pixels past the break point are the beach and stay dark between
+    waves."""
+    water, foam = p['color'], p['color2']
+    FRAME = 0.03
+    BREAK_X = 0.72                   # where the crest crashes (0 sea … 1 shore)
+    period = max(2.0, float(p['speed']) / 1000.0)
+    xs = wave_positions(s.n, p['direction'])
+    ripple = 0.0
+
+    def paint(level, fmix):
+        level = _clamp(level, 0.0, 1.0)
+        fmix = _clamp(fmix, 0.0, 1.0)
+        return _lerp(_scale(water, level), _scale(foam, level), fmix)
+
+    while s.running():
+        size = 1.0 if random.random() < 0.25 else random.uniform(0.55, 0.9)
+        approach = 3.2 * (0.8 + 0.4 * size)
+        crash = 0.5
+        wash = 1.4 + 0.8 * size
+        recede = 1.8 + 0.6 * size
+        lull = max(0.6, period * random.uniform(0.65, 1.35) - (approach + crash + wash + recede))
+        total = approach + crash + wash + recede + lull
+        t = 0.0
+        while t < total and s.running():
+            ripple += 0.05
+            crest_pos = crest_w = crest_amp = foam_face = 0.0
+            foam_back = foam_front = foam_amp = flash = wet = 0.0
+            if t < approach:
+                u = t / approach
+                crest_pos = BREAK_X * (u ** 1.25)          # accelerates toward the break
+                crest_w = 0.24 - 0.12 * u                   # steepens
+                crest_amp = size * (0.3 + 0.7 * u)
+                foam_face = max(0.0, (u - 0.55) / 0.45) * 0.85
+            elif t < approach + crash:
+                u = (t - approach) / crash
+                crest_pos, crest_w, crest_amp = BREAK_X, 0.12, size * (1.0 - u)
+                foam_back, foam_front = BREAK_X - 0.15, BREAK_X + (1.0 - BREAK_X) * 0.35 * u
+                foam_amp = size * (0.7 + 0.3 * u)
+                flash = size * (1.0 - u) ** 2
+            elif t < approach + crash + wash:
+                u = (t - approach - crash) / wash
+                foam_back = BREAK_X - 0.15 + 0.30 * u
+                foam_front = BREAK_X + (1.0 - BREAK_X) * (0.35 + 0.65 * (u ** 0.7))
+                foam_amp = size * (1.0 - 0.45 * u)
+                wet = 0.5 * u
+            elif t < approach + crash + wash + recede:
+                u = (t - approach - crash - wash) / recede
+                foam_front = 1.0 - 0.55 * u
+                foam_back = BREAK_X + 0.15 - 0.25 * u
+                foam_amp = size * 0.55 * (1.0 - u)
+                wet = 0.5 * (1.0 - u)
+            for i, x in enumerate(xs):
+                level = 0.18 + 0.06 * math.sin(ripple + x * 9.0)
+                if x > BREAK_X:                             # the beach: dark unless wet
+                    level = level * max(0.0, 1.0 - (x - BREAK_X) / (1.0 - BREAK_X)) + wet * 0.25
+                fmix = 0.0
+                if crest_amp > 0.0:
+                    d = (x - crest_pos) / crest_w
+                    g = math.exp(-d * d)
+                    level += crest_amp * g
+                    fmix = max(fmix, foam_face * g * (1.0 if x >= crest_pos else 0.35))
+                if foam_amp > 0.0 and foam_back <= x <= foam_front:
+                    edge = 1.0 - (foam_front - x) / max(1e-3, foam_front - foam_back)
+                    f = foam_amp * (0.35 + 0.65 * edge)
+                    if random.random() < 0.2:
+                        f *= 1.35                            # fizz
+                    level = max(level, f)
+                    fmix = max(fmix, f)
+                if flash > 0.0:                             # the crash lights the shore side only
+                    local = flash * _clamp((x - 0.4) / 0.32, 0.0, 1.0)
+                    level = max(level, local)
+                    fmix = max(fmix, local)
+                s[i] = paint(level, fmix)
+            s.show()
+            s.sleep(FRAME)
+            t += FRAME
+    s.off()
+
+
+def perimeter_distances(n, ratio=1.5, seam_at_corner=True):
+    """Distance of each pixel from the table's centre, 0–1 of the corner
+    distance, for a strip that runs around a rectangle `ratio` times as long
+    as it is wide. With the seam at a corner pixel 0 IS that corner; with the
+    seam mid-side pixel 0 is the middle of a long side. Long-side midpoints
+    are nearest the centre, then short-side midpoints, corners farthest."""
+    if n <= 0:
+        return []
+    L, W = max(1.0, float(ratio)), 1.0
+    P = 2 * (L + W)
+    rmax = math.hypot(L / 2, W / 2)
+    offset = 0.0 if seam_at_corner else L / 2
+    out = []
+    for i in range(n):
+        d = (offset + P * i / n) % P
+        if d < L:
+            x, y = -L / 2 + d, -W / 2
+        elif d < L + W:
+            x, y = L / 2, -W / 2 + (d - L)
+        elif d < 2 * L + W:
+            x, y = L / 2 - (d - L - W), W / 2
+        else:
+            x, y = -L / 2, W / 2 - (d - 2 * L - W)
+        out.append(math.hypot(x, y) / rmax)
+    return out
+
+
+def raindrop(s, p):
+    """Rings from drops at the table's centre. Each drop is a decaying wave
+    packet (a few crests and troughs) expanding at a fixed speed; a pixel
+    shows it when the packet's radius passes its own distance from the
+    centre, so the rings roll through the strip nearest-first. Drops come
+    at random around 'speed' ms and may overlap; between them the water
+    sits dim and still with a faint shimmer."""
+    water, glint = p['color'], p['color2']
+    FRAME = 0.03
+    RING_SPEED = 0.45      # corner-distances per second (~2.2 s centre → corner)
+    WAVELENGTH = 0.26      # crest-to-crest, in corner-distances
+    SIGMA = 1.0 * WAVELENGTH
+    DECAY = 6.0            # seconds for a packet to fade to ~37 %
+    period = max(0.5, float(p['speed']) / 1000.0)
+    rs = perimeter_distances(s.n, p['ratio'], int(p['seam']) == 1)
+    drops = []             # impact times
+    t = 0.0
+    next_drop = random.uniform(0.2, 0.8)
+    shimmer = 0.0
+    while s.running():
+        if t >= next_drop:
+            drops.append(t)
+            next_drop = t + period * random.uniform(0.5, 1.5)
+        shimmer += 0.03
+        packets = []
+        keep = []
+        for t0 in drops:
+            age = t - t0
+            radius = RING_SPEED * age
+            amp = math.exp(-age / DECAY)
+            if amp > 0.02 and radius - 3 * SIGMA < 1.05:
+                packets.append((radius, amp))
+                keep.append(t0)
+        drops = keep
+        for i, r in enumerate(rs):
+            base = 0.16 + 0.03 * math.sin(shimmer + r * 7.0 + i * 0.3)
+            disp = 0.0
+            for radius, amp in packets:
+                d = r - radius
+                env = math.exp(-(d / SIGMA) ** 2)
+                if env < 0.01:
+                    continue
+                disp += amp * env * math.cos(2 * math.pi * d / WAVELENGTH) / (max(r, 0.3) ** 0.3)
+            disp = _clamp(1.4 * disp, -1.0, 1.0)
+            level = _clamp(base + 0.8 * disp, 0.03, 1.0)
+            fmix = _clamp(disp, 0.0, 1.0)                 # crests glint, troughs go dark
+            s[i] = _lerp(_scale(water, level), _scale(glint, level), fmix)
+        s.show()
+        s.sleep(FRAME)
+        t += FRAME
+    s.off()
+
+
+def fire_color(ember, flame, h):
+    """Heat 0–1 → color: near-black ember glow → ember → flame → white-hot."""
+    hot = tuple(min(255, c + 160) for c in flame)
+    h = _clamp(h, 0.0, 1.0)
+    if h < 0.45:
+        return _lerp(_scale(ember, 0.1), ember, h / 0.45)
+    if h < 0.85:
+        return _lerp(ember, flame, (h - 0.45) / 0.40)
+    return _lerp(flame, hot, (h - 0.85) / 0.15)
+
+
+def bonfire(s, p):
+    """Per-pixel heat that cools and diffuses around the ring (the strip's
+    ends meet, so heat wraps across the seam), fed by random tongues of
+    flame (density), shaped by slow gusts, with sparks that flash white and
+    cool away. Heat maps to ember → flame → white-hot through fire_color."""
+    ember, flame = p['color'], p['color2']
+    n = s.n
+    frame_s = max(0.005, float(p['speed']) / 1000.0)
+    activity = float(p['density'])
+    spark_rate = float(p['sparks'])
+    heat = [0.3] * n
+    sparks = {}            # pixel -> flash life (1.0 → 0), independent of the gust
+    gust, gust_target, gust_timer = 1.0, 1.0, 0.0
+    while s.running():
+        # gusts: drift toward a new random strength every 1–3 s
+        gust_timer -= frame_s
+        if gust_timer <= 0:
+            gust_target = random.uniform(0.6, 1.1)
+            gust_timer = random.uniform(1.0, 3.0)
+        gust += (gust_target - gust) * 0.04
+        # cool + diffuse around the ring
+        new = []
+        for i in range(n):
+            v = heat[i] * 0.6 + heat[i - 1] * 0.2 + heat[(i + 1) % n] * 0.2
+            v -= random.uniform(0.0, 0.07)
+            new.append(max(0.2 + random.uniform(-0.03, 0.03), v))   # embers never go out
+        heat = new
+        # tongues of flame: a warm bump a few pixels wide
+        if n > 0 and random.random() < activity:
+            centre = random.randrange(n)
+            width = random.uniform(1.5, 5.0)
+            amp = random.uniform(0.45, 1.0)
+            for off in range(-8, 9):
+                j = (centre + off) % n
+                heat[j] = min(1.0, heat[j] + amp * math.exp(-(off / width) ** 2))
+        # sparks: a pixel flashes white-hot for a few frames, leaving heat behind
+        if n > 0 and random.random() < spark_rate * frame_s:
+            j = random.randrange(n)
+            sparks[j] = 1.0
+            heat[j] = 1.0
+        for j in list(sparks):
+            sparks[j] *= 0.55
+            if sparks[j] < 0.05:
+                del sparks[j]
+        for i in range(n):
+            c = fire_color(ember, flame, heat[i] * gust)
+            life = sparks.get(i)
+            if life:
+                c = _lerp(c, (255, 255, 230), life)
+            s[i] = c
+        s.show()
+        s.sleep(frame_s)
+    s.off()
+
+
 def joyful_celebration(s, p):
     colors = [(255, 0, 0), (125, 125, 0), (255, 255, 0), (0, 255, 0), (0, 0, 255),
               (75, 0, 130), (238, 130, 238)]
@@ -826,7 +1070,10 @@ FUNCS = {
     'fireworks_finale': fireworks_finale,
     'shimmer_sine_wave': shimmer_sine_wave,
     'shimmer_effect': shimmer_effect,
+    'wave_crash': wave_crash,
+    'raindrop': raindrop,
     'ember_rise': ember_rise,
+    'bonfire': bonfire,
     'serenity_flow': serenity_flow,
     'tranquil_drift': tranquil_drift,
     'color_chase': color_chase,

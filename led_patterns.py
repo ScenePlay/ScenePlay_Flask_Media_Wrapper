@@ -16,6 +16,7 @@ Vocabulary (every pattern lists the subset it uses; see PATTERNS):
   speed            ms between steps — lower is faster
   direction        1 forward / -1 reverse
   trail, sparks, density   pattern-specific tunables
+  ratio, seam      table geometry for perimeter-aware patterns (Raindrop)
   brightness       0–1 CREATIVE level; each box multiplies it by its own
                    hardware Max brightness (tblLEDConfig) — see led_Run.Strip
   duration         seconds; 0 = run until the next scene
@@ -71,6 +72,15 @@ PARAM_DEFS = {
     'density': {
         'label': 'Density', 'kind': 'float', 'min': 0.01, 'max': 1.0, 'step': 0.01,
         'default': 0.25, 'hint': 'Chance per frame that a new particle spawns',
+    },
+    'ratio': {
+        'label': 'Table length ÷ width', 'kind': 'float', 'min': 1.0, 'max': 4.0, 'step': 0.1,
+        'default': 1.5, 'hint': '1 = square, 1.5 = 3:2, 2 = twice as long as wide',
+    },
+    'seam': {
+        'label': 'Strip starts at', 'kind': 'choice', 'default': 1,
+        'choices': [[1, 'A corner'], [0, 'The middle of a side']],
+        'hint': 'Where the strip begins and ends on the table',
     },
     'brightness': {
         'label': 'Brightness', 'kind': 'float', 'min': 0.0, 'max': 1.0, 'step': 0.05,
@@ -174,6 +184,26 @@ PATTERNS = OrderedDict((p['type'], p) for p in [
        ['color', 'color2', 'speed', 'direction'],
        color={'label': 'Wave', 'default': [0, 60, 180]},
        color2={'label': 'Glint', 'default': [200, 220, 255]}),
+    _P('wave_crash', 'Wave Crash',
+       'A swell rolls in from open water, steepens, crashes on the shore, and the foam '
+       'washes up and drains back. Built for a strip that circles the table: the seam '
+       'where the ends meet is the open sea, the far side is the shore.',
+       ['color', 'color2', 'speed', 'direction'],
+       color={'label': 'Water', 'default': [0, 70, 140], 'hint': 'Deep-water color'},
+       color2={'label': 'Foam', 'default': [235, 245, 255], 'hint': 'Crest and foam color'},
+       speed={'label': 'Time between waves', 'default': 9000,
+              'hint': 'Average ms from one wave to the next; waves vary naturally around it'},
+       direction={'label': 'Shore', 'choices': [[1, 'Far side (seam is open sea)'],
+                                                [-1, 'At the seam (far side is open sea)']]}),
+    _P('raindrop', 'Raindrop',
+       'A drop falls in the centre of the table; its rings spread out and roll through '
+       'the strip — the nearest sides first, the corners last — then the water settles. '
+       'Drops come at random around the tempo and can overlap.',
+       ['color', 'color2', 'speed', 'ratio', 'seam'],
+       color={'label': 'Water', 'default': [0, 60, 120], 'hint': 'Still-water color'},
+       color2={'label': 'Ring glint', 'default': [180, 230, 255], 'hint': 'Highlight on each ring crest'},
+       speed={'label': 'Time between drops', 'default': 4000,
+              'hint': 'Average ms between drops; randomised'}),
     _P('shimmer_effect', 'Embers Breathing',
        'Every pixel breathes between two colors at its own pace.',
        ['color', 'color2', 'speed', 'direction'],
@@ -186,6 +216,15 @@ PATTERNS = OrderedDict((p['type'], p) for p in [
        color={'label': 'Cool glow', 'default': [180, 40, 0]},
        color2={'label': 'Hot core', 'default': [255, 200, 60]},
        density={'label': 'Spawn rate', 'default': 0.25}),
+    _P('bonfire', 'Bonfire',
+       'A fire in the middle of the table: warm embers all the way round, tongues of flame '
+       'flaring up and dying back, gusts that swell and settle, and the odd spark popping white.',
+       ['color', 'color2', 'speed', 'density', 'sparks'],
+       color={'label': 'Embers', 'default': [140, 25, 0], 'hint': 'The glow between flames'},
+       color2={'label': 'Flames', 'default': [255, 130, 0], 'hint': 'Flame color; the hottest spots go white'},
+       speed={'default': 40, 'hint': 'Frame delay — lower flickers faster'},
+       density={'label': 'Flame activity', 'default': 0.35, 'hint': 'How often new tongues of flame flare up'},
+       sparks={'label': 'Sparks per second', 'default': 4, 'min': 0, 'max': 30}),
     _P('serenity_flow', 'Serenity Flow',
        'Light blooms from darkness between two colors, holds, and fades away again.',
        ['color', 'color2', 'speed', 'direction'],
