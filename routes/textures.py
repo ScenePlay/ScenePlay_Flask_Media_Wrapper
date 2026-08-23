@@ -140,13 +140,22 @@ def _save_texture_image(raw, orig_ext):
     return filename
 
 
-def _add_texture(raw, orig_ext, form):
-    """Shared by upload and clipboard paste. Returns (payload, status)."""
+def _validate_texture_name(form):
+    """(name, error) — the slug rules and the collision check, shared by the
+    save paths and the AI flow (which checks BEFORE spending a generation)."""
     name = str(form.get('name', '')).strip().lower().replace(' ', '_')
     if not SLUG_RE.match(name):
-        return {'ok': False, 'error': 'name must be 1-64 chars: a-z 0-9 _ -'}, 400
+        return name, 'name must be 1-64 chars: a-z 0-9 _ -'
     if name in _existing_names():
-        return {'ok': False, 'error': f'a texture named "{name}" already exists'}, 400
+        return name, f'a texture named "{name}" already exists'
+    return name, None
+
+
+def _add_texture(raw, orig_ext, form):
+    """Shared by upload and clipboard paste. Returns (payload, status)."""
+    name, err = _validate_texture_name(form)
+    if err:
+        return {'ok': False, 'error': err}, 400
     category = str(form.get('category', 'other')).strip().lower()
     if category not in CATEGORIES:
         category = 'other'

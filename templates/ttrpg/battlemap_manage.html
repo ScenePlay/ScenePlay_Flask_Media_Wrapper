@@ -629,6 +629,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='scripts/floorplan_prompt.js') }}"></script>
 <script src="{{ static_v('scripts/paste_image.js') }}"></script>
+<script src="{{ static_v('scripts/ai_generate.js') }}"></script>
 <script src="{{ static_v('scripts/texture_picker.js') }}"></script>
 <script>
 // ── Per-card DM notes (read/edit/add/delete) ─────────────────────────────────
@@ -1568,8 +1569,12 @@ function aiGenerateArt(btn) {
     _renderSchematicPreview();
     if (_mapPromptType === 'live') { _aiStartVideo(text, btn); return; }
     _aiArtMsg('', false);
-    _aiBusy(btn, '✨ Painting… (can take a minute)');
-    fetch('/ttrpg/ai/map-art/' + _activeMapId, {
+    const mapId = _activeMapId;
+    const busy = () => _aiBusy(btn, '✨ Painting… (can take a minute)');
+    busy();
+    // Generate → preview (use / regenerate / discard) → only an ACCEPTED
+    // image is stored, through the same bg-paste path the clipboard uses.
+    const generate = () => fetch('/ttrpg/ai/map-art/' + mapId, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt_text: text,
@@ -1577,14 +1582,25 @@ function aiGenerateArt(btn) {
         schematic_png_b64: _fpSchematicCanvas
           ? _fpSchematicCanvas.toDataURL('image/png').split(',')[1] : null,
       }),
-    }).then(r => r.json())
-      .then(d => {
-        _aiDone(btn);
-        if (!d.ok) { _aiArtMsg('Gemini: ' + (d.error || 'generation failed'), true); return; }
-        _applyBgUpdate(d);
-        _aiArtMsg('✨ Background set.', false);
-      })
-      .catch(() => { _aiDone(btn); _aiArtMsg('Gemini request failed (network).', true); });
+    }).then(r => r.json()).then(d => { _aiDone(btn); return aiResponseToBlob(d); });
+    aiImageWithPreview(generate, {
+      title: 'Map background preview', useLabel: 'Use as background',
+      note: 'The current background is untouched until you accept this one.',
+      onRegenerate: busy,
+    }).then(blob => {
+      if (!blob) { _aiArtMsg('Discarded — background unchanged.', false); return; }
+      const fd = new FormData();
+      fd.append('ext', ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg'));
+      fd.append('bg_image', blob, 'gemini');
+      _aiArtMsg('Saving…', false);
+      return fetch('/ttrpg/battlemap/' + mapId + '/bg-paste', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ok) { _aiArtMsg('Save failed: ' + (d.error || 'rejected'), true); return; }
+          _applyBgUpdate(d);
+          _aiArtMsg('✨ Background set.', false);
+        });
+    }).catch(e => { _aiDone(btn); _aiArtMsg('Gemini: ' + (e.message || 'request failed (network)'), true); });
   };
   if (_FP_INFO[_activeMapId] && !_fpPlanCache[_activeMapId]) {
     _fpFetchPlan(_activeMapId).then(go);

@@ -2066,9 +2066,14 @@ function aiGeneratePortrait(btn) {
   btn.disabled = true;
   btn.textContent = '✨ Painting…';
   status.textContent = '';
-  aiImageBlob(prompt)
-    .then(blob => { _uploadPortraitBlob(blob); })
-    .then(() => { status.textContent = '✨ Portrait generated and saved.'; })
+  aiImageWithPreview(() => aiImageBlob(prompt),
+                     { title: 'Portrait preview', useLabel: 'Use as portrait',
+                       onRegenerate: () => { status.textContent = '✨ Painting another…'; } })
+    .then(blob => {
+      if (!blob) { status.textContent = 'Discarded — nothing saved.'; return; }
+      _uploadPortraitBlob(blob);
+      status.textContent = '✨ Portrait saved.';
+    })
     .catch(e => {
       status.textContent = 'Gemini: ' + e.message;
       status.style.color = 'var(--bs-danger, #dc3545)';

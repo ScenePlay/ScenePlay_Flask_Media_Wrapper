@@ -243,8 +243,11 @@ function aiGenerateNewPortrait(btn) {
   btn.textContent = '✨ Painting…';
   status.textContent = '';
   status.style.color = '';
-  aiImageBlob(prompt)
+  aiImageWithPreview(() => aiImageBlob(prompt),
+                     { title: 'Portrait preview', useLabel: 'Use as portrait',
+                       onRegenerate: () => { status.textContent = '✨ Painting another…'; } })
     .then(blob => {
+      if (!blob) { status.textContent = 'Discarded — nothing attached.'; return; }
       aiBlobToFileInput(blob, input, 'portrait');
       status.textContent =
         '✨ Portrait attached — it saves when you create the character.';

@@ -271,30 +271,30 @@ window.TexturePicker = (function () {
       .catch(() => { status.textContent = 'Copy the text below manually.'; });
   }
 
+  // Save a blob into the library with the AI tab's name/category/tile —
+  // the clipboard paste and the one-click generate both end here.
+  function texSave(blob, status) {
+    const fd = new FormData();
+    fd.append('name', root.querySelector('#texai-name').value);
+    fd.append('category', root.querySelector('#texai-cat').value);
+    fd.append('tile_ft', root.querySelector('#texai-tile').value);
+    fd.append('source', 'ai');
+    fd.append('ext', ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg'));
+    fd.append('image', blob, 'pasted');
+    status.textContent = 'Saving…';
+    return fetch('/ttrpg/textures/paste', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { status.textContent = d.error || 'Rejected'; return; }
+        status.textContent = '✓ Added "' + d.name + '"';
+        refresh().then(() => showTab('lib'));
+      })
+      .catch(() => { status.textContent = 'Save failed (network)'; });
+  }
+
   function pasteAiResult() {
     const status = root.querySelector('#texai-status');
-    const meta = () => {
-      const fd = new FormData();
-      fd.append('name', root.querySelector('#texai-name').value);
-      fd.append('category', root.querySelector('#texai-cat').value);
-      fd.append('tile_ft', root.querySelector('#texai-tile').value);
-      fd.append('source', 'ai');
-      return fd;
-    };
-    const send = blob => {
-      const fd = meta();
-      fd.append('ext', ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg'));
-      fd.append('image', blob, 'pasted');
-      status.textContent = 'Saving…';
-      fetch('/ttrpg/textures/paste', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(d => {
-          if (!d.ok) { status.textContent = d.error || 'Rejected'; return; }
-          status.textContent = '✓ Added "' + d.name + '"';
-          refresh().then(() => showTab('lib'));
-        })
-        .catch(() => { status.textContent = 'Save failed (network)'; });
-    };
+    const send = blob => texSave(blob, status);
     if (!root.querySelector('#texai-name').value.trim()) {
       status.textContent = 'Give it a name first.';
       return;
@@ -313,8 +313,9 @@ window.TexturePicker = (function () {
     }
   }
 
-  // One-click generation: same prompt as the copy flow, but Gemini renders
-  // it server-side and the result lands straight in the library.
+  // One-click generation: same prompt as the copy flow, rendered server-side
+  // by Gemini, PREVIEWED (use / regenerate / discard), and only then saved
+  // through the same paste path as the clipboard flow.
   function aiGenerate() {
     const status = root.querySelector('#texai-status');
     const btn = root.querySelector('#texai-generate');
@@ -323,10 +324,11 @@ window.TexturePicker = (function () {
       return;
     }
     const orig = btn.innerHTML;
-    btn.disabled = true;
-    btn.textContent = '✨ Generating…';
+    const busy = () => { btn.disabled = true; btn.textContent = '✨ Generating…'; status.textContent = ''; };
+    const done = () => { btn.disabled = false; btn.innerHTML = orig; };
+    busy();
     root.querySelector('#texai-prompt').value = aiPromptText();
-    fetch('/ttrpg/ai/texture-generate', {
+    const generate = () => fetch('/ttrpg/ai/texture-generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt_text: aiPromptText(),
@@ -334,17 +336,15 @@ window.TexturePicker = (function () {
         category: root.querySelector('#texai-cat').value,
         tile_ft: root.querySelector('#texai-tile').value,
       }),
-    }).then(r => r.json())
-      .then(d => {
-        btn.disabled = false; btn.innerHTML = orig;
-        if (!d.ok) { status.textContent = d.error || 'Generation failed'; return; }
-        status.textContent = '✓ Added "' + d.name + '"';
-        refresh().then(() => showTab('lib'));
-      })
-      .catch(() => {
-        btn.disabled = false; btn.innerHTML = orig;
-        status.textContent = 'Gemini request failed (network).';
-      });
+    }).then(r => r.json()).then(d => { done(); return aiResponseToBlob(d); });
+    aiImageWithPreview(generate, {
+      title: 'Texture preview', useLabel: 'Add to library',
+      note: 'Seamless tile preview — nothing is added to the library until you accept it.',
+      onRegenerate: busy,
+    }).then(blob => {
+      if (!blob) { status.textContent = 'Discarded — nothing added.'; return; }
+      return texSave(blob, status);
+    }).catch(e => { done(); status.textContent = 'Gemini: ' + (e.message || 'request failed'); });
   }
 
   function armCtrlV(send, status) {

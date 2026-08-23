@@ -198,6 +198,37 @@
     user-select: none;
   }
   .fx-panel-header:active { cursor: grabbing; }
+  /* Texture picker: the real <select> is hidden, a button with a thumbnail
+     stands in; the menu is body-level and fixed so the scrolling panel
+     can't clip it. */
+  select.fp-tex-select.fp-tex-hidden { display: none; }
+  .fp-tex-btn {
+    display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
+    text-align: left; cursor: pointer; width: auto;
+  }
+  .fp-tex-thumb {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 4px;
+    background-size: cover; background-position: center;
+    border: 1px solid rgba(0,0,0,.35);
+  }
+  .fp-tex-thumb.fp-tex-none {
+    background: repeating-linear-gradient(45deg, #888 0 3px, #bbb 3px 6px);
+    opacity: .55;
+  }
+  .fp-tex-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fp-tex-menu {
+    position: fixed; z-index: 500; width: 236px; max-height: 260px; overflow-y: auto;
+    background: var(--ttrpg-primary); color: var(--ttrpg-text);
+    border: 1px solid var(--ttrpg-accent); border-radius: 6px; padding: 4px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.6); font-size: .8rem;
+  }
+  .fp-tex-cat { padding: 6px 6px 2px; font-size: .68rem; letter-spacing: .05em; text-transform: uppercase; opacity: .65; }
+  .fp-tex-row {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 6px;
+    background: none; border: 0; border-radius: 4px; color: inherit; text-align: left; cursor: pointer;
+  }
+  .fp-tex-row:hover, .fp-tex-row.active { background: color-mix(in srgb, var(--ttrpg-accent) 25%, transparent); }
+  .fp-tex-row .fp-tex-thumb { width: 30px; height: 30px; }
   .fx-close-btn {
     background: none;
     border: none;
@@ -477,6 +508,9 @@
               title="Empty the roll feed for everyone — this map, every player's map and the stream overlay">
         &#128465; Clear Rolls</button>
       {% endif %}
+      <!-- Hidden by battlemap.js where the Fullscreen API is unsupported (iPhone) -->
+      <button id="fullscreen-btn" class="btn btn-sm btn-outline-secondary"
+              onclick="toggleFullscreen()" title="Full screen">&#9974; Full screen</button>
 
       <!-- SFX control — docked in the top bar so it stays out of the map -->
       <div id="sfx-ctrl" style="display:inline-flex;align-items:center;gap:6px;
@@ -691,11 +725,6 @@
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.5rem;font-weight:900;line-height:1;cursor:pointer;">&minus;</button>
         <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
-        <!-- Hidden by battlemap.js where the Fullscreen API is unsupported (iPhone) -->
-        <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Full screen"
-                style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
-                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
-                       font-size:1.3rem;line-height:1;cursor:pointer;">&#9974;</button>
         {% if bm3d_available %}
         <button id="bm3d-btn" onclick="enter3d()"
                 title="3D mode — first-person view of this map from a token's position"
@@ -1206,7 +1235,7 @@
     <button id="fp-tool-door" class="btn btn-sm btn-outline-secondary flex-grow-1"
             onclick="BMFP.setTool('door')" title="Click a wall to turn it into a door; click a door to turn it back">&#128682; Door</button>
     <button id="fp-tool-select" class="btn btn-sm btn-outline-secondary flex-grow-1"
-            onclick="BMFP.setTool('select')" title="Click a wall, door, or prop to edit it. Selected props: drag to move, drag the round handle to rotate">&#128269; Select</button>
+            onclick="BMFP.setTool('select')" title="Click a wall, door, prop or light to edit it. Selected props and lights drag to move; the round handle rotates a prop">&#128269; Select</button>
     <button id="fp-tool-erase" class="btn btn-sm btn-outline-secondary flex-grow-1"
             onclick="BMFP.setTool('erase')" title="Click a wall / door / elevation / light to delete it">&#9003; Erase</button>
   </div>
@@ -1216,7 +1245,7 @@
     <div class="d-flex align-items-center mb-1">
       <span id="fp-sel-what" class="fx-label" style="color:#3df0c8;">Wall</span>
       <button class="btn btn-sm btn-outline-danger px-2 ms-auto" onclick="BMFP.deleteSel()"
-              title="Delete this segment">&#128465;</button>
+              title="Delete the selected wall, door, prop or light">&#128465;</button>
     </div>
     <div class="align-items-center gap-2 mb-1" style="display:flex;" id="fp-sel-hb-row">
       <label class="fx-label">Height</label>
@@ -1239,7 +1268,39 @@
              title="Scale multiplier (1 = life size)">
       <span class="fx-label">&times;</span>
     </div>
-    <div class="d-flex align-items-center gap-2 mb-1">
+    <div class="align-items-center gap-2 mb-1" style="display:none;" id="fp-sel-light-row">
+      <label class="fx-label">Type</label>
+      <select id="fp-sel-light-type" class="form-select form-select-sm" style="width:auto;flex:1;min-width:0;">
+        <option value="torch">Torch</option>
+        <option value="brazier">Brazier</option>
+        <option value="lantern">Lantern</option>
+        <option value="candle">Candle</option>
+        <option value="glow">Magical glow</option>
+      </select>
+      <input type="color" id="fp-sel-light-color" class="form-control form-control-sm"
+             style="width:44px;padding:2px;" title="Light color">
+    </div>
+    <!-- Two rows: the panel is 248px wide and four fields don't fit one line -->
+    <div class="align-items-center gap-2 mb-1" style="display:none;" id="fp-sel-light-row2">
+      <label class="fx-label">Reach</label>
+      <input type="number" id="fp-sel-light-radius" min="5" max="120" step="5" placeholder="auto"
+             class="form-control form-control-sm" style="width:56px;" title="Reach in feet">
+      <span class="fx-label">ft</span>
+      <label class="fx-label ms-auto" title="Height above the floor, feet">Ht</label>
+      <input type="number" id="fp-sel-light-height" min="0" max="50" step="1" placeholder="6"
+             class="form-control form-control-sm" style="width:52px;" title="Height above the floor, feet">
+    </div>
+    <div class="align-items-center gap-2 mb-1" style="display:none;" id="fp-sel-light-row3">
+      <label class="fx-label" title="Brightness multiplier (1 = normal)">Bright</label>
+      <input type="number" id="fp-sel-light-intensity" min="0.1" max="3" step="0.1" placeholder="1"
+             class="form-control form-control-sm" style="width:56px;" title="Brightness multiplier, 0.1–3 (1 = normal)">
+      <span class="fx-label">&times;</span>
+      <div class="form-check ms-auto" style="margin-bottom:0;" title="Flame flicker in 3D">
+        <input class="form-check-input" type="checkbox" id="fp-sel-light-flicker">
+        <label class="form-check-label fx-label" for="fp-sel-light-flicker">Flicker</label>
+      </div>
+    </div>
+    <div class="align-items-center gap-2 mb-1" style="display:flex;" id="fp-sel-tex-row">
       <label class="fx-label">Texture</label>
       <select id="fp-sel-texture" class="form-select form-select-sm fp-tex-select"
               data-empty-label="(default)"

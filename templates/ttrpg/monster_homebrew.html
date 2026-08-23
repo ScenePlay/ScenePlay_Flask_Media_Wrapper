@@ -433,8 +433,11 @@ function aiGenerateIcon(btn) {
   btn.textContent = '✨ Painting…';
   status.textContent = '';
   status.style.color = '';
-  aiImageBlob(prompt)
+  aiImageWithPreview(() => aiImageBlob(prompt),
+                     { title: 'Token preview', useLabel: 'Use as token',
+                       onRegenerate: () => { status.textContent = '✨ Painting another…'; } })
     .then(blob => {
+      if (!blob) { status.textContent = 'Discarded — nothing attached.'; return; }
       aiBlobToFileInput(blob, input, 'token');
       status.textContent =
         '✨ Token attached to the Picture field — it saves with the entry.';

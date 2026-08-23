@@ -327,6 +327,16 @@ window.BMFP = (function () {
         title.textContent = 'Drag to rotate (drag the prop itself to move it)';
         knob.appendChild(title);
         svg.appendChild(knob);
+      } else if (sel.kind === 'light') {
+        const ring = svgEl('circle', {
+          cx: px(s.x), cy: px(s.y), r: 13,
+          fill: '#3df0c8', 'fill-opacity': '0.25',
+          stroke: '#3df0c8', 'stroke-width': 2.5,
+        });
+        const title = svgEl('title', {});
+        title.textContent = 'Drag to move the light';
+        ring.appendChild(title);
+        svg.appendChild(ring);
       } else {
         svg.appendChild(svgEl('line', {
           x1: px(s.x1), y1: px(s.y1), x2: px(s.x2), y2: px(s.y2),
@@ -656,6 +666,7 @@ window.BMFP = (function () {
       const el = document.getElementById('fp-zone-' + f);
       if (el) el.value = (zn && zn[f]) || (f === 'wall_style' ? 'none' : '');
     });
+    refreshTexFaces();
     const box = document.getElementById('fp-zone-fields');
     if (box) box.style.display = zn ? '' : 'none';
     // one line per painted area with its own delete — a room is often two
@@ -725,6 +736,15 @@ window.BMFP = (function () {
         best = { kind: 'prop', idx: i }; bestD = d;
       }
     });
+    // Lights: the fixture dot, not its reach. A click ON the dot wins over a
+    // wall running through the same spot — sconces sit on walls, and the
+    // wall is always the "nearer" segment otherwise.
+    (plan.lights || []).forEach((lt, i) => {
+      const d = Math.hypot(p.x - lt.x, p.y - lt.y);
+      if (d <= HIT_RADIUS && (d < bestD || d <= HIT_RADIUS * 0.8)) {
+        best = { kind: 'light', idx: i }; bestD = Math.min(bestD, d);
+      }
+    });
     sel = best;
     renderSelUI();
     redraw();
@@ -737,16 +757,34 @@ window.BMFP = (function () {
     box.style.display = s ? '' : 'none';
     if (!s) return;
     const isProp = sel.kind === 'prop';
+    const isLight = sel.kind === 'light';
     document.getElementById('fp-sel-what').textContent =
       isProp ? `Prop: ${s.type}`
+             : isLight ? `Light: ${s.type}`
              : sel.kind === 'door' ? `Door ${s.id || ''}` : `Wall #${sel.idx + 1}`;
-    // walls/doors get the height row; props get the turn/size row
-    // inline flex/none (NOT the d-flex class: its !important would beat
-    // an inline display:none and the rows would never hide)
-    document.getElementById('fp-sel-hb-row').style.display = isProp ? 'none' : 'flex';
-    document.getElementById('fp-sel-style-row').style.display = isProp ? 'none' : 'flex';
+    // walls/doors get the height row; props the turn/size row; lights their
+    // own rows (no texture). inline flex/none (NOT the d-flex class: its
+    // !important would beat an inline display:none and the rows would never hide)
+    document.getElementById('fp-sel-hb-row').style.display = (isProp || isLight) ? 'none' : 'flex';
+    document.getElementById('fp-sel-style-row').style.display = (isProp || isLight) ? 'none' : 'flex';
     document.getElementById('fp-sel-prop-row').style.display = isProp ? 'flex' : 'none';
+    document.getElementById('fp-sel-tex-row').style.display = isLight ? 'none' : 'flex';
+    document.getElementById('fp-sel-light-row').style.display = isLight ? 'flex' : 'none';
+    document.getElementById('fp-sel-light-row2').style.display = isLight ? 'flex' : 'none';
+    document.getElementById('fp-sel-light-row3').style.display = isLight ? 'flex' : 'none';
+    if (isLight) {
+      const meta = LIGHT_META[s.type] || LIGHT_META.torch;
+      document.getElementById('fp-sel-light-type').value = s.type || 'torch';
+      document.getElementById('fp-sel-light-color').value = s.color || meta.color;
+      document.getElementById('fp-sel-light-radius').value = s.radius_ft || '';
+      document.getElementById('fp-sel-light-radius').placeholder = meta.radius_ft;
+      document.getElementById('fp-sel-light-height').value = s.height_ft ?? '';
+      document.getElementById('fp-sel-light-intensity').value = s.intensity ?? '';
+      document.getElementById('fp-sel-light-flicker').checked = s.flicker !== false;
+      return;
+    }
     document.getElementById('fp-sel-texture').value = s.texture || '';
+    refreshTexFaces();
     if (isProp) {
       document.getElementById('fp-sel-rot').value = s.rot || 0;
       document.getElementById('fp-sel-scale').value = s.scale || 1;
@@ -771,6 +809,24 @@ window.BMFP = (function () {
       const v = parseFloat(document.getElementById(id).value);
       return isNaN(v) ? null : Math.max(lo, Math.min(hi, v));
     };
+    if (sel.kind === 'light') {
+      const type = document.getElementById('fp-sel-light-type').value;
+      if (LIGHT_META[type]) s.type = type;
+      const meta = LIGHT_META[s.type] || LIGHT_META.torch;
+      const color = (document.getElementById('fp-sel-light-color').value || '').toLowerCase();
+      if (color && color !== meta.color) s.color = color; else delete s.color;
+      const r = num('fp-sel-light-radius', 5, 120);
+      if (r !== null && r !== meta.radius_ft) s.radius_ft = r; else delete s.radius_ft;
+      const h = num('fp-sel-light-height', 0, 50);
+      if (h !== null) s.height_ft = h; else delete s.height_ft;
+      const it = num('fp-sel-light-intensity', 0.1, 3);
+      if (it !== null && it !== 1) s.intensity = it; else delete s.intensity;
+      if (document.getElementById('fp-sel-light-flicker').checked) delete s.flicker;
+      else s.flicker = false;
+      markDirty();
+      renderSelUI();
+      return;
+    }
     const tex = (document.getElementById('fp-sel-texture').value || '').trim();
     if (tex && tex !== 'none') s.texture = tex; else delete s.texture;
     if (sel.kind === 'prop') {
@@ -827,6 +883,114 @@ window.BMFP = (function () {
         selEl.appendChild(og);
       });
       selEl.value = cur;
+      buildTexPicker(selEl, entries || []);
+    });
+  }
+
+  // ── texture picker: a dropdown that shows the bitmaps ─────────────────────
+  // The <select> stays as the value holder (every onchange handler and
+  // `.value` read in this file keeps working); it is hidden and a button
+  // with the current texture's thumbnail + name stands in for it. The menu
+  // is a fixed-position list (so the scrolling panel can't clip it) of
+  // thumbnail + name rows grouped by category.
+  let texMenu = null;        // the single open menu, if any
+  const texByName = {};
+
+  function texFace(btn, selEl) {
+    const name = selEl.value || '';
+    const t = texByName[name];
+    const thumb = btn.querySelector('.fp-tex-thumb');
+    const label = btn.querySelector('.fp-tex-name');
+    thumb.style.backgroundImage = t ? `url("${t.url}")` : '';
+    thumb.classList.toggle('fp-tex-none', !t);
+    const emptyLabel = selEl.dataset.emptyLabel || '(from map art)';
+    label.textContent = t ? t.name : (selEl.options[0] ? selEl.options[0].textContent : emptyLabel);
+    btn.title = t ? `${t.name} (${t.category})` : emptyLabel;
+  }
+
+  function closeTexMenu() {
+    if (texMenu) { texMenu.remove(); texMenu = null; }
+  }
+
+  function openTexMenu(btn, selEl, entries) {
+    closeTexMenu();
+    const menu = document.createElement('div');
+    menu.className = 'fp-tex-menu';
+    const addRow = (value, label, t) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'fp-tex-row' + (selEl.value === value ? ' active' : '');
+      const th = document.createElement('span');
+      th.className = 'fp-tex-thumb' + (t ? '' : ' fp-tex-none');
+      if (t) th.style.backgroundImage = `url("${t.url}")`;
+      const nm = document.createElement('span');
+      nm.className = 'fp-tex-name';
+      nm.textContent = label;
+      row.appendChild(th);
+      row.appendChild(nm);
+      row.onclick = () => {
+        selEl.value = value;
+        selEl.dispatchEvent(new Event('change', { bubbles: true }));   // runs the inline onchange
+        texFace(btn, selEl);
+        closeTexMenu();
+      };
+      menu.appendChild(row);
+    };
+    addRow('', selEl.options[0] ? selEl.options[0].textContent : '(from map art)', null);
+    const byCat = {};
+    entries.forEach(t => (byCat[t.category] = byCat[t.category] || []).push(t));
+    Object.keys(byCat).sort().forEach(cat => {
+      const h = document.createElement('div');
+      h.className = 'fp-tex-cat';
+      h.textContent = cat;
+      menu.appendChild(h);
+      byCat[cat].forEach(t => addRow(t.name, t.name, t));
+    });
+    // fixed position under the button; flip above it when near the bottom
+    const r = btn.getBoundingClientRect();
+    const maxH = 260;
+    menu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 240)) + 'px';
+    if (r.bottom + maxH > window.innerHeight && r.top > maxH) {
+      menu.style.bottom = (window.innerHeight - r.top + 2) + 'px';
+    } else {
+      menu.style.top = (r.bottom + 2) + 'px';
+    }
+    document.body.appendChild(menu);
+    texMenu = menu;
+    const active = menu.querySelector('.fp-tex-row.active');
+    if (active) active.scrollIntoView({ block: 'center' });
+    setTimeout(() => {
+      const onDoc = e => { if (!menu.contains(e.target) && e.target !== btn) { closeTexMenu(); cleanup(); } };
+      const onKey = e => { if (e.key === 'Escape') { closeTexMenu(); cleanup(); } };
+      const cleanup = () => { document.removeEventListener('pointerdown', onDoc, true);
+                              document.removeEventListener('keydown', onKey, true); };
+      document.addEventListener('pointerdown', onDoc, true);
+      document.addEventListener('keydown', onKey, true);
+    }, 0);
+  }
+
+  function buildTexPicker(selEl, entries) {
+    entries.forEach(t => { texByName[t.name] = t; });
+    let btn = selEl.nextElementSibling;
+    if (!btn || !btn.classList.contains('fp-tex-btn')) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fp-tex-btn form-select form-select-sm';
+      btn.innerHTML = '<span class="fp-tex-thumb"></span><span class="fp-tex-name"></span>';
+      btn.onclick = e => { e.preventDefault(); texMenu ? closeTexMenu() : openTexMenu(btn, selEl, entries); };
+      selEl.insertAdjacentElement('afterend', btn);
+      selEl.classList.add('fp-tex-hidden');
+    }
+    btn.onclick = e => { e.preventDefault(); texMenu ? closeTexMenu() : openTexMenu(btn, selEl, entries); };
+    texFace(btn, selEl);
+  }
+
+  // Called wherever this file sets a texture <select>'s value programmatically
+  // (programmatic value changes fire no event the button could listen for).
+  function refreshTexFaces() {
+    document.querySelectorAll('select.fp-tex-select').forEach(selEl => {
+      const btn = selEl.nextElementSibling;
+      if (btn && btn.classList.contains('fp-tex-btn')) texFace(btn, selEl);
     });
   }
 
@@ -952,9 +1116,9 @@ window.BMFP = (function () {
         }
       }
       selectAt(p);
-      if (sel && sel.kind === 'prop') {
-        const pr = plan.props[sel.idx];
-        drag = { kind: 'selmove', idx: sel.idx,
+      if (sel && (sel.kind === 'prop' || sel.kind === 'light')) {
+        const pr = plan[sel.kind + 's'][sel.idx];
+        drag = { kind: 'selmove', list: sel.kind + 's', idx: sel.idx,
                  snap: JSON.stringify(plan), pushed: false,
                  offX: pr.x - p.x, offY: pr.y - p.y,
                  last: pr.x + ',' + pr.y };
@@ -1071,7 +1235,7 @@ window.BMFP = (function () {
     if (!drag) return;
     const p = evtCell(e);
     if (drag.kind === 'selmove') {
-      const pr = plan.props[drag.idx];
+      const pr = plan[drag.list || 'props'][drag.idx];
       const nx = snapTo(p.x + drag.offX), ny = snapTo(p.y + drag.offY);
       if (nx + ',' + ny === drag.last) return;   // redraw only on snap steps
       _dragCommit(drag);

@@ -102,10 +102,13 @@ def floorplan_generate():
 @login_required
 @dm_required
 def map_art(map_id):
-    """Generate the map background image. When the browser sends the
-    schematic blueprint PNG, it rides as the conditioning input image so the
-    model paints directly over the floorplan geometry (the LAYOUT MATCH
-    promise, enforced by pixels instead of prose)."""
+    """Generate the map background image and return it for PREVIEW — the
+    browser shows it (use / regenerate / discard) and saves the accepted one
+    through the existing bg-paste endpoint, so nothing lands on the map the
+    DM hasn't seen. When the browser sends the schematic blueprint PNG, it
+    rides as the conditioning input image so the model paints directly over
+    the floorplan geometry (the LAYOUT MATCH promise, enforced by pixels
+    instead of prose)."""
     if not gemini.configured():
         return _need_key()
     from models.ttrpg import tblBattleMaps
@@ -126,10 +129,8 @@ def map_art(map_id):
                                          mime='image/png')
     except gemini.GeminiError as e:
         return _err(e)
-    from routes.battlemap import _store_bg_bytes
-    payload = _store_bg_bytes(bm, raw, ext)
-    payload['model'] = model
-    return jsonify(payload)
+    return jsonify({'ok': True, 'ext': ext, 'model': model, 'map_id': bm.map_id,
+                    'image_b64': base64.b64encode(raw).decode('ascii')})
 
 
 @ai_bp.route('/map-video/<int:map_id>', methods=['POST'])
@@ -185,25 +186,27 @@ def job(job_id):
 @login_required
 @dm_required
 def texture_generate():
-    """Generate a seamless texture and add it straight to the library —
-    same validation as the paste path (slug rules, name collisions...)."""
+    """Generate a seamless texture and return it for PREVIEW; the browser
+    saves the accepted image through the library's paste endpoint (same
+    validation as every other add). The name is validated HERE first so a
+    bad or duplicate name fails before a generation is paid for."""
     if not gemini.configured():
         return _need_key()
     d = request.get_json() or {}
     prompt = (d.get('prompt_text') or '').strip()
     if not prompt:
         return _err('Empty prompt.', 400)
+    from routes.textures import _validate_texture_name
+    name, name_err = _validate_texture_name({'name': d.get('name')})
+    if name_err:
+        return _err(name_err, 400)
     model = gemini.resolve_model('image', d.get('model'))
     try:
         raw, ext = gemini.generate_image(prompt, model)
     except gemini.GeminiError as e:
         return _err(e)
-    from routes.textures import _add_texture
-    payload, status_code = _add_texture(raw, ext, {
-        'name': d.get('name'), 'category': d.get('category'),
-        'tile_ft': d.get('tile_ft'), 'source': 'ai',
-    })
-    return jsonify(payload), status_code
+    return jsonify({'ok': True, 'ext': ext, 'model': model, 'name': name,
+                    'image_b64': base64.b64encode(raw).decode('ascii')})
 
 
 @ai_bp.route('/image-generate', methods=['POST'])

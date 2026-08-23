@@ -180,20 +180,39 @@ class TestFloorplanGenerate:
 
 
 class TestMapArt:
-    def test_generates_and_stores_bg(self, ai_app, monkeypatch):
+    def test_returns_preview_bytes_without_storing(self, ai_app, monkeypatch):
+        """Preview-before-save: the endpoint hands the image back; nothing
+        touches the map until the browser accepts it via bg-paste."""
         a, dm, _, map_id, gemini = ai_app
         gemini.save_api_key('k')
+        png = _png_bytes(64)
         monkeypatch.setattr(gemini, 'generate_image',
                             lambda prompt, model, image=None, mime=None:
-                            (_png_bytes(64), 'png'))
+                            (png, 'png'))
+        from models.ttrpg import tblBattleMaps
+        with a.app_context():
+            before = db.session.get(tblBattleMaps, map_id).bg_image
         with _dm(a, dm) as c:
             d = c.post(f'/ttrpg/ai/map-art/{map_id}',
                        json={'prompt_text': 'paint',
                              'schematic_png_b64':
                                  base64.b64encode(_png_bytes()).decode()}
                        ).get_json()
-        assert d['ok'] and d['is_video'] is False
-        assert d['url'].startswith('/static/')
+        assert d['ok'] and d['ext'] == 'png' and d['map_id'] == map_id
+        assert base64.b64decode(d['image_b64']) == png
+        assert 'url' not in d and 'filename' not in d
+        with a.app_context():
+            assert db.session.get(tblBattleMaps, map_id).bg_image == before   # untouched
+
+    def test_accepted_preview_saves_through_bg_paste(self, ai_app):
+        a, dm, _, map_id, gemini = ai_app
+        import io as _io
+        with _dm(a, dm) as c:
+            d = c.post(f'/ttrpg/battlemap/{map_id}/bg-paste',
+                       data={'ext': 'png',
+                             'bg_image': (_io.BytesIO(_png_bytes(64)), 'gemini.png')},
+                       content_type='multipart/form-data').get_json()
+        assert d['ok'] and d['is_video'] is False and d['url'].startswith('/static/')
         from models.ttrpg import tblBattleMaps
         import routes.battlemap as bm_mod
         with a.app_context():
@@ -250,33 +269,50 @@ class TestMapVideo:
 
 
 class TestTextureGenerate:
-    def test_adds_to_library(self, ai_app, monkeypatch):
+    def test_returns_preview_bytes_library_untouched(self, ai_app, monkeypatch):
         a, dm, _, _, gemini = ai_app
         gemini.save_api_key('k')
+        png = _png_bytes()
         monkeypatch.setattr(gemini, 'generate_image',
                             lambda prompt, model, image=None, mime=None:
-                            (_png_bytes(), 'png'))
+                            (png, 'png'))
         with _dm(a, dm) as c:
             d = c.post('/ttrpg/ai/texture-generate',
-                       json={'prompt_text': 'moss', 'name': 'ai_moss',
+                       json={'prompt_text': 'moss', 'name': 'AI Moss',
                              'category': 'stone', 'tile_ft': 6}).get_json()
+            assert d['ok'] and d['name'] == 'ai_moss'        # normalised slug
+            assert base64.b64decode(d['image_b64']) == png
+            man = c.get('/ttrpg/textures/manifest').get_json()
+        assert not any(t['name'] == 'ai_moss' for t in man['textures'])   # not saved yet
+
+    def test_accepted_preview_saves_through_paste(self, ai_app):
+        a, dm, _, _, gemini = ai_app
+        import io as _io
+        with _dm(a, dm) as c:
+            d = c.post('/ttrpg/textures/paste',
+                       data={'name': 'ai_moss', 'category': 'stone', 'tile_ft': '6',
+                             'source': 'ai', 'ext': 'png',
+                             'image': (_io.BytesIO(_png_bytes()), 'pasted')},
+                       content_type='multipart/form-data').get_json()
             assert d['ok'] and d['name'] == 'ai_moss'
             man = c.get('/ttrpg/textures/manifest').get_json()
         mine = next(t for t in man['textures'] if t['name'] == 'ai_moss')
         assert mine['source'] == 'ai' and mine['tile_ft'] == 6.0
 
-    def test_slug_collision_passes_through(self, ai_app, monkeypatch):
+    def test_slug_collision_rejected_before_generating(self, ai_app, monkeypatch):
         a, dm, _, _, gemini = ai_app
         gemini.save_api_key('k')
+        calls = []
         monkeypatch.setattr(gemini, 'generate_image',
                             lambda prompt, model, image=None, mime=None:
-                            (_png_bytes(), 'png'))
+                            calls.append(1) or (_png_bytes(), 'png'))
         with _dm(a, dm) as c:
             r = c.post('/ttrpg/ai/texture-generate',
                        json={'prompt_text': 'x', 'name': 'flagstone',
                              'category': 'floor', 'tile_ft': 5})
         assert r.status_code == 400
         assert 'already exists' in r.get_json()['error']
+        assert calls == []                                   # no generation paid for
 
 
 class TestImageGenerate:
