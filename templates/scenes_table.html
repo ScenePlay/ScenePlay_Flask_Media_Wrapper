@@ -42,7 +42,6 @@
           button.className = "btn btn-primary";
           button.setAttribute("type","submit") 
           button.setAttribute("value","Add New Row")
-          button.style = "float: right; margin-right: 100px";
           button.onclick = function() {
               spAddRowPrompt('/api/scenesaddrow',
                   {field: 'campaign_id', kind: 'campaign', dropdownId: 'campaignFilterDropdown',
@@ -57,7 +56,7 @@
           //     window.location.reload();
           // }
 
-          element.parentNode.insertBefore(button, element.nextSibling);
+          spGridActions()?.prepend(button);
       }
       class Dropdown {
           constructor() {

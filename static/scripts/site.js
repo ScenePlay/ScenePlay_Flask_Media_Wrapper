@@ -110,14 +110,15 @@ function applyFilterResponse(resp, sceneValue){
 }
 
 // forceRender() rebuilds the grid's DOM from scratch, which throws away the
-// toolbar controls the pages inject next to the search box: the Add New Row
-// button (each page's addButton(), run from body onload) and the Select
-// Page / Delete Selected pair (spInitBulkDelete, which remembers its config
-// in spBulkCfg and dedupes by element id). Re-insert both once the rebuilt
-// search bar exists, each only where the page set it up in the first place.
+// toolbar group the pages inject next to the search box: the Add New Row
+// button (each page's addButton()) and the Select Page / Delete Selected
+// pair (spInitBulkDelete, which remembers its config in spBulkCfg and
+// dedupes by element id). Re-insert both once the rebuilt search bar
+// exists, each only where the page set it up in the first place. (This used
+// to look for addButton in body onload — no page wires it that way, so the
+// Add button vanished after every filter change.)
 function restoreGridControls(){
-  var onload = document.body.getAttribute('onload') || '';
-  var wantAdd = onload.indexOf('addButton') !== -1 && typeof addButton === 'function';
+  var wantAdd = typeof addButton === 'function';
   var tries = 0;
   var t = setInterval(function () {
     var search = document.querySelector('div.gridjs-search');
@@ -131,6 +132,14 @@ function restoreGridControls(){
   }, 50);
 }
 
+
+// Every table page that defines addButton() gets its toolbar on load via the
+// same polling restore used after filter changes — Grid.js renders after the
+// load event, so a page's own addButton() call can run too early (or, on the
+// media pages, was never wired at all). Deduped: nothing is added twice.
+window.addEventListener('load', function () {
+  if (typeof addButton === 'function') restoreGridControls();
+});
 
 // Shared Add New Row POST for the filterable table pages. When the page's
 // campaign/scene filter dropdown has a real selection, ask whether the new
@@ -552,9 +561,25 @@ async function spDeleteSelected() {
   window.location.reload();
 }
 
-// Insert the Select Page / Delete Selected buttons next to the gridjs search
-// box (same slot the Add New Row buttons use). Retries briefly because the
-// grid renders asynchronously after page load.
+// The one toolbar group every table page puts its buttons in: a bordered box
+// inside the Grid.js header, to the right of the search field (wrapping under
+// it on narrow screens). Grid.js rebuilds its header on forceRender, so this
+// is looked up (and re-created when missing) on every call rather than cached.
+// Nothing Grid.js renders is moved — the box is a sibling of its search div.
+function spGridActions() {
+  const search = document.querySelector('div.gridjs-search');
+  if (!search) return null;
+  let box = search.parentNode.querySelector('.sp-grid-actions');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'sp-grid-actions';
+    search.insertAdjacentElement('afterend', box);
+  }
+  return box;
+}
+
+// Insert the Select Page / Delete Selected buttons into the toolbar group.
+// Retries briefly because the grid renders asynchronously after page load.
 function spInitBulkDelete(endpoint, primeKey) {
   spBulkCfg = {endpoint: endpoint, primeKey: primeKey};
   const tryInsert = attempts => {
@@ -570,16 +595,15 @@ function spInitBulkDelete(endpoint, primeKey) {
     delBtn.className = 'btn btn-danger';
     delBtn.value = 'Delete Selected (0)';
     delBtn.disabled = true;
-    delBtn.style = 'float: right; margin-left: 10px;';
     delBtn.onclick = spDeleteSelected;
     const selBtn = document.createElement('input');
     selBtn.type = 'button';
     selBtn.className = 'btn btn-secondary';
     selBtn.value = 'Select Page';
-    selBtn.style = 'float: right; margin-left: 10px;';
     selBtn.onclick = spSelectPage;
-    anchor.parentNode.insertBefore(delBtn, anchor.nextSibling);
-    anchor.parentNode.insertBefore(selBtn, anchor.nextSibling);
+    const box = spGridActions();
+    box.appendChild(selBtn);
+    box.appendChild(delBtn);
   };
   tryInsert(25);
 }

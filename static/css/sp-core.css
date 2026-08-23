@@ -556,6 +556,9 @@ details.sp-card > *:last-child { margin-bottom: 12px; }
 }
 .sp-page-head h1,
 .sp-page-head h2 { margin: 0; }
+/* Variant: keep the filters on the LEFT, right after the title (home page) */
+.sp-page-head.sp-head-start { justify-content: flex-start; gap: .75rem 2rem; }
+.sp-page-head.sp-head-start .sp-filter-row { margin-bottom: 0; }
 
 /* Row of label+select filter pairs */
 .sp-filter-row {
@@ -575,6 +578,32 @@ details.sp-card > *:last-child { margin-bottom: 12px; }
   min-width: 200px;
   flex: 1 1 200px;
   max-width: 320px;
+}
+
+/* Grid.js header: the search field plus ONE bordered group holding every
+   page action (Add New Row, Select Page, Delete Selected, Apply to Crontab).
+   A wrapping flex row replaces the old per-button float:right, which let the
+   buttons drift apart as the width changed. */
+.gridjs-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem .75rem;
+}
+.gridjs-head .gridjs-search { float: none; }
+.sp-grid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-left: auto;
+  padding: .35rem .5rem;
+  border: 1px solid var(--sp-border);
+  border-radius: 8px;
+}
+.sp-grid-actions .btn { float: none; margin: 0; }
+@media (max-width: 640px) {
+  .sp-grid-actions { margin-left: 0; width: 100%; }
 }
 
 /* Horizontal-scroll shell for wide tables */

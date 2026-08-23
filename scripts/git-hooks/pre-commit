@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Secret guard: blocks commits that would leak local credentials.
+# Secret guard (blocks commits that would leak local credentials) and
+# auto-version (bumps the patch number on every commit — see step 3).
 # Installed into .git/hooks/pre-commit (this tracked copy is the source —
 # re-install after a fresh clone with:  scripts/install_git_hooks.sh).
 #
@@ -24,4 +25,26 @@ if git diff --cached -U0 | grep -E '^\+' \
   echo "COMMIT BLOCKED: staged changes contain something that looks like" >&2
   echo "an API key. Remove the secret from the change, then commit again." >&2
   exit 1
+fi
+
+# 3) Auto-version: every commit bumps the PATCH number in version.py and
+#    pyproject.toml (1.3.0 -> 1.3.1) and stages both, so each commit carries
+#    its own version number. Skipped when either file is already staged —
+#    that's a deliberate hand edit (minor/major bump) and must stand — or
+#    when SP_NO_BUMP=1 is set (e.g. a --amend that shouldn't bump twice).
+if [ -z "${SP_NO_BUMP:-}" ] \
+   && ! git diff --cached --name-only | grep -qE '^(version\.py|pyproject\.toml)$'; then
+  root="$(git rev-parse --show-toplevel)"
+  cur=$(sed -nE 's/^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"[[:space:]]*$/\1/p' "$root/version.py")
+  if [ -n "$cur" ]; then
+    major=${cur%%.*}; rest=${cur#*.}; minor=${rest%%.*}; patch=${rest#*.}
+    new="$major.$minor.$((patch + 1))"
+    for f in version.py pyproject.toml; do
+      # write-then-move: GNU and BSD sed disagree on -i, git bash has GNU
+      sed -E "s/^(__version__ = |version = )\"$cur\"/\1\"$new\"/" "$root/$f" > "$root/$f.tmp" \
+        && mv "$root/$f.tmp" "$root/$f"
+    done
+    git add "$root/version.py" "$root/pyproject.toml"
+    echo "version $cur -> $new (auto-bump; SP_NO_BUMP=1 skips it)"
+  fi
 fi

@@ -153,7 +153,6 @@
         addBtn.className = "btn btn-primary";
         addBtn.setAttribute("type", "submit");
         addBtn.setAttribute("value", "Add New Row");
-        addBtn.style = "float: right; margin-right: 10px;";
         addBtn.onclick = async function () {
           try {
             const response = await fetch('/api/cronscheduleaddrow', {
@@ -174,7 +173,6 @@
         applyBtn.className = "btn btn-success";
         applyBtn.setAttribute("type", "submit");
         applyBtn.setAttribute("value", "Apply to Crontab");
-        applyBtn.style = "float: right; margin-right: 10px;";
         applyBtn.onclick = async function () {
           if (confirm('Apply all active schedules to the system crontab? Existing ScenePlay-managed entries will be replaced.')) {
             try {
@@ -195,8 +193,10 @@
           }
         };
 
-        element.parentNode.insertBefore(applyBtn, element.nextSibling);
-        element.parentNode.insertBefore(addBtn, applyBtn.nextSibling);
+        const box = spGridActions();
+        if (!box) return;
+        box.prepend(applyBtn);
+        box.prepend(addBtn);
       }
 
       const activeDD = [
