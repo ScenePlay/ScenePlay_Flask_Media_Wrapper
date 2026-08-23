@@ -480,7 +480,11 @@
                             logEl.textContent = d.log.join('\n');
                             logEl.style.display = '';
                           }
-                          if (d.error) {          // DM gate
+                          if (d.login_url) {      // DM gate: go log in, come back here
+                            window.location = d.login_url;
+                            return;
+                          }
+                          if (d.error) {
                             status.textContent = d.error;
                             btn.disabled = false;
                             return;

@@ -211,11 +211,13 @@ def main():
     
 def _dm_required_json():
     """DM gate for the update APIs (same policy as Restart Computer: anyone
-    on the LAN reaches this page, but changing the box is DM-only)."""
+    on the LAN reaches this page, but changing the box is DM-only). The
+    login_url lets the page send the visitor STRAIGHT to the login form,
+    which brings them back here afterwards."""
     from flask_login import current_user
     if not (current_user.is_authenticated and current_user.is_dm()):
-        return jsonify({'error': 'DM login required — log in on the TTRPG '
-                        'pages first, then retry.'}), 403
+        return jsonify({'error': 'DM login required.',
+                        'login_url': url_for('auth.login', next=url_for('ut.main'))}), 403
     return None
 
 
