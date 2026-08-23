@@ -586,6 +586,39 @@ window.BMFP = (function () {
     redraw();
   }
 
+  // Remove ONE painted area from the active zone (the zone itself stays, even
+  // with no areas, so it can be repainted). Before this the only way out of
+  // a mis-painted second area was deleting the whole room.
+  function deleteZoneRect(ri) {
+    const zn = plan && plan.zones && plan.zones[activeZone];
+    if (!zn || !zn.rects || !zn.rects[ri]) return;
+    pushUndo();
+    zn.rects.splice(ri, 1);
+    markDirty();
+    renderZoneUI();
+  }
+
+  // Erase-tool fallback: the zone area under the pointer (active zone first,
+  // then any zone). Only called when nothing else was under the brush.
+  function eraseZoneRectAt(p) {
+    const zones = plan.zones || [];
+    const order = activeZone >= 0 ? [activeZone, ...zones.map((_, i) => i).filter(i => i !== activeZone)]
+                                  : zones.map((_, i) => i);
+    for (const zi of order) {
+      const rects = (zones[zi] && zones[zi].rects) || [];
+      const ri = rects.findIndex(r => p.x >= r.x1 && p.x < r.x2 && p.y >= r.y1 && p.y < r.y2);
+      if (ri !== -1) {
+        pushUndo();
+        rects.splice(ri, 1);
+        activeZone = zi;
+        markDirty();
+        renderZoneUI();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function setZoneField(field, value) {
     const zn = plan && plan.zones && plan.zones[activeZone];
     if (!zn) return;
@@ -610,7 +643,8 @@ window.BMFP = (function () {
     zones.forEach((zn, i) => {
       const o = document.createElement('option');
       o.value = i;
-      o.textContent = (zn.name || zn.id) + ` (${(zn.rects || []).length})`;
+      const n = (zn.rects || []).length;
+      o.textContent = (zn.name || zn.id) + ` — ${n} area${n === 1 ? '' : 's'}`;
       selEl.appendChild(o);
     });
     selEl.disabled = !zones.length;
@@ -624,6 +658,32 @@ window.BMFP = (function () {
     });
     const box = document.getElementById('fp-zone-fields');
     if (box) box.style.display = zn ? '' : 'none';
+    // one line per painted area with its own delete — a room is often two
+    // or three rects, and a mis-drawn one must be removable on its own
+    const list = document.getElementById('fp-zone-rects');
+    if (list) {
+      list.innerHTML = '';
+      const rects = (zn && zn.rects) || [];
+      if (zn && !rects.length) {
+        list.textContent = 'No areas yet — use Paint and drag over this room\'s floor.';
+      }
+      rects.forEach((r, ri) => {
+        const row = document.createElement('div');
+        row.className = 'd-flex align-items-center gap-2';
+        const txt = document.createElement('span');
+        txt.className = 'flex-grow-1';
+        txt.textContent = `Area ${ri + 1}: ${r.x2 - r.x1}×${r.y2 - r.y1} squares at (${r.x1}, ${r.y1})`;
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'btn btn-sm btn-outline-danger py-0 px-1';
+        del.title = 'Remove this area from the room';
+        del.textContent = '\u2715';
+        del.onclick = () => deleteZoneRect(ri);
+        row.appendChild(txt);
+        row.appendChild(del);
+        list.appendChild(row);
+      });
+    }
   }
 
   // ── select tool (per-segment inspector + prop direct manipulation) ────────
@@ -774,7 +834,11 @@ window.BMFP = (function () {
 
   function evtCell(e) {
     const rect = layer().getBoundingClientRect();
-    return { x: (e.clientX - rect.left) / CELL_PX, y: (e.clientY - rect.top) / CELL_PX };
+    // Clamped to the map: a drag that runs off the edge (or off the window —
+    // see the pointer capture in init) finishes AT the edge instead of being
+    // thrown away with the room half-drawn.
+    const x = (e.clientX - rect.left) / CELL_PX, y = (e.clientY - rect.top) / CELL_PX;
+    return { x: Math.max(0, Math.min(GRID_COLS, x)), y: Math.max(0, Math.min(GRID_ROWS, y)) };
   }
 
   // +toFixed(2) kills float noise from 0.2 steps (3 * 0.2 = 0.6000000000000001)
@@ -952,7 +1016,7 @@ window.BMFP = (function () {
         `left:${p.x * CELL_PX - rPx}px;top:${p.y * CELL_PX - rPx}px;`;
       overlay().appendChild(ring);
       drag = { kind: 'erase', previewEl: ring };
-      eraseAt(p);
+      eraseAt(p, true);
       return;
     }
     if (tool === 'door')  { doorAt(p);  return; }
@@ -1180,9 +1244,14 @@ window.BMFP = (function () {
     return false;
   }
 
-  function eraseAt(p) {
+  function eraseAt(p, allowZones) {
     let guard = 200;                       // plan caps make this unreachable
-    while (guard-- > 0 && eraseOne(p)) {}  // clear EVERYTHING the brush touches
+    let removed = false;
+    while (guard-- > 0 && eraseOne(p)) removed = true;  // clear EVERYTHING the brush touches
+    // A zone area only goes when the press landed on otherwise-empty floor
+    // inside it (never during a sweep), so clearing walls in a room doesn't
+    // also strip the room.
+    if (!removed && allowZones) eraseZoneRectAt(p);
   }
 
   function doorAt(p) {
@@ -1220,10 +1289,23 @@ window.BMFP = (function () {
     }
     const snapEl = document.getElementById('fp-snap');
     if (snapEl) snapEl.value = String(snap);   // restored from localStorage
-    ov.addEventListener('pointerdown', onDown);
+    // Pointer capture: once a drag starts, the overlay keeps getting move/up
+    // events even when the pointer leaves it — past the map edge, over the
+    // floating panel, or outside the browser window. Releasing anywhere
+    // finishes the shape (coordinates clamped to the map in evtCell). The
+    // old pointerleave handler threw the whole drag away, which lost a room
+    // the moment the cursor slipped off the map.
+    ov.addEventListener('pointerdown', e => {
+      onDown(e);
+      if (drag && ov.setPointerCapture) {
+        try { ov.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
+      }
+    });
     ov.addEventListener('pointermove', onMove);
     ov.addEventListener('pointerup', onUp);
-    ov.addEventListener('pointerleave', () => {
+    // Only a genuine cancel (touch gesture taken over by the browser, device
+    // disconnect) abandons an in-progress shape.
+    ov.addEventListener('pointercancel', () => {
       if (drag) {
         if (drag.previewEl) drag.previewEl.remove();
         drag = null;
@@ -1251,7 +1333,7 @@ window.BMFP = (function () {
     setWallShow, setShow2d, setElevHeight, setSnap, setLightType, setLightColor,
     setLightRadius, setPropType, setPropRot, setPropScale, setPropTexture,
     undo, redo, nudge, scalePlan,
-    newZone, deleteZone, selectZone, setZoneField,
+    newZone, deleteZone, deleteZoneRect, selectZone, setZoneField,
     applySel, deleteSel, setTexOptions, getDraft,
     toggle: togglePanel, close: closePanel,
     isDirty: () => dirty,

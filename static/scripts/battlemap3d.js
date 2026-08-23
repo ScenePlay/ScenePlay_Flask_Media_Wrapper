@@ -336,12 +336,33 @@ window.BM3D = (function () {
     return matFor(opts);
   }
 
-  // Zone lookup: last zone whose rect covers the point wins. pad grows the
-  // rects — a room's boundary WALLS sit exactly on its rect edges, so a
-  // strict inside-test would drop the east/south walls out of their zone.
+  // Total painted area of a zone (cells²) — the measure of how specific it is.
+  function zoneArea(zn) {
+    var a = 0, rs = (zn && zn.rects) || [];
+    for (var j = 0; j < rs.length; j++) {
+      a += Math.max(0, rs[j].x2 - rs[j].x1) * Math.max(0, rs[j].y2 - rs[j].y1);
+    }
+    return a;
+  }
+
+  // Zones sorted for stacking: largest first, so a room painted INSIDE another
+  // room comes later and wins — whatever order the DM drew them in. Ties keep
+  // list order (the later-drawn zone wins, the old rule).
+  function zonesBySize() {
+    var zones = ((plan && plan.zones) || []).map(function (zn, i) {
+      return { zn: zn, i: i, area: zoneArea(zn) };
+    });
+    zones.sort(function (a, b) { return (b.area - a.area) || (a.i - b.i); });
+    return zones.map(function (e) { return e.zn; });
+  }
+
+  // Zone lookup: the SMALLEST zone whose rect covers the point wins (a nested
+  // room overrides the room around it). pad grows the rects — a room's
+  // boundary WALLS sit exactly on its rect edges, so a strict inside-test
+  // would drop the east/south walls out of their zone.
   function zoneAt(x, z, pad) {
     var p = pad || 0;
-    var zones = (plan && plan.zones) || [];
+    var zones = zonesBySize();
     for (var i = zones.length - 1; i >= 0; i--) {
       var rs = zones[i].rects || [];
       for (var j = 0; j < rs.length; j++) {
@@ -933,9 +954,12 @@ window.BM3D = (function () {
     // Zone floor overlays: a zone's floor texture REPLACES the bg art inside
     // its rects — floated just above the base mesh, world-scale repeat UVs,
     // tinted toward the art's hue so it still harmonizes with the map. One
-    // merged mesh per textured zone.
-    ((plan && plan.zones) || []).forEach(function (zn) {
+    // merged mesh per textured zone. Largest zones first and each smaller
+    // one a hair higher, so a room inside a room shows ITS floor (and two
+    // overlapping textured floors never z-fight).
+    zonesBySize().forEach(function (zn, rank) {
       if (!zn.floor_texture) return;
+      var lift = 0.003 + rank * 0.002;
       var ztex = libTexture(zn.floor_texture);
       if (!ztex) return;
       var tf = ztex.userData.tileFt || 5;
@@ -951,7 +975,7 @@ window.BM3D = (function () {
             var qx1 = Math.max(ix2 * step, r.x1), qx2 = Math.min((ix2 + 1) * step, r.x2);
             var qz1 = Math.max(iz2 * step, r.y1), qz2 = Math.min((iz2 + 1) * step, r.y2);
             if (qx2 - qx1 < 0.001 || qz2 - qz1 < 0.001) continue;
-            var h = floorAt((qx1 + qx2) / 2, (qz1 + qz2) / 2) + 0.003;
+            var h = floorAt((qx1 + qx2) / 2, (qz1 + qz2) / 2) + lift;
             zpos.push(qx1, h, qz1,  qx2, h, qz1,  qx2, h, qz2,  qx1, h, qz2);
             zuv.push(qx1 * 5 / tf, -qz1 * 5 / tf,  qx2 * 5 / tf, -qz1 * 5 / tf,
                      qx2 * 5 / tf, -qz2 * 5 / tf,  qx1 * 5 / tf, -qz2 * 5 / tf);
