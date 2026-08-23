@@ -13,7 +13,8 @@ on both the local pages and the relay portal):
                       "style":"stone", "texture":"mossy_stone"}],
       "doors":      [{"id":"d1","x1":3,"y1":6.5,"x2":3,"y2":7.5,"open":false,
                       "height_ft":8, "texture":"oak_planks"}],
-      "elevations": [{"x1":5,"y1":5,"x2":9,"y2":9,"floor_ft":-10,"label":"pit"}],
+      "elevations": [{"x1":5,"y1":5,"x2":9,"y2":9,"floor_ft":-10,"label":"pit",
+                      "rot":30}],
       "lights":     [{"x":4,"y":6,"type":"torch","color":"#ff9a3c",
                       "intensity":1.0,"radius_ft":30,"height_ft":6,"flicker":true}],
       "props":      [{"type":"barrel","x":5,"y":5.4,"rot":40,"scale":1,
@@ -372,6 +373,13 @@ def validate_floorplan(data, grid_cols, grid_rows):
             continue
         rect = {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
                 'floor_ft': round(_clamp(floor, *LEVEL_FT_RANGE), 1)}
+        # Optional rotation (degrees clockwise about the rect's CENTER) —
+        # angled platforms/pits. Circles ignore it, absent/0 = axis-aligned.
+        rot = _num(raw.get('rot'))
+        if rot:
+            rot = round(rot % 360, 1)
+            if rot:
+                rect['rot'] = rot
         label = raw.get('label')
         if label:
             rect['label'] = str(label).strip()[:40]

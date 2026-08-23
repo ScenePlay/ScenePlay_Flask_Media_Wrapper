@@ -133,17 +133,31 @@ window.FPPrompt = (function () {
     }
 
     // Elevations under the walls: pits hatched, platforms solid light gray.
+    // Rotated rects ("rot", degrees clockwise about the center) draw in a
+    // rotated local frame so the schematic matches the 3D footprint.
     (plan.elevations || []).forEach(e => {
       ctx.save();
+      const rot = e.shape !== 'circle' && e.rot;
+      if (rot) {
+        ctx.translate((e.x1 + e.x2) / 2 * px, (e.y1 + e.y2) / 2 * px);
+        ctx.rotate(e.rot * Math.PI / 180);
+      }
+      // shape bounds in the (possibly rotated) local frame
+      const bx = e.shape === 'circle' ? (e.cx - e.r) * px
+               : rot ? -(e.x2 - e.x1) / 2 * px : e.x1 * px;
+      const by = e.shape === 'circle' ? (e.cy - e.r) * px
+               : rot ? -(e.y2 - e.y1) / 2 * px : e.y1 * px;
+      const bw = e.shape === 'circle' ? e.r * 2 * px : (e.x2 - e.x1) * px;
+      const bh = e.shape === 'circle' ? e.r * 2 * px : (e.y2 - e.y1) * px;
+      const tracePath = () => {
+        ctx.beginPath();
+        if (e.shape === 'circle') ctx.arc(e.cx * px, e.cy * px, e.r * px, 0, Math.PI * 2);
+        else ctx.rect(bx, by, bw, bh);
+      };
       ctx.setLineDash([6, 4]);
       ctx.strokeStyle = '#555555';
       ctx.lineWidth = 2;
-      ctx.beginPath();
-      if (e.shape === 'circle') {
-        ctx.arc(e.cx * px, e.cy * px, e.r * px, 0, Math.PI * 2);
-      } else {
-        ctx.rect(e.x1 * px, e.y1 * px, (e.x2 - e.x1) * px, (e.y2 - e.y1) * px);
-      }
+      tracePath();
       if (e.floor_ft > 0) {
         ctx.fillStyle = '#cfcfcf';
         ctx.fill();
@@ -153,10 +167,6 @@ window.FPPrompt = (function () {
         ctx.setLineDash([]);
         ctx.strokeStyle = '#9a9a9a';
         ctx.lineWidth = 2;
-        const bx = e.shape === 'circle' ? (e.cx - e.r) * px : e.x1 * px;
-        const by = e.shape === 'circle' ? (e.cy - e.r) * px : e.y1 * px;
-        const bw = e.shape === 'circle' ? e.r * 2 * px : (e.x2 - e.x1) * px;
-        const bh = e.shape === 'circle' ? e.r * 2 * px : (e.y2 - e.y1) * px;
         for (let o = -bh; o < bw; o += 10) {   // diagonal hatch
           ctx.beginPath();
           ctx.moveTo(bx + o, by + bh);
@@ -164,9 +174,7 @@ window.FPPrompt = (function () {
           ctx.stroke();
         }
         ctx.restore();
-        ctx.beginPath();
-        if (e.shape === 'circle') ctx.arc(e.cx * px, e.cy * px, e.r * px, 0, Math.PI * 2);
-        else ctx.rect(e.x1 * px, e.y1 * px, (e.x2 - e.x1) * px, (e.y2 - e.y1) * px);
+        tracePath();
       }
       ctx.stroke();
       ctx.restore();

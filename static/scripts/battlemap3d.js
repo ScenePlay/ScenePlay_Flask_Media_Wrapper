@@ -147,7 +147,10 @@ window.BM3D = (function () {
   }
 
   // Local floor height (world units) at cell coords. Elevation rects are
-  // last-wins, matching the validator's contract.
+  // last-wins, matching the validator's contract. Rects may carry "rot"
+  // (degrees clockwise about the center): the point is inverse-rotated into
+  // the rect's local frame, so every floorAt() consumer — floor quads, step
+  // skirts, token heights, camera — respects the rotation for free.
   function floorAt(x, z) {
     var h = 0;
     if (!plan || !plan.elevations) return 0;
@@ -156,6 +159,14 @@ window.BM3D = (function () {
       if (e.shape === 'circle') {
         var dx = x - e.cx, dz = z - e.cy;
         if (dx * dx + dz * dz <= e.r * e.r) h = e.floor_ft * FT;
+      } else if (e.rot) {
+        var cx = (e.x1 + e.x2) / 2, cz = (e.y1 + e.y2) / 2;
+        var a = e.rot * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+        var lx = cx + (x - cx) * ca + (z - cz) * sa;
+        var lz = cz - (x - cx) * sa + (z - cz) * ca;
+        if (lx >= e.x1 && lx < e.x2 && lz >= e.y1 && lz < e.y2) {
+          h = e.floor_ft * FT;
+        }
       } else if (x >= e.x1 && x < e.x2 && z >= e.y1 && z < e.y2) {
         h = e.floor_ft * FT;
       }
@@ -882,9 +893,11 @@ window.BM3D = (function () {
 
     // Circle elevations need finer floor tessellation than one quad per grid
     // cell, or their rims quantize into rectangles (a r=1.5 circle covered a
-    // 3x2 block of whole cells). Rect-only plans keep the cheap 1-cell grid.
+    // 3x2 block of whole cells). Rotated rects have the same problem — their
+    // angled edges staircase at cell size. Axis-aligned-only plans keep the
+    // cheap 1-cell grid.
     var hasCircle = !!(plan && plan.elevations && plan.elevations.some(function (e) {
-      return e.shape === 'circle';
+      return e.shape === 'circle' || e.rot;
     }));
     var SUB = hasCircle ? (cols * rows <= 1600 ? 4 : 2) : 1;
     var step = 1 / SUB;

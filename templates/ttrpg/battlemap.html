@@ -1070,6 +1070,12 @@
              style="width:70px;" oninput="BMFP.setElevHeight(this.value)"
              title="Applied to elevation shapes as you draw them — remembered for next time">
       <span class="fx-label">ft</span>
+      <label class="fx-label">Angle</label>
+      <input type="number" id="fp-elev-rot" value="0" min="0" max="359" step="15"
+             class="form-control form-control-sm"
+             style="width:64px;" oninput="BMFP.setElevRot(this.value)"
+             title="Rotation applied to new SQUARE elevations as you draw them (degrees clockwise about the center)">
+      <span class="fx-label">&deg;</span>
     </div>
     <div class="fx-label" style="color:#666;font-size:.68rem;">Negative feet = pit, positive = platform.</div>
   </div>
@@ -1267,6 +1273,18 @@
              class="form-control form-control-sm" style="width:64px;"
              title="Scale multiplier (1 = life size)">
       <span class="fx-label">&times;</span>
+    </div>
+    <div class="align-items-center gap-2 mb-1" style="display:none;" id="fp-sel-elev-row">
+      <label class="fx-label">Floor</label>
+      <input type="number" id="fp-sel-elev-ft" min="-50" max="100" step="5"
+             class="form-control form-control-sm" style="width:70px;"
+             title="Floor height in feet — negative = pit, positive = platform">
+      <span class="fx-label">ft</span>
+      <label class="fx-label">Angle</label>
+      <input type="number" id="fp-sel-elev-rot" min="0" max="359" step="15" placeholder="0"
+             class="form-control form-control-sm" style="width:64px;"
+             title="Rotation in degrees (clockwise, about the rectangle's center)">
+      <span class="fx-label">&deg;</span>
     </div>
     <div class="align-items-center gap-2 mb-1" style="display:none;" id="fp-sel-light-row">
       <label class="fx-label">Type</label>

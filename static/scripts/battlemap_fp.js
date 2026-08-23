@@ -46,6 +46,7 @@ window.BMFP = (function () {
   let wallHeightFt = 10;
   let wallShow = false;        // new walls also render on players' 2D maps
   let elevFt = -10;            // height applied to new elevation shapes
+  let elevRot = 0;             // degrees clockwise applied to new elevation rects
   let lightType = 'torch';
   let lightColor = null;       // '#rrggbb' when custom; null = type default
   let lightRadius = null;      // ft when overridden; null = type default
@@ -251,11 +252,16 @@ window.BMFP = (function () {
         lx = px(e.cx) - px(e.r) * 0.5;
         ly = px(e.cy);
       } else {
-        g.appendChild(svgEl('rect', Object.assign({
+        const attrs = Object.assign({
           x: px(e.x1), y: px(e.y1),
-          width: px(e.x2 - e.x1), height: px(e.y2 - e.y1) }, fillAttrs)));
-        lx = px(e.x1) + 6;
-        ly = px(e.y1) + 16;
+          width: px(e.x2 - e.x1), height: px(e.y2 - e.y1) }, fillAttrs);
+        const ecx = px((e.x1 + e.x2) / 2), ecy = px((e.y1 + e.y2) / 2);
+        if (e.rot) attrs.transform = `rotate(${e.rot} ${ecx} ${ecy})`;
+        g.appendChild(svgEl('rect', attrs));
+        // rotated rects label at the center (the corner may sit outside the
+        // rotated outline); axis-aligned keep the tidy corner label
+        lx = e.rot ? ecx - 14 : px(e.x1) + 6;
+        ly = e.rot ? ecy + 4 : px(e.y1) + 16;
       }
       const label = svgEl('text', {
         x: lx, y: ly,
@@ -337,12 +343,56 @@ window.BMFP = (function () {
         title.textContent = 'Drag to move the light';
         ring.appendChild(title);
         svg.appendChild(ring);
+      } else if (sel.kind === 'elevation') {
+        if (s.shape === 'circle') {
+          svg.appendChild(svgEl('circle', {
+            cx: px(s.cx), cy: px(s.cy), r: px(s.r),
+            fill: 'none', stroke: '#3df0c8', 'stroke-width': 3,
+          }));
+        } else {
+          const ecx = px((s.x1 + s.x2) / 2), ecy = px((s.y1 + s.y2) / 2);
+          const hl = svgEl('rect', {
+            x: px(s.x1), y: px(s.y1),
+            width: px(s.x2 - s.x1), height: px(s.y2 - s.y1),
+            fill: 'none', stroke: '#3df0c8', 'stroke-width': 3,
+          });
+          if (s.rot) hl.setAttribute('transform', `rotate(${s.rot} ${ecx} ${ecy})`);
+          svg.appendChild(hl);
+          // rotate handle above the rect's top edge, turning with it —
+          // same manipulation language as props
+          const h = _elevRotHandle(s);
+          svg.appendChild(svgEl('line', {
+            x1: ecx, y1: ecy, x2: px(h.x), y2: px(h.y),
+            stroke: '#3df0c8', 'stroke-width': 1.5, 'stroke-dasharray': '3 3',
+          }));
+          const knob = svgEl('circle', {
+            cx: px(h.x), cy: px(h.y), r: 6,
+            fill: '#3df0c8', stroke: '#083f33', 'stroke-width': 2,
+          });
+          const title = svgEl('title', {});
+          title.textContent = 'Drag to rotate (drag the area itself to move it)';
+          knob.appendChild(title);
+          svg.appendChild(knob);
+        }
       } else {
         svg.appendChild(svgEl('line', {
           x1: px(s.x1), y1: px(s.y1), x2: px(s.x2), y2: px(s.y2),
           stroke: '#3df0c8', 'stroke-width': 11, 'stroke-linecap': 'round',
           'stroke-opacity': '0.45',
         }));
+        // endpoint knobs: drag one to reshape/rotate the segment; drag the
+        // segment body to slide the whole wall/door
+        [1, 2].forEach(n => {
+          const knob = svgEl('circle', {
+            cx: px(s['x' + n]), cy: px(s['y' + n]), r: 6,
+            fill: '#3df0c8', stroke: '#083f33', 'stroke-width': 2,
+          });
+          const title = svgEl('title', {});
+          title.textContent =
+            'Drag to move this end (drag the segment itself to slide it)';
+          knob.appendChild(title);
+          svg.appendChild(knob);
+        });
       }
     }
 
@@ -527,6 +577,11 @@ window.BMFP = (function () {
     try { localStorage.setItem('bmfp_elev_ft', String(elevFt)); } catch (e) {}
   }
 
+  function setElevRot(v) {
+    const d = parseInt(v, 10);
+    elevRot = isNaN(d) ? 0 : ((d % 360) + 360) % 360;
+  }
+
   function setSnap(v) {
     const s = parseFloat(v);
     if (SNAPS.indexOf(s) === -1) return;
@@ -709,6 +764,15 @@ window.BMFP = (function () {
              y: pr.y + Math.sin(a) * ROT_HANDLE_PX / CELL_PX };
   }
 
+  // Elevation-rect rotate handle: just past the midpoint of the rect's top
+  // edge (in its rotated frame), so it clears the outline whatever the size.
+  function _elevRotHandle(e) {
+    const cx = (e.x1 + e.x2) / 2, cy = (e.y1 + e.y2) / 2;
+    const a = ((e.rot || 0) - 90) * Math.PI / 180;
+    const d = (cy - e.y1) + ROT_HANDLE_PX / CELL_PX;
+    return { x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d };
+  }
+
   // Commit a drag's pre-state to the undo stack on its FIRST real change —
   // a drag that never moves anything leaves no undo entry behind.
   function _dragCommit(d) {
@@ -745,6 +809,14 @@ window.BMFP = (function () {
         best = { kind: 'light', idx: i }; bestD = Math.min(bestD, d);
       }
     });
+    // Elevations claim the click LAST — they cover whole areas, so anything
+    // sitting on them (walls, props, lights) must stay selectable. Later
+    // entries win, matching floorAt()'s last-wins stacking.
+    if (!best) {
+      (plan.elevations || []).forEach((ev, i) => {
+        if (_elevContains(ev, p)) best = { kind: 'elevation', idx: i };
+      });
+    }
     sel = best;
     renderSelUI();
     redraw();
@@ -758,20 +830,32 @@ window.BMFP = (function () {
     if (!s) return;
     const isProp = sel.kind === 'prop';
     const isLight = sel.kind === 'light';
+    const isElev = sel.kind === 'elevation';
     document.getElementById('fp-sel-what').textContent =
       isProp ? `Prop: ${s.type}`
              : isLight ? `Light: ${s.type}`
+             : isElev ? `Elevation: ${s.floor_ft < 0 ? 'pit' : 'platform'}` +
+                        (s.shape === 'circle' ? ' ⬤' : '')
              : sel.kind === 'door' ? `Door ${s.id || ''}` : `Wall #${sel.idx + 1}`;
-    // walls/doors get the height row; props the turn/size row; lights their
-    // own rows (no texture). inline flex/none (NOT the d-flex class: its
-    // !important would beat an inline display:none and the rows would never hide)
-    document.getElementById('fp-sel-hb-row').style.display = (isProp || isLight) ? 'none' : 'flex';
-    document.getElementById('fp-sel-style-row').style.display = (isProp || isLight) ? 'none' : 'flex';
+    // walls/doors get the height row; props the turn/size row; lights and
+    // elevations their own rows (no texture). inline flex/none (NOT the d-flex
+    // class: its !important would beat an inline display:none and the rows
+    // would never hide)
+    document.getElementById('fp-sel-hb-row').style.display = (isProp || isLight || isElev) ? 'none' : 'flex';
+    document.getElementById('fp-sel-style-row').style.display = (isProp || isLight || isElev) ? 'none' : 'flex';
     document.getElementById('fp-sel-prop-row').style.display = isProp ? 'flex' : 'none';
-    document.getElementById('fp-sel-tex-row').style.display = isLight ? 'none' : 'flex';
+    document.getElementById('fp-sel-tex-row').style.display = (isLight || isElev) ? 'none' : 'flex';
+    document.getElementById('fp-sel-elev-row').style.display = isElev ? 'flex' : 'none';
     document.getElementById('fp-sel-light-row').style.display = isLight ? 'flex' : 'none';
     document.getElementById('fp-sel-light-row2').style.display = isLight ? 'flex' : 'none';
     document.getElementById('fp-sel-light-row3').style.display = isLight ? 'flex' : 'none';
+    if (isElev) {
+      document.getElementById('fp-sel-elev-ft').value = s.floor_ft;
+      const rotEl = document.getElementById('fp-sel-elev-rot');
+      rotEl.value = s.rot || 0;
+      rotEl.disabled = s.shape === 'circle';   // circles have no orientation
+      return;
+    }
     if (isLight) {
       const meta = LIGHT_META[s.type] || LIGHT_META.torch;
       document.getElementById('fp-sel-light-type').value = s.type || 'torch';
@@ -809,6 +893,17 @@ window.BMFP = (function () {
       const v = parseFloat(document.getElementById(id).value);
       return isNaN(v) ? null : Math.max(lo, Math.min(hi, v));
     };
+    if (sel.kind === 'elevation') {
+      const ft = num('fp-sel-elev-ft', -50, 100);
+      if (ft !== null && ft) s.floor_ft = ft;
+      if (s.shape !== 'circle') {
+        const r = num('fp-sel-elev-rot', 0, 359);
+        if (r) s.rot = r; else delete s.rot;
+      }
+      markDirty();
+      renderSelUI();
+      return;
+    }
     if (sel.kind === 'light') {
       const type = document.getElementById('fp-sel-light-type').value;
       if (LIGHT_META[type]) s.type = type;
@@ -1008,6 +1103,19 @@ window.BMFP = (function () {
   // +toFixed(2) kills float noise from 0.2 steps (3 * 0.2 = 0.6000000000000001)
   const snapTo = v => +(Math.max(0, Math.round(v / snap) * snap)).toFixed(2);
 
+  // Point-in-elevation test honoring the rect's optional rotation ("rot",
+  // degrees clockwise about the center) — the point is inverse-rotated into
+  // the rect's local frame. Mirrors battlemap3d.js floorAt().
+  function _elevContains(e, p) {
+    if (e.shape === 'circle') return Math.hypot(p.x - e.cx, p.y - e.cy) <= e.r;
+    if (!e.rot) return p.x >= e.x1 && p.x < e.x2 && p.y >= e.y1 && p.y < e.y2;
+    const cx = (e.x1 + e.x2) / 2, cy = (e.y1 + e.y2) / 2;
+    const a = e.rot * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    const lx = cx + (p.x - cx) * ca + (p.y - cy) * sa;
+    const ly = cy - (p.x - cx) * sa + (p.y - cy) * ca;
+    return lx >= e.x1 && lx < e.x2 && ly >= e.y1 && ly < e.y2;
+  }
+
   function distToSeg(p, a, b) {
     const dx = b.x - a.x, dy = b.y - a.y;
     const len2 = dx * dx + dy * dy;
@@ -1115,6 +1223,33 @@ window.BMFP = (function () {
           return;
         }
       }
+      // A selected ELEVATION RECT's rotate handle spins it (15° snaps),
+      // checked before re-selecting so the knob keeps the click.
+      const selElev = sel && sel.kind === 'elevation' && plan.elevations[sel.idx];
+      if (selElev && selElev.shape !== 'circle') {
+        const h = _elevRotHandle(selElev);
+        if (Math.hypot(p.x - h.x, p.y - h.y) <= 14 / CELL_PX + 0.1) {
+          drag = { kind: 'selelevrot', idx: sel.idx,
+                   snap: JSON.stringify(plan), pushed: false };
+          return;
+        }
+      }
+      // A selected WALL/DOOR is directly manipulable too: grab an endpoint
+      // knob to reshape/rotate it (checked BEFORE re-selecting, so a knob
+      // near another segment doesn't steal the click).
+      if (sel && (sel.kind === 'wall' || sel.kind === 'door')) {
+        const sg = plan[sel.kind + 's'][sel.idx];
+        if (sg) {
+          const grabR = 12 / CELL_PX + 0.05;
+          for (const n of [1, 2]) {
+            if (Math.hypot(p.x - sg['x' + n], p.y - sg['y' + n]) <= grabR) {
+              drag = { kind: 'selend', list: sel.kind + 's', idx: sel.idx,
+                       end: n, snap: JSON.stringify(plan), pushed: false };
+              return;
+            }
+          }
+        }
+      }
       selectAt(p);
       if (sel && (sel.kind === 'prop' || sel.kind === 'light')) {
         const pr = plan[sel.kind + 's'][sel.idx];
@@ -1122,6 +1257,28 @@ window.BMFP = (function () {
                  snap: JSON.stringify(plan), pushed: false,
                  offX: pr.x - p.x, offY: pr.y - p.y,
                  last: pr.x + ',' + pr.y };
+      } else if (sel && (sel.kind === 'wall' || sel.kind === 'door')) {
+        // body drag slides the whole segment (both endpoints together)
+        const sg = plan[sel.kind + 's'][sel.idx];
+        drag = { kind: 'selseg', list: sel.kind + 's', idx: sel.idx,
+                 snap: JSON.stringify(plan), pushed: false,
+                 grab: p, o: { x1: sg.x1, y1: sg.y1, x2: sg.x2, y2: sg.y2 },
+                 lastDx: 0, lastDy: 0 };
+      } else if (sel && sel.kind === 'elevation') {
+        const ev = plan.elevations[sel.idx];
+        if (ev.shape === 'circle') {
+          drag = { kind: 'selcirc', idx: sel.idx,
+                   snap: JSON.stringify(plan), pushed: false,
+                   offX: ev.cx - p.x, offY: ev.cy - p.y,
+                   last: ev.cx + ',' + ev.cy };
+        } else {
+          // same slide mechanics as walls — x1..y2 translate together, rot
+          // rides along untouched
+          drag = { kind: 'selseg', list: 'elevations', idx: sel.idx,
+                   snap: JSON.stringify(plan), pushed: false,
+                   grab: p, o: { x1: ev.x1, y1: ev.y1, x2: ev.x2, y2: ev.y2 },
+                   lastDx: 0, lastDy: 0 };
+        }
       }
       return;
     }
@@ -1244,6 +1401,36 @@ window.BMFP = (function () {
       markDirty();
       return;
     }
+    if (drag.kind === 'selend') {
+      const sg = plan[drag.list][drag.idx];
+      const other = drag.end === 1 ? 2 : 1;
+      const nx = snapTo(p.x), ny = snapTo(p.y);
+      if (nx === sg['x' + drag.end] && ny === sg['y' + drag.end]) return;
+      if (nx === sg['x' + other] && ny === sg['y' + other]) return;  // no zero-length
+      _dragCommit(drag);
+      sg['x' + drag.end] = nx; sg['y' + drag.end] = ny;
+      markDirty();
+      return;
+    }
+    if (drag.kind === 'selseg') {
+      const sg = plan[drag.list][drag.idx];
+      const o = drag.o;
+      // Snap the DELTA (not each endpoint) so diagonals keep their exact
+      // shape, then clamp so both endpoints stay on the grid.
+      let dx = snapTo(o.x1 + (p.x - drag.grab.x)) - o.x1;
+      let dy = snapTo(o.y1 + (p.y - drag.grab.y)) - o.y1;
+      dx = Math.max(-Math.min(o.x1, o.x2),
+                    Math.min(GRID_COLS - Math.max(o.x1, o.x2), dx));
+      dy = Math.max(-Math.min(o.y1, o.y2),
+                    Math.min(GRID_ROWS - Math.max(o.y1, o.y2), dy));
+      if (dx === drag.lastDx && dy === drag.lastDy) return;
+      _dragCommit(drag);
+      sg.x1 = +(o.x1 + dx).toFixed(2); sg.y1 = +(o.y1 + dy).toFixed(2);
+      sg.x2 = +(o.x2 + dx).toFixed(2); sg.y2 = +(o.y2 + dy).toFixed(2);
+      drag.lastDx = dx; drag.lastDy = dy;
+      markDirty();
+      return;
+    }
     if (drag.kind === 'selrotate') {
       const pr = plan.props[drag.idx];
       // handle sits "above" the prop at rot 0, so pointing the pointer in a
@@ -1255,6 +1442,28 @@ window.BMFP = (function () {
       if (rot) pr.rot = rot; else delete pr.rot;
       markDirty();
       renderSelUI();   // keep the inspector's Turn field live
+      return;
+    }
+    if (drag.kind === 'selelevrot') {
+      const ev = plan.elevations[drag.idx];
+      const ecx = (ev.x1 + ev.x2) / 2, ecy = (ev.y1 + ev.y2) / 2;
+      const ang = Math.atan2(p.y - ecy, p.x - ecx) * 180 / Math.PI + 90;
+      const rot = ((Math.round(ang / 15) * 15) % 360 + 360) % 360;
+      if ((ev.rot || 0) === rot) return;
+      _dragCommit(drag);
+      if (rot) ev.rot = rot; else delete ev.rot;
+      markDirty();
+      renderSelUI();
+      return;
+    }
+    if (drag.kind === 'selcirc') {
+      const ev = plan.elevations[drag.idx];
+      const nx = snapTo(p.x + drag.offX), ny = snapTo(p.y + drag.offY);
+      if (nx + ',' + ny === drag.last) return;
+      _dragCommit(drag);
+      ev.cx = nx; ev.cy = ny;
+      drag.last = nx + ',' + ny;
+      markDirty();
       return;
     }
     if (drag.kind === 'erase') {
@@ -1294,6 +1503,13 @@ window.BMFP = (function () {
       drag.previewEl.setAttribute('y', y1 * CELL_PX);
       drag.previewEl.setAttribute('width',  Math.abs(end.x - drag.start.x) * CELL_PX);
       drag.previewEl.setAttribute('height', Math.abs(end.y - drag.start.y) * CELL_PX);
+      // live-preview the panel's angle about the rect's current center, so
+      // the drawn footprint IS the final footprint
+      if (drag.kind === 'elev' && elevRot) {
+        const pcx = (x1 + Math.abs(end.x - drag.start.x) / 2) * CELL_PX;
+        const pcy = (y1 + Math.abs(end.y - drag.start.y) / 2) * CELL_PX;
+        drag.previewEl.setAttribute('transform', `rotate(${elevRot} ${pcx} ${pcy})`);
+      }
     }
   }
 
@@ -1301,7 +1517,9 @@ window.BMFP = (function () {
     if (!drag) return;
     const d = drag;
     drag = null;
-    if (d.kind === 'selmove' || d.kind === 'selrotate') return;   // no preview el
+    if (d.kind === 'selmove' || d.kind === 'selrotate' ||
+        d.kind === 'selend' || d.kind === 'selseg' ||
+        d.kind === 'selcirc' || d.kind === 'selelevrot') return;   // no preview el
     d.previewEl.remove();
     if (!d.end) return;
 
@@ -1346,7 +1564,9 @@ window.BMFP = (function () {
       const y1 = Math.min(d.start.y, d.end.y), y2 = Math.max(d.start.y, d.end.y);
       if (x1 === x2 || y1 === y2 || !elevFt) return;
       pushUndo();
-      plan.elevations.push({ x1, y1, x2, y2, floor_ft: elevFt });
+      const ev = { x1, y1, x2, y2, floor_ft: elevFt };
+      if (elevRot) ev.rot = elevRot;
+      plan.elevations.push(ev);
       markDirty();
     } else if (d.kind === 'elevc') {
       if (!d.r || d.r < snap || !elevFt) return;
@@ -1401,9 +1621,7 @@ window.BMFP = (function () {
       return true;
     }
     if (wi !== null) { plan.walls.splice(wi, 1); markDirty(); return true; }
-    const ei = plan.elevations.findIndex(e2 => e2.shape === 'circle'
-      ? Math.hypot(p.x - e2.cx, p.y - e2.cy) <= e2.r
-      : (p.x >= e2.x1 && p.x < e2.x2 && p.y >= e2.y1 && p.y < e2.y2));
+    const ei = plan.elevations.findIndex(e2 => _elevContains(e2, p));
     if (ei !== -1) { plan.elevations.splice(ei, 1); markDirty(); return true; }
     return false;
   }
@@ -1494,7 +1712,7 @@ window.BMFP = (function () {
 
   return {
     onState, redraw, save, revert, setTool, setWallHeight, setWallStyle,
-    setWallShow, setShow2d, setElevHeight, setSnap, setLightType, setLightColor,
+    setWallShow, setShow2d, setElevHeight, setElevRot, setSnap, setLightType, setLightColor,
     setLightRadius, setPropType, setPropRot, setPropScale, setPropTexture,
     undo, redo, nudge, scalePlan,
     newZone, deleteZone, deleteZoneRect, selectZone, setZoneField,
