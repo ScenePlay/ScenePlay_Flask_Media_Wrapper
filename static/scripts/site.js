@@ -141,6 +141,52 @@ window.addEventListener('load', function () {
   if (typeof addButton === 'function') restoreGridControls();
 });
 
+// A small modal with ONE dropdown — the house way to ask the user to pick
+// from a list when the grid itself can't host the select. Resolves to the
+// chosen option's value, or null on Cancel/close. (A typed-number prompt is
+// never acceptable here — see CLAUDE.md.)
+function spPickOption(title, text, label, options) {
+  return new Promise(resolve => {
+    let modal = document.getElementById('spPickModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'spPickModal';
+      modal.className = 'modal fade';
+      modal.tabIndex = -1;
+      modal.innerHTML =
+        '<div class="modal-dialog modal-sm"><div class="modal-content">'
+        + '<div class="modal-header"><h5 class="modal-title"></h5>'
+        + '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>'
+        + '<div class="modal-body"><p class="small text-muted sp-pick-text"></p>'
+        + '<label class="form-label fw-bold sp-pick-label" for="spPickSelect"></label>'
+        + '<select id="spPickSelect" class="form-select"></select></div>'
+        + '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>'
+        + '<button type="button" class="btn btn-primary sp-pick-ok">Add</button></div>'
+        + '</div></div>';
+      document.body.appendChild(modal);
+    }
+    modal.querySelector('.modal-title').textContent = title;
+    modal.querySelector('.sp-pick-text').textContent = text || '';
+    modal.querySelector('.sp-pick-label').textContent = label || '';
+    const sel = modal.querySelector('#spPickSelect');
+    sel.innerHTML = '';
+    options.forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+    });
+    const inst = bootstrap.Modal.getOrCreateInstance(modal);
+    let done = false;
+    const finish = value => { if (!done) { done = true; resolve(value); } };
+    const ok = modal.querySelector('.sp-pick-ok');
+    ok.onclick = () => { finish(sel.value); inst.hide(); };
+    modal.addEventListener('hidden.bs.modal', () => finish(null), {once: true});
+    inst.show();
+    sel.focus();
+  });
+}
+
 // Shared Add New Row POST for the filterable table pages. When the page's
 // campaign/scene filter dropdown has a real selection, ask whether the new
 // row should belong to it — OK stamps the id on the row, Cancel creates it
@@ -172,20 +218,25 @@ async function spAddRowPrompt(endpoint, filter) {
     }
   } else if (cdOn && dd) {
     // Campaign picked but the scene filter is on All. These rows can only
-    // join a campaign THROUGH a scene, and the scene dropdown already lists
-    // exactly this campaign's scenes — offer them as a numbered pick.
+    // join a campaign THROUGH a scene: ask whether the row belongs to this
+    // campaign, then let the user pick the scene from a DROPDOWN (the scene
+    // filter already lists exactly this campaign's scenes). Never a typed
+    // number — see CLAUDE.md.
     const opts = Array.from(dd.options).filter(o => parseInt(o.value, 10) || 0);
     if (opts.length) {
-      const ans = window.prompt('The ' + filter.contextKind + ' "' + cdName
-          + '" is selected but the ' + filter.kind + ' filter is on All. Rows '
-          + 'here join a ' + filter.contextKind + ' through their '
-          + filter.kind + ' — attach the new row to one of:\n'
-          + opts.map((o, i) => (i + 1) + ') ' + o.text.trim()).join('\n')
-          + '\n\nEnter a number, or leave blank for none (Cancel adds nothing):');
-      if (ans === null) return;
-      const n = parseInt(ans, 10);
-      body[filter.field] = (n >= 1 && n <= opts.length)
-          ? parseInt(opts[n - 1].value, 10) : 0;
+      if (confirm('Add the new row to the currently selected ' + filter.contextKind
+          + ' "' + cdName + '"?')) {
+        const picked = await spPickOption(
+          'Add to ' + filter.contextKind + ' "' + cdName + '"',
+          'Rows here join a ' + filter.contextKind + ' through their ' + filter.kind
+            + '. Which ' + filter.kind + ' should the new row belong to?',
+          filter.kind.charAt(0).toUpperCase() + filter.kind.slice(1),
+          opts.map(o => ({value: o.value, label: o.text.trim()})));
+        if (picked === null) return;             // cancelled: add nothing
+        body[filter.field] = parseInt(picked, 10) || 0;
+      } else {
+        body[filter.field] = 0;
+      }
     }
   }
   try {
