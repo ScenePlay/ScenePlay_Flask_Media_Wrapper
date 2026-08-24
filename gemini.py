@@ -29,13 +29,13 @@ API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 _KEY_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                          'instance', 'gemini_api_key')
 
-# Model allowlists per modality. Defaults are the battle-tested generation;
-# the newer ids are offered for DMs who want them (an unsupported id fails
-# loudly with Google's own error message, never silently).
-TEXT_MODELS = ('gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite',
-               'gemini-3.7-flash')
-IMAGE_MODELS = ('gemini-2.5-flash-image', 'gemini-3.1-flash-image',
-                'gemini-3-pro-image')
+# Model allowlists per modality. Google retired the 2.x generation from the
+# API (2026), so only 3.x ids are offered; an id Google rejects fails loudly
+# with Google's own error message, never silently. resolve_model ignores a
+# stored setting that falls off this list, so boxes that had a 2.5 model
+# saved drop to the new default on their own.
+TEXT_MODELS = ('gemini-3.7-flash',)
+IMAGE_MODELS = ('gemini-3.1-flash-image', 'gemini-3-pro-image')
 VIDEO_MODELS = ('veo-3.1-fast-generate-preview', 'veo-3.1-generate-preview',
                 'veo-3.0-fast-generate-001', 'veo-3.0-generate-001')
 

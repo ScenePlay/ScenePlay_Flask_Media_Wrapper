@@ -1478,11 +1478,47 @@ fetch('/ttrpg/textures/manifest').then(r => r.json())
 
 let _aiStatus = null;
 fetch('/ttrpg/ai/status').then(r => r.json()).then(d => {
-  if (!d.ok || !d.configured) return;
+  // Gemini OR the alternative image provider lights the buttons; a flow the
+  // active provider can't do (layouts/video without a Gemini key) still
+  // fails with its own clear message.
+  if (!d.ok || !(d.configured || d.image_ready || d.text_ready)) return;
   _aiStatus = d;
   document.querySelectorAll('.ai-gemini-btn').forEach(b => {
     b.style.display = b.dataset.display || '';
   });
+  // The art button paints IMAGES → name the active image provider on it.
+  // Layout/trace/video buttons stay Gemini (text and Veo are Gemini-only).
+  if (d.text_provider === 'runware') {
+    // The layout designer runs on Runware: rebrand the design/trace buttons
+    // (with the model that will run) and park the Gemini text-model dropdown.
+    document.querySelectorAll('[onclick^="aiGenerateFloorplan"]').forEach(b => {
+      b.innerHTML = b.innerHTML.replace(/Gemini/g, 'Runware')
+        + (d.text_model ? ' <small>(' + d.text_model + ')</small>' : '');
+      b.title = b.title.replace(/Gemini/g, 'Runware')
+        + (d.text_model ? ' — model: ' + d.text_model : '');
+    });
+    const txtSel = document.getElementById('ai-model-text');
+    if (txtSel) {
+      txtSel.disabled = true;
+      txtSel.title = 'Ignored — Runware designs layouts; its model is set in Utilities → AI Generation';
+    }
+  }
+  if (d.image_provider === 'runware') {
+    const art = document.querySelector('[onclick="aiGenerateArt(this)"]');
+    if (art) {
+      const short = String(d.image_model || '').replace(/^runware:/, '');
+      art.innerHTML = art.innerHTML.replace(/Gemini/g, 'Runware')
+        + (short ? ' <small>(' + short + ')</small>' : '');
+      art.title += ' — images render with Runware'
+        + (d.image_model ? ', model ' + d.image_model : '')
+        + ' (set the model in Utilities → AI Generation)';
+    }
+    const imgSel = document.getElementById('ai-model-image');
+    if (imgSel) {
+      imgSel.disabled = true;
+      imgSel.title = 'Ignored — Runware is the image provider; its model is set in Utilities → AI Generation';
+    }
+  }
   const fill = (id, mod) => {
     const sel = document.getElementById(id);
     if (!sel) return;
@@ -1582,7 +1618,11 @@ function aiGenerateArt(btn) {
         schematic_png_b64: _fpSchematicCanvas
           ? _fpSchematicCanvas.toDataURL('image/png').split(',')[1] : null,
       }),
-    }).then(r => r.json()).then(d => { _aiDone(btn); return aiResponseToBlob(d); });
+    }).then(r => r.json()).then(d => {
+      _aiDone(btn);
+      if (d && d.ok && d.note) _aiArtMsg(d.note, false);   // e.g. schematic ignored
+      return aiResponseToBlob(d);
+    });
     aiImageWithPreview(generate, {
       title: 'Map background preview', useLabel: 'Use as background',
       note: 'The current background is untouched until you accept this one.',
@@ -1600,7 +1640,7 @@ function aiGenerateArt(btn) {
           _applyBgUpdate(d);
           _aiArtMsg('✨ Background set.', false);
         });
-    }).catch(e => { _aiDone(btn); _aiArtMsg('Gemini: ' + (e.message || 'request failed (network)'), true); });
+    }).catch(e => { _aiDone(btn); _aiArtMsg('AI: ' + (e.message || 'request failed (network)'), true); });
   };
   if (_FP_INFO[_activeMapId] && !_fpPlanCache[_activeMapId]) {
     _fpFetchPlan(_activeMapId).then(go);

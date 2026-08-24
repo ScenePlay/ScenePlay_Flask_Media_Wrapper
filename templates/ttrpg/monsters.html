@@ -241,10 +241,49 @@ function resetFilters() {
   document.getElementById('cr-max-slider').value = CR_STEPS.length - 1;
   document.getElementById('cr-range-display').textContent = 'CR 0 – 30';
   searchInput.value = '';
+  try { localStorage.removeItem(FILTER_KEY); } catch (e) {}
   doSearch();
 }
 
+// ── sticky filters: saved per browser, restored on the next page load ──────
+const FILTER_KEY = 'sp_monster_filters';
+
+function saveFilters() {
+  try {
+    localStorage.setItem(FILTER_KEY, JSON.stringify({
+      q:      searchInput.value,
+      type:   document.getElementById('filter-type').value,
+      size:   document.getElementById('filter-size').value,
+      source: document.getElementById('filter-source').value,
+      crMin:  parseInt(document.getElementById('cr-min-slider').value),
+      crMax:  parseInt(document.getElementById('cr-max-slider').value),
+    }));
+  } catch (e) {}
+}
+
+function restoreFilters() {
+  let f = null;
+  try { f = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch (e) {}
+  if (!f) return;
+  const setSel = (id, v) => {
+    const el = document.getElementById(id);
+    if (v && [...el.options].some(o => o.value === v)) el.value = v;
+  };
+  setSel('filter-type', f.type);
+  setSel('filter-size', f.size);
+  setSel('filter-source', f.source);
+  const clamp = (v, d) => Number.isInteger(v) && v >= 0 && v < CR_STEPS.length ? v : d;
+  let minIdx = clamp(f.crMin, 0), maxIdx = clamp(f.crMax, CR_STEPS.length - 1);
+  if (minIdx > maxIdx) { minIdx = 0; maxIdx = CR_STEPS.length - 1; }
+  document.getElementById('cr-min-slider').value = minIdx;
+  document.getElementById('cr-max-slider').value = maxIdx;
+  document.getElementById('cr-range-display').textContent =
+    'CR ' + CR_STEPS[minIdx].label + ' – ' + CR_STEPS[maxIdx].label;
+  if (typeof f.q === 'string') searchInput.value = f.q;
+}
+
 function runSearch() {
+  saveFilters();
   const q      = searchInput.value.trim();
   const type   = document.getElementById('filter-type').value;
   const size   = document.getElementById('filter-size').value;
@@ -435,7 +474,8 @@ function addToSession() {
     });
 }
 
-// Force filters to defaults on every page load (prevent browser state restoration)
+// Start from defaults (prevent browser form-state restoration), then apply
+// the saved filters so they STICK across refreshes; Reset Filters clears them.
 document.getElementById('filter-type').value   = '';
 document.getElementById('filter-size').value   = '';
 document.getElementById('filter-source').value = '';
@@ -443,6 +483,7 @@ document.getElementById('cr-min-slider').value = 0;
 document.getElementById('cr-max-slider').value = CR_STEPS.length - 1;
 document.getElementById('cr-range-display').textContent = 'CR 0 – 30';
 searchInput.value = '';
+restoreFilters();
 runSearch();
 </script>
 {% endblock %}

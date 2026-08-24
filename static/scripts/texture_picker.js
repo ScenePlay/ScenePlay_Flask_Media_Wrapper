@@ -126,8 +126,16 @@ window.TexturePicker = (function () {
     // The one-click Gemini path appears only when a key is configured
     // (Utilities → Gemini AI); the copy-paste flow works either way.
     fetch('/ttrpg/ai/status').then(r => r.json()).then(d => {
-      if (d.ok && d.configured) {
-        root.querySelector('#texai-generate').style.display = '';
+      if (d.ok && (d.image_ready !== undefined ? d.image_ready : d.configured)) {
+        const btn = root.querySelector('#texai-generate');
+        btn.style.display = '';
+        // name the ACTIVE image provider AND its model on the button
+        const name = d.image_provider === 'runware' ? 'Runware' : 'Gemini';
+        const short = String(d.image_model || '').replace(/^runware:/, '').replace(/^gemini-/, '');
+        btn.innerHTML = btn.innerHTML.replace(/Gemini/g, name)
+          + (short ? ' <small>(' + short + ')</small>' : '');
+        btn.title = btn.title.replace(/Gemini/g, name)
+          + (d.image_model ? ' — model: ' + d.image_model : '');
       }
     }).catch(() => {});
     return root;
@@ -344,7 +352,7 @@ window.TexturePicker = (function () {
     }).then(blob => {
       if (!blob) { status.textContent = 'Discarded — nothing added.'; return; }
       return texSave(blob, status);
-    }).catch(e => { done(); status.textContent = 'Gemini: ' + (e.message || 'request failed'); });
+    }).catch(e => { done(); status.textContent = 'AI: ' + (e.message || 'request failed'); });
   }
 
   function armCtrlV(send, status) {

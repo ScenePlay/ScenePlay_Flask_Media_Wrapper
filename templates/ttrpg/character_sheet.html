@@ -2075,7 +2075,7 @@ function aiGeneratePortrait(btn) {
       status.textContent = '✨ Portrait saved.';
     })
     .catch(e => {
-      status.textContent = 'Gemini: ' + e.message;
+      status.textContent = 'AI: ' + e.message;
       status.style.color = 'var(--bs-danger, #dc3545)';
     })
     .finally(() => { btn.disabled = false; btn.innerHTML = orig; });
@@ -2084,7 +2084,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof aiConfigured === 'function') {
     aiConfigured().then(on => {
       const b = document.getElementById('llm-ai-btn');
-      if (b && on) b.style.display = '';
+      if (b && on) { b.style.display = ''; aiBrandImageButton(b); }
     });
   }
 });

@@ -8,16 +8,47 @@
 //   aiConfigured().then(on => { if (on) show the ✨ buttons; });
 //   aiImageBlob(promptText).then(blob => ...save via the flow's own path...);
 
-let _aiConfiguredPromise = null;
+let _aiStatusPromise = null;
+
+function aiStatus() {
+  if (!_aiStatusPromise) {
+    _aiStatusPromise = fetch('/ttrpg/ai/status')
+      .then(r => r.json())
+      .catch(() => ({ ok: false }));
+  }
+  return _aiStatusPromise;
+}
 
 function aiConfigured() {
-  if (!_aiConfiguredPromise) {
-    _aiConfiguredPromise = fetch('/ttrpg/ai/status')
-      .then(r => r.json())
-      .then(d => !!(d.ok && d.configured))
-      .catch(() => false);
-  }
-  return _aiConfiguredPromise;
+  return aiStatus().then(d =>
+    !!(d.ok && (d.image_ready !== undefined ? d.image_ready : d.configured)));
+}
+
+// 'Runware' or 'Gemini' — whichever paints images right now.
+function aiImageProviderName(d) {
+  return d && d.image_provider === 'runware' ? 'Runware' : 'Gemini';
+}
+
+// Short display form of a model id: 'runware:400@3' → '400@3',
+// 'gemini-3.1-flash-image' → '3.1-flash-image'.
+function aiShortModel(id) {
+  return String(id || '').replace(/^runware:/, '').replace(/^gemini-/, '');
+}
+
+// Rewrite a ✨ button's label/tooltip to name the ACTIVE image provider AND
+// the model it will run — with Runware selected, a button still reading
+// "Generate with Gemini" made it look like the setting hadn't taken.
+function aiBrandImageButton(el) {
+  if (!el) return;
+  aiStatus().then(d => {
+    const name = aiImageProviderName(d);
+    el.innerHTML = el.innerHTML.replace(/Gemini/g, name)
+      + (d.image_model ? ' <small>(' + aiShortModel(d.image_model) + ')</small>' : '');
+    if (el.title) {
+      el.title = el.title.replace(/Gemini/g, name)
+        + (d.image_model ? ' — model: ' + d.image_model : '');
+    }
+  });
 }
 
 // {ok, ext, image_b64} (the shape every AI image endpoint returns) → Blob.

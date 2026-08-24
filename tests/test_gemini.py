@@ -74,15 +74,15 @@ class TestResolveModel:
         import sql
         monkeypatch.setattr(sql, 'appsettingGet',
                             lambda name, default=None: default)
-        assert gemini.resolve_model('text', 'gemini-2.5-pro') == 'gemini-2.5-pro'
+        assert gemini.resolve_model('text', 'gemini-3.7-flash') == 'gemini-3.7-flash'
         assert gemini.resolve_model('text', 'gpt-9000') == gemini.DEFAULTS['text']
 
     def test_stored_setting_used_when_allowlisted(self, monkeypatch):
         import sql
         monkeypatch.setattr(sql, 'appsettingGet',
-                            lambda name, default=None: 'gemini-2.5-pro'
+                            lambda name, default=None: 'gemini-3.7-flash'
                             if name == 'gemini_model_text' else default)
-        assert gemini.resolve_model('text') == 'gemini-2.5-pro'
+        assert gemini.resolve_model('text') == 'gemini-3.7-flash'
 
     def test_stored_garbage_falls_back(self, monkeypatch):
         import sql
@@ -122,10 +122,10 @@ class TestGenerateJson:
     def test_happy_path_and_request_shape(self, fake_requests):
         calls, responses = fake_requests
         responses['post'].append(_Resp(200, _gen_body([{'text': '{"walls": []}'}])))
-        out = gemini.generate_json('design a map', 'gemini-2.5-flash')
+        out = gemini.generate_json('design a map', 'gemini-3.7-flash')
         assert out == '{"walls": []}'
         req = calls['post'][0]
-        assert req['url'].endswith('models/gemini-2.5-flash:generateContent')
+        assert req['url'].endswith('models/gemini-3.7-flash:generateContent')
         assert req['headers']['x-goog-api-key'] == 'k'
         assert '?' not in req['url']            # never the key in a URL
         assert req['json']['generationConfig']['responseMimeType'] == 'application/json'
@@ -133,7 +133,7 @@ class TestGenerateJson:
     def test_image_attachment_rides_inline(self, fake_requests):
         calls, responses = fake_requests
         responses['post'].append(_Resp(200, _gen_body([{'text': '{}'}])))
-        gemini.generate_json('trace', 'gemini-2.5-flash',
+        gemini.generate_json('trace', 'gemini-3.7-flash',
                              image=b'PNG', mime='image/png')
         parts = calls['post'][0]['json']['contents'][0]['parts']
         assert parts[1]['inline_data']['data'] == base64.b64encode(b'PNG').decode()
@@ -143,18 +143,18 @@ class TestGenerateJson:
         responses['post'].append(_Resp(200, {
             'promptFeedback': {'blockReason': 'SAFETY'}}))
         with pytest.raises(gemini.GeminiError) as e:
-            gemini.generate_json('x', 'gemini-2.5-flash')
+            gemini.generate_json('x', 'gemini-3.7-flash')
         assert 'safety' in str(e.value).lower()
 
     def test_http_errors_friendly(self, fake_requests):
         _, responses = fake_requests
         responses['post'].append(_Resp(429, {'error': {'message': 'slow down'}}))
         with pytest.raises(gemini.GeminiError) as e:
-            gemini.generate_json('x', 'gemini-2.5-flash')
+            gemini.generate_json('x', 'gemini-3.7-flash')
         assert 'quota' in str(e.value).lower() and 'slow down' in str(e.value)
         responses['post'].append(_Resp(403, {'error': {'message': 'bad key'}}))
         with pytest.raises(gemini.GeminiError) as e2:
-            gemini.generate_json('x', 'gemini-2.5-flash')
+            gemini.generate_json('x', 'gemini-3.7-flash')
         assert 'key' in str(e2.value).lower()
 
 
@@ -166,7 +166,7 @@ class TestGenerateImage:
             {'inlineData': {'mimeType': 'image/png',
                             'data': base64.b64encode(b'IMG').decode()}},
         ])))
-        raw, ext = gemini.generate_image('paint', 'gemini-2.5-flash-image')
+        raw, ext = gemini.generate_image('paint', 'gemini-3.7-flash-image')
         assert raw == b'IMG' and ext == 'png'
 
     def test_snake_case_and_jpeg_ext(self, fake_requests):
@@ -175,14 +175,14 @@ class TestGenerateImage:
             {'inline_data': {'mime_type': 'image/jpeg',
                              'data': base64.b64encode(b'J').decode()}},
         ])))
-        raw, ext = gemini.generate_image('paint', 'gemini-2.5-flash-image')
+        raw, ext = gemini.generate_image('paint', 'gemini-3.7-flash-image')
         assert raw == b'J' and ext == 'jpg'
 
     def test_text_only_reply_is_an_error(self, fake_requests):
         _, responses = fake_requests
         responses['post'].append(_Resp(200, _gen_body([{'text': 'sorry no'}])))
         with pytest.raises(gemini.GeminiError) as e:
-            gemini.generate_image('paint', 'gemini-2.5-flash-image')
+            gemini.generate_image('paint', 'gemini-3.7-flash-image')
         assert 'without an image' in str(e.value)
 
 

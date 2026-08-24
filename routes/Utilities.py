@@ -136,7 +136,7 @@ def main():
                   else 'Lights stay on after a scene\'s media finishes (until the '
                        'next scene or All Stop).')
             return redirect(url_for('ut.main'))
-        elif request.form['submit'] == 'Save Gemini Settings':
+        elif request.form['submit'] == 'Save AI Settings':
             # AI settings are DM-only, and the key follows the relay-secret
             # masking rule: a blank submission keeps the existing key.
             from flask_login import current_user
@@ -157,7 +157,42 @@ def main():
                 chosen = request.form.get(f'gemini_model_{modality}', '')
                 if chosen in gemini._ALLOWED[modality]:
                     appsettingSet(f'gemini_model_{modality}', chosen)
-            flash('Gemini settings saved.')
+            # Runware: the alternative image provider (same key hygiene)
+            import runware
+            if request.form.get('runware_clear_key'):
+                runware.clear_api_key()
+                flash('Runware API key removed.')
+            else:
+                rkey = request.form.get('runware_api_key', '').strip()
+                if rkey:
+                    runware.save_api_key(rkey)
+                    flash('Runware API key saved (stored locally in '
+                          'instance/, never in the database or git).')
+            rmodel = request.form.get('runware_model', '').strip()
+            if rmodel and ':' in rmodel:
+                ok, why = runware.validate_image_model(rmodel)
+                if ok:
+                    appsettingSet('runware_model', rmodel)
+                else:
+                    flash(why)          # keep the previous model
+
+            provider = request.form.get('image_provider', 'gemini')
+            appsettingSet('image_provider',
+                          'runware' if provider == 'runware' else 'gemini')
+            rtext = request.form.get('runware_text_model', '').strip()
+            if rtext:
+                slug, why = runware.normalize_text_model(rtext)
+                if slug:
+                    appsettingSet('runware_text_model', slug)
+                    if slug != rtext:
+                        flash(f'Layout model saved as "{slug}" (the chat API '
+                              'uses slug ids; converted automatically).')
+                else:
+                    flash(why)          # keep the previous model
+            tprov = request.form.get('text_provider', 'gemini')
+            appsettingSet('text_provider',
+                          'runware' if tprov == 'runware' else 'gemini')
+            flash('AI settings saved.')
             return redirect(url_for('ut.main'))
         elif request.form['submit'] == 'Restart Computer':
             # Rebooting the box is DM-only: anyone on the LAN can reach this
@@ -193,6 +228,7 @@ def main():
     from routes._util import dm_only_sceneplay_enabled
     from flask_login import current_user
     import gemini
+    import runware
     return render_template('utils.html', items=data, volume=volume, Scenes=scenes,
                            keep_music=keep_music, backups=backups, backup_auto=backup_auto,
                            lights_off_on_end=lights_off_on_scene_end_enabled(),
@@ -205,6 +241,14 @@ def main():
                            gemini_choices={'text': gemini.TEXT_MODELS,
                                            'image': gemini.IMAGE_MODELS,
                                            'video': gemini.VIDEO_MODELS},
+                           runware_configured=runware.configured(),
+                           runware_key_source=runware.key_source(),
+                           runware_model=runware.resolve_model(),
+                           image_provider=(appsettingGet('image_provider', 'gemini')
+                                           or 'gemini'),
+                           text_provider=(appsettingGet('text_provider', 'gemini')
+                                          or 'gemini'),
+                           runware_text_model=runware.resolve_text_model(),
                            is_dm=(current_user.is_authenticated
                                   and current_user.is_dm()))
 

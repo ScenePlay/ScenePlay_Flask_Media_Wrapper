@@ -293,7 +293,7 @@
                 </form>
                 <form method="post" action="{{ url_for('ut.main') }}" autocomplete="off">
                     <details class="sp-card">
-                    <summary><h3>Gemini AI (optional)</h3></summary>
+                    <summary><h3>AI Generation (optional)</h3></summary>
                     <p style="font-size:.85em;color:var(--sp-muted);margin:6px 0;">
                       With a Google Gemini API key, every AI prompt in the battle-map
                       tools gains a one-click <b>&#10024; Generate</b> button — map
@@ -345,14 +345,78 @@
                       </label>
                       {% endfor %}
                     </div>
+                    <hr style="border-color:var(--sp-border);margin:10px 0;">
+                    <p style="font-size:.9em;margin:6px 0;">
+                      <b>Image provider</b> &mdash; which service paints the images
+                      (map art, textures, portraits, monster icons). Layouts and
+                      Veo video always use Gemini.
+                    </p>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0;font-size:.9em;">
+                      <label><input type="radio" name="image_provider" value="gemini"
+                             {{ 'checked' if image_provider != 'runware' }}> Google Gemini</label>
+                      <label><input type="radio" name="image_provider" value="runware"
+                             {{ 'checked' if image_provider == 'runware' }}> Runware.ai (FLUX &mdash; fast, fractions of a cent per image)</label>
+                    </div>
+                    <p style="margin:6px 0;font-size:.9em;">
+                      Runware status:
+                      {% if runware_configured %}
+                        <b style="color:var(--sp-ok, #3c9a5f);">key set</b>
+                        {{ '(from RUNWARE_API_KEY env var — the field below is ignored)'
+                           if runware_key_source == 'env' }}
+                      {% else %}
+                        <b style="color:var(--sp-muted);">no key</b> &mdash; create one at
+                        <a href="https://my.runware.ai/" target="_blank"
+                           rel="noopener">my.runware.ai</a>
+                      {% endif %}
+                    </p>
+                    <input type="password" name="runware_api_key" value=""
+                           autocomplete="new-password" class="form-control d-inline-block mb-2"
+                           placeholder="{{ 'leave blank to keep existing' if runware_configured
+                                          else 'paste your Runware API key' }}"
+                           style="width:70%;">
+                    {% if runware_configured and runware_key_source != 'env' %}
+                    <label style="display:block;font-size:.85em;margin:2px 0 6px;">
+                      <input type="checkbox" name="runware_clear_key" value="1">
+                      Remove the stored Runware key
+                    </label>
+                    {% endif %}
+                    <p style="font-size:.9em;margin:10px 0 4px;">
+                      <b>Layout designer</b> &mdash; which service DESIGNS and traces the
+                      battle-map floorplans (the schematic step). Runware runs it
+                      through any LLM it hosts, billed to your Runware balance.
+                    </p>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0;font-size:.9em;">
+                      <label><input type="radio" name="text_provider" value="gemini"
+                             {{ 'checked' if text_provider != 'runware' }}> Google Gemini (direct)</label>
+                      <label><input type="radio" name="text_provider" value="runware"
+                             {{ 'checked' if text_provider == 'runware' }}> Runware.ai</label>
+                    </div>
+                    <label style="font-size:.85em;display:block;margin:4px 0;">
+                      <b>Runware layout model</b>
+                      <input type="text" name="runware_text_model" value="{{ runware_text_model }}"
+                             class="form-control form-control-sm" style="width:60%;">
+                      <span style="color:var(--sp-muted);">e.g. <code>google-gemini-3-5-flash</code>,
+                      <code>anthropic-claude-sonnet-4-6</code>, <code>openai-gpt-5-5</code> —
+                      tracing a map image needs a vision-capable model.</span>
+                    </label>
+                    <label style="font-size:.85em;display:block;margin:4px 0;">
+                      <b>Runware model</b> (AIR id)
+                      <input type="text" name="runware_model" value="{{ runware_model }}"
+                             class="form-control form-control-sm" style="width:60%;">
+                      <span style="color:var(--sp-muted);">e.g. <code>runware:400@3</code> = FLUX.2 klein,
+                      <code>runware:101@1</code> = FLUX.1 Dev, <code>google:4@3</code> =
+                      Nano Banana 2 (Gemini image via Runware); any Runware or
+                      CivitAI image-model AIR id works.</span>
+                    </label>
                     <ul style="font-size:.85em;color:var(--sp-muted);margin:2px 0 6px 18px;">
-                      <li>Images cost a few cents; a Veo video clip costs a few
+                      <li>Gemini images cost a few cents; Runware images cost
+                          fractions of a cent; a Veo video clip costs a few
                           dollars and takes 1&ndash;6 minutes.</li>
                       <li>The defaults are the proven models; the newer ones are
-                          offered to try &mdash; if Google rejects one, the error
-                          says so and you can switch back here.</li>
+                          offered to try &mdash; if the provider rejects one, the
+                          error says so and you can switch back here.</li>
                     </ul>
-                    <input type="submit" name="submit" value="Save Gemini Settings" class="btn btn-secondary"/>
+                    <input type="submit" name="submit" value="Save AI Settings" class="btn btn-secondary"/>
                     {% else %}
                     <p style="margin:6px 0;">
                       <a href="{{ url_for('auth.login', next=url_for('ut.main')) }}">Log
