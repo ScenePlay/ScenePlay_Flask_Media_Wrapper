@@ -628,3 +628,53 @@ class TestYouTubeGoLiveApi:
             yt.appsettingGet, yt.appsettingSet = yt_get
         assert store['yt_refresh_token'] == ''
         assert store['yt_stream_id'] == ''
+
+
+class TestCardOverrideAll:
+    """The strip's CARD ON / CARD OFF pair: pin the whole table to their stat
+    cards, or release everyone to camera, in one post."""
+
+    def _party(self, a, monkeypatch):
+        import routes.obs as ro
+        from models.ttrpg import tblCharacters
+        chars = [tblCharacters(character_id=i, user_id=1, name=f'C{i}', level=1,
+                               hp_current=1, hp_max=1,
+                               created_at='2026-01-01 00:00:00')
+                 for i in (7, 8)]
+        monkeypatch.setattr(ro, '_ordered_party', lambda *x, **k: chars)
+        return chars
+
+    def test_all_on_then_off(self, dm_app, monkeypatch):
+        a, dm, store, _tmp = dm_app
+        import obs_ws
+        monkeypatch.setattr(obs_ws, 'connected', lambda: False)
+        self._party(a, monkeypatch)
+        with a.test_client(user=dm) as c:
+            d = c.post('/ttrpg/obs/api/card-override',
+                       json={'all': True, 'show_card': True}).get_json()
+            assert d['ok'] is True and d['card_ids'] == [7, 8]
+            assert store['obs_card_override'] == '7,8'
+            d = c.post('/ttrpg/obs/api/card-override',
+                       json={'all': True, 'show_card': False}).get_json()
+            assert d['card_ids'] == []
+
+    def test_all_off_keeps_pins_outside_the_party(self, dm_app, monkeypatch):
+        """Only tiles on stream are touched — a benched player's pin stays."""
+        a, dm, store, _tmp = dm_app
+        import obs_ws
+        monkeypatch.setattr(obs_ws, 'connected', lambda: False)
+        self._party(a, monkeypatch)
+        store['obs_card_override'] = '7,42'
+        with a.test_client(user=dm) as c:
+            d = c.post('/ttrpg/obs/api/card-override',
+                       json={'all': True, 'show_card': False}).get_json()
+        assert d['card_ids'] == [42]
+
+    def test_cards_state_for_the_poll(self):
+        from types import SimpleNamespace as NS
+        from routes.battlemap import _cards_state
+        party = [NS(character_id=7), NS(character_id=8)]
+        assert _cards_state(set(), party) == 'none'
+        assert _cards_state({7}, party) == 'some'
+        assert _cards_state({7, 8, 42}, party) == 'all'
+        assert _cards_state({42}, []) == 'none'

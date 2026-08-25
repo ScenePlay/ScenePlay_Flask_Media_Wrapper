@@ -771,6 +771,20 @@
                 style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">CAM &#9889;</button>
+        <!-- Whole-table stat cards: pin everyone to their card (a break, a
+             secret roll, a camera-shy table) and release them all back to
+             camera. Two buttons, not a toggle: with mixed per-player pins
+             there is no single "current" state to flip. -->
+        <button id="obs-cardon-btn" onclick="obsMapCardAll(true)"
+                title="Show every player's stat card on the stream instead of their camera"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.6rem;font-weight:700;line-height:1;cursor:pointer;">CARD ON</button>
+        <button id="obs-cardoff-btn" onclick="obsMapCardAll(false)"
+                title="Release every player back to their camera (cards still stand in for dead feeds)"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.6rem;font-weight:700;line-height:1;cursor:pointer;">CARD OFF</button>
         <button class="obs-cut-btn" data-cut="party" onclick="obsCut('party', this)"
                 title="Cut to the party scene (G)"
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;

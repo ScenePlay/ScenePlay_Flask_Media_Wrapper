@@ -108,3 +108,34 @@ class TestTileDecision:
         kara, _probe = rig
         monkeypatch.setattr(ro, '_presence', lambda: {})
         assert '/tile/7' in ro._tile_url(kara, {}, set())
+
+
+class TestWatchPacing:
+    """The watch paces itself: fast while a feed is dark or in doubt, idle
+    when every camera is lit, a bare setting read when the feature is off."""
+
+    def test_off_is_slowest(self, app, rig, ro, settings):
+        settings['obs_auto_cam'] = '0'
+        assert ro._cam_watch_seconds() == ro.AUTO_CAM_OFF_S
+
+    def test_all_lit_idles(self, app, rig, ro):
+        ro._scan_cameras()
+        assert ro._cam_watch_seconds() == ro.AUTO_CAM_IDLE_S
+
+    def test_pending_vote_goes_fast(self, app, rig, ro):
+        _kara, probe = rig
+        probe['dark'] = True
+        ro._scan_cameras()                     # one vote, not yet swapped
+        assert ro._cam_watch_seconds() == ro.AUTO_CAM_FAST_S
+
+    def test_swapped_to_card_stays_fast(self, app, rig, ro):
+        _kara, probe = rig
+        probe['dark'] = True
+        ro._scan_cameras()
+        ro._scan_cameras()
+        assert 7 in ro._auto_dark_ids
+        assert ro._cam_watch_seconds() == ro.AUTO_CAM_FAST_S, \
+            'a returning face must be spotted quickly'
+
+    def test_fast_is_far_quicker_than_the_feed_watch(self, ro):
+        assert ro.AUTO_CAM_FAST_S * ro.AUTO_CAM_DARK_PASSES < ro.DEFAULT_WATCH_S / 2

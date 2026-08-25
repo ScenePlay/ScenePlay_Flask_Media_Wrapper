@@ -381,8 +381,20 @@ def _watch_seconds():
 # lit pass to swap back (the audience should see a returning face fast).
 _cam_dark_votes = {}             # character_id -> consecutive dark passes
 _auto_dark_ids = set()           # currently swapped to card by the watcher
+_cam_timer = None
 AUTO_CAM_DARK_PASSES = 2
 AUTO_CAM_LUMA = 10               # 0-255 mean; a live face is way above this
+# The watch runs on its own timer, not the 20 s feed watch, and paces itself:
+# FAST while any feed is dark or has a dark vote pending (a returning face
+# should show within a couple of seconds; a real drop should be covered in
+# ~2×FAST, not ~2×20 s), IDLE when every camera is lit, and OFF is just a
+# setting read every few seconds so switching it on takes effect promptly.
+# The per-camera cost is one 96×54 screenshot and a histogram — around a
+# millisecond of OBS render time — so even FAST with a full table is well
+# under a percent of a core.
+AUTO_CAM_FAST_S = 2
+AUTO_CAM_IDLE_S = 5
+AUTO_CAM_OFF_S = 10
 
 
 def auto_cam_on():
@@ -433,6 +445,50 @@ def _scan_cameras():
         else:
             _cam_dark_votes[cid] = 0
             _auto_dark_ids.discard(cid)
+
+
+def _cam_watch_seconds():
+    """How long until the next camera pass, from what the last one saw."""
+    import obs_ws
+    if not (auto_cam_on() and obs_ws.connected()):
+        return AUTO_CAM_OFF_S
+    if _auto_dark_ids or any(_cam_dark_votes.values()):
+        return AUTO_CAM_FAST_S
+    return AUTO_CAM_IDLE_S
+
+
+def start_cam_watch(app_obj, delay=None):
+    """Idempotent self-pacing camera watch (see the AUTO_CAM_* notes). Call
+    again with delay=0 to run a pass right away, e.g. when auto-cam is
+    switched on or the party scene is rebuilt."""
+    global _cam_timer
+
+    def _tick():
+        try:
+            with app_obj.app_context():
+                if appsettingGet('obs_enabled', '0') == '1':
+                    before = set(_auto_dark_ids)
+                    _scan_cameras()
+                    if _auto_dark_ids != before:
+                        refresh_tiles()   # swap now, not on the feed watch
+                    nxt = _cam_watch_seconds()
+                else:
+                    nxt = AUTO_CAM_OFF_S
+        except Exception as exc:          # a watchdog must never die loudly
+            log.info('OBS camera watch failed: %s', exc)
+            nxt = AUTO_CAM_IDLE_S
+        finally:
+            start_cam_watch(app_obj, nxt)
+
+    with _watch_lock:
+        if _cam_timer is not None:
+            _cam_timer.cancel()
+        if delay is None:
+            with app_obj.app_context():
+                delay = _cam_watch_seconds()
+        _cam_timer = threading.Timer(delay, _tick)
+        _cam_timer.daemon = True
+        _cam_timer.start()
 
 
 def refresh_tiles():
@@ -720,8 +776,8 @@ def start_feed_watch(app_obj):
         try:
             with app_obj.app_context():
                 if appsettingGet('obs_enabled', '0') == '1':
-                    _scan_cameras()      # votes feed the swap below
-                    refresh_tiles()
+                    refresh_tiles()      # presence / pin changes; the pixel
+                                         # watch has its own faster timer
                     rebind_music_if_stale()
         except Exception as exc:          # a watchdog must never die loudly
             log.info('OBS feed watch failed: %s', exc)
@@ -734,14 +790,20 @@ def start_feed_watch(app_obj):
         _watch_timer = threading.Timer(seconds, _tick)
         _watch_timer.daemon = True
         _watch_timer.start()
+    # The camera watch starts (or restarts) with the feed watch at every
+    # call site: boot, enabling OBS, and a party rebuild.
+    start_cam_watch(app_obj, 0)
 
 
 def stop_feed_watch():
-    global _watch_timer, _dice_timer
+    global _watch_timer, _dice_timer, _cam_timer
     with _watch_lock:
         if _watch_timer is not None:
             _watch_timer.cancel()
             _watch_timer = None
+        if _cam_timer is not None:
+            _cam_timer.cancel()
+            _cam_timer = None
         if _dice_timer is not None:
             _dice_timer.cancel()
             _dice_timer = None
@@ -2055,19 +2117,33 @@ def api_card_override():
     """Pin a player to their stat card (or release them back to their camera).
 
     The manual answer to a dropped feed: presence only sees portal players, so
-    for anyone at the table this is what the DM reaches for."""
+    for anyone at the table this is what the DM reaches for.
+
+    {'character_id': id, 'show_card': bool} — one player
+    {'all': True, 'show_card': bool}        — everyone with a tile, the DM
+                                              included (the strip's CARD ON /
+                                              CARD OFF buttons: "cards up"
+                                              for a break, cameras back after)."""
     data = request.get_json(silent=True) or {}
+    on = bool(data.get('show_card'))
+    if data.get('all'):
+        for char in _ordered_party():
+            _set_card_override(char.character_id, on)
+        swapped = refresh_tiles()
+        return jsonify({'ok': True, 'all': True, 'show_card': on,
+                        'card_ids': sorted(_card_overrides()),
+                        'swapped': swapped})
     try:
         character_id = int(data.get('character_id') or 0)
     except (TypeError, ValueError):
         return jsonify({'ok': False, 'error': 'bad character_id'}), 400
     if not character_id:
         return jsonify({'ok': False, 'error': 'character_id required'}), 400
-    on = bool(data.get('show_card'))
     _set_card_override(character_id, on)
     swapped = refresh_tiles()
     return jsonify({'ok': True, 'character_id': character_id,
-                    'show_card': on, 'swapped': swapped})
+                    'show_card': on, 'card_ids': sorted(_card_overrides()),
+                    'swapped': swapped})
 
 
 @obs_bp.route('/api/auto-cam', methods=['POST'])
@@ -2086,6 +2162,8 @@ def api_auto_cam():
         swapped = refresh_tiles()
     except Exception as exc:
         log.info('auto-cam first pass skipped: %s', exc)
+    # Re-pace the watch now rather than waiting out the OFF interval.
+    start_cam_watch(current_app._get_current_object())
     return jsonify({'ok': True, 'on': on, 'swapped': swapped})
 
 

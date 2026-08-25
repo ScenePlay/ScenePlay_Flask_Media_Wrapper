@@ -2441,6 +2441,25 @@ function obsMapMuteAll(scope, muted) {
     .catch(() => {});
 }
 
+// Whole-table stat cards from the strip: pin everyone to their card, or
+// release everyone to camera. Same endpoint the Broadcast page's per-player
+// checkboxes use, with the 'all' scope. The tile swap happens server-side.
+function obsMapCardAll(on) {
+  fetch('/ttrpg/obs/api/card-override', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true, show_card: on }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) { alert((d && d.error) || 'Could not change the stat cards.'); return; }
+      const onBtn = document.getElementById('obs-cardon-btn');
+      const offBtn = document.getElementById('obs-cardoff-btn');
+      if (onBtn) _obsLit(onBtn, on);
+      if (offBtn) _obsLit(offBtn, !on);
+    })
+    .catch(() => {});
+}
+
 // Cut OBS to one of the ScenePlay scenes. Optimistic-then-corrected, same as
 // obsViewPlayer: the 2s poll is the authority, this just avoids a dead-feeling
 // button while the request is in flight.
@@ -2652,6 +2671,16 @@ function _obsSync(obs) {
   });
   const mode = document.getElementById('obs-mapmode-btn');
   if (mode) mode.style.opacity = obs.connected ? '' : '.4';
+  // Whole-table card buttons: lit when EVERY tile is pinned (ON) or NONE is
+  // (OFF); a mixed table lights neither, since neither button describes it.
+  if (obs.cards !== undefined) {
+    _obsLit(document.getElementById('obs-cardon-btn'), obs.cards === 'all');
+    _obsLit(document.getElementById('obs-cardoff-btn'), obs.cards === 'none');
+    ['obs-cardon-btn', 'obs-cardoff-btn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.style.opacity = obs.connected ? '' : '.4';
+    });
+  }
   // Auto-camera watch: the poll is the authority, wherever it was toggled.
   if (obs.auto_cam !== undefined) {
     const ac = document.getElementById('obs-autocam-btn');
