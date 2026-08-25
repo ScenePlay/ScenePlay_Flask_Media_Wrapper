@@ -155,6 +155,7 @@ window.BMFP = (function () {
         if (hEl) hEl.value = wallHeightFt;
         const sEl = document.getElementById('fp-wall-style');
         if (sEl) sEl.value = plan.wall_style || 'none';
+        renderSkyUI();
         const eEl = document.getElementById('fp-elev-height');
         if (eEl) eEl.value = elevFt;     // remembered from last session
         redraw();
@@ -566,6 +567,25 @@ window.BMFP = (function () {
     markDirty();
   }
 
+  // Map-wide sky dome: {time, weather}. Choosing a time creates it; "None"
+  // removes it (weather alone means nothing without a time of day).
+  function setSky(field, v) {
+    if (!plan) return;
+    pushUndo();
+    const sky = Object.assign({ weather: 'clear' }, plan.sky || {});
+    sky[field] = v;
+    if (!sky.time) delete plan.sky; else plan.sky = { time: sky.time, weather: sky.weather || 'clear' };
+    markDirty();
+    renderSkyUI();
+  }
+
+  function renderSkyUI() {
+    const t = document.getElementById('fp-sky-time');
+    const w = document.getElementById('fp-sky-weather');
+    if (t) t.value = (plan && plan.sky && plan.sky.time) || '';
+    if (w) { w.value = (plan && plan.sky && plan.sky.weather) || 'clear'; w.disabled = !(plan && plan.sky); }
+  }
+
   function setWallShow(v) {
     wallShow = !!v;
   }
@@ -691,6 +711,11 @@ window.BMFP = (function () {
     value = (value || '').trim();
     if (field === 'name') {
       if (value) zn.name = value.slice(0, 60); else delete zn.name;
+    } else if (field === 'ceiling_ft') {
+      const n = parseFloat(value);
+      if (isFinite(n) && n > 0) zn.ceiling_ft = Math.min(60, Math.max(7, n));
+      else delete zn.ceiling_ft;
+      renderZoneUI();               // show the clamped value
     } else if (value && value !== 'none') {
       zn[field] = value;
     } else {
@@ -717,10 +742,12 @@ window.BMFP = (function () {
     const zn = zones[activeZone];
     const nameEl = document.getElementById('fp-zone-name');
     if (nameEl) nameEl.value = (zn && zn.name) || '';
-    ['floor_texture', 'wall_texture', 'wall_style'].forEach(f => {
+    ['floor_texture', 'wall_texture', 'ceiling_texture', 'wall_style'].forEach(f => {
       const el = document.getElementById('fp-zone-' + f);
       if (el) el.value = (zn && zn[f]) || (f === 'wall_style' ? 'none' : '');
     });
+    const cftEl = document.getElementById('fp-zone-ceiling_ft');
+    if (cftEl) cftEl.value = (zn && zn.ceiling_ft) || '';
     refreshTexFaces();
     const box = document.getElementById('fp-zone-fields');
     if (box) box.style.display = zn ? '' : 'none';
@@ -1711,7 +1738,7 @@ window.BMFP = (function () {
   })();
 
   return {
-    onState, redraw, save, revert, setTool, setWallHeight, setWallStyle,
+    onState, redraw, save, revert, setTool, setWallHeight, setWallStyle, setSky,
     setWallShow, setShow2d, setElevHeight, setElevRot, setSnap, setLightType, setLightColor,
     setLightRadius, setPropType, setPropRot, setPropScale, setPropTexture,
     undo, redo, nudge, scalePlan,

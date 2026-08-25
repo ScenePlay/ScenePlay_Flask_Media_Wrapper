@@ -1015,6 +1015,64 @@ window.BM3D = (function () {
                                                { vertexColors: true })));
     });
 
+    // Zone ceilings: a downward-facing quad sheet over each ceilinged zone's
+    // rects at ceiling_ft above the LOCAL floor (so a dais under it keeps its
+    // headroom). Single-sided on purpose: the first-person camera sees a
+    // roof, while the overview / fly / OBS look-down cameras see straight
+    // through to the floor and tokens — a fully roofed dungeon stays
+    // readable from above. Same tiling + art tint as the floor overlay so
+    // the room reads as one material system. Nested rooms sit a hair LOWER
+    // than the room around them, mirroring the floor's stacking rule.
+    var defCeilFt = (plan && plan.default_wall_height_ft) || 10;
+    zonesBySize().forEach(function (zn, rank) {
+      if (!zn.ceiling_texture) return;
+      var ctex = libTexture(zn.ceiling_texture);
+      if (!ctex) return;
+      var cft = zn.ceiling_ft || defCeilFt;
+      var drop = rank * 0.002;
+      var tf = ctex.userData.tileFt || 5;
+      var cpos = [], cuv = [], ccol = [], cidx = [], cn4 = 0;
+      (zn.rects || []).forEach(function (r) {
+        var ix0 = Math.max(0, Math.floor(r.x1 * SUB));
+        var ix1 = Math.min(nx, Math.ceil(r.x2 * SUB));
+        var iz0 = Math.max(0, Math.floor(r.y1 * SUB));
+        var iz1 = Math.min(nz, Math.ceil(r.y2 * SUB));
+        for (var iz2 = iz0; iz2 < iz1; iz2++) {
+          for (var ix2 = ix0; ix2 < ix1; ix2++) {
+            var qx1 = Math.max(ix2 * step, r.x1), qx2 = Math.min((ix2 + 1) * step, r.x2);
+            var qz1 = Math.max(iz2 * step, r.y1), qz2 = Math.min((iz2 + 1) * step, r.y2);
+            if (qx2 - qx1 < 0.001 || qz2 - qz1 < 0.001) continue;
+            var h = floorAt((qx1 + qx2) / 2, (qz1 + qz2) / 2) + cft * FT - drop;
+            cpos.push(qx1, h, qz1,  qx2, h, qz1,  qx2, h, qz2,  qx1, h, qz2);
+            cuv.push(qx1 * 5 / tf, -qz1 * 5 / tf,  qx2 * 5 / tf, -qz1 * 5 / tf,
+                     qx2 * 5 / tf, -qz2 * 5 / tf,  qx1 * 5 / tf, -qz2 * 5 / tf);
+            var tint = [1, 1, 1];
+            if (_bgPix) {
+              var c = cellAvgColor(qx1, qz1);
+              tint = artTint((Math.round(c[0]) << 16) | (Math.round(c[1]) << 8) |
+                             Math.round(c[2]));
+            }
+            // Ceilings get less light than floors: darken the tint a touch so
+            // the room doesn't read as lit from above through its own roof.
+            for (var k = 0; k < 4; k++) ccol.push(tint[0] * 0.8, tint[1] * 0.8, tint[2] * 0.8);
+            // Winding reversed vs the floor: the face normal points DOWN.
+            cidx.push(cn4, cn4 + 1, cn4 + 2, cn4, cn4 + 2, cn4 + 3);
+            cn4 += 4;
+          }
+        }
+      });
+      if (!cn4) return;
+      var cg = new THREE.BufferGeometry();
+      cg.setAttribute('position', new THREE.Float32BufferAttribute(cpos, 3));
+      cg.setAttribute('uv', new THREE.Float32BufferAttribute(cuv, 2));
+      cg.setAttribute('color', new THREE.Float32BufferAttribute(ccol, 3));
+      cg.setIndex(cidx);
+      cg.computeVertexNormals();
+      group.add(new THREE.Mesh(cg, libMaterial(zn.ceiling_texture,
+                                               { vertexColors: true,
+                                                 side: THREE.FrontSide })));
+    });
+
     if (edges.length) {
       var styled = _bgPix && plan && plan.wall_style && plan.wall_style !== 'none';
       if (styled && edges.length <= 400 * SUB) {
@@ -2594,15 +2652,306 @@ window.BM3D = (function () {
 
   // ── scene lifecycle ────────────────────────────────────────────────────────
 
+  // ── sky dome (floorplan "sky": {time, weather}) ──────────────────────────
+  // A procedural dome — no bitmaps, so nothing to push to the portal — drawn
+  // on the inside of a sphere that follows the camera. The shader paints a
+  // zenith→horizon gradient, a sun (or moon) disc with glow, a star field
+  // at night, and drifting FBM clouds. Each preset also retunes the lighting
+  // rig and fog so the room's surfaces agree with what the sky says.
+  // No "sky" in the plan = the classic dark void, byte-for-byte unchanged.
+  var SKY_PRESETS = {
+    //           zenith    horizon   sun elev/az  sunColor  sunI  amb   fogI  stars
+    night:     { zen: 0x050816, hor: 0x141c33, el: 35, az: 210, sun: 0xcfd8ff, size: 0.0012,
+                 sunI: 0.25, amb: 0x8090c0, ambI: 0.35, hemi: [0x30406a, 0x101018], stars: 1 },
+    morning:   { zen: 0x5f9fe8, hor: 0xffd9a8, el: 14, az: 100, sun: 0xffe9c0, size: 0.0018,
+                 sunI: 0.85, amb: 0xfff2e0, ambI: 0.55, hemi: [0xbfd4ff, 0x6a5a48], stars: 0 },
+    afternoon: { zen: 0x3f86e0, hor: 0xbfe0ff, el: 62, az: 200, sun: 0xfff8ea, size: 0.0015,
+                 sunI: 1.0,  amb: 0xffffff, ambI: 0.6,  hemi: [0xcfe2ff, 0x6f6455], stars: 0 },
+    evening:   { zen: 0x2b3a78, hor: 0xff8a4a, el: 6,  az: 265, sun: 0xffb060, size: 0.0022,
+                 sunI: 0.7,  amb: 0xffc9a0, ambI: 0.45, hemi: [0x6a5a9a, 0x4a3a30], stars: 0.35 }
+  };
+  var SKY_VERT = [
+    'varying vec3 vDir;',
+    'void main() {',
+    '  vDir = normalize(position);',
+    '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+    '  gl_Position = projectionMatrix * mv;',
+    '  gl_Position.z = gl_Position.w;',      // always at the far plane
+    '}'].join('\n');
+  var SKY_FRAG = [
+    'precision highp float;',
+    'varying vec3 vDir;',
+    'uniform vec3 uZen, uHor, uSunCol, uGround;',
+    'uniform vec3 uSunDir;',
+    'uniform float uTime, uStars, uCloud, uCover, uSunSize, uLowTier, uDay, uFlash;',
+    'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+    'float noise(vec2 p) {',
+    '  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+    '  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),',
+    '             mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);',
+    '}',
+    'float fbm(vec2 p) {',
+    '  float v = 0.0, a = 0.5;',
+    '  int oct = uLowTier > 0.5 ? 4 : 6;',
+    '  for (int i = 0; i < 6; i++) { if (i >= oct) break; v += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; }',
+    '  return v;',
+    '}',
+    'void main() {',
+    '  vec3 d = normalize(vDir);',
+    '  float up = clamp(d.y, 0.0, 1.0);',
+    // gradient: horizon band fades into zenith
+    '  vec3 col = mix(uHor, uZen, pow(up, 0.55));',
+    '  if (d.y < 0.0) { col = mix(uHor, uGround, clamp(-d.y * 6.0, 0.0, 1.0)); }',
+    // sun / moon disc + glow
+    '  float sd = max(dot(d, uSunDir), 0.0);',
+    '  float disc = smoothstep(1.0 - uSunSize, 1.0 - uSunSize * 0.5, sd);',
+    '  float glow = pow(sd, 600.0) * 0.6 + pow(sd, 40.0) * 0.25 + pow(sd, 6.0) * 0.08;',
+    // stars: hash on a quantized direction, slow twinkle
+    '  float stars = 0.0;',
+    '  if (uStars > 0.0 && d.y > 0.0) {',
+    '    vec2 sp = d.xz / (d.y + 0.35) * 90.0;',
+    '    vec2 cell = floor(sp); vec2 f = fract(sp) - 0.5;',
+    '    float h = hash(cell);',
+    '    float r = length(f - (vec2(hash(cell + 1.7), hash(cell + 3.1)) - 0.5) * 0.6);',
+    '    float tw = 0.75 + 0.25 * sin(uTime * (1.5 + h * 3.0) + h * 40.0);',
+    '    stars = step(0.92, h) * smoothstep(0.09, 0.0, r) * tw * 1.4 * uStars * smoothstep(0.0, 0.25, d.y);',
+    '  }',
+    // clouds: FBM on the sky plane, drifting; denser preset = more cover
+    '  float cl = 0.0;',
+    '  if (uCloud > 0.0 && d.y > 0.02) {',
+    '    vec2 cp = d.xz / (d.y + 0.25) * 6.0 + vec2(uTime * 0.03, uTime * 0.01);',
+    '    float n = fbm(cp);',
+    // uCover: 1 = scattered cumulus, up to 2 = solid overcast. Higher cover
+    // lowers the density threshold (bigger, merged clouds) and lays a broad
+    // low-frequency deck underneath so no blue shows through a storm.
+    '    float over = clamp(uCover - 1.0, 0.0, 1.0);',
+    '    cl = smoothstep(0.48 - 0.2 * over, 0.72 - 0.16 * over, n) * (0.55 + 0.45 * uCloud);',
+    '    float deck = fbm(cp * 0.35 + 3.7) * 0.5 + 0.5;',
+    '    cl = max(cl, over * (0.55 + 0.45 * deck));',
+    '    cl *= smoothstep(0.0, 0.15, d.y);',           // thin out at the horizon
+    '  }',
+    // Cloud colour: bright, slightly sky-tinted by day; a dark grey silhouette
+    // at night; sun-lit edges where the density is thin near the sun.
+    '  vec3 lit = mix(vec3(0.96), uHor, 0.2) * mix(1.0, 0.72, uCloud);',
+    '  vec3 dark = mix(vec3(0.62), uZen, 0.35) * mix(1.0, 0.8, uCloud);',
+    '  vec3 cloudCol = mix(lit, dark, cl * 0.8);',
+    '  cloudCol = mix(uZen * 0.6 + vec3(0.08), cloudCol, uDay);',
+    '  cloudCol += uSunCol * pow(sd, 6.0) * 0.18 * (1.0 - cl);',
+    '  col += uSunCol * (disc + glow) * (1.0 - cl * 0.9);',
+    '  col += vec3(stars) * (1.0 - cl);',
+    '  col = mix(col, cloudCol, cl);',
+    '  col = mix(col, vec3(0.9, 0.93, 1.0), uFlash * 0.85);',
+    '  gl_FragColor = vec4(col, 1.0);',
+    '  #include <encodings_fragment>',
+    '}'].join('\n');
+
+  var _sky = null;                  // {mesh, mat, preset, cloud}
+  var PRECIP = { rain: 'rain', snow: 'snow', storm: 'rain' };
+  function skySpec() {
+    var s = plan && plan.sky;
+    if (!s || !SKY_PRESETS[s.time]) return null;
+    var w = s.weather || 'clear';
+    return { preset: SKY_PRESETS[s.time], time: s.time, weather: w,
+             cloud: w === 'clear' ? 0.0 : 1.0,
+             precip: PRECIP[w] || null, storm: w === 'storm' };
+  }
+
+  // ── precipitation (weather rain / snow / storm) ──────────────────────────
+  // A box of particles that FOLLOWS THE CAMERA — the standard first-person
+  // weather trick: a few thousand drops around the viewer look like weather
+  // everywhere, without simulating the whole map. Rain is line segments
+  // (streaks); snow is soft points that drift. A particle that would fall
+  // inside a zone with a ceiling is moved elsewhere: rain outside the
+  // window, dry in the tavern. One draw call, trivial per-frame maths — fine
+  // on the low tier, which just gets fewer particles.
+  var _precip = null;               // {kind, obj, pos, vel, n, box}
+  var PRECIP_COUNT = { low: 1200, medium: 3000, high: 6000 };
+  var PRECIP_BOX = { r: 7, up: 4.5, down: 2.5 };   // world units around the camera
+  function _snowSprite() {
+    var c = document.createElement('canvas'); c.width = c.height = 32;
+    var g = c.getContext('2d');
+    var grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.7)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 32);
+    var t = new THREE.CanvasTexture(c);
+    return t;
+  }
+  function _roofed(x, z) {
+    var zn = zoneAt(x, z, 0);
+    return !!(zn && zn.ceiling_texture);
+  }
+  function _precipSpawn(i, cam, top) {
+    var P = _precip, r = PRECIP_BOX.r, x, z, tries = 0;
+    do {
+      x = cam.x + (Math.random() * 2 - 1) * r;
+      z = cam.z + (Math.random() * 2 - 1) * r;
+    } while (_roofed(x, z) && ++tries < 4);
+    P.pos[i * 3] = x;
+    P.pos[i * 3 + 1] = top ? cam.y + PRECIP_BOX.up : cam.y - PRECIP_BOX.down + Math.random() * (PRECIP_BOX.up + PRECIP_BOX.down);
+    P.pos[i * 3 + 2] = z;
+    P.dead[i] = tries >= 4 ? 1 : 0;          // fully roofed area: hide it
+  }
+  function buildPrecip() {
+    if (_precip) {
+      scene.remove(_precip.obj); _precip.obj.geometry.dispose(); _precip.obj.material.dispose();
+      _precip = null;
+    }
+    var spec = skySpec();
+    if (!spec || !spec.precip) return;
+    var kind = spec.precip;
+    var n = PRECIP_COUNT[TIER] || 3000;
+    var pos = new Float32Array(n * 3), vel = new Float32Array(n), dead = new Uint8Array(n);
+    var seed = new Float32Array(n);
+    _precip = { kind: kind, n: n, pos: pos, vel: vel, dead: dead, seed: seed, obj: null };
+    var cam = camera ? camera.position : new THREE.Vector3(cfg.gridCols / 2, 1, cfg.gridRows / 2);
+    for (var i = 0; i < n; i++) {
+      _precipSpawn(i, cam, false);
+      vel[i] = kind === 'rain' ? 9 + Math.random() * 4 : 0.45 + Math.random() * 0.4;
+      seed[i] = Math.random() * 6.283;
+    }
+    var geo = new THREE.BufferGeometry();
+    if (kind === 'rain') {
+      // 2 vertices per drop; the streak's second vertex trails above by the
+      // drop's speed — written every frame from pos.
+      var lpos = new Float32Array(n * 6);
+      geo.setAttribute('position', new THREE.BufferAttribute(lpos, 3));
+      var lmat = new THREE.LineBasicMaterial({ color: spec.storm ? 0xaebbcc : 0xc8d6e6,
+                                               transparent: true, opacity: spec.storm ? 0.55 : 0.42 });
+      _precip.obj = new THREE.LineSegments(geo, lmat);
+    } else {
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      var pmat = new THREE.PointsMaterial({ size: 0.075, map: _snowSprite(), transparent: true,
+                                            opacity: 0.9, depthWrite: false, sizeAttenuation: true });
+      _precip.obj = new THREE.Points(geo, pmat);
+    }
+    _precip.obj.frustumCulled = false;
+    _precip.obj.renderOrder = 50;
+    scene.add(_precip.obj);
+  }
+  function tickPrecip(dt, t) {
+    var P = _precip;
+    if (!P || !camera) return;
+    var cam = camera.position, r = PRECIP_BOX.r, sec = t / 1000;
+    var wind = P.kind === 'rain' ? 1.6 : 0.5;
+    var floorLimit = cam.y - PRECIP_BOX.down;
+    var out = P.kind === 'rain' ? P.obj.geometry.attributes.position.array : null;
+    for (var i = 0; i < P.n; i++) {
+      var k = i * 3;
+      var x = P.pos[k], y = P.pos[k + 1], z = P.pos[k + 2];
+      y -= P.vel[i] * dt;
+      x += wind * dt * (P.kind === 'snow' ? Math.sin(sec * 0.7 + P.seed[i]) : 0.6);
+      if (P.kind === 'snow') z += 0.35 * dt * Math.cos(sec * 0.5 + P.seed[i]);
+      // keep the box centred on the camera: wrap horizontally
+      if (x < cam.x - r) x += 2 * r; else if (x > cam.x + r) x -= 2 * r;
+      if (z < cam.z - r) z += 2 * r; else if (z > cam.z + r) z -= 2 * r;
+      // hit the local floor (or fell out of the box): respawn at the top
+      var groundY = floorAt(x, z);
+      if (y < groundY || y < floorLimit) {
+        _precipSpawn(i, cam, true);
+        x = P.pos[k]; y = P.pos[k + 1]; z = P.pos[k + 2];
+      } else if (y > cam.y + PRECIP_BOX.up) { y = cam.y + PRECIP_BOX.up; }
+      P.pos[k] = x; P.pos[k + 1] = y; P.pos[k + 2] = z;
+      if (P.dead[i]) { P.pos[k + 1] = y = -1000; }
+      if (out) {
+        var len = P.vel[i] * 0.02;
+        out[i * 6] = x; out[i * 6 + 1] = y; out[i * 6 + 2] = z;
+        out[i * 6 + 3] = x - 0.02; out[i * 6 + 4] = y + len; out[i * 6 + 5] = z;
+      }
+    }
+    P.obj.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // Storm lightning: a random flash every few seconds — the sky whites out
+  // for a frame or two and the ambient light spikes with it, then decays.
+  var _flash = 0, _nextFlash = 0, _rigAmb = null, _rigAmbI = 0;
+  function tickLightning(dt, t) {
+    var spec = skySpec();
+    if (!spec || !spec.storm) { _flash = 0; return; }
+    var sec = t / 1000;
+    if (!_nextFlash) _nextFlash = sec + 2 + Math.random() * 6;
+    if (sec >= _nextFlash) {
+      _flash = 1;
+      _nextFlash = sec + (Math.random() < 0.3 ? 0.15 : 3 + Math.random() * 9);   // sometimes a double
+    }
+    _flash = Math.max(0, _flash - dt * 6);
+    if (_sky) _sky.mat.uniforms.uFlash.value = _flash;
+    if (_rigAmb) _rigAmb.intensity = _rigAmbI + _flash * 1.2;
+  }
+  function sunDirFor(p) {
+    var el = p.el * Math.PI / 180, az = p.az * Math.PI / 180;
+    return new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el),
+                             Math.cos(el) * Math.cos(az)).normalize();
+  }
+  function buildSky() {
+    if (_sky) { scene.remove(_sky.mesh); _sky.mesh.geometry.dispose(); _sky.mat.dispose(); _sky = null; }
+    var spec = skySpec();
+    if (!spec) return;
+    var p = spec.preset;
+    var span = Math.max(cfg.gridCols, cfg.gridRows);
+    var mat = new THREE.ShaderMaterial({
+      vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
+      side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+      uniforms: {
+        uZen:    { value: new THREE.Color(p.zen) },
+        uHor:    { value: new THREE.Color(p.hor) },
+        uGround: { value: new THREE.Color(0x0b0d12) },
+        uSunCol: { value: new THREE.Color(p.sun) },
+        uSunDir: { value: sunDirFor(p) },
+        uTime:   { value: 0 },
+        uStars:  { value: p.stars },
+        uCloud:  { value: spec.cloud },
+        uCover:  { value: spec.storm ? 2.0 : (spec.precip ? 1.7 : (spec.cloud ? 1.0 : 0.0)) },
+        uSunSize: { value: p.size },
+        uDay:    { value: spec.time === 'night' ? 0.0 : (spec.time === 'evening' ? 0.55 : 1.0) },
+        uFlash:  { value: 0 },
+        uLowTier: { value: TIER === 'low' ? 1 : 0 }
+      }
+    });
+    if (spec.precip === 'rain') {
+      mat.uniforms.uZen.value.lerp(new THREE.Color(0x30363e), spec.storm ? 0.7 : 0.45);
+      mat.uniforms.uHor.value.lerp(new THREE.Color(0x6a737d), spec.storm ? 0.7 : 0.45);
+    } else if (spec.precip === 'snow') {
+      mat.uniforms.uZen.value.lerp(new THREE.Color(0xb9c2cc), 0.5);
+      mat.uniforms.uHor.value.lerp(new THREE.Color(0xe3e8ee), 0.55);
+    }
+    var mesh = new THREE.Mesh(new THREE.SphereGeometry(span * 3, 32, 16), mat);
+    mesh.renderOrder = -1000;      // paint first; everything else draws over it
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    _sky = { mesh: mesh, mat: mat, preset: p, cloud: spec.cloud };
+  }
+  function tickSky(t) {
+    if (!_sky || !camera) return;
+    _sky.mesh.position.copy(camera.position);
+    _sky.mat.uniforms.uTime.value = t / 1000;
+  }
+
   // Background/fog tuned per tier: high pulls the fog in and darkens the sky
-  // slightly for atmosphere; low/medium keep the classic distances.
+  // slightly for atmosphere; low/medium keep the classic distances. With a
+  // sky dome the fog takes the horizon colour and is pushed out so the dome
+  // is actually visible past the map's edge (cloudy presets keep it nearer —
+  // overcast light is flatter and hazier).
   function applyAtmosphere() {
     if (!scene) return;
     var span = Math.max(cfg.gridCols, cfg.gridRows);
+    var spec = skySpec();
     var bg = TIER === 'high' ? 0x080a0f : 0x0b0d12;
-    scene.background = new THREE.Color(bg);
     var near = span * (TIER === 'high' ? 0.7 : 0.8);
     var far = span * (TIER === 'high' ? 2.3 : 2.6);
+    if (spec) {
+      var fogCol = new THREE.Color(spec.preset.hor);
+      if (spec.cloud) fogCol.lerp(new THREE.Color(0x9aa3ad), 0.5);
+      if (spec.time === 'night') fogCol.lerp(new THREE.Color(0x0b0d12), 0.35);
+      if (spec.precip === 'rain') fogCol.lerp(new THREE.Color(spec.storm ? 0x3a4048 : 0x5a6470), 0.6);
+      if (spec.precip === 'snow') fogCol.lerp(new THREE.Color(0xdfe4ea), 0.6);
+      bg = fogCol.getHex();
+      near = span * (spec.storm ? 0.7 : spec.precip ? 0.9 : spec.cloud ? 1.2 : 1.8);
+      far = span * (spec.storm ? 2.0 : spec.precip ? 2.4 : spec.cloud ? 3.2 : 5.0);
+    }
+    scene.background = new THREE.Color(bg);
+    if (_sky) _sky.mat.uniforms.uGround.value.setHex(bg);
     if (scene.fog) { scene.fog.color.setHex(bg); scene.fog.near = near; scene.fog.far = far; }
     else scene.fog = new THREE.Fog(bg, near, far);
     if (renderer) renderer.setClearColor(bg);   // blind-in-fog frames clear to this
@@ -2620,16 +2969,41 @@ window.BM3D = (function () {
     // A plan with placed lights gets a darker base on medium/high so the
     // fixtures visibly own the scene; plans without keep the bright rig.
     var hasLights = !!(plan && plan.lights && plan.lights.length);
+    var spec = skySpec();
     var sunI = TIER === 'low' ? 0.6 : (hasLights ? 0.4 : 0.5);
     var sun = new THREE.DirectionalLight(0xfff4e0, sunI);
     sun.position.set(cfg.gridCols * 0.3, span, cfg.gridRows * 0.15);
+    var ambCol = 0xffffff, ambI = TIER === 'low' ? 0.75 : (hasLights ? 0.35 : 0.55);
+    var hemi = [0xbfd4ff, 0x4a4038];
+    if (spec) {
+      // The sky owns the light: sun from the preset's direction and colour,
+      // ambient in the sky's tint. Cloud cover flattens the sun into the
+      // ambient (soft, shadowless overcast). Night keeps the moon faint and
+      // leans on the plan's placed lights, if any.
+      var p = spec.preset;
+      var dir = sunDirFor(p).multiplyScalar(span * 1.5);
+      sun.position.set(cfg.gridCols / 2 + dir.x, dir.y, cfg.gridRows / 2 + dir.z);
+      sun.color.setHex(p.sun);
+      var lowBoost = TIER === 'low' ? 1.15 : 1.0;
+      var nightDim = (hasLights && spec.time === 'night') ? 0.6 : 1.0;
+      var sunK = spec.storm ? 0.15 : (spec.precip ? 0.25 : (spec.cloud ? 0.35 : 1.0));
+      sun.intensity = p.sunI * sunK * lowBoost * nightDim;
+      ambCol = p.amb;
+      var ambK = spec.storm ? 0.05 : (spec.precip === 'snow' ? 0.3 : (spec.cloud ? 0.2 : 0.0));
+      ambI = (p.ambI + ambK) * lowBoost * nightDim;
+      hemi = p.hemi;
+    }
+    var amb = new THREE.AmbientLight(ambCol, ambI);
+    _rigAmb = amb; _rigAmbI = ambI;
     if (TIER === 'low') {
-      _rig.push(new THREE.AmbientLight(0xffffff, 0.75), sun);
+      _rig.push(amb, sun);
     } else {
-      _rig.push(new THREE.AmbientLight(0xffffff, hasLights ? 0.35 : 0.55), sun,
-                new THREE.HemisphereLight(0xbfd4ff, 0x4a4038, 0.25));
+      _rig.push(amb, sun,
+                new THREE.HemisphereLight(hemi[0], hemi[1], spec ? 0.35 : 0.25));
     }
     for (var i = 0; i < _rig.length; i++) scene.add(_rig[i]);
+    buildSky();
+    buildPrecip();
     applyAtmosphere();
   }
 
@@ -2753,6 +3127,9 @@ window.BM3D = (function () {
     if (!scene) return;   // floorplan fetch still in flight on first open
     var dt = Math.min(0.1, (t - lastT) / 1000 || 0.016);
     lastT = t;
+    tickSky(t);
+    tickPrecip(dt, t);
+    tickLightning(dt, t);
 
     var canvas = renderer.domElement;
     var w = canvas.clientWidth, h = canvas.clientHeight;

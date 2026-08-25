@@ -130,6 +130,25 @@ class TestNormalization:
     def test_wall_style_passthrough(self):
         clean, warnings, errors = validate_floorplan(_plan(wall_style='brick'), 20, 20)
         assert errors == [] and clean['wall_style'] == 'brick'
+
+    def test_sky_presets(self):
+        """time × weather; weather defaults to clear; unknown time drops the
+        sky with a warning; a plan without one stays sky-less."""
+        clean, w, e = validate_floorplan(_plan(sky={'time': 'evening', 'weather': 'cloudy'}), 20, 20)
+        assert e == [] and clean['sky'] == {'time': 'evening', 'weather': 'cloudy'}
+        clean, w, e = validate_floorplan(_plan(sky={'time': 'Night'}), 20, 20)
+        assert clean['sky'] == {'time': 'night', 'weather': 'clear'}
+        clean, w, e = validate_floorplan(_plan(sky={'time': 'noon', 'weather': 'hail'}), 20, 20)
+        assert 'sky' not in clean and any('sky time' in x for x in w)
+        clean, w, e = validate_floorplan(_plan(sky={'time': 'morning', 'weather': 'hail'}), 20, 20)
+        assert clean['sky'] == {'time': 'morning', 'weather': 'clear'}
+        for wx in ('rain', 'snow', 'storm'):
+            clean, w, e = validate_floorplan(_plan(sky={'time': 'night', 'weather': wx}), 20, 20)
+            assert clean['sky'] == {'time': 'night', 'weather': wx}
+        clean, w, e = validate_floorplan(_plan(sky='evening'), 20, 20)
+        assert 'sky' not in clean and any('sky' in x for x in w)
+        clean, w, e = validate_floorplan(_plan(), 20, 20)
+        assert 'sky' not in clean
         # 'none' and absent are both omitted from the clean JSON
         clean2, _, _ = validate_floorplan(_plan(wall_style='none'), 20, 20)
         assert 'wall_style' not in clean2
@@ -233,6 +252,28 @@ class TestSchemaV2:
         assert z['wall_style'] == 'stone'
         assert any('texture ref' in w for w in warnings)
         assert any('"rects"' in w for w in warnings)
+
+    def test_zone_ceiling(self):
+        """ceiling_texture is a library ref like the floor's; ceiling_ft is
+        clamped so the first-person camera can never end up above it."""
+        clean, warnings, errors = validate_floorplan(_plan(zones=[
+            {'rects': [{'x1': 2, 'y1': 2, 'x2': 10, 'y2': 8}],
+             'ceiling_texture': 'rough_planks', 'ceiling_ft': 12},
+            {'rects': [{'x1': 0, 'y1': 0, 'x2': 2, 'y2': 2}],
+             'ceiling_texture': 'BAD SLUG!', 'ceiling_ft': 3},
+            {'rects': [{'x1': 0, 'y1': 0, 'x2': 2, 'y2': 2}],
+             'ceiling_texture': 'flagstone', 'ceiling_ft': 'tall'},
+        ]), 20, 20)
+        assert errors == []
+        z1, z2, z3 = clean['zones']
+        assert z1['ceiling_texture'] == 'rough_planks' and z1['ceiling_ft'] == 12.0
+        assert 'ceiling_texture' not in z2 and z2['ceiling_ft'] == 7.0
+        assert z3['ceiling_texture'] == 'flagstone' and 'ceiling_ft' not in z3
+
+    def test_zone_texture_keys_cover_every_surface(self):
+        import floorplan
+        assert set(floorplan.ZONE_TEXTURE_KEYS) == {
+            'floor_texture', 'wall_texture', 'ceiling_texture'}
 
     def test_segment_texture_and_style(self):
         clean, warnings, errors = validate_floorplan(_plan(

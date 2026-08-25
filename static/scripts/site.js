@@ -145,7 +145,7 @@ window.addEventListener('load', function () {
 // from a list when the grid itself can't host the select. Resolves to the
 // chosen option's value, or null on Cancel/close. (A typed-number prompt is
 // never acceptable here — see CLAUDE.md.)
-function spPickOption(title, text, label, options) {
+function spPickOption(title, text, label, options, okLabel) {
   return new Promise(resolve => {
     let modal = document.getElementById('spPickModal');
     if (!modal) {
@@ -164,6 +164,10 @@ function spPickOption(title, text, label, options) {
         + '<button type="button" class="btn btn-primary sp-pick-ok">Add</button></div>'
         + '</div></div>';
       document.body.appendChild(modal);
+      // Own open/closed flag: Bootstrap drops the 'show' class the moment
+      // hide() is called, long before the fade finishes, so the class can't
+      // tell "still closing" from "closed".
+      modal.addEventListener('hidden.bs.modal', () => { modal._spOpen = false; });
     }
     modal.querySelector('.modal-title').textContent = title;
     modal.querySelector('.sp-pick-text').textContent = text || '';
@@ -180,10 +184,21 @@ function spPickOption(title, text, label, options) {
     let done = false;
     const finish = value => { if (!done) { done = true; resolve(value); } };
     const ok = modal.querySelector('.sp-pick-ok');
+    ok.textContent = okLabel || 'Add';
     ok.onclick = () => { finish(sel.value); inst.hide(); };
-    modal.addEventListener('hidden.bs.modal', () => finish(null), {once: true});
-    inst.show();
-    sel.focus();
+    // Back-to-back picks (choose A, then immediately choose B): Bootstrap
+    // drops a show() issued while the previous instance is still fading out,
+    // so queue this one behind that hide. The cancel listener is attached
+    // only once WE are showing, or the old modal's hidden event would resolve
+    // this promise with null before it ever opened.
+    const start = () => {
+      modal._spOpen = true;
+      modal.addEventListener('hidden.bs.modal', () => finish(null), {once: true});
+      inst.show();
+      sel.focus();
+    };
+    if (modal._spOpen) modal.addEventListener('hidden.bs.modal', start, {once: true});
+    else start();
   });
 }
 

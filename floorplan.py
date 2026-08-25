@@ -9,6 +9,7 @@ on both the local pages and the relay portal):
       "schema_version": 2,
       "grid": {"cols": 20, "rows": 20},
       "default_wall_height_ft": 10,
+      "sky":        {"time":"evening","weather":"cloudy"},
       "walls":      [{"x1":3,"y1":0,"x2":3,"y2":6.5, "height_ft":15, "base_ft":0,
                       "style":"stone", "texture":"mossy_stone"}],
       "doors":      [{"id":"d1","x1":3,"y1":6.5,"x2":3,"y2":7.5,"open":false,
@@ -22,8 +23,14 @@ on both the local pages and the relay portal):
       "zones":      [{"id":"z1","name":"Great Hall",
                       "rects":[{"x1":2,"y1":2,"x2":10,"y2":8}],
                       "floor_texture":"flagstone","wall_texture":"castle_stone",
+                      "ceiling_texture":"rough_planks","ceiling_ft":12,
                       "wall_style":"stone"}]
     }
+
+A zone with a ceiling_texture gets a ceiling over its rects at ceiling_ft
+above the local floor (default: the map's wall height). Ceilings are drawn
+one-sided — seen from inside the room, never from an overhead view — so a
+ceilinged map is still readable from the top-down / overview cameras.
 
 v1 documents (no lights/props/zones, no texture refs) are a strict subset and
 are accepted forever; validation stamps the current version on output.
@@ -48,6 +55,19 @@ MAX_LIGHTS     = 200
 MAX_PROPS      = 300
 MAX_ZONES      = 50
 MAX_ZONE_RECTS = 20
+# Texture-library refs a zone may carry. Every collector that decides which
+# bitmaps the relay must be sent iterates THIS — add a surface here and the
+# push, the missing-texture check and validation all pick it up together.
+ZONE_TEXTURE_KEYS = ('floor_texture', 'wall_texture', 'ceiling_texture')
+# Map-wide sky dome (renderer: battlemap3d.js SKY_PRESETS). Stored as
+# {"time": ..., "weather": ...}; absent = the classic dark void. rain/snow/
+# storm imply cloud cover and add camera-following precipitation (storm =
+# rain + lightning) that stays out of ceilinged zones.
+SKY_TIMES    = ('night', 'morning', 'afternoon', 'evening')
+SKY_WEATHERS = ('clear', 'cloudy', 'rain', 'snow', 'storm')
+# Ceiling height above the zone's local floor. Floor is eye height (5 ft)
+# plus headroom so the first-person camera can never sit above the ceiling.
+CEILING_FT_RANGE = (7.0, 60.0)
 MAX_JSON_BYTES = 1024 * 1024
 
 DEFAULT_WALL_HEIGHT_FT = 10
@@ -490,10 +510,13 @@ def validate_floorplan(data, grid_cols, grid_rows):
         name = raw.get('name')
         if name:
             zone['name'] = str(name).strip()[:60]
-        for key in ('floor_texture', 'wall_texture'):
+        for key in ZONE_TEXTURE_KEYS:
             tex = _texture_ref(raw, key, warnings, where)
             if tex:
                 zone[key] = tex
+        cft = _num(raw.get('ceiling_ft'))
+        if cft is not None:
+            zone['ceiling_ft'] = round(_clamp(cft, *CEILING_FT_RANGE), 1)
         style = _wall_style(raw, 'wall_style', warnings, where)
         if style:
             zone['wall_style'] = style
@@ -525,6 +548,20 @@ def validate_floorplan(data, grid_cols, grid_rows):
         warnings.append(f'unknown wall_style {style!r} ignored')
     elif style and style != 'none':
         clean['wall_style'] = style
+
+    sky = data.get('sky')
+    if isinstance(sky, dict):
+        stime = str(sky.get('time') or '').strip().lower()
+        sweather = str(sky.get('weather') or 'clear').strip().lower()
+        if stime and stime not in SKY_TIMES:
+            warnings.append(f'unknown sky time {stime!r} ignored')
+        elif stime:
+            if sweather not in SKY_WEATHERS:
+                warnings.append(f'unknown sky weather {sweather!r} — using clear')
+                sweather = 'clear'
+            clean['sky'] = {'time': stime, 'weather': sweather}
+    elif sky not in (None, '', {}):
+        warnings.append('sky: not an object — ignored')
 
     # Player 2D visibility switches (whole plan): show ALL walls+doors and/or
     # all props on the players' flat map — not just per-wall "show" flags.

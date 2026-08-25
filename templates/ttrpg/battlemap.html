@@ -731,6 +731,16 @@
                 style="width:44px;height:44px;border-radius:8px;border:1px solid #555;
                        background:var(--ttrpg-primary);color:var(--ttrpg-accent);
                        font-size:1.1rem;font-weight:900;line-height:1;cursor:pointer;">3D</button>
+        {% if current_user.is_dm() %}
+        <!-- Sky / weather without opening the floorplan editor: "the storm
+             rolls in" is a mid-session call. Saves straight to the floorplan;
+             every open 3D view (table, portal, OBS) picks it up on its poll. -->
+        <button id="bm-sky-btn" onclick="bmSkyPick()"
+                title="Sky &amp; weather for 3D mode — time of day, sunny/cloudy/rain/snow/storm"
+                style="width:44px;height:26px;border-radius:6px;border:1px solid #555;
+                       background:var(--ttrpg-primary);color:var(--ttrpg-accent);
+                       font-size:.62rem;font-weight:700;line-height:1;cursor:pointer;">SKY</button>
+        {% endif %}
         {% endif %}
         {% if current_user.is_dm() %}
         <div style="width:28px;border-top:1px solid #444;margin:2px 0;"></div>
@@ -1058,6 +1068,27 @@
         <option value="wood">Wood</option>
       </select>
     </div>
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <label class="fx-label" title="Sky dome for 3D mode — seen past the map's edge and wherever there is no ceiling. Also sets the sun, ambient light and haze.">Sky</label>
+      <select id="fp-sky-time" class="form-select form-select-sm"
+              style="width:auto;flex:1;min-width:0;" onchange="BMFP.setSky('time', this.value)"
+              title="Time of day for the 3D sky and its lighting">
+        <option value="">None (dark void)</option>
+        <option value="night">Night — stars</option>
+        <option value="morning">Morning</option>
+        <option value="afternoon">Afternoon</option>
+        <option value="evening">Evening</option>
+      </select>
+      <select id="fp-sky-weather" class="form-select form-select-sm"
+              style="width:auto;flex:0 0 auto;" onchange="BMFP.setSky('weather', this.value)"
+              title="Clear sky, or overcast with drifting cloud and flatter light">
+        <option value="clear">Sunny</option>
+        <option value="cloudy">Cloudy</option>
+        <option value="rain">Rain</option>
+        <option value="snow">Snow</option>
+        <option value="storm">Storm</option>
+      </select>
+    </div>
     <div class="form-check" style="margin-bottom:0;">
       <input class="form-check-input" type="checkbox" id="fp-wall-show"
              onchange="BMFP.setWallShow(this.checked)">
@@ -1231,6 +1262,21 @@
         <select id="fp-zone-wall_texture" class="form-select form-select-sm fp-tex-select"
                 style="width:auto;flex:1;min-width:0;"
                 onchange="BMFP.setZoneField('wall_texture', this.value)"></select>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <label class="fx-label" style="min-width:36px;">Ceiling</label>
+        <select id="fp-zone-ceiling_texture" class="form-select form-select-sm fp-tex-select"
+                style="width:auto;flex:1;min-width:0;" data-empty-label="(no ceiling)"
+                onchange="BMFP.setZoneField('ceiling_texture', this.value)"
+                title="Roof over this room in 3D — seen from inside; the overhead views look straight through it"></select>
+      </div>
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <label class="fx-label" style="min-width:36px;">Height</label>
+        <input type="number" id="fp-zone-ceiling_ft" class="form-control form-control-sm"
+               style="width:72px;flex:0 0 auto;" min="7" max="60" step="0.5" placeholder="ft"
+               onchange="BMFP.setZoneField('ceiling_ft', this.value)"
+               title="Ceiling height in feet above this room's floor (blank = the map's wall height)">
+        <span class="small" style="color:var(--sp-muted);font-size:.7rem;">ft above the floor (blank = wall height)</span>
       </div>
       <div class="d-flex align-items-center gap-2">
         <label class="fx-label" style="min-width:36px;">Finish</label>

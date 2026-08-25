@@ -243,7 +243,7 @@ def _push_map_state(bm):
             if dr.get('texture'):
                 names.add(dr['texture'])
         for z in floorplan.get('zones', []):
-            for key in ('floor_texture', 'wall_texture'):
+            for key in floorplan_mod.ZONE_TEXTURE_KEYS:
                 if z.get(key):
                     names.add(z[key])
         # Props resolve textures client-side (explicit ref, else the type's
@@ -1152,7 +1152,7 @@ def _unknown_texture_refs(clean):
         if p.get('texture'):
             refs.add(p['texture'])
     for z in clean.get('zones', []):
-        for key in ('floor_texture', 'wall_texture'):
+        for key in floorplan_mod.ZONE_TEXTURE_KEYS:
             if z.get(key):
                 refs.add(z[key])
     return sorted(refs - have)

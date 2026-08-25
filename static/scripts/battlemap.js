@@ -2901,3 +2901,67 @@ function adjustCellPx(delta) {
     if (saved) setCellPx(parseInt(saved));
   } catch(e) {}
 })();
+
+
+// ── Sky & weather from the strip ─────────────────────────────────────────────
+// Two dropdown modals (never a numbered prompt), then a floorplan save with
+// only the "sky" key changed. The floorplan version bump makes every open 3D
+// view rebuild on its next poll. Refuses while the floorplan editor holds
+// unsaved edits — the save would silently discard them.
+function bmSkyPick() {
+  if (window.BMFP && BMFP.isDirty && BMFP.isDirty()) {
+    alert('Save or revert the floorplan editor first — the sky is stored in the floorplan.');
+    return;
+  }
+  const TIMES = [
+    { value: '', label: 'None (dark void)' }, { value: 'night', label: 'Night — stars' },
+    { value: 'morning', label: 'Morning' }, { value: 'afternoon', label: 'Afternoon' },
+    { value: 'evening', label: 'Evening' }];
+  const WEATHER = [
+    { value: 'clear', label: 'Sunny / clear' }, { value: 'cloudy', label: 'Cloudy' },
+    { value: 'rain', label: 'Rain' }, { value: 'snow', label: 'Snow' },
+    { value: 'storm', label: 'Storm (rain + lightning)' }];
+  fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`).then(r => r.json()).then(async d => {
+    const plan = (d && d.floorplan) || {
+      format: 'sceneplay-floorplan', schema_version: 2,
+      walls: [], doors: [], elevations: [] };
+    const cur = plan.sky || {};
+    // Put the current choice first so OK with no change is a no-op.
+    const order = (list, v) => list.slice().sort((a, b) => (a.value === v ? -1 : 0) - (b.value === v ? -1 : 0));
+    const time = await spPickOption('Sky', 'Time of day for the 3D sky and its lighting.',
+                                    'Time', order(TIMES, cur.time || ''), 'Next');
+    if (time === null) return;
+    let weather = 'clear';
+    if (time) {
+      weather = await spPickOption('Weather', 'Clear, overcast, or precipitation. Rain and snow stay out of roofed rooms.',
+                                   'Weather', order(WEATHER, cur.weather || 'clear'), 'Apply');
+      if (weather === null) return;
+    }
+    if ((cur.time || '') === time && (cur.weather || 'clear') === weather) return;
+    if (time) plan.sky = { time, weather }; else delete plan.sky;
+    return fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ floorplan: plan }),
+    }).then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        if (!ok || !j.ok) { alert((j && (j.errors || []).join('\n')) || 'Could not save the sky.'); return; }
+        _bmPaintSky(time, weather);
+      });
+  }).catch(() => alert('Could not load the floorplan.'));
+}
+
+function _bmPaintSky(time, weather) {
+  const b = document.getElementById('bm-sky-btn');
+  if (!b) return;
+  const ICON = { clear: '\u2600', cloudy: '\u2601', rain: '\u{1F327}', snow: '\u2744', storm: '\u26C8' };
+  b.textContent = time ? ((ICON[weather] || '') + ' ' + time.slice(0, 3).toUpperCase()) : 'SKY';
+  b.style.borderColor = time ? '#2f7d38' : '#555';
+}
+
+// Paint the strip button with the saved sky on load (DM pages only).
+document.addEventListener('DOMContentLoaded', () => {
+  if (!document.getElementById('bm-sky-btn') || typeof MAP_ID === 'undefined') return;
+  fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`).then(r => r.json())
+    .then(d => { const s = (d && d.floorplan && d.floorplan.sky) || {}; _bmPaintSky(s.time || '', s.weather || 'clear'); })
+    .catch(() => {});
+});

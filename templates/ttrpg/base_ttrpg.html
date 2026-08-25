@@ -16,6 +16,8 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/sp-core.css') }}">
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/sp-ttrpg.css') }}">
     <script src="{{ url_for('static', filename='scripts/bootstrap.bundle.min.js') }}"></script>
+    <!-- Shared helpers (spPickOption dropdown modal, grid toolbar shims); load-time hooks are selector-guarded -->
+    <script src="{{ url_for('static', filename='scripts/site.js') }}"></script>
     {% block head %}{% endblock %}
 </head>
 <body>
