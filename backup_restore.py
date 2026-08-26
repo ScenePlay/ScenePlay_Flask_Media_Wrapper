@@ -351,6 +351,11 @@ def _upgrade_restored_db():
         sql.create_table()
         db.create_all()
         fm_upgrade()
+        try:
+            import media_facets
+            media_facets.backfill_sure_artists(sql.database)   # restored rows get their artists
+        except Exception:
+            pass
         return True
     except Exception as e:
         print('post-restore schema upgrade skipped (next app start will retry):', e)

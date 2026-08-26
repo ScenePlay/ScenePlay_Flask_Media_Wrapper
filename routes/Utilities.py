@@ -728,6 +728,24 @@ def artists_page():
                            items=select_data_stats(), volume=currentvolume())
 
 
+@ut.route('/api/artists/build', methods=['POST'])
+def artists_build():
+    """Fill in artists for every song/video that has none, from the stored
+    metadata: exact (YouTube artist field) + high (title confirmed by the
+    channel) always; {include_medium: true} adds title-only derivations.
+    Values the DM set by hand are never touched. Returns counts."""
+    import media_facets as mf
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    want = {'exact', 'high'} | ({'medium'} if data.get('include_medium') else set())
+    rows = mf.suggest_artists(database)
+    picked = [{'media_type': r['media_type'], 'id': r['id'], 'artist': r['artist']}
+              for r in rows if r['confidence'] in want and r['artist']]
+    updated = mf.apply_artists(database, picked)
+    left = {k: sum(1 for r in rows if r['confidence'] == k and k not in want) for k in ('medium', 'low', 'none')}
+    return jsonify({'ok': True, 'updated': updated, 'left': left})
+
+
 @ut.route('/api/artists/apply', methods=['POST'])
 def artists_apply():
     import media_facets as mf

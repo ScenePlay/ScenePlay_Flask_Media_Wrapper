@@ -81,3 +81,14 @@ class TestOrigin:
         assert c.execute("SELECT origin_playlist_title FROM tblMediaMetadata WHERE media_type='music' AND media_id=2").fetchone() == ('Road Trip',)
         assert c.execute("SELECT origin_playlist FROM tblMediaMetadata WHERE media_type='video' AND media_id=9").fetchone() == ('https://yt/list=C',)
         c.close()
+
+
+def test_backfill_sure_only_and_idempotent(env):
+    assert mf.backfill_sure_artists(env) == 1          # song 1 (high); song 2 is low; song 3 is DM-set
+    c = sqlite3.connect(env)
+    assert c.execute("SELECT artist, artist_source FROM tblMediaMetadata WHERE media_id=1").fetchone() == ('Bon Jovi', 'dm')
+    assert c.execute("SELECT artist FROM tblMediaMetadata WHERE media_id=2").fetchone() == ('',)
+    assert c.execute("SELECT artist FROM tblMediaMetadata WHERE media_id=3").fetchone() == ('Someone',)
+    c.close()
+    assert mf.backfill_sure_artists(env) == 0
+    assert mf.backfill_sure_artists('/nonexistent/x.db') == 0, 'never raises'

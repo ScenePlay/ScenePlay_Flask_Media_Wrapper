@@ -145,3 +145,17 @@ def apply_artists(database, choices):
     finally:
         conn.close()
     return n
+
+
+def backfill_sure_artists(database):
+    """Fill artists for every row that has none, SURE derivations only
+    (exact / high). Idempotent, never touches a DM-set value; run at boot
+    and after a restore so an upgraded or restored box gets its artist list
+    without anyone pressing a button. Returns the number of rows set."""
+    try:
+        rows = suggest_artists(database)
+    except Exception:
+        return 0            # pre-0011 schema or a locked file: next boot
+    picked = [{'media_type': r['media_type'], 'id': r['id'], 'artist': r['artist']}
+              for r in rows if r['confidence'] in ('exact', 'high') and r['artist']]
+    return apply_artists(database, picked) if picked else 0

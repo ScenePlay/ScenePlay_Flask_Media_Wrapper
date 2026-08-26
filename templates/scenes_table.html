@@ -339,7 +339,14 @@
         <div><label class="small"><b>Genre</b> <span class="text-muted" title="From the YouTube tags, title and channel (or a label you set on the music table)">from metadata</span></label>
              <div id="sm-genres" class="sm-list" style="width:170px;height:150px;"></div><div class="sm-picked" data-for="sm-genres"></div></div>
         <div><label class="small"><b>Artists</b></label><input type="search" class="form-control form-control-sm mb-1 sm-filter" data-list="sm-artists" placeholder="filter…" style="max-width:190px;">
-             <div id="sm-artists" class="sm-list" style="width:190px;height:150px;"></div><div class="sm-picked" data-for="sm-artists"></div></div>
+             <div id="sm-artists" class="sm-list" style="width:190px;height:150px;"></div><div class="sm-picked" data-for="sm-artists"></div>
+             <!-- Artists are worked out from the YouTube data for NEW downloads;
+                  an upgraded box (or a restored library) needs this once. -->
+             <button type="button" class="btn btn-sm btn-outline-secondary mt-1" style="font-size:.72rem;" onclick="smBuildArtists(false)"
+                     title="Work out the artist for every song and video that has none, from its YouTube title / channel / artist field. Sure cases only; safe to repeat.">&#9881; Build from metadata</button>
+             <button type="button" class="btn btn-sm btn-outline-secondary mt-1" style="font-size:.72rem;" onclick="smBuildArtists(true)"
+                     title="Also take the title-only guesses (Artist – Title with no channel confirmation). Fix any wrong ones in the music table's Artist column.">&#9881; …incl. guesses</button>
+             <div id="sm-build-msg" class="small text-muted"></div></div>
         <div><label class="small"><b>Kind</b></label><div id="sm-kinds" class="sm-list" style="width:170px;"></div>
              <label class="small mt-2"><b>Decade</b></label><div id="sm-decades" class="sm-list" style="width:170px;max-height:110px;"></div></div>
         <div><label class="small"><b>Word in title / channel</b></label><input type="text" id="sm-text" class="form-control form-control-sm" style="max-width:170px;">
@@ -402,6 +409,22 @@
     const el = document.querySelector('.sm-picked[data-for="' + id + '"]'); if (!el) return;
     const picked = [...document.querySelectorAll('#' + id + ' input:checked')].map(i => i.value);
     el.textContent = picked.length ? 'picked: ' + picked.join(', ') : '';
+  }
+  function smBuildArtists(includeMedium) {
+    const msg = document.getElementById('sm-build-msg'); msg.textContent = 'Building…';
+    fetch('/api/artists/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ include_medium: includeMedium }) })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        msg.textContent = 'Set ' + d.updated + ' artist' + (d.updated === 1 ? '' : 's') + (d.left.medium ? ' — ' + d.left.medium + ' guesses left (use "…incl. guesses")' : '') + '.';
+        // refill the pickers with the new artists, keeping current ticks
+        const keep = new Set([...document.querySelectorAll('#sm-artists input:checked')].map(i => i.value));
+        fetch('/api/smart-scenes/facets').then(r => r.json()).then(f => {
+          const s = document.getElementById('sm-artists'); s.innerHTML = '';
+          f.options.artists.forEach(o => { const l = document.createElement('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = o.value; cb.className = 'form-check-input me-1'; cb.checked = keep.has(o.value); if (cb.checked) l.classList.add('picked');
+            cb.onchange = () => { l.classList.toggle('picked', cb.checked); smPickedLine('sm-artists'); smCount(); }; l.appendChild(cb); l.appendChild(document.createTextNode(o.value + ' (' + o.count + ')')); s.appendChild(l); });
+          smPickedLine('sm-artists');
+        });
+      }).catch(() => { msg.textContent = 'Failed.'; });
   }
   function spSmartReset() {
     ['sm-scenes', 'sm-genres', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => { document.querySelectorAll('#' + id + ' input').forEach(i => { i.checked = false; }); document.querySelectorAll('#' + id + ' label').forEach(l => { l.classList.remove('picked'); l.style.display = ''; }); smPickedLine(id); });

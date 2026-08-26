@@ -442,8 +442,25 @@ apparray = [
     ["dl_sound_fail",1,"int"]          # chime on a failed one (Utilities → Download Queue)
 ]
 
+def _backfill_artists_async():
+    """Artist facet for rows that never had one (upgraded / restored boxes).
+    A short background thread so boot isn't held up; sure derivations only."""
+    import threading
+
+    def _run():
+        try:
+            import media_facets
+            n = media_facets.backfill_sure_artists(databaseDir)
+            if n:
+                print(f'[artists] filled {n} artists from metadata')
+        except Exception as exc:        # never let a facet stop the box
+            print('[artists] backfill skipped:', exc)
+    threading.Thread(target=_run, name='artist-backfill', daemon=True).start()
+
+
 def startTheadPlayer():
     appsettings(apparray)
+    _backfill_artists_async()
     appsettingAudioPlayFlagUpdate(0)
     appsettingVideoPlayFlagUpdate(0)
     appsettingYT_QuePlayFlagUpdate(0)
