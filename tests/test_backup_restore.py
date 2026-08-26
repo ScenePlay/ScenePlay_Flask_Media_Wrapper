@@ -870,6 +870,41 @@ class TestFullMerge:
         assert q(env['live'], "SELECT is_open FROM tblBattleMapDoors WHERE map_id=? AND door_key='d1'",
                  (mid,)) == [(0,)]
 
+    def test_full_merge_remaps_library_video_background(self, env):
+        """A map background that is a LIBRARY-VIDEO reference (see
+        shared_assets) embeds a tblVideoMedia id. Merge re-numbers media rows
+        by videoId, so the reference must follow — and one whose video the
+        merge never brought over is dropped, not left pointing at a stranger."""
+        live = env['live']
+        x(live, "INSERT INTO tblVideoMedia(video_id, path, title, urlSource, dnLoadStatus, videoId, displayName) "
+                "VALUES (50, '/v/', 'clip.mp4', 'https://u', 3, 'vidCLIP00001', 'Clip')")
+        src = str(env['tmp'] / 'srcvid.db')
+        make_db(src)
+        x(src, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        x(src, "INSERT INTO tblVideoMedia(video_id, path, title, urlSource, dnLoadStatus, videoId, displayName) "
+               "VALUES (3, '/v/', 'clip.mp4', 'https://u', 3, 'vidCLIP00001', 'Clip')")
+        x(src, "INSERT INTO tblCampaigns(campaign_name, active, order_by) VALUES ('Vid', 1, '1')")
+        x(src, "INSERT INTO tblSessions(title, session_number, campaign_id, status, dm_notes, created_at) "
+               "VALUES ('EpV', 1, 1, 'active', '', 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, bg_image, is_active, sort_order, created_at) "
+               "VALUES (1, 'Hangar', 20, 20, '../../../assets/media/video/3.mp4', 0, 0, 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, bg_image, is_active, sort_order, created_at) "
+               "VALUES (1, 'Lost', 20, 20, '../../../assets/media/video/99.mp4', 0, 1, 't')")
+        x(src, "INSERT INTO tblBattleMaps(session_id, name, grid_cols, grid_rows, bg_image, is_active, sort_order, created_at) "
+               "VALUES (1, 'Art', 20, 20, '../portraits/kara.png', 0, 2, 't')")
+        old = sql.database
+        sql.database = src
+        try:
+            snap = br.create_backup(label='vid')
+        finally:
+            sql.database = old
+        x(live, "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        br.restore_merge(snap, include_uploads=False, full=True, fallback_user_id=1)
+        got = dict(q(live, "SELECT name, bg_image FROM tblBattleMaps"))
+        assert got['Hangar'] == '../../../assets/media/video/50.mp4', 'followed the videoId dedup to the local id'
+        assert got['Lost'] == '', 'unknown video: no background rather than a wrong one'
+        assert got['Art'] == '../portraits/kara.png', 'picture references pass through untouched'
+
     def test_plain_merge_still_skips_ttrpg(self, env):
         snap = self._boxes(env)
         s = br.restore_merge(snap, include_uploads=False)   # full NOT set

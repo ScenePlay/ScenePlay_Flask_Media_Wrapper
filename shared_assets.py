@@ -43,6 +43,18 @@ def video_ref(video_id, ext):
     return f'../../../assets/media/video/{int(video_id)}.{ext}'
 
 
+def remap_video_ref(value, id_map):
+    """A library-video reference carries a tblVideoMedia id; when rows are
+    re-numbered (backup MERGE) the id must follow. Non-video values pass
+    through; a video id the map doesn't know becomes '' (no background)
+    rather than pointing at someone else's video."""
+    m = _VID_REF.match(value or '')
+    if not m:
+        return value
+    new = id_map.get(int(m.group(1)))
+    return video_ref(new, m.group(2)) if new else ''
+
+
 def library_video(database, video_id):
     """(path, ext) for a finished library video, or (None, None)."""
     table, idcol, filecol = MEDIA_KINDS['video']

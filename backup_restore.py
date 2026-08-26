@@ -664,6 +664,13 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
             ceiling = c.execute("SELECT COALESCE(MAX(sort_order), 0) FROM tblBattleMaps "
                                 "WHERE session_id=?", (sid,)).fetchone()[0]
             data.update(session_id=sid, is_active=0, sort_order=ceiling + 1)
+            # A background that is a LIBRARY-VIDEO reference names a
+            # tblVideoMedia id from the source box; media rows were just
+            # re-numbered by videoId, so follow the map (shared_assets).
+            if data.get('bg_image'):
+                import shared_assets
+                data['bg_image'] = shared_assets.remap_video_ref(
+                    data['bg_image'], (media_map or {}).get('video', {}))
             map_map[src_id] = _copy_row(c, 'tblBattleMaps', data)
             new_maps.add(map_map[src_id])
             s['maps'] += 1

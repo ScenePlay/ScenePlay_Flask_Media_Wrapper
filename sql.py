@@ -2108,3 +2108,172 @@ def select_data_allsongs():
 #select_data_allsongs()
 
  
+
+
+# ── Download queue: stats, failures, retries, chime toggles ──────────────────
+# Utilities → "Download Queue" card. Status lexicon (lutStatus): 1 Queued,
+# 2 Processing, 3 Finished, 4 Failed, 5 Unavailable (permanently skipped).
+
+_DL_TABLES = {'music': ('tblMusic', 'song_id', 'song'),
+              'video': ('tblVideoMedia', 'video_ID', 'title')}
+
+
+def download_sound_enabled(ok):
+    """Whether the finished / failed chime should play — thin wrapper over
+    the chimes registry (chimes.py) kept for older callers."""
+    import chimes
+    try:
+        return chimes.chime_path(appsettingGet, chimes.effects_dir(),
+                                 'download_ok' if ok else 'download_fail') is not None
+    except Exception:
+        return True          # no settings table / DB hiccup: never silence by accident
+
+
+def set_download_sounds(ok=None, fail=None):
+    import chimes
+    d = chimes.effects_dir()
+    if ok is not None:
+        chimes.save(appsettingGet, appsettingSet, d, 'download_ok', enabled=bool(ok))
+    if fail is not None:
+        chimes.save(appsettingGet, appsettingSet, d, 'download_fail', enabled=bool(fail))
+
+
+def download_stats():
+    """Per media type: counts by status plus what the card shows —
+    remaining (queued + processing) and the failure rate over every download
+    that reached an outcome (finished vs failed/unavailable)."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    out = {}
+    try:
+        for kind, (tbl, _pk, _name) in _DL_TABLES.items():
+            counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+            for status, n in c.execute(
+                    f"SELECT dnLoadStatus, COUNT(*) FROM {tbl} "
+                    f"WHERE urlSource IS NOT NULL AND urlSource <> '' "
+                    f"GROUP BY dnLoadStatus"):
+                if status in counts:
+                    counts[status] = n
+            done = counts[3] + counts[4] + counts[5]
+            out[kind] = {
+                'queued': counts[1], 'processing': counts[2], 'finished': counts[3],
+                'failed': counts[4], 'unavailable': counts[5],
+                'remaining': counts[1] + counts[2],
+                'failure_rate': round(100.0 * (counts[4] + counts[5]) / done, 1) if done else 0.0,
+            }
+    finally:
+        c.close()
+        conn.close()
+    return out
+
+
+def failed_downloads():
+    """Every failed / unavailable row with its captured yt-dlp error, newest
+    first, so the DM can see WHY and retry from the Utilities page."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    rows = []
+    try:
+        for kind, (tbl, pk, name) in _DL_TABLES.items():
+            for rid, nm, disp, url, status, err in c.execute(
+                    f"SELECT {pk}, {name}, displayName, urlSource, dnLoadStatus, dnLastError "
+                    f"FROM {tbl} WHERE dnLoadStatus IN (4, 5) ORDER BY {pk} DESC"):
+                rows.append({'media_type': kind, 'id': rid,
+                             'name': disp or nm or url or f'#{rid}',
+                             'url': url or '', 'status': status,
+                             'status_label': 'Unavailable' if status == 5 else 'Failed',
+                             'error': err or ''})
+    finally:
+        c.close()
+        conn.close()
+    rows.sort(key=lambda r: r['id'], reverse=True)
+    return rows
+
+
+def retry_download(media_type, pk):
+    """Put one failed / unavailable row back in the queue (status 1) and
+    clear its last error so a fresh failure is distinguishable. The queue
+    worker's gate is raised so it picks it up now. Returns True if a row
+    changed."""
+    if media_type not in _DL_TABLES:
+        return False
+    tbl, pkcol, _ = _DL_TABLES[media_type]
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        c.execute(f"UPDATE {tbl} SET dnLoadStatus = 1, dnLastError = '' "
+                  f"WHERE {pkcol} = ? AND dnLoadStatus IN (4, 5) "
+                  f"AND urlSource IS NOT NULL AND urlSource <> ''", (pk,))
+        changed = c.rowcount > 0
+        if changed:
+            c.execute("UPDATE tblAppSettings SET value = '1' WHERE name = 'yt_que_switch'")
+        conn.commit()
+    finally:
+        c.close()
+        conn.close()
+    return changed
+
+
+def retry_all_failed(include_unavailable=False):
+    """Re-queue every failed row (and optionally the 'unavailable' ones —
+    those were skipped on purpose, e.g. a private or deleted video, so they
+    are opt-in). Returns the number re-queued."""
+    statuses = '(4, 5)' if include_unavailable else '(4)'
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    n = 0
+    try:
+        for tbl, _pk, _name in _DL_TABLES.values():
+            c.execute(f"UPDATE {tbl} SET dnLoadStatus = 1, dnLastError = '' "
+                      f"WHERE dnLoadStatus IN {statuses} "
+                      f"AND urlSource IS NOT NULL AND urlSource <> ''")
+            n += c.rowcount
+        if n:
+            c.execute("UPDATE tblAppSettings SET value = '1' WHERE name = 'yt_que_switch'")
+        conn.commit()
+    finally:
+        c.close()
+        conn.close()
+    return n
+
+
+def delete_failed_download(media_type, pk):
+    """Remove a download that will not succeed: only rows in Failed /
+    Unavailable are eligible (a finished track is deleted from its own
+    table page, not from the queue card). Returns True if a row was removed;
+    scene links, metadata and any partial file go with it (delete_media_row)."""
+    if media_type not in _DL_TABLES:
+        return False
+    tbl, pkcol, _ = _DL_TABLES[media_type]
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        row = c.execute(f"SELECT dnLoadStatus FROM {tbl} WHERE {pkcol} = ?", (pk,)).fetchone()
+    finally:
+        c.close()
+        conn.close()
+    if not row or row[0] not in (4, 5):
+        return False
+    delete_media_row(media_type, pk)
+    return True
+
+
+def delete_all_failed(include_unavailable=False):
+    """Remove every Failed row (and, opt-in, the Unavailable ones) entirely —
+    scene links, metadata, partial files. Returns the number removed."""
+    statuses = (4, 5) if include_unavailable else (4,)
+    n = 0
+    for kind, (tbl, pkcol, _) in _DL_TABLES.items():
+        conn = sqlite3.connect(database)
+        c = conn.cursor()
+        try:
+            ids = [r[0] for r in c.execute(
+                f"SELECT {pkcol} FROM {tbl} WHERE dnLoadStatus IN ({','.join('?' * len(statuses))})",
+                statuses)]
+        finally:
+            c.close()
+            conn.close()
+        for pk in ids:
+            delete_media_row(kind, pk)
+            n += 1
+    return n

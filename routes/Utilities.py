@@ -557,3 +557,116 @@ def asset_media_video(media_id, ext):
         abort(404)
     mime = {'mp4': 'video/mp4', 'webm': 'video/webm', 'ogv': 'video/ogg'}[ext.lower()]
     return send_file(path, mimetype=mime, conditional=True)
+
+
+# ── Download queue card ───────────────────────────────────────────────────────
+# Utilities → "Download Queue": how many are left, the failure rate, WHY each
+# failure failed (the captured yt-dlp error), retry one / retry all, and the
+# two chime toggles. JSON so the card can refresh itself while downloads run.
+
+@ut.route('/api/downloads/status')
+def downloads_status():
+    from sql import download_stats, failed_downloads
+    return jsonify({'ok': True, 'stats': download_stats(), 'failed': failed_downloads()})
+
+
+@ut.route('/api/downloads/retry', methods=['POST'])
+def downloads_retry():
+    from sql import retry_download, retry_all_failed
+    data = request.get_json(silent=True) or {}
+    if data.get('all'):
+        n = retry_all_failed(include_unavailable=bool(data.get('include_unavailable')))
+        return jsonify({'ok': True, 'requeued': n})
+    try:
+        pk = int(data.get('id') or 0)
+    except (TypeError, ValueError):
+        pk = 0
+    kind = data.get('media_type')
+    if not pk or kind not in ('music', 'video'):
+        return jsonify({'ok': False, 'error': 'media_type and id required'}), 400
+    changed = retry_download(kind, pk)
+    return jsonify({'ok': True, 'requeued': 1 if changed else 0})
+
+
+@ut.route('/api/downloads/delete', methods=['POST'])
+def downloads_delete():
+    """Remove a failed / unavailable download record entirely (scene links,
+    metadata, any partial file). Finished rows are refused."""
+    from sql import delete_failed_download, delete_all_failed
+    data = request.get_json(silent=True) or {}
+    if data.get('all'):
+        n = delete_all_failed(include_unavailable=bool(data.get('include_unavailable')))
+        return jsonify({'ok': True, 'deleted': n})
+    try:
+        pk = int(data.get('id') or 0)
+    except (TypeError, ValueError):
+        pk = 0
+    kind = data.get('media_type')
+    if not pk or kind not in ('music', 'video'):
+        return jsonify({'ok': False, 'error': 'media_type and id required'}), 400
+    if not delete_failed_download(kind, pk):
+        return jsonify({'ok': False, 'error': 'Only failed or unavailable downloads can be removed here.'}), 400
+    return jsonify({'ok': True, 'deleted': 1})
+
+
+# ── Chimes (data-driven: chimes.EVENTS) ──────────────────────────────────────
+
+def _chimes_payload():
+    import chimes
+    from sql import appsettingGet
+    d = chimes.effects_dir()
+    return {'ok': True, 'events': chimes.config(appsettingGet, d),
+            'sounds': chimes.available_sounds(d)}
+
+
+@ut.route('/api/chimes')
+def chimes_get():
+    return jsonify(_chimes_payload())
+
+
+@ut.route('/api/chimes', methods=['POST'])
+def chimes_set():
+    """{key, enabled?, file?} — switch and/or sound for one event."""
+    import chimes
+    from sql import appsettingGet, appsettingSet
+    data = request.get_json(silent=True) or {}
+    ok = chimes.save(appsettingGet, appsettingSet, chimes.effects_dir(), data.get('key'),
+                     enabled=(bool(data['enabled']) if 'enabled' in data else None),
+                     file=(data.get('file') if 'file' in data else None))
+    if not ok:
+        return jsonify({'ok': False, 'error': 'Unknown chime or sound file.'}), 400
+    return jsonify(_chimes_payload())
+
+
+@ut.route('/chimes/sound/<name>')
+def chime_sound(name):
+    """Serve a sound from effects/ so the card can preview it in the browser."""
+    import chimes
+    if not chimes.safe_sound_name(name):
+        abort(404)
+    return send_from_directory(chimes.effects_dir(), name)
+
+
+@ut.route('/api/chimes/upload', methods=['POST'])
+def chimes_upload():
+    """Add a sound to effects/ (mp3/wav/ogg, ≤ 2 MB) — it then appears in
+    every event's picker. Optional 'key' assigns it to that event right away."""
+    import chimes
+    from sql import appsettingGet, appsettingSet
+    f = request.files.get('sound')
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'error': 'No file.'}), 400
+    name = os.path.basename(f.filename).strip().replace('/', '_')
+    if not chimes.safe_sound_name(name):
+        return jsonify({'ok': False, 'error': 'Use a plain .mp3, .wav or .ogg filename.'}), 400
+    raw = f.read()
+    if len(raw) > 2 * 1024 * 1024:
+        return jsonify({'ok': False, 'error': 'Keep chimes under 2 MB.'}), 400
+    d = chimes.effects_dir()
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name), 'wb') as out:
+        out.write(raw)
+    key = request.form.get('key')
+    if key:
+        chimes.save(appsettingGet, appsettingSet, d, key, file=name)
+    return jsonify(_chimes_payload())

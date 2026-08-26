@@ -37,6 +37,11 @@ def yt(monkeypatch, tmp_path):
                         lambda row, op: calls.__setitem__('status', (row, op)))
     monkeypatch.setattr(yt_que, 'play_mp3',
                         lambda fi: calls.__setitem__('chime', os.path.basename(fi)))
+    # Chime choice lives in the real settings table (chimes.EVENTS); pin the
+    # defaults here so the DM's own Utilities choice can't flip this test.
+    import chimes
+    monkeypatch.setattr(chimes, 'chime_path',
+                        lambda get, d, key: os.path.join(d, 'finished.mp3' if key == 'download_ok' else 'failed.mp3'))
     monkeypatch.setattr(yt_que.time, 'sleep', lambda s: None)
     # never git-clone/pull in tests; popen_env() then returns the plain env
     monkeypatch.setattr(yt_que.ytdlp_source, 'refresh', lambda: False)

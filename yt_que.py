@@ -118,8 +118,15 @@ def YT_Exec(fi):
    except Exception:
       pass                        # diagnostics must never fail the download
    try:
-      play_mp3(os.path.join(start_dir, 'effects',
-                            'finished.mp3' if ok else 'failed.mp3'))
+      # Data-driven chimes (chimes.EVENTS): the Utilities card picks the
+      # switch and the sound per event; read each time so a change takes
+      # effect without a restart.
+      import chimes
+      from sql import appsettingGet
+      snd = chimes.chime_path(appsettingGet, os.path.join(start_dir, 'effects'),
+                              'download_ok' if ok else 'download_fail')
+      if snd:
+         play_mp3(snd)
    except Exception:
       pass                        # a missing chime must never fail the download
 

@@ -437,7 +437,9 @@ apparray = [
     ["Empty2",int(arr[14]),"int"],
     ["meta_que_switch",1,"int"],       # metadata worker gate (independent of arr)
     ["playlist_que_switch",1,"int"],   # playlist expansion worker gate
-    ["CurrentScene",0,"int"]           # active scene for per-scene playback params
+    ["CurrentScene",0,"int"],          # active scene for per-scene playback params
+    ["dl_sound_ok",1,"int"],           # chime on a finished YouTube download
+    ["dl_sound_fail",1,"int"]          # chime on a failed one (Utilities → Download Queue)
 ]
 
 def startTheadPlayer():

@@ -2648,7 +2648,7 @@ function _obsSync(obs) {
     const live = onMap && String(obs.view_char || '') === b.dataset.characterId;
     b.classList.toggle('btn-outline-success', live);
     b.classList.toggle('btn-outline-secondary', !live);
-    b.style.opacity = obs.connected ? '' : '.45';
+    b.classList.toggle('obs-offline', !obs.connected);
     b.title = !obs.connected ? 'OBS is not connected'
             : live ? 'The map is being shown through this character now'
             : 'Show the map through this character (3D if the map supports it)';
@@ -2667,10 +2667,10 @@ function _obsSync(obs) {
   const scenes = obs.cut_scenes || {};
   document.querySelectorAll('.obs-cut-btn').forEach(b => {
     _obsLit(b, !!obs.current_scene && obs.current_scene === scenes[b.dataset.cut]);
-    b.style.opacity = obs.connected ? '' : '.4';
+    b.classList.toggle('obs-offline', !obs.connected);
   });
   const mode = document.getElementById('obs-mapmode-btn');
-  if (mode) mode.style.opacity = obs.connected ? '' : '.4';
+  if (mode) mode.classList.toggle('obs-offline', !obs.connected);
   // Whole-table card buttons: lit when EVERY tile is pinned (ON) or NONE is
   // (OFF); a mixed table lights neither, since neither button describes it.
   if (obs.cards !== undefined) {
@@ -2678,7 +2678,7 @@ function _obsSync(obs) {
     _obsLit(document.getElementById('obs-cardoff-btn'), obs.cards === 'none');
     ['obs-cardon-btn', 'obs-cardoff-btn'].forEach(id => {
       const b = document.getElementById(id);
-      if (b) b.style.opacity = obs.connected ? '' : '.4';
+      if (b) b.classList.toggle('obs-offline', !obs.connected);
     });
   }
   // Auto-camera watch: the poll is the authority, wherever it was toggled.
@@ -2687,7 +2687,7 @@ function _obsSync(obs) {
     if (ac) {
       ac.dataset.on = obs.auto_cam ? '1' : '0';
       _obsLit(ac, !!obs.auto_cam);
-      ac.style.opacity = obs.connected ? '' : '.4';
+      ac.classList.toggle('obs-offline', !obs.connected);
     }
   }
 }
@@ -2728,14 +2728,15 @@ function _obsClearViewButtons() {
 // on screen" has to be set on the element rather than toggled as a class.
 function _obsLit(btn, live) {
   if (!btn) return;
-  // Live is signalled by the BORDER only. The label stays dark: the strip's
-  // button face is --ttrpg-primary, which is a near-white cream on the light
-  // theme, so green-on-cream made the AUTO/2D/3D label unreadable — the very
-  // thing the colour was meant to draw attention to.
+  // Live is signalled by the border ring plus a faint green face tint. The
+  // label keeps the theme's accent colour in BOTH states: a hard-coded dark
+  // label (an earlier fix for green-on-cream in daylight) vanished on the
+  // dark themes, where the face is near-black — the accent token already
+  // contrasts with the face on every theme.
   btn.style.borderColor = live ? '#2f7d38' : '#555';
-  btn.style.color = live ? '#14151b' : 'var(--ttrpg-accent)';
+  btn.style.color = 'var(--ttrpg-accent)';
   btn.style.fontWeight = live ? '900' : '';
-  btn.style.boxShadow = live ? '0 0 0 2px #3fa14a' : '';
+  btn.style.boxShadow = live ? '0 0 0 2px #3fa14a, inset 0 0 0 100px rgba(63,161,74,.22)' : '';
 }
 
 // ── Campaign Scenes ───────────────────────────────────────────────────────────

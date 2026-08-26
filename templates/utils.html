@@ -425,6 +425,60 @@
                     {% endif %}
                     </details>
                 </form>
+                <details class="sp-card" id="dlq-card">
+                <summary><h3>Download Queue</h3></summary>
+                <p style="font-size:.85em;margin:6px 0;">
+                  What the YouTube downloader is doing right now, why anything failed, and the
+                  chimes it plays. Refreshes itself every few seconds while this card is open.
+                </p>
+                <div class="d-flex gap-4 flex-wrap" style="font-size:.9em;margin:6px 0 10px;">
+                  <div><b>Songs</b> — <span id="dlq-music-remaining">…</span> left
+                    <span class="text-muted">(<span id="dlq-music-detail"></span>)</span><br>
+                    failure rate <b id="dlq-music-rate">…</b></div>
+                  <div><b>Videos</b> — <span id="dlq-video-remaining">…</span> left
+                    <span class="text-muted">(<span id="dlq-video-detail"></span>)</span><br>
+                    failure rate <b id="dlq-video-rate">…</b></div>
+                </div>
+                <!-- Chimes: rows come from chimes.EVENTS via /api/chimes — a new
+                     chime is a registry row, not new markup. Each row: on/off,
+                     which sound (anything in effects/), preview. -->
+                <div style="font-size:.85em;margin-bottom:10px;">
+                  <b>Chimes</b>
+                  <table id="chime-table" style="border-collapse:collapse;margin:4px 0;">
+                    <tbody><tr><td class="text-muted">Loading…</td></tr></tbody>
+                  </table>
+                  <div class="d-flex gap-2 align-items-center flex-wrap" style="margin-top:4px;">
+                    <input type="file" id="chime-upload" accept=".mp3,.wav,.ogg,audio/*" class="form-control form-control-sm" style="max-width:260px;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="chimeUpload()"
+                            title="Add a sound to the effects folder — it then appears in every chime's picker">&#11014; Add sound</button>
+                    <span id="chime-msg" class="small text-muted"></span>
+                  </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center flex-wrap" style="margin-bottom:6px;">
+                  <b style="font-size:.9em;">Failed downloads <span id="dlq-failed-count" class="text-muted"></span></b>
+                  <button type="button" class="btn btn-sm btn-primary" id="dlq-retry-all" onclick="dlqRetry(null, false)"
+                          title="Put every FAILED download back in the queue">&#8635; Retry all failed</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="dlqRetry(null, true)"
+                          title="Also retry the rows marked Unavailable (skipped on purpose: private, deleted, region-locked…)">&#8635; Retry unavailable too</button>
+                  <button type="button" class="btn btn-sm btn-outline-danger" id="dlq-delete-all" onclick="dlqDeleteAll(false)"
+                          title="Remove every FAILED download record entirely">&#10005; Delete all failed</button>
+                  <button type="button" class="btn btn-sm btn-outline-danger" onclick="dlqDeleteAll(true)"
+                          title="Also remove the rows marked Unavailable">&#10005; Delete unavailable too</button>
+                  <span id="dlq-msg" class="small text-muted"></span>
+                </div>
+                <div style="max-height:40vh;overflow:auto;">
+                <table style="width:100%;font-size:.82em;border-collapse:collapse;" id="dlq-table">
+                  <thead><tr>
+                    <th style="text-align:left;padding:3px 6px;">Type</th>
+                    <th style="text-align:left;padding:3px 6px;">Name</th>
+                    <th style="text-align:left;padding:3px 6px;">Status</th>
+                    <th style="text-align:left;padding:3px 6px;">Why it failed</th>
+                    <th></th>
+                  </tr></thead>
+                  <tbody><tr><td colspan="5" class="text-muted" style="padding:4px 6px;">Loading…</td></tr></tbody>
+                </table>
+                </div>
+                </details>
                 <details class="sp-card">
                 <summary><h3>Downloads</h3></summary>
                 <p style="font-size:.85em;margin:6px 0;">
@@ -494,6 +548,115 @@
                       localStorage.setItem(key, d.open ? '1' : '0');
                     });
                   });
+
+                  // ── Download Queue card ──────────────────────────────────
+                  // Polls while the card is open; retries and the chime toggles
+                  // post JSON and repaint from the server's answer.
+                  const dlqCard = document.getElementById('dlq-card');
+                  let dlqTimer = null;
+                  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+                  function dlqPaint(d) {
+                    for (const k of ['music', 'video']) {
+                      const s = d.stats[k];
+                      document.getElementById('dlq-' + k + '-remaining').textContent = s.remaining;
+                      document.getElementById('dlq-' + k + '-detail').textContent =
+                        s.queued + ' queued, ' + s.processing + ' downloading, ' + s.finished + ' done, ' + s.failed + ' failed' + (s.unavailable ? ', ' + s.unavailable + ' unavailable' : '');
+                      const rate = document.getElementById('dlq-' + k + '-rate');
+                      rate.textContent = s.failure_rate + '%';
+                      rate.style.color = s.failure_rate >= 25 ? '#c0392b' : (s.failure_rate > 0 ? '#b9770e' : '');
+                    }
+                    document.getElementById('dlq-failed-count').textContent = d.failed.length ? '(' + d.failed.length + ')' : '(none)';
+                    document.getElementById('dlq-retry-all').disabled = !d.failed.some(r => r.status === 4);
+                    document.getElementById('dlq-delete-all').disabled = !d.failed.some(r => r.status === 4);
+                    const tb = document.querySelector('#dlq-table tbody');
+                    tb.innerHTML = d.failed.length ? '' : '<tr><td colspan="5" class="text-muted" style="padding:4px 6px;">No failed downloads.</td></tr>';
+                    d.failed.forEach(r => {
+                      const tr = document.createElement('tr');
+                      tr.style.borderTop = '1px solid var(--sp-border)';
+                      tr.innerHTML = '<td style="padding:3px 6px;">' + (r.media_type === 'music' ? '&#9835; Song' : '&#9654; Video') + '</td>' +
+                        '<td style="padding:3px 6px;max-width:260px;word-break:break-word;">' + esc(r.name) + (r.url ? '<br><a href="' + esc(r.url) + '" target="_blank" rel="noopener" class="text-muted" style="font-size:.85em;">' + esc(r.url) + '</a>' : '') + '</td>' +
+                        '<td style="padding:3px 6px;white-space:nowrap;color:' + (r.status === 5 ? 'var(--sp-muted)' : '#c0392b') + ';">' + esc(r.status_label) + '</td>' +
+                        '<td style="padding:3px 6px;max-width:420px;word-break:break-word;font-family:monospace;font-size:.9em;">' + esc(r.error || '(no error captured)') + '</td>' +
+                        '<td style="padding:3px 6px;white-space:nowrap;"><button type="button" class="btn btn-sm btn-primary" onclick="dlqRetry({media_type:\'' + r.media_type + '\', id:' + r.id + '}, false)">&#8635; Retry</button> ' +
+                        '<button type="button" class="btn btn-sm btn-outline-danger" title="Remove this record entirely — its scene links, metadata and any partial file" onclick="dlqDelete(\'' + r.media_type + '\', ' + r.id + ', this)">&#10005; Delete</button></td>';
+                      tb.appendChild(tr);
+                    });
+                  }
+                  function dlqRefresh() {
+                    fetch('/api/downloads/status').then(r => r.json()).then(d => { if (d.ok) dlqPaint(d); }).catch(() => {});
+                  }
+                  window.dlqRetry = function (one, includeUnavailable) {
+                    const msg = document.getElementById('dlq-msg');
+                    const body = one ? one : { all: true, include_unavailable: includeUnavailable };
+                    fetch('/api/downloads/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                      .then(r => r.json()).then(d => {
+                        msg.textContent = d.ok ? ('Re-queued ' + d.requeued + ' — downloading now.') : (d.error || 'Retry failed.');
+                        dlqRefresh();
+                      }).catch(() => { msg.textContent = 'Retry failed.'; });
+                  };
+                  // Delete a record that will never download: confirm, then the
+                  // server removes row + scene links + metadata + partial file.
+                  window.dlqDelete = function (mediaType, id, btn) {
+                    const name = btn.closest('tr').querySelector('td:nth-child(2)').firstChild.textContent;
+                    if (!confirm('Remove "' + name + '" from ScenePlay entirely? It is taken out of every scene it was added to.')) return;
+                    const msg = document.getElementById('dlq-msg');
+                    fetch('/api/downloads/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ media_type: mediaType, id: id }) })
+                      .then(r => r.json()).then(d => {
+                        msg.textContent = d.ok ? 'Removed.' : (d.error || 'Delete failed.');
+                        dlqRefresh();
+                      }).catch(() => { msg.textContent = 'Delete failed.'; });
+                  };
+                  window.dlqDeleteAll = function (includeUnavailable) {
+                    if (!confirm('Remove ' + (includeUnavailable ? 'every failed AND unavailable' : 'every failed') + ' download record from ScenePlay entirely? Each is taken out of every scene it was added to. This cannot be undone.')) return;
+                    const msg = document.getElementById('dlq-msg');
+                    fetch('/api/downloads/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true, include_unavailable: includeUnavailable }) })
+                      .then(r => r.json()).then(d => {
+                        msg.textContent = d.ok ? ('Removed ' + d.deleted + '.') : (d.error || 'Delete failed.');
+                        dlqRefresh();
+                      }).catch(() => { msg.textContent = 'Delete failed.'; });
+                  };
+                  // ── Chimes (data-driven) ─────────────────────────────────
+                  function chimePaint(d) {
+                    const tb = document.querySelector('#chime-table tbody');
+                    tb.innerHTML = '';
+                    d.events.forEach(ev => {
+                      const tr = document.createElement('tr');
+                      const opts = d.sounds.map(s => '<option value="' + esc(s) + '"' + (s === ev.file ? ' selected' : '') + '>' + esc(s) + (s === ev.default ? ' (default)' : '') + '</option>').join('');
+                      tr.innerHTML =
+                        '<td style="padding:2px 8px 2px 0;"><label class="form-check" style="margin:0;"><input class="form-check-input chime-on" type="checkbox" data-key="' + ev.key + '"' + (ev.enabled ? ' checked' : '') + '> <span class="form-check-label" title="' + esc(ev.help) + '">' + esc(ev.label) + '</span></label></td>' +
+                        '<td style="padding:2px 8px;"><select class="form-select form-select-sm chime-file" data-key="' + ev.key + '" style="width:auto;min-width:160px;">' + opts + '</select></td>' +
+                        '<td style="padding:2px 4px;"><button type="button" class="btn btn-sm btn-outline-secondary" title="Preview" onclick="chimePreview(this)">&#9654;</button></td>' +
+                        (ev.missing ? '<td class="small text-muted" style="padding:2px 8px;">chosen file missing — using default</td>' : '');
+                      tb.appendChild(tr);
+                    });
+                    tb.querySelectorAll('.chime-on').forEach(cb => cb.onchange = () => chimeSave({ key: cb.dataset.key, enabled: cb.checked }));
+                    tb.querySelectorAll('.chime-file').forEach(sel => sel.onchange = () => chimeSave({ key: sel.dataset.key, file: sel.value }));
+                  }
+                  function chimeRefresh() { fetch('/api/chimes').then(r => r.json()).then(d => { if (d.ok) chimePaint(d); }).catch(() => {}); }
+                  function chimeSave(body) {
+                    const msg = document.getElementById('chime-msg');
+                    fetch('/api/chimes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                      .then(r => r.json()).then(d => { if (d.ok) { chimePaint(d); msg.textContent = 'Saved.'; } else msg.textContent = d.error || 'Save failed.'; })
+                      .catch(() => { msg.textContent = 'Save failed.'; });
+                  }
+                  window.chimePreview = function (btn) {
+                    const sel = btn.closest('tr').querySelector('.chime-file');
+                    new Audio('/chimes/sound/' + encodeURIComponent(sel.value)).play().catch(() => {});
+                  };
+                  window.chimeUpload = function () {
+                    const inp = document.getElementById('chime-upload'), msg = document.getElementById('chime-msg');
+                    if (!inp.files.length) { msg.textContent = 'Choose a sound file first.'; return; }
+                    const fd = new FormData(); fd.append('sound', inp.files[0]);
+                    fetch('/api/chimes/upload', { method: 'POST', body: fd }).then(r => r.json())
+                      .then(d => { if (d.ok) { chimePaint(d); msg.textContent = 'Added — pick it in a chime\'s dropdown.'; inp.value = ''; } else msg.textContent = d.error || 'Upload failed.'; })
+                      .catch(() => { msg.textContent = 'Upload failed.'; });
+                  };
+                  chimeRefresh();
+                  function dlqPoll() {
+                    clearInterval(dlqTimer); dlqTimer = null;
+                    if (dlqCard && dlqCard.open) { dlqRefresh(); dlqTimer = setInterval(dlqRefresh, 5000); }
+                  }
+                  if (dlqCard) { dlqCard.addEventListener('toggle', dlqPoll); dlqPoll(); }
 
                   // ── Software Update card ─────────────────────────────────
                   (function () {
