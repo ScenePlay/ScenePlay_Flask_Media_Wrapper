@@ -19,7 +19,7 @@ def env(tmp_path):
     conn.execute("CREATE TABLE tblVideoMedia (video_ID INTEGER PRIMARY KEY, path TEXT, title TEXT, "
                  "displayName TEXT, dnLoadStatus INT)")
     conn.execute("CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, "
-                 "media_id INT, title TEXT, duration INT, uploader TEXT, upload_date TEXT, active INT)")
+                 "media_id INT, title TEXT, duration INT, uploader TEXT, upload_date TEXT, active INT, artist TEXT DEFAULT '', origin_playlist_title TEXT DEFAULT '')")
     conn.execute("CREATE TABLE tblBattleMaps (map_id INTEGER PRIMARY KEY, name TEXT, bg_image TEXT)")
     mdir = tmp_path / 'Music'; mdir.mkdir()
     (mdir / 'abc.mp3').write_bytes(b'x' * 2048)
@@ -28,7 +28,7 @@ def env(tmp_path):
         (2, str(mdir) + '/', 'gone.mp3', '', 3),          # finished but file missing
         (3, str(mdir) + '/', 'queued.mp3', '', 1),        # not finished: excluded
     ])
-    conn.execute("INSERT INTO tblMediaMetadata VALUES (1,'music',1,'Real Title',3725,'Chan','20240101',1)")
+    conn.execute("INSERT INTO tblMediaMetadata VALUES (1,'music',1,'Real Title',3725,'Chan','20240101',1,'Some Artist','Road Trip')")
     up = tmp_path / 'uploads'; (up / 'battlemaps').mkdir(parents=True); (up / 'portraits').mkdir()
     (up / 'battlemaps' / 'cave.jpg').write_bytes(b'j' * 500)
     (up / 'portraits' / 'kara.png').write_bytes(b'p' * 100)
@@ -46,6 +46,7 @@ class TestMedia:
         assert r['name'] == 'Real Title' and r['display_name'] == 'My Typed Name'
         assert r['exists'] and r['size'] == 2048 and r['size_h'] == '2.0 KB'
         assert r['duration_h'] == '1:02:05' and r['uploader'] == 'Chan'
+        assert r['artist'] == 'Some Artist' and r['kind'] == 'Mix / ambience' and r['origin_playlist_title'] == 'Road Trip'
 
     def test_missing_file_flagged_and_falls_back_to_filename(self, env):
         r = {x['id']: x for x in inv.media_rows(env['db'], 'music')}[2]

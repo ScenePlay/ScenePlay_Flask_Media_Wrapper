@@ -64,7 +64,14 @@ def expand_playlist(url):
         try:
             info = json.loads(out)
             if isinstance(info, dict):
-                return 'ok', info.get('entries') or []
+                entries = info.get('entries') or []
+                # carry the playlist title along on the list for the origin stamp
+                try:
+                    entries = list(entries)
+                    entries.playlist_title = info.get('title') or ''    # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                return 'ok', entries
         except ValueError:
             pass
     return 'transient', (proc.stderr or 'no output').strip()[:500]
@@ -105,8 +112,15 @@ def _run_job(playlist_id, url, media_type, scene_ID, retry_count):
         if not vid:
             continue
         try:
-            enqueue_single(canonical_watch_url(vid), mediaType, scene_ID)
+            pk, _created, _msg = enqueue_single(canonical_watch_url(vid), mediaType, scene_ID)
             added += 1
+            # Playlist of origin (media_facets grouping) — best effort.
+            if pk:
+                try:
+                    from sql import set_media_origin
+                    set_media_origin(media_type, pk, url, getattr(payload, 'playlist_title', ''))
+                except Exception:
+                    pass
         except Exception as e:      # a single bad entry must not abort the batch
             print('[playlist_que] entry error:', vid, e)
     update_playlist_status(playlist_id, 3, last_error=f'expanded {added} entries')

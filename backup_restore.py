@@ -52,7 +52,7 @@ _START_DIR = os.path.dirname(os.path.realpath(__file__))
 MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
     # standard merge
     'lutGenre', 'tblMusic', 'tblVideoMedia', 'tblMediaMetadata',
-    'tblCampaigns', 'tblScenes', 'tblMusicScene', 'tblVideoScene',
+    'tblCampaigns', 'tblScenes', 'tblMusicScene', 'tblVideoScene', 'tblSceneRules',
     'tblFeatsLibrary', 'tblWeaponsLibrary', 'tblArmorLibrary',
     'tblSpellsLibrary', 'tblSkillsLibrary', 'tblRacesLibrary',
     'tblEquipmentLibrary', 'tblClassesLibrary', 'tblSubclassesLibrary',
@@ -1161,17 +1161,21 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
                 media_map[kind][pk] = new_pk
                 new_media[kind].add(new_pk)
                 s[kind] += 1
+                # Column list = whatever both sides have (archives predate the
+                # 0011 facet columns; a newer archive may carry more than us).
+                meta_cols = [col for col in _common_cols(c, 'tblMediaMetadata',
+                                                         exclude=('metadata_id', 'media_type', 'media_id',
+                                                                  'retry_count', 'last_error', 'active'))
+                             ] if src_has_meta else []
                 meta = c.execute(
-                    "SELECT title, duration, uploader, upload_date, thumbnail, view_count, "
-                    "description, categories, raw_json, extracted_at "
-                    "FROM src.tblMediaMetadata WHERE media_type = ? AND media_id = ?",
-                    (kind, pk)).fetchone() if src_has_meta else None
+                    f"SELECT {', '.join(meta_cols)} FROM src.tblMediaMetadata "
+                    f"WHERE media_type = ? AND media_id = ?",
+                    (kind, pk)).fetchone() if meta_cols else None
                 if meta:
                     c.execute(
-                        "INSERT INTO tblMediaMetadata(media_type, media_id, title, duration, uploader, "
-                        "upload_date, thumbnail, view_count, description, categories, raw_json, "
-                        "retry_count, last_error, extracted_at, active) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', ?, 1)",
+                        f"INSERT INTO tblMediaMetadata(media_type, media_id, {', '.join(meta_cols)}, "
+                        f"retry_count, last_error, active) "
+                        f"VALUES (?, ?, {', '.join('?' * len(meta_cols))}, 0, '', 1)",
                         (kind, new_pk, *meta))
                     c.execute(f"UPDATE {tbl} SET metaStatus = 3 WHERE {pkcol} = ?", (new_pk,))
                 else:
@@ -1250,6 +1254,21 @@ def restore_merge(zip_path, include_uploads=True, full=False, fallback_user_id=N
             c.execute("INSERT INTO tblMusicScene(scene_ID, song_ID, orderBy, volume, loops) VALUES (?, ?, ?, ?, ?)",
                       (tgt_scene, tgt_song, link_order('tblMusicScene', tgt_scene, order_by), volume, loops))
             s['links'] += 1
+        # Smart-scene rules ride with their scene (a scene that already had a
+        # rule here keeps its own; an archive from before smart scenes has no
+        # table and is skipped).
+        if c.execute("SELECT 1 FROM src.sqlite_master WHERE type='table' AND name='tblSceneRules'").fetchone():
+            c.execute("CREATE TABLE IF NOT EXISTS tblSceneRules (rule_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "scene_ID INT UNIQUE, rule_json TEXT, auto_refresh INT DEFAULT 1, created_at TEXT, "
+                      "last_refresh TEXT, last_added INT DEFAULT 0)")
+            for scene_src, rule_json, auto, created in c.execute(
+                    "SELECT scene_ID, rule_json, auto_refresh, created_at FROM src.tblSceneRules").fetchall():
+                tgt = scene_map.get(scene_src)
+                if not tgt or c.execute("SELECT 1 FROM tblSceneRules WHERE scene_ID = ?", (tgt,)).fetchone():
+                    continue
+                c.execute("INSERT INTO tblSceneRules(scene_ID, rule_json, auto_refresh, created_at) VALUES (?, ?, ?, ?)",
+                          (tgt, rule_json, auto, created))
+                s['scene_rules'] = s.get('scene_rules', 0) + 1
         for scene_src, video_src, screen, order_by, volume, loops in c.execute(
                 "SELECT scene_ID, video_ID, DisplayScreen_ID, orderBy, volume, loops "
                 "FROM src.tblVideoScene ORDER BY scene_ID, orderBy").fetchall():

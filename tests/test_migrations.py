@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0010_led_pattern_params'
+HEAD = '0013_prune_orphan_scene_links_again'
 
 
 def columns(path, table):
@@ -87,6 +87,8 @@ class TestBaselineUpgrade:
         assert 'version' in columns(old_db, 'tblServersIP')
         assert 'next_retry' in columns(old_db, 'tblPlaylistQueue')
         assert 'relay_roll_id' in columns(old_db, 'tblRollLog')
+        for col in ('artist', 'artist_source', 'origin_playlist', 'origin_playlist_title'):
+            assert col in columns(old_db, 'tblMediaMetadata')   # 0011
 
     def test_sort_order_seeded_from_map_id(self, old_db):
         run_upgrade(old_db)
@@ -205,3 +207,24 @@ class TestSessionNotesCarryOver:
         conn.commit(); conn.close()
         run_upgrade(sessions_db)
         assert q(sessions_db, "SELECT title FROM tblSessionNotes WHERE session_id=1") == [('fresh',)]
+
+
+def test_0012_prunes_links_to_missing_scenes(tmp_path):
+    """Links to a deleted scene or the All Stop pseudo-scene (-1) go; links to
+    real scenes stay."""
+    path = str(tmp_path / 'links.db')
+    conn = sqlite3.connect(path)
+    for stmt in OLD_SCHEMA:
+        conn.execute(stmt)
+    # created lower-case on purpose: the live database's sqlite_master holds
+    # these names in a different case than the code writes them
+    conn.execute("CREATE TABLE tblscenes (scene_ID INTEGER PRIMARY KEY, sceneName TEXT)")
+    conn.execute("CREATE TABLE tblmusicscene (musicScene_ID INTEGER PRIMARY KEY, scene_ID INT, song_ID INT)")
+    conn.execute("CREATE TABLE tblvideoscene (videoScene_ID INTEGER PRIMARY KEY, scene_ID INT, video_ID INT)")
+    conn.execute("INSERT INTO tblScenes VALUES (5, 'Rock')")
+    conn.executemany("INSERT INTO tblMusicScene (scene_ID, song_ID) VALUES (?,?)", [(5, 1), (-1, 2), (99, 3), (None, 4)])
+    conn.executemany("INSERT INTO tblVideoScene (scene_ID, video_ID) VALUES (?,?)", [(5, 1), (-1, 1)])
+    conn.commit(); conn.close()
+    run_upgrade(path)
+    assert q(path, "SELECT scene_ID, song_ID FROM tblMusicScene") == [(5, 1)]
+    assert q(path, "SELECT scene_ID, video_ID FROM tblVideoScene") == [(5, 1)]

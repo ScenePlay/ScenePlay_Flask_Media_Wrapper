@@ -37,12 +37,14 @@
     </div>
     <div class="scroll">
     <table id="{{ kind }}-tbl">
-      <thead><tr><th>Title</th><th>Channel</th><th>Length</th><th>Uploaded</th><th>File</th><th class="num">Size</th><th></th></tr></thead>
+      <thead><tr><th>Title</th><th>Artist</th><th>Channel</th><th>Kind</th><th>Length</th><th>Uploaded</th><th>File</th><th class="num">Size</th><th></th></tr></thead>
       <tbody>
       {% for r in rows %}
       <tr class="{{ '' if r.exists else 'missing' }}">
         <td>{{ r.name }}{% if r.display_name and r.display_name != r.name %}<div class="muted" style="font-size:.85em;">{{ r.display_name }}</div>{% endif %}</td>
-        <td>{{ r.uploader }}</td>
+        <td>{{ r.artist }}</td>
+        <td>{{ r.uploader }}{% if r.origin_playlist_title %}<div class="muted" style="font-size:.85em;">from playlist: {{ r.origin_playlist_title }}</div>{% endif %}</td>
+        <td class="muted">{{ r.kind }}</td>
         <td class="num">{{ r.duration_h }}</td>
         <td class="num">{{ r.upload_date }}</td>
         <td class="muted" style="word-break:break-all;">{{ r.file }}</td>
@@ -50,7 +52,7 @@
         <td class="num">{% if r.exists %}<a class="btn btn-sm btn-primary sp-dl" href="{{ url_for('ut.asset_download_media', kind=kind, media_id=r.id) }}" title="Download this file">&#11015; Download</a>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="muted">Nothing downloaded yet.</td></tr>
+      <tr><td colspan="9" class="muted">Nothing downloaded yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -42,6 +42,15 @@
           button.className = "btn btn-primary";
           button.setAttribute("type","submit") 
           button.setAttribute("value","Add New Row")
+          // "+ Smart scene": a scene that fills itself from a rule (artists,
+          // kind, decade, a word, or other scenes as sources) — one form,
+          // live count, create. Sits next to Add New Row.
+          var smart = document.createElement("input");
+          smart.className = "btn btn-outline-primary ms-1";
+          smart.setAttribute("type","button");
+          smart.setAttribute("value","+ Smart Scene");
+          smart.onclick = function() { spSmartSceneForm(); };
+          element.parentNode.insertBefore(smart, element.nextSibling);
           button.onclick = function() {
               spAddRowPrompt('/api/scenesaddrow',
                   {field: 'campaign_id', kind: 'campaign', dropdownId: 'campaignFilterDropdown',
@@ -173,6 +182,17 @@
               return gridjs.html(camp.outerHTML);
               } 
           },
+          {id: 'rule', name: 'Rule', sort: false,
+          formatter: function (cellData, row) {
+              // Smart scenes show their rule with an unlink ✕; hand-built
+              // scenes show nothing. Del (right) removes the whole scene —
+              // links, patterns and rule included.
+              const rule = row.cells[5] ? row.cells[5].data : '';
+              if (!rule) return '';
+              return gridjs.html('<span class="small" title="This scene fills itself from this rule">&#9889; ' + rule.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) + '</span> '
+                + '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size:.7rem;" title="Stop deriving — keep the scene and its songs as they are" onclick="unlinkRule(' + row.cells[0].data + ', this)">&#10005; unlink</button>');
+              }
+          },
           {id: 'dlete', name: 'Del', sort: false,
           formatter: function (cellData, row) {
               // Multi-select delete: checkbox feeds the shared Set in site.js;
@@ -244,6 +264,12 @@
             });
       }
 
+      function unlinkRule(sceneId, btn) {
+        if (!confirm('Stop deriving this scene from its rule? The scene and everything in it stay.')) return;
+        fetch('/api/scenes/unlink-rule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scene_ID: sceneId }) })
+          .then(() => { if (window.spGrid) window.spGrid.forceRender(); else location.reload(); });
+      }
+
       function activeChange(){
         var ev = event.target;
         id = ev.id.split("_ID_")
@@ -284,4 +310,84 @@
 
       window.addEventListener('load', addButton);
     </script>
-  {% endblock %}
+  
+<!-- ── Smart scene form (one place to build a rule-driven scene) ───────── -->
+<div class="modal fade" id="spSmartModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">New smart scene</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <p class="small text-muted" style="margin:0 0 8px;">Pick what goes in: other scenes as sources, artists, a kind, a decade, a word.
+        Choices in one box are "any of"; across boxes they combine. The scene keeps its rule — new downloads that match are added automatically, and nothing you add by hand is ever removed.</p>
+      <div class="d-flex gap-3 flex-wrap">
+        <div><label class="small"><b>From scenes</b></label><br><select id="sm-scenes" multiple size="7" style="min-width:170px;font-size:.85em;"></select></div>
+        <div><label class="small"><b>Artists</b></label><br><input type="search" id="sm-artist-q" class="form-control form-control-sm mb-1" placeholder="filter…" style="max-width:170px;"><select id="sm-artists" multiple size="5" style="min-width:170px;font-size:.85em;"></select></div>
+        <div><label class="small"><b>Kind</b></label><br><select id="sm-kinds" multiple size="3" style="min-width:150px;font-size:.85em;"></select>
+             <label class="small mt-2"><b>Decade</b></label><br><select id="sm-decades" multiple size="3" style="min-width:150px;font-size:.85em;"></select></div>
+        <div><label class="small"><b>Word in title / channel</b></label><input type="text" id="sm-text" class="form-control form-control-sm" style="max-width:170px;">
+             <div class="mt-2 small"><label><input type="checkbox" id="sm-music" checked> music</label> &nbsp; <label><input type="checkbox" id="sm-video" checked> videos</label></div></div>
+      </div>
+      <div id="sm-count" class="small mt-2 text-muted">Pick something to see how many match.</div>
+      <div class="d-flex gap-2 align-items-end flex-wrap mt-2">
+        <div><label class="small">Scene name</label><input type="text" id="sm-name" class="form-control form-control-sm" style="min-width:240px;"></div>
+        <div><label class="small">Campaign</label><select id="sm-campaign" class="form-select form-select-sm"></select></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="spSmartReset()">&#8634; Reset</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span id="sm-msg" class="small text-muted me-auto"></span>
+      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="spSmartCreate()">Create scene</button>
+    </div>
+  </div></div>
+</div>
+<script>
+  // Facet pickers are filled from /utilities/assets… no: from the smart-scene
+  // facet feed, once per open; the count re-queries on every change.
+  let smTimer = null;
+  function smRule() {
+    const sel = id => [...document.getElementById(id).selectedOptions].map(o => o.value);
+    const media = []; if (document.getElementById('sm-music').checked) media.push('music'); if (document.getElementById('sm-video').checked) media.push('video');
+    return { scenes: sel('sm-scenes'), artists: sel('sm-artists'), kinds: sel('sm-kinds'), decades: sel('sm-decades'), text: document.getElementById('sm-text').value, media };
+  }
+  function smCount() {
+    clearTimeout(smTimer);
+    smTimer = setTimeout(() => {
+      const r = smRule();
+      if (!r.scenes.length && !r.artists.length && !r.kinds.length && !r.decades.length && !r.text.trim()) { document.getElementById('sm-count').textContent = 'Pick something to see how many match.'; return; }
+      fetch('/api/smart-scenes/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule: r }) })
+        .then(x => x.json()).then(d => { document.getElementById('sm-count').textContent = d.summary + ' — ' + d.music.length + ' songs, ' + d.video.length + ' videos'; }).catch(() => {});
+    }, 250);
+  }
+  function spSmartSceneForm() {
+    const m = document.getElementById('spSmartModal');
+    fetch('/api/smart-scenes/facets').then(r => r.json()).then(d => {
+      const fill = (id, list, label) => { const s = document.getElementById(id); s.innerHTML = ''; list.forEach(o => { const e = document.createElement('option'); e.value = o.value; e.textContent = (label ? o.label : o.value) + ' (' + o.count + ')'; s.appendChild(e); }); };
+      fill('sm-scenes', d.options.scenes); fill('sm-artists', d.options.artists); fill('sm-kinds', d.options.kinds, true); fill('sm-decades', d.options.decades);
+      const c = document.getElementById('sm-campaign'); c.innerHTML = ''; d.campaigns.forEach(x => { const e = document.createElement('option'); e.value = x.id; e.textContent = x.name; if (x.name === 'Music') e.selected = true; c.appendChild(e); });
+      ['sm-scenes', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => document.getElementById(id).onchange = smCount);
+      document.getElementById('sm-text').oninput = smCount; document.getElementById('sm-music').onchange = smCount; document.getElementById('sm-video').onchange = smCount;
+      document.getElementById('sm-artist-q').oninput = function () { const q = this.value.trim().toLowerCase(); [...document.getElementById('sm-artists').options].forEach(o => { o.hidden = !!q && !o.textContent.toLowerCase().includes(q); }); };
+      spSmartReset();
+      bootstrap.Modal.getOrCreateInstance(m).show();
+    }).catch(() => alert('Could not load the pickers.'));
+  }
+  function spSmartReset() {
+    ['sm-scenes', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => [...document.getElementById(id).options].forEach(o => { o.selected = false; o.hidden = false; }));
+    document.getElementById('sm-artist-q').value = ''; document.getElementById('sm-text').value = ''; document.getElementById('sm-name').value = '';
+    document.getElementById('sm-music').checked = true; document.getElementById('sm-video').checked = true;
+    document.getElementById('sm-count').textContent = 'Pick something to see how many match.'; document.getElementById('sm-msg').textContent = '';
+  }
+  function spSmartCreate() {
+    const msg = document.getElementById('sm-msg'); const name = document.getElementById('sm-name').value.trim();
+    if (!name) { msg.textContent = 'Give the scene a name.'; return; }
+    fetch('/api/smart-scenes/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, campaign_id: document.getElementById('sm-campaign').value, rule: smRule(), auto_refresh: true }) })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        msg.textContent = 'Created with ' + d.added.music + ' songs, ' + d.added.video + ' videos.';
+        setTimeout(() => location.reload(), 800);
+      }).catch(() => { msg.textContent = 'Failed.'; });
+  }
+</script>
+{% endblock %}

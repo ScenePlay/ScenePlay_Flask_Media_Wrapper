@@ -1,0 +1,12 @@
+{# Shared tab strip for the Library Organizer utility — one tool, four views.
+   `active` is one of organize | genres | artists | scenes. #}
+<div class="d-flex gap-1 flex-wrap align-items-center" style="margin:0 0 12px;border-bottom:1px solid var(--sp-border);padding-bottom:8px;">
+  <span class="muted small" style="margin-right:6px;">Library Organizer:</span>
+  {% for key, label, ep in (('organize', '⚡ Organize (one click)', 'ut.organize_page'),
+                            ('genres', '♫ Genres', 'ut.genres_page'),
+                            ('artists', '👤 Artists', 'ut.artists_page'),
+                            ('scenes', '🎬 Smart Scenes', 'ut.smart_scenes_page')) %}
+  <a class="btn btn-sm {{ 'btn-primary' if active == key else 'btn-outline-secondary' }}" href="{{ url_for(ep) }}">{{ label }}</a>
+  {% endfor %}
+  <a href="{{ url_for('ut.main') }}" class="small ms-auto">&larr; Utilities</a>
+</div>

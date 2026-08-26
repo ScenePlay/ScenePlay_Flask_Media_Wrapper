@@ -82,11 +82,63 @@ def data():
     if start != -1 and length != -1:
         query = query.offset(start).limit(length)
 
-    # response
+    # response — plus the play-queue state of each scene's media for the
+    # grid's Queue checkbox ('all' / 'some' / 'none' / '' = nothing playable)
+    from sql import scene_queue_state
+    import smart_scenes
+    from extensions import database
+    rules = {x['scene_id']: x['summary'] for x in smart_scenes.list_rules(database)}
+    rows = []
+    for r in query:
+        d = r.to_dict()
+        d['queued'] = scene_queue_state(r.scene_ID)
+        d['rule'] = rules.get(r.scene_ID, '')      # '' = a plain, hand-built scene
+        rows.append(d)
     return {
-        'data': [tbl.to_dict() for tbl in query],
+        'data': rows,
         'total': total,
     }
+
+
+@sn.route('/api/scenes/unlink-rule', methods=['POST'])
+def unlink_rule():
+    """Turn a smart scene back into a plain one: the rule goes, the scene and
+    every song it holds stay."""
+    import smart_scenes
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    try:
+        sid = int(data.get('scene_ID') or 0)
+    except (TypeError, ValueError):
+        sid = 0
+    if not sid:
+        abort(400)
+    smart_scenes.drop_rule(database, sid)
+    return jsonify({'ok': True})
+
+
+@sn.route('/api/scenes/queue-states')
+def queue_states():
+    """Home page poll: {scene_ID: all|some|none} so the cards' Queue toggles
+    track what the players have consumed."""
+    from sql import scene_queue_states
+    return jsonify({'ok': True, 'states': scene_queue_states()})
+
+
+@sn.route('/api/scenes/queue', methods=['POST'])
+def queue_toggle():
+    """{scene_ID, queued: bool} — put a scene's songs/videos into the play
+    queue (or pull them out) without activating the scene."""
+    from sql import queue_scene_songs, scene_queue_state
+    data = request.get_json(silent=True) or {}
+    try:
+        scene_id = int(data.get('scene_ID') or 0)
+    except (TypeError, ValueError):
+        scene_id = 0
+    if not scene_id:
+        abort(400)
+    changed = queue_scene_songs(scene_id, bool(data.get('queued')))
+    return jsonify({'ok': True, 'changed': changed, 'queued': scene_queue_state(scene_id)})
 
 @sn.route('/api/scenes', methods=['POST'])
 def update():

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sp-org .muted { color:var(--sp-muted); }
+  .sp-org .opts { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px 24px; font-size:.9em; }
+  .sp-org .opts label.form-check { margin:0; }
+  .sp-org .plan { font-size:.9em; }
+  .sp-org .plan h4 { font-size:1em; margin:10px 0 4px; }
+  .sp-org .chips span { display:inline-block; border:1px solid var(--sp-border); border-radius:12px; padding:1px 8px; margin:2px 3px 2px 0; font-size:.85em; }
+  .sp-org .chips .attached { border-color:#b9770e; } .sp-org .chips .skipped { opacity:.55; }
+</style>
+<div class="sp-page sp-org">
+  {% set active = 'organize' %}
+  <div class="sp-page-head">
+    <h1>Library Organizer <span class="muted" style="font-weight:normal;font-size:.6em;">· Organize</span></h1>
+  </div>
+  {% include '_library_nav.html' %}
+  <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
+    One function that does the whole job: label genres (from the scenes you built), label artists (from the YouTube data),
+    then create a smart scene per genre and per artist — and refresh them all. Trusted derivations only, unless you tick the
+    wider options. <b>Preview</b> shows exactly what will happen; nothing is written until <b>Run</b>.
+    The individual pages (Suggest Genres, Artists, Smart Scenes) stay for reviewing the leftovers.
+  </p>
+
+  <details class="sp-card" open>
+    <summary><h3>Options</h3></summary>
+    <div class="opts" style="margin:8px 0;">
+      <div>
+        <b>1 · Genres</b>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-genres" checked> <span class="form-check-label">Label songs by the genre-named scene they sit in</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-genres-tags"> <span class="form-check-label">…also where only YouTube tags say so <span class="muted">(less certain)</span></span></label>
+      </div>
+      <div>
+        <b>2 · Artists</b>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-artists" checked> <span class="form-check-label">Set artists that are exact or channel-confirmed</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-artists-medium"> <span class="form-check-label">…also title-only derivations <span class="muted">(check the Artists page first)</span></span></label>
+      </div>
+      <div>
+        <b>3 · Smart scenes</b>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-genre-scenes" checked> <span class="form-check-label">One per genre with at least <input type="number" id="o-genre-min" value="3" min="1" style="width:56px;" class="form-control form-control-sm d-inline-block"> items</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-artist-scenes" checked> <span class="form-check-label">One per artist with at least <input type="number" id="o-artist-min" value="4" min="1" style="width:56px;" class="form-control form-control-sm d-inline-block"> items</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-attach" checked> <span class="form-check-label">A scene with that name already there? Make <i>it</i> smart instead of duplicating</span></label>
+      </div>
+      <div>
+        <b>Where &amp; what</b>
+        <div>Campaign: <select id="o-campaign" class="form-select form-select-sm d-inline-block" style="width:auto;">{% for c in campaigns %}<option value="{{ c.campaign_id }}" {% if c.campaign_name == 'Music' %}selected{% endif %}>{{ c.campaign_name }}</option>{% endfor %}</select></div>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-music" checked> <span class="form-check-label">Music</span></label>
+        <label class="form-check"><input class="form-check-input" type="checkbox" id="o-video" checked> <span class="form-check-label">Videos</span></label>
+      </div>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <button type="button" class="btn btn-outline-primary" onclick="orgGo(true)">&#128269; Preview plan</button>
+      <button type="button" class="btn btn-primary" id="org-run" onclick="orgGo(false)" disabled title="Preview first">&#9654; Run</button>
+      <span id="org-msg" class="small muted"></span>
+    </div>
+  </details>
+
+  <details class="sp-card" open id="org-plan-card" style="display:none;">
+    <summary><h3 id="org-plan-title">Plan</h3></summary>
+    <div id="org-plan" class="plan"></div>
+  </details>
+</div>
+<script>
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  const g = id => document.getElementById(id);
+  function orgOptions() {
+    const media = []; if (g('o-music').checked) media.push('music'); if (g('o-video').checked) media.push('video');
+    return { genres: g('o-genres').checked, genres_include_tags: g('o-genres-tags').checked,
+             artists: g('o-artists').checked, artists_include_medium: g('o-artists-medium').checked,
+             scenes: g('o-genre-scenes').checked || g('o-artist-scenes').checked,
+             genre_scenes: g('o-genre-scenes').checked, artist_scenes: g('o-artist-scenes').checked,
+             genre_min: g('o-genre-min').value, artist_min: g('o-artist-min').value,
+             campaign_id: g('o-campaign').value, media, attach_existing: g('o-attach').checked };
+  }
+  function chips(list) {
+    if (!list || !list.length) return '<span class="muted">none</span>';
+    return '<div class="chips">' + list.map(s => '<span class="' + s.action + '" title="' + s.action + '">' + esc(s.name) + ' (' + s.count + ')' + (s.action === 'attached' ? ' · attach' : s.action === 'skipped' ? ' · exists' : '') + '</span>').join('') + '</div>';
+  }
+  function render(d) {
+    const dry = d.dry_run; let h = '';
+    if (d.genres) {
+      const b = d.genres.by_confidence;
+      h += '<h4>1 · Genres</h4>' + (dry ? ('Will label <b>' + d.genres.apply + '</b> songs' + (d.genres.names.length ? ' as ' + esc(d.genres.names.join(', ')) : '')) : ('Labelled <b>' + d.genres.applied + '</b> songs' + (d.genres.created_genres.length ? ' — new genres: ' + esc(d.genres.created_genres.join(', ')) : '')))
+         + ' <span class="muted">(' + b.scene + ' by scene, ' + b.tags + ' by tags only, ' + b.conflict + ' conflicts, ' + b.none + ' no clue — leftovers on Suggest Genres)</span>';
+    }
+    if (d.artists) {
+      const b = d.artists.by_confidence;
+      h += '<h4>2 · Artists</h4>' + (dry ? 'Will set <b>' + d.artists.apply + '</b> artists' : 'Set <b>' + d.artists.applied + '</b> artists')
+         + ' <span class="muted">(' + b.exact + ' exact, ' + b.high + ' high, ' + b.medium + ' medium, ' + b.low + ' low, ' + b.none + ' none — leftovers on Artists)</span>';
+    }
+    if (d.scenes) {
+      const count = (l, a) => (l || []).filter(s => s.action === a).length;
+      h += '<h4>3 · Smart scenes</h4>';
+      if (d.scenes.genres) h += '<div><b>Per genre</b> — ' + count(d.scenes.genres, 'created') + ' new, ' + count(d.scenes.genres, 'attached') + ' attached, ' + count(d.scenes.genres, 'skipped') + ' already there' + chips(d.scenes.genres) + '</div>';
+      if (d.scenes.artists) h += '<div style="margin-top:6px;"><b>Per artist</b> — ' + count(d.scenes.artists, 'created') + ' new, ' + count(d.scenes.artists, 'attached') + ' attached, ' + count(d.scenes.artists, 'skipped') + ' already there' + chips(d.scenes.artists) + '</div>';
+      if (dry) h += '<div class="muted small" style="margin-top:4px;">Counts use today\'s labels — with steps 1–2 on, the run can produce a few more.</div>';
+    }
+    if (!dry && d.refreshed) h += '<h4>4 · Refresh</h4>' + d.refreshed.scenes + ' smart scenes refreshed, <b>' + d.refreshed.links + '</b> links added.';
+    g('org-plan').innerHTML = h; g('org-plan-title').textContent = dry ? 'Plan (nothing written yet)' : 'Done'; g('org-plan-card').style.display = '';
+  }
+  function orgGo(dry) {
+    const msg = g('org-msg');
+    if (!dry && !confirm('Run the plan now? Genres and artists are written, scenes created/attached, and smart scenes refreshed.')) return;
+    msg.textContent = dry ? 'Planning…' : 'Running…';
+    fetch('/api/library/organize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dry_run: dry, options: orgOptions() }) })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        render(d); msg.textContent = dry ? 'Preview ready — Run when happy.' : 'Done.'; g('org-run').disabled = !dry;
+      }).catch(() => { msg.textContent = 'Failed.'; });
+  }
+</script>
+{% endblock %}

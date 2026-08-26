@@ -52,6 +52,14 @@ def fmt_duration(secs):
     return f'{h}:{m:02d}:{s:02d}' if h else f'{m}:{s:02d}'
 
 
+def _kind(duration):
+    try:
+        import media_facets
+        return media_facets.KINDS.get(media_facets.media_kind(duration), '')
+    except Exception:
+        return ''
+
+
 def _stat(path):
     try:
         st = os.stat(path)
@@ -70,7 +78,8 @@ def media_rows(database, kind):
     try:
         rows = conn.execute(
             f"SELECT m.{idcol}, m.path, m.{filecol}, m.displayName, "
-            f"       d.title, d.uploader, d.duration, d.upload_date "
+            f"       d.title, d.uploader, d.duration, d.upload_date, "
+            f"       COALESCE(d.artist,''), COALESCE(d.origin_playlist_title,'') "
             f"FROM {table} m "
             f"LEFT JOIN tblMediaMetadata d ON d.media_type = ? AND d.media_id = m.{idcol} "
             f"       AND COALESCE(d.active, 1) = 1 "
@@ -79,11 +88,12 @@ def media_rows(database, kind):
     finally:
         conn.close()
     out = []
-    for mid, mdir, fname, disp, title, uploader, dur, udate in rows:
+    for mid, mdir, fname, disp, title, uploader, dur, udate, artist, origin in rows:
         mdir = mdir or ''
         full = os.path.join(mdir, fname)
         size, mtime = _stat(full)
         out.append({
+            'artist': artist, 'origin_playlist_title': origin, 'kind': _kind(dur),
             'id': mid, 'file': fname, 'dir': mdir, 'path': full,
             'exists': size is not None, 'size': size, 'size_h': fmt_size(size),
             'display_name': disp or '', 'title': title or '',

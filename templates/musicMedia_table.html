@@ -138,7 +138,7 @@
       // duration/uploader/thumbnail come from tblMediaMetadata, grafted onto each
       // row by /api/music. Order here must match the column-definition order —
       // the sort callback maps col.index into this array.
-      const tblColumns = ['song_ID','path','song', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus', 'duration', 'uploader', 'thumbnail'];
+      const tblColumns = ['song_ID','path','song', 'pTimes', 'playedDTTM', 'active', 'genre', 'que', 'urlSource', 'dnLoadStatus', 'duration', 'uploader', 'thumbnail', 'artist'];
       const primeKey = tblColumns[0]
       window.spGrid = new gridjs.Grid({
         
@@ -245,6 +245,8 @@
               formatter: (cellData) => fmtDur(cellData)
           },
           { id: tblColumns[11], name: 'Uploader', sort: true },
+          // Derived from the title/channel by media_facets; click to correct it.
+          { id: tblColumns[13], name: 'Artist', sort: true, 'attributes': editableCellAttributes },
           { id: tblColumns[12], name: 'Info', sort: false,
               formatter: function (cellData, row) {
                 // Thumbnail doubles as the metadata-details button; empty until

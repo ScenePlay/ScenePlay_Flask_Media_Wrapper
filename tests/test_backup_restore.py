@@ -21,7 +21,7 @@ import backup_restore as br
 SCHEMA = [
     "CREATE TABLE tblMusic (song_id INTEGER PRIMARY KEY, path TEXT, song TEXT, pTimes INT, playedDTTM TEXT, active INT, genre INT, que INT, urlSource TEXT, dnLoadStatus INT, videoId TEXT, displayName TEXT, metaStatus INT DEFAULT 0, metaNextRetry TEXT)",
     "CREATE TABLE tblVideoMedia (video_id INTEGER PRIMARY KEY, path TEXT, title TEXT, pTimes INT, playedDTTM TEXT, active INT, genre INT, que INT, urlSource TEXT, dnLoadStatus INT, videoId TEXT, displayName TEXT, metaStatus INT DEFAULT 0, metaNextRetry TEXT)",
-    "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, duration INT, uploader TEXT, upload_date TEXT, thumbnail TEXT, view_count INT, description TEXT, categories TEXT, raw_json TEXT, retry_count INT DEFAULT 0, last_error TEXT, extracted_at TEXT, active INT DEFAULT 1)",
+    "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, duration INT, uploader TEXT, upload_date TEXT, thumbnail TEXT, view_count INT, description TEXT, categories TEXT, raw_json TEXT, retry_count INT DEFAULT 0, last_error TEXT, extracted_at TEXT, active INT DEFAULT 1, artist TEXT DEFAULT '', artist_source TEXT DEFAULT '', origin_playlist TEXT DEFAULT '', origin_playlist_title TEXT DEFAULT '')",
     "CREATE TABLE tblScenes (scene_ID INTEGER PRIMARY KEY, sceneName TEXT, active INT, orderBy INT, campaign_id INT)",
     "CREATE TABLE tblCampaigns (campaign_id INTEGER PRIMARY KEY, campaign_name TEXT, active INT, order_by TEXT)",
     "CREATE TABLE lutGenre (genre_id INTEGER PRIMARY KEY, genre TEXT, directory TEXT, active INT, orderBy INT)",
@@ -303,6 +303,44 @@ class TestMerge:
         br.restore_merge(archive)
         s2 = br.restore_merge(archive)
         assert (s2['campaigns'], s2['scenes'], s2['music'], s2['video'], s2['links']) == (0, 0, 0, 0, 0)
+
+
+class TestMergeMetadataFacets:
+    """Merge carries whatever metadata columns both sides share — the 0011
+    facets (artist…) when the archive has them, and an archive from before
+    0011 (no artist column) still merges its older columns."""
+
+    def _snap(self, env, with_facets):
+        src = str(env['tmp'] / (('facet' if with_facets else 'old') + '.db'))
+        make_db(src)
+        if not with_facets:
+            c = sqlite3.connect(src)
+            c.execute("CREATE TABLE tmp AS SELECT metadata_id, media_type, media_id, title, duration, uploader, "
+                      "upload_date, thumbnail, view_count, description, categories, raw_json, retry_count, "
+                      "last_error, extracted_at, active FROM tblMediaMetadata")
+            c.execute("DROP TABLE tblMediaMetadata"); c.execute("ALTER TABLE tmp RENAME TO tblMediaMetadata"); c.commit(); c.close()
+        x(src, "INSERT INTO tblMusic(path, song, urlSource, dnLoadStatus, videoId, displayName) "
+               "VALUES ('/x/', 'n.mp3', 'https://u', 3, 'vidFACET0001', 'N')")
+        if with_facets:
+            x(src, "INSERT INTO tblMediaMetadata(media_type, media_id, title, uploader, artist, artist_source, origin_playlist_title) "
+                   "VALUES ('music', 1, 'Bon Jovi - Prayer', 'Bon Jovi', 'Bon Jovi', 'dm', 'Road Trip')")
+        else:
+            x(src, "INSERT INTO tblMediaMetadata(media_type, media_id, title, uploader) VALUES ('music', 1, 'Old Song', 'Chan')")
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label='facet')
+        finally:
+            sql.database = old
+
+    def test_facets_carry(self, env):
+        br.restore_merge(self._snap(env, True), include_uploads=False)
+        assert q(env['live'], "SELECT artist, artist_source, origin_playlist_title FROM tblMediaMetadata "
+                              "WHERE media_type='music'") == [('Bon Jovi', 'dm', 'Road Trip')]
+
+    def test_pre_facet_archive_still_merges(self, env):
+        br.restore_merge(self._snap(env, False), include_uploads=False)
+        assert q(env['live'], "SELECT title, COALESCE(artist,'') FROM tblMediaMetadata WHERE media_type='music'") == [('Old Song', '')]
 
 
 class TestMergeSceneScoping:
@@ -1453,7 +1491,7 @@ class TestLedSchemaRestore:
         assert p2['variance'] == [5, 6, 7] and p2['duration'] == 5 and p2['brightness'] == 0.6
         names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
         assert 'tblledtypemodel' not in names
-        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0010_led_pattern_params'
+        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0013_prune_orphan_scene_links_again'
 
     # -- merge ---------------------------------------------------------------
     def test_full_merge_old_archive_converts_every_row(self, env):

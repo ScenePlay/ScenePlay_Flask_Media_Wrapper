@@ -291,8 +291,14 @@ def _activate_scene(id):
     # patternType, params, orderBy); no rows = lights off.
     scnPat = CRUD_tblScenePattern([id], "bySceneID")
     ledPattern = led_patterns.build_payload((r[2], r[3], r[4]) for r in scnPat)
-    rows = get_MusicSceneSongs_BYSceneID(id)
-    rowsVideo = get_VideoScene_BYSceneID(id)
+    # The All Stop pseudo-scene (-1) is a pure teardown: it must never load
+    # links. Stray rows linked to -1 used to come straight back into the
+    # queue after every All Stop (migration 0012 prunes those rows too).
+    if str(id) == '-1':
+        rows, rowsVideo = [], []
+    else:
+        rows = get_MusicSceneSongs_BYSceneID(id)
+        rowsVideo = get_VideoScene_BYSceneID(id)
     
     # Pause the SPAWNERS before swapping queues. The player threads free-run
     # on a 1 s poll: with the play flags left ON they notice queue_kill's

@@ -16,6 +16,7 @@ from models.scenes import tblscenes as sc
 from routes.main import addMediaToYT_que
 from flask import send_from_directory
 import backup_restore
+from extensions import db
 
 ut = Blueprint('ut', __name__)
 
@@ -670,3 +671,237 @@ def chimes_upload():
     if key:
         chimes.save(appsettingGet, appsettingSet, d, key, file=name)
     return jsonify(_chimes_payload())
+
+
+# ── Genre suggestions ─────────────────────────────────────────────────────────
+# Utilities → "Suggest Genres": propose a genre for every song without one
+# (scene membership first, yt-dlp tags second — see genre_suggest.py), show
+# the reason, and write only what the DM confirms.
+
+@ut.route('/utilities/genres')
+def genres_page():
+    import genre_suggest as gs
+    from extensions import database
+    from sql import appsettingGet
+    rows = gs.suggest(database, appsettingGet)
+    names = gs.genre_names(database)
+    proposed = sorted({r['suggested'] for r in rows if r['suggested']} |
+                      {r['alt'] for r in rows if r['alt']} | set(names), key=str.lower)
+    counts = {k: sum(1 for r in rows if r['confidence'] == k) for k in ('scene', 'tags', 'conflict', 'none')}
+    return render_template('genres_suggest.html', rows=rows, genres=proposed, counts=counts,
+                           scene_map=gs.scene_map(appsettingGet),
+                           items=select_data_stats(), volume=currentvolume())
+
+
+@ut.route('/api/genres/apply', methods=['POST'])
+def genres_apply():
+    import genre_suggest as gs
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    items = data.get('items') or []
+    if not isinstance(items, list):
+        return jsonify({'ok': False, 'error': 'items must be a list'}), 400
+    return jsonify({'ok': True, **gs.apply(database, items)})
+
+
+@ut.route('/api/genres/scene-map', methods=['POST'])
+def genres_scene_map():
+    """Save the DM's scene→genre mapping (JSON object; '' removes a scene)."""
+    from sql import appsettingSet
+    data = request.get_json(silent=True) or {}
+    m = data.get('map')
+    if not isinstance(m, dict):
+        return jsonify({'ok': False, 'error': 'map must be an object'}), 400
+    appsettingSet('genre_scene_map', json.dumps({str(k): str(v or '') for k, v in m.items()}))
+    return jsonify({'ok': True})
+
+
+# ── Artists (derived facet) ───────────────────────────────────────────────────
+
+@ut.route('/utilities/artists')
+def artists_page():
+    import media_facets as mf
+    from extensions import database
+    rows = mf.suggest_artists(database)
+    counts = {k: sum(1 for r in rows if r['confidence'] == k) for k in ('exact', 'high', 'medium', 'low', 'none')}
+    return render_template('artists_suggest.html', rows=rows, counts=counts, kinds=mf.KINDS,
+                           items=select_data_stats(), volume=currentvolume())
+
+
+@ut.route('/api/artists/apply', methods=['POST'])
+def artists_apply():
+    import media_facets as mf
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    items = data.get('items') or []
+    if not isinstance(items, list):
+        return jsonify({'ok': False, 'error': 'items must be a list'}), 400
+    return jsonify({'ok': True, 'updated': mf.apply_artists(database, items)})
+
+
+# ── Smart scenes ──────────────────────────────────────────────────────────────
+# Utilities → Smart Scenes: scenes whose members are derived from metadata
+# (genre / artist / kind / decade / text) — see smart_scenes.py.
+
+@ut.route('/utilities/smart-scenes')
+def smart_scenes_page():
+    import smart_scenes as ss
+    from extensions import database
+    from models.scenes import tblscenes as sc
+    from models.campaigns import tblcampaigns as cp
+    campaigns = cp.query.with_entities(cp.campaign_id, cp.campaign_name).order_by(cp.campaign_name).all()
+    scenes = sc.query.with_entities(sc.scene_ID, sc.sceneName, sc.campaign_id).order_by(sc.sceneName).all()
+    return render_template('smart_scenes.html', options=ss.facet_options(database), rules=ss.list_rules(database),
+                           campaigns=campaigns, scenes=scenes, kinds=__import__('media_facets').KINDS,
+                           items=select_data_stats(), volume=currentvolume())
+
+
+@ut.route('/api/smart-scenes/facets')
+def smart_scenes_facets():
+    """Pickers for the Scenes table's "+ Smart Scene" form."""
+    import smart_scenes as ss
+    from extensions import database
+    from models.campaigns import tblcampaigns as cp
+    return jsonify({'ok': True, 'options': ss.facet_options(database),
+                    'campaigns': [{'id': c.campaign_id, 'name': c.campaign_name}
+                                  for c in cp.query.order_by(cp.campaign_name)]})
+
+
+@ut.route('/api/smart-scenes/preview', methods=['POST'])
+def smart_scenes_preview():
+    import smart_scenes as ss
+    from extensions import database
+    rule = (request.get_json(silent=True) or {}).get('rule') or {}
+    m = ss.match(database, rule)
+    return jsonify({'ok': True, 'summary': ss.describe(rule),
+                    'music': [{'id': i, 'name': n} for i, n in m['music']],
+                    'video': [{'id': i, 'name': n} for i, n in m['video']]})
+
+
+@ut.route('/api/smart-scenes/create', methods=['POST'])
+def smart_scenes_create():
+    """{name, campaign_id, rule, auto_refresh} — or {scene_id, rule} to make
+    an existing scene smart."""
+    import smart_scenes as ss
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    rule = data.get('rule') or {}
+    try:
+        if data.get('scene_id'):
+            ss.set_rule(database, int(data['scene_id']), rule, bool(data.get('auto_refresh', True)))
+            added = ss.refresh(database, int(data['scene_id']))
+            return jsonify({'ok': True, 'scene_id': int(data['scene_id']), 'added': added})
+        res = ss.create_scene(database, data.get('name'), _campaign_or_default(data.get('campaign_id')), rule,
+                              bool(data.get('auto_refresh', True)))
+        return jsonify({'ok': True, **res})
+    except (ValueError, TypeError) as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+
+
+def _campaign_or_default(raw):
+    """A campaign id from the request, else the 'Music' campaign, else the
+    first one — the home page's mix button has no campaign picker."""
+    from models.campaigns import tblcampaigns as cp
+    try:
+        cid = int(raw or 0)
+    except (TypeError, ValueError):
+        cid = 0
+    if cid and db.session.get(cp, cid):
+        return cid
+    row = cp.query.filter(db.func.lower(cp.campaign_name) == 'music').first() or cp.query.order_by(cp.campaign_id).first()
+    return row.campaign_id if row else 0
+
+
+@ut.route('/api/smart-scenes/from-queue', methods=['POST'])
+def smart_scenes_from_queue():
+    """Home page "Save this mix as a scene": the scenes currently queued
+    (fully or partly) become the sources of a new smart scene."""
+    import smart_scenes as ss
+    from extensions import database
+    from sql import scene_queue_states
+    data = request.get_json(silent=True) or {}
+    states = scene_queue_states()
+    picked = data.get('scene_ids')
+    # The page says which scenes were clicked; only those still in the queue
+    # count. Without a list (older page), fall back to every queued scene.
+    ids = ([int(x) for x in picked if str(x).lstrip('-').isdigit() and states.get(int(x)) in ('all', 'some')]
+           if isinstance(picked, list) and picked else
+           [sid for sid, st in states.items() if st in ('all', 'some')])
+    names = [r[0] for r in db.session.execute(
+        db.text("SELECT sceneName FROM tblScenes WHERE scene_ID IN :ids ORDER BY sceneName").bindparams(
+            db.bindparam('ids', expanding=True)), {'ids': ids or [0]})]
+    if len(names) < 2:
+        return jsonify({'ok': False, 'error': 'Queue two or more scenes first.'}), 400
+    name = (data.get('name') or '').strip() or ' + '.join(names)
+    try:
+        res = ss.create_scene(database, name, _campaign_or_default(data.get('campaign_id')),
+                              {'scenes': names, 'media': ['music', 'video']})
+    except ValueError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    return jsonify({'ok': True, 'name': name, 'sources': names, **res})
+
+
+@ut.route('/api/smart-scenes/refresh', methods=['POST'])
+def smart_scenes_refresh():
+    import smart_scenes as ss
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    if data.get('all'):
+        return jsonify({'ok': True, 'added': ss.refresh_all(database, auto_only=False)})
+    return jsonify({'ok': True, 'added': ss.refresh(database, int(data.get('scene_id') or 0))})
+
+
+@ut.route('/api/smart-scenes/drop', methods=['POST'])
+def smart_scenes_drop():
+    import smart_scenes as ss
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    ss.drop_rule(database, int(data.get('scene_id') or 0))
+    return jsonify({'ok': True})
+
+
+@ut.route('/api/smart-scenes/bulk', methods=['POST'])
+def smart_scenes_bulk():
+    import smart_scenes as ss
+    from extensions import database
+    data = request.get_json(silent=True) or {}
+    try:
+        made = ss.bulk_create(database, data.get('by'), int(data.get('min_count') or 3),
+                              int(data.get('campaign_id') or 0),
+                              media=tuple(data.get('media') or ss.MEDIA),
+                              name_format=str(data.get('name_format') or '{value}'))
+    except ValueError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    return jsonify({'ok': True, 'made': made})
+
+
+# ── Organize Library: genres → artists → smart scenes in one go ──────────────
+
+@ut.route('/utilities/organize')
+def organize_page():
+    from models.campaigns import tblcampaigns as cp
+    campaigns = cp.query.with_entities(cp.campaign_id, cp.campaign_name).order_by(cp.campaign_name).all()
+    return render_template('organize.html', campaigns=campaigns,
+                           items=select_data_stats(), volume=currentvolume())
+
+
+@ut.route('/api/library/organize', methods=['POST'])
+def organize_api():
+    """{dry_run: bool, options: {...}} → plan (dry run) or the run summary."""
+    import library_organize as lo
+    from extensions import database
+    from sql import appsettingGet
+    data = request.get_json(silent=True) or {}
+    opts = data.get('options') or {}
+    try:
+        if data.get('dry_run', True):
+            return jsonify({'ok': True, 'dry_run': True, **lo.plan(database, appsettingGet, opts)})
+        return jsonify({'ok': True, 'dry_run': False, **lo.run(database, appsettingGet, opts)})
+    except (ValueError, TypeError) as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+
+
+@ut.route('/utilities/library')
+def library_page():
+    """Landing URL for the Library Organizer utility (the one-click view)."""
+    return redirect(url_for('ut.organize_page'))

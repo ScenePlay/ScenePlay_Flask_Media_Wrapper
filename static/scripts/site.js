@@ -703,13 +703,24 @@ function nextVideo(){
 function killQueue(){
 
   const Click = function(){
-      fetch("/killqueue", {
+      // Home page scene cards: clear every "Queued / Partly queued" pill
+      // right away — the server empties the queue (unless Infinite Play is
+      // ON, which deliberately keeps it); the answer + poll settle the truth.
+      const pills = document.querySelectorAll('.sp-scene-queue');
+      const keep = (document.getElementById('keepMusicBtn') || {}).textContent || '';
+      if (pills.length && keep.trim() !== 'ON') pills.forEach(b => { b.dataset.state = 'none'; });
+      const p = fetch("/killqueue", {
           method: "POST",
           body: "",
           headers: {
           "Content-Type": "application/json" 
       }
-      }).then(response => response.text()).then(data => console.log(data));
+      }).then(response => response.text()).then(data => {
+          console.log(data);
+          if (typeof sceneQueuePoll === 'function') sceneQueuePoll();
+          if (typeof songAndVideoCount === 'function') songAndVideoCount();
+      });
+      return p;
   }
   const Click2 = function(){
     fetch("/activatescenes/?id=-1", {
@@ -720,9 +731,9 @@ function killQueue(){
     }
     }).then(response => response.text()).then(data => console.log(data));
   }
-  Click()
-  sleep(2000)
-  Click2()
+  // Kill first, THEN the pseudo-scene teardown — the old sleep(2000) was a
+  // Promise nobody awaited, so the two requests raced.
+  Click().then(() => Click2());
   //sleep(2000).then(() => window.location.reload());
 }
 

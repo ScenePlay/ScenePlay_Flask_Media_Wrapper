@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sp-ar table { width:100%; font-size:.85em; border-collapse:collapse; }
+  .sp-ar th, .sp-ar td { padding:4px 8px; border-bottom:1px solid var(--sp-border); vertical-align:top; }
+  .sp-ar th { text-align:left; position:sticky; top:0; background:var(--sp-surface,#fff); }
+  .sp-ar .muted { color:var(--sp-muted); }
+  .sp-ar .c-exact, .sp-ar .c-high { color:#2f7d38; } .sp-ar .c-medium { color:#b9770e; } .sp-ar .c-low { color:#c0392b; }
+  .sp-ar .scroll { max-height:65vh; overflow:auto; }
+  .sp-ar input.ar-artist { min-width:180px; }
+</style>
+<div class="sp-page sp-ar">
+  {% set active = 'artists' %}
+  <div class="sp-page-head">
+    <h1>Library Organizer <span class="muted" style="font-weight:normal;font-size:.6em;">· Artists</span></h1>
+  </div>
+  {% include '_library_nav.html' %}
+  <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
+    An artist for every song and video that has none, worked out from the YouTube data:
+    <b class="c-exact">exact</b> = YouTube's own artist field (auto-generated "&ndash; Topic" uploads);
+    <b class="c-high">high</b> = "Artist &ndash; Title" and the channel agrees;
+    <b class="c-medium">medium</b> = the title alone says so; <b class="c-low">low</b> = only the channel name.
+    Edit any box before applying. New downloads get the exact/high cases filled automatically.
+    Also shown: the kind by length (song / long track / mix) and the decade where YouTube knows it.
+  </p>
+  <details class="sp-card" open>
+    <summary><h3>Proposals <span class="muted" style="font-weight:normal;font-size:.75em;">
+      — {{ rows | length }} without an artist: {{ counts.exact }} exact, {{ counts.high }} high, {{ counts.medium }} medium, {{ counts.low }} low, {{ counts.none }} none</span></h3></summary>
+    <div class="d-flex gap-2 align-items-center flex-wrap" style="margin:6px 0 8px;">
+      <button type="button" class="btn btn-primary" onclick="arApply(['exact','high'])">&#10003; Apply exact + high ({{ counts.exact + counts.high }})</button>
+      <button type="button" class="btn btn-outline-primary" onclick="arApply(['exact','high','medium'])">&#10003; …and medium ({{ counts.exact + counts.high + counts.medium }})</button>
+      <button type="button" class="btn btn-outline-primary" onclick="arApply(null)">&#10003; Apply checked</button>
+      <label class="form-check" style="margin:0 0 0 8px;"><input class="form-check-input" type="checkbox" onchange="document.querySelectorAll('.ar-pick').forEach(c => c.checked = this.checked)"> <span class="form-check-label small">check all</span></label>
+      <input type="search" class="form-control form-control-sm" placeholder="Filter…" style="max-width:240px;" oninput="arFilter(this.value)">
+      <span id="ar-msg" class="small muted"></span>
+    </div>
+    <div class="scroll">
+    <table id="ar-table">
+      <thead><tr><th></th><th>Title</th><th>Channel</th><th>Artist</th><th>How</th><th>Kind</th><th>Decade</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr data-type="{{ r.media_type }}" data-id="{{ r.id }}" data-conf="{{ r.confidence }}">
+        <td><input class="form-check-input ar-pick" type="checkbox"></td>
+        <td style="max-width:340px;word-break:break-word;">{{ r.name }}{% if r.media_type == 'video' %} <span class="muted">(video)</span>{% endif %}</td>
+        <td class="muted">{{ r.channel }}</td>
+        <td><input type="text" class="form-control form-control-sm ar-artist" value="{{ r.artist }}" placeholder="(leave blank to skip)"></td>
+        <td class="c-{{ r.confidence }}">{{ r.confidence }}{% if r.source %} <span class="muted">({{ r.source }})</span>{% endif %}</td>
+        <td class="muted">{{ kinds.get(r.kind, '') }}</td>
+        <td class="muted">{{ r.decade }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Every song and video already has an artist.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+</div>
+<script>
+  function arFilter(q) {
+    q = q.trim().toLowerCase();
+    document.querySelectorAll('#ar-table tbody tr').forEach(tr => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+  }
+  // confs: list of confidence levels to apply, or null for the checked rows.
+  function arApply(confs) {
+    const items = [];
+    document.querySelectorAll('#ar-table tbody tr[data-id]').forEach(tr => {
+      const pick = confs ? confs.includes(tr.dataset.conf) : tr.querySelector('.ar-pick').checked;
+      const artist = tr.querySelector('.ar-artist').value.trim();
+      if (pick && artist) items.push({ media_type: tr.dataset.type, id: parseInt(tr.dataset.id, 10), artist });
+    });
+    const msg = document.getElementById('ar-msg');
+    if (!items.length) { msg.textContent = 'Nothing to apply.'; return; }
+    if (!confirm('Set the artist on ' + items.length + ' item' + (items.length === 1 ? '' : 's') + '?')) return;
+    fetch('/api/artists/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { msg.textContent = d.error || 'Apply failed.'; return; }
+        msg.textContent = 'Updated ' + d.updated + '. Reloading…'; setTimeout(() => location.reload(), 900);
+      }).catch(() => { msg.textContent = 'Apply failed.'; });
+  }
+</script>
+{% endblock %}

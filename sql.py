@@ -88,9 +88,11 @@ def create_table():
     c.execute("CREATE TABLE IF NOT EXISTS tblCronSchedule (  schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT,  minute TEXT,  hour TEXT,  day_of_month TEXT,  month TEXT,  day_of_week TEXT,  command TEXT,  description TEXT,  active INT)")
     # yt-dlp metadata per media row (media_type 'music'|'video' + media_id soft-FK to
     # tblMusic.song_id / tblVideoMedia.video_ID). Raw JSON kept alongside promoted columns.
-    c.execute("CREATE TABLE IF NOT EXISTS tblMediaMetadata (  metadata_id INTEGER PRIMARY KEY AUTOINCREMENT,  media_type TEXT,  media_id INT,  title TEXT,  duration INT,  uploader TEXT,  upload_date TEXT,  thumbnail TEXT,  view_count INT,  description TEXT,  categories TEXT,  raw_json TEXT,  retry_count INT DEFAULT 0,  last_error TEXT,  extracted_at TEXT,  active INT DEFAULT 1)")
+    c.execute("CREATE TABLE IF NOT EXISTS tblMediaMetadata (  metadata_id INTEGER PRIMARY KEY AUTOINCREMENT,  media_type TEXT,  media_id INT,  title TEXT,  duration INT,  uploader TEXT,  upload_date TEXT,  thumbnail TEXT,  view_count INT,  description TEXT,  categories TEXT,  raw_json TEXT,  retry_count INT DEFAULT 0,  last_error TEXT,  extracted_at TEXT,  active INT DEFAULT 1,  artist TEXT DEFAULT '',  artist_source TEXT DEFAULT '',  origin_playlist TEXT DEFAULT '',  origin_playlist_title TEXT DEFAULT '')")
     # Playlist-expansion jobs: a playlist URL is queued here and a background worker
     # expands it into single-video intakes. status uses the lutStatus lexicon (1-4).
+    # Smart scenes: a metadata rule per scene (smart_scenes.py owns the shape)
+    c.execute("CREATE TABLE IF NOT EXISTS tblSceneRules (  rule_id INTEGER PRIMARY KEY AUTOINCREMENT,  scene_ID INT UNIQUE,  rule_json TEXT,  auto_refresh INT DEFAULT 1,  created_at TEXT,  last_refresh TEXT,  last_added INT DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS tblPlaylistQueue (  playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,  url TEXT,  media_type TEXT,  scene_ID INT,  status INT DEFAULT 1,  retry_count INT DEFAULT 0,  last_error TEXT,  created_at TEXT,  next_retry TEXT)")
     # Dedup identity: one media row per YouTube video per table. Partial indexes so
     # legacy rows (videoId NULL) stay legal; SQLite treats NULLs as distinct anyway,
@@ -1108,13 +1110,16 @@ def get_Scenes():
     for row in dataPre:
         grouped_data[row['scene_ID']].append(row)
     data = [combine_rows(rows) for rows in grouped_data.values()]
-    
+
     conn.commit()
     c.close()
     conn.close()
-    #for r in data:
-    #   row = r
-    
+    # Song / video counts and estimated play time for the scene cards.
+    stats = scene_media_stats()
+    for r in data:
+        st = stats.get(r.get('scene_ID')) or {'songs': 0, 'videos': 0, 'seconds': 0, 'play_time': ''}
+        r['songs'], r['videos'], r['play_time'] = st['songs'], st['videos'], st['play_time']
+        r['queued'] = scene_queue_state(r.get('scene_ID')) if (st['songs'] or st['videos']) else ''
     return data
 
 def getAllIPAddressFromtblServersIP(ips):
@@ -1394,6 +1399,15 @@ def CRUD_tblScenes(row,CRUD):
         conn.commit()
     elif CRUD == "D":
         _Scene_ID = row[0]
+        # Cascade: the scene's song/video links, LED and WLED pattern rows and
+        # its smart rule go with it. Orphaned links used to linger (and rows
+        # linked to a dead scene id came back through the All Stop pseudo-
+        # scene). Media rows themselves are untouched — one file, many scenes.
+        for tbl in ('tblMusicScene', 'tblVideoScene', 'tblScenePattern', 'tblwledPattern', 'tblSceneRules'):
+            try:
+                c.execute(f"DELETE FROM {tbl} WHERE scene_ID = ?", (_Scene_ID,))
+            except sqlite3.OperationalError:
+                pass    # table absent on an older database
         c.execute("Delete From tblScenes where Scene_ID = ?", (_Scene_ID,))
         conn.commit()
     else:
@@ -2277,3 +2291,166 @@ def delete_all_failed(include_unavailable=False):
             delete_media_row(kind, pk)
             n += 1
     return n
+
+
+def media_artist_source(media_type, pk):
+    """How the stored artist was set ('topic' / 'title+channel' / 'dm' / '')."""
+    conn = sqlite3.connect(database)
+    try:
+        row = conn.execute("SELECT COALESCE(artist_source,'') FROM tblMediaMetadata "
+                           "WHERE media_type=? AND media_id=?", (media_type, pk)).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    finally:
+        conn.close()
+    return row[0] if row else ''
+
+
+def set_media_origin(media_type, pk, playlist_url, playlist_title=''):
+    """Stamp the playlist a download came from (metadata row created as a
+    stub if meta_que hasn't run yet — it updates in place later). Only the
+    FIRST origin is kept: a song in two playlists stays with its first."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        row = c.execute("SELECT metadata_id, COALESCE(origin_playlist,'') FROM tblMediaMetadata "
+                        "WHERE media_type=? AND media_id=?", (media_type, pk)).fetchone()
+        if row and row[1]:
+            return False
+        if row:
+            c.execute("UPDATE tblMediaMetadata SET origin_playlist=?, origin_playlist_title=? "
+                      "WHERE metadata_id=?", (playlist_url, playlist_title or '', row[0]))
+        else:
+            c.execute("INSERT INTO tblMediaMetadata(media_type, media_id, origin_playlist, origin_playlist_title) "
+                      "VALUES (?, ?, ?, ?)", (media_type, pk, playlist_url, playlist_title or ''))
+        conn.commit()
+        return True
+    except sqlite3.OperationalError:
+        return False        # pre-0011 schema: origin is best-effort
+    finally:
+        c.close()
+        conn.close()
+
+
+# ── Scene → play queue (Scenes table "Queue" checkbox) ───────────────────────
+
+def scene_queue_state(scene_id):
+    """'all' | 'some' | 'none' | '' — how much of a scene's playable media
+    (finished downloads) is in the play queue right now. '' = the scene has
+    no playable media at all."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        total, queued = 0, 0
+        for tbl, link, pk in (('tblMusic', 'tblMusicScene', 'song_ID'),
+                              ('tblVideoMedia', 'tblVideoScene', 'video_ID')):
+            t, q = c.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(CASE WHEN COALESCE(m.que,0) <> 0 THEN 1 ELSE 0 END),0) "
+                f"FROM {link} l JOIN {tbl} m ON m.{pk} = l.{pk} "
+                f"WHERE l.scene_ID = ? AND m.dnLoadStatus = 3", (scene_id,)).fetchone()
+            total += t or 0
+            queued += q or 0
+    finally:
+        c.close()
+        conn.close()
+    if not total:
+        return ''
+    return 'all' if queued == total else ('some' if queued else 'none')
+
+
+def scene_queue_states():
+    """{scene_ID: 'all'|'some'|'none'} for every scene with playable media —
+    one pass, for the home page's live repaint."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    tot, que = {}, {}
+    try:
+        for tbl, link, pk in (('tblMusic', 'tblMusicScene', 'song_ID'),
+                              ('tblVideoMedia', 'tblVideoScene', 'video_ID')):
+            for sid, t, q in c.execute(
+                    f"SELECT l.scene_ID, COUNT(*), SUM(CASE WHEN COALESCE(m.que,0) <> 0 THEN 1 ELSE 0 END) "
+                    f"FROM {link} l JOIN {tbl} m ON m.{pk} = l.{pk} WHERE m.dnLoadStatus = 3 GROUP BY l.scene_ID"):
+                tot[sid] = tot.get(sid, 0) + (t or 0)
+                que[sid] = que.get(sid, 0) + (q or 0)
+    finally:
+        c.close()
+        conn.close()
+    return {sid: ('all' if que.get(sid, 0) == t else ('some' if que.get(sid, 0) else 'none'))
+            for sid, t in tot.items() if t}
+
+
+def queue_scene_songs(scene_id, queued=True):
+    """Add a scene's songs and videos to the play queue (or take them out)
+    WITHOUT activating the scene — the current scene, lights and what is
+    playing now are untouched; the new tracks simply join the line. Adding
+    also raises the play flags so an idle player starts. Returns
+    {'music': n, 'video': n} rows changed."""
+    val = 1 if queued else 0
+    out = {}
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    try:
+        for kind, tbl, link, pk in (('music', 'tblMusic', 'tblMusicScene', 'song_ID'),
+                                    ('video', 'tblVideoMedia', 'tblVideoScene', 'video_ID')):
+            c.execute(
+                f"UPDATE {tbl} SET que = ? WHERE dnLoadStatus = 3 AND COALESCE(que,0) <> ? AND {pk} IN "
+                f"(SELECT {pk} FROM {link} WHERE scene_ID = ?)", (val, val, scene_id))
+            out[kind] = c.rowcount
+        conn.commit()
+    finally:
+        c.close()
+        conn.close()
+    if queued and (out['music'] or out['video']):
+        if out['music']:
+            appsettingAudioPlayFlagUpdate(1)
+        if out['video']:
+            appsettingVideoPlayFlagUpdate(1)
+    return out
+
+
+# ── Scene media stats (home page scene cards) ────────────────────────────────
+
+def fmt_play_time(seconds):
+    """'2h 10m', '48m', '3m 20s', or '' for nothing."""
+    try:
+        s = int(seconds or 0)
+    except (TypeError, ValueError):
+        return ''
+    if s <= 0:
+        return ''
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f'{h}h {m:02d}m'
+    if m:
+        return f'{m}m' if sec < 30 or m >= 10 else f'{m}m {sec}s'
+    return f'{sec}s'
+
+
+def scene_media_stats():
+    """{scene_ID: {'songs': n, 'videos': n, 'seconds': total}} over every
+    scene's DOWNLOADED media. Play time = each track's metadata duration ×
+    (loops + 1) — the same maths the header's queue estimate uses — so a
+    song still waiting for metadata counts as a song but adds no time
+    (the estimate is a floor until the metadata queue catches up)."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    out = {}
+    try:
+        for kind, tbl, link, pk, key in (('music', 'tblMusic', 'tblMusicScene', 'song_ID', 'songs'),
+                                         ('video', 'tblVideoMedia', 'tblVideoScene', 'video_ID', 'videos')):
+            for sid, n, secs in c.execute(
+                    f"SELECT l.scene_ID, COUNT(*), "
+                    f"COALESCE(SUM(COALESCE(d.duration,0) * (COALESCE(l.loops,0) + 1)), 0) "
+                    f"FROM {link} l JOIN {tbl} m ON m.{pk} = l.{pk} "
+                    f"LEFT JOIN tblMediaMetadata d ON d.media_type = ? AND d.media_id = m.{pk} "
+                    f"WHERE m.dnLoadStatus = 3 GROUP BY l.scene_ID", (kind,)):
+                st = out.setdefault(sid, {'songs': 0, 'videos': 0, 'seconds': 0})
+                st[key] = n
+                st['seconds'] += int(secs or 0)
+    finally:
+        c.close()
+        conn.close()
+    for st in out.values():
+        st['play_time'] = fmt_play_time(st['seconds'])
+    return out

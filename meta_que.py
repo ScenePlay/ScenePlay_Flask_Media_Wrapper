@@ -139,11 +139,30 @@ def _run_job(pkey, url, media_type, retry_count):
     if status == 'ok':
         info = payload
         fields = _promoted_fields(info)
+        # Artist facet (media_facets): only the derivations we trust, and
+        # never over a value the DM confirmed on Utilities → Artists.
+        try:
+            import media_facets
+            from sql import media_artist_source
+            if media_artist_source(media_type, pkey) != 'dm':
+                artist, src, conf = media_facets.derive_artist(
+                    fields.get('title') or '', fields.get('uploader') or '', info)
+                if conf in ('exact', 'high'):
+                    fields['artist'], fields['artist_source'] = artist, src
+        except Exception:
+            pass                    # a facet must never fail the extraction
         fields['raw_json'] = slim_raw_json(info)[:2_000_000]   # guard against absurd blobs
         fields['retry_count'] = retry_count
         fields['last_error'] = ''
         fields['extracted_at'] = now
         upsert_media_metadata(media_type, pkey, fields)
+        # Smart scenes (smart_scenes.py): a fresh row may now match a rule.
+        try:
+            import smart_scenes
+            from sql import database as _db
+            smart_scenes.refresh_all(_db)
+        except Exception:
+            pass
         if info.get('title'):
             fill_display_name_if_empty(media_type, pkey, info['title'])
         thumb_store.cache(media_type, pkey, info.get('thumbnail'))   # best-effort

@@ -23,7 +23,7 @@ _name_key = db.func.coalesce(db.func.nullif(tbl.displayName, ''), tbl.song)
 # Soft FK into tblMediaMetadata (see models/mediaMetadata.py). Only needed when
 # sorting by a metadata column — row values are merged after pagination instead.
 _meta_join = db.and_(metaTbl.media_type == 'music', metaTbl.media_id == tbl.song_id)
-_meta_sort = {'duration': metaTbl.duration, 'uploader': metaTbl.uploader}
+_meta_sort = {'duration': metaTbl.duration, 'uploader': metaTbl.uploader, 'artist': metaTbl.artist}
 
 @mu.route('/music')
 def edittbl():
@@ -105,6 +105,7 @@ def data():
         m = meta.get(r.song_id)
         d['duration']  = m.duration  if m else None
         d['uploader']  = m.uploader  if m else None
+        d['artist']    = (m.artist or '') if m else ''
         # local cached copy first (works offline), remote URL as fallback
         d['thumbnail'] = thumb_store.url('music', r.song_id) or (m.thumbnail if m else None)
         data.append(d)
@@ -124,8 +125,14 @@ def update():
     # videoId is the dedup identity and metaStatus the metadata-queue state —
     # machine-managed. They sit in tblColumns for display/sort only; a client
     # POSTing them would corrupt dedup or wedge the queue.
+    # Artist lives on the metadata row (media_facets), not tblMusic — an edit
+    # here is the DM's word and is never overwritten by the derivation.
+    if 'artist' in data:
+        import media_facets
+        from extensions import database
+        media_facets.apply_artists(database, [{'media_type': 'music', 'id': data[primeKey], 'artist': data['artist']}])
     for field in tblColumns:
-        if field in ('videoId', 'metaStatus'):
+        if field in ('videoId', 'metaStatus', 'artist'):
             continue
         if field in data:
             setattr(TSP, field, data[field])

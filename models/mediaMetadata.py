@@ -23,6 +23,11 @@ class tblmediametadata(db.Model):
     last_error   = db.Column(db.Text)
     extracted_at = db.Column(db.Text)
     active       = db.Column(db.Integer, default=1)
+    # facets (migration 0011): derived artist + provenance, playlist of origin
+    artist       = db.Column(db.Text, default='')
+    artist_source = db.Column(db.Text, default='')
+    origin_playlist = db.Column(db.Text, default='')
+    origin_playlist_title = db.Column(db.Text, default='')
 
     def to_dict(self):
         return {

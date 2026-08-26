@@ -21,12 +21,34 @@
             <!-- One card per scene: the gradient band shows the scene's two
                  LED colors (RPi strip + WLED); tags name the patterns.
                  The whole card activates the scene. -->
+            <!-- Appears once two or more scenes are queued: the mix you are
+                 hearing becomes a smart scene whose sources are those scenes. -->
+            <div id="sp-mix-bar" class="gap-2 align-items-center flex-wrap" style="display:none;margin:0 0 10px;">
+              <span class="small" id="sp-mix-label"></span>
+              <input type="text" id="sp-mix-name" class="form-control form-control-sm" placeholder="scene name (blank = the scene names joined)" style="max-width:300px;">
+              <button type="button" class="btn btn-sm btn-primary" onclick="spSaveMix()">&#128190; Save this mix as a scene</button>
+              <span id="sp-mix-msg" class="small text-muted"></span>
+            </div>
             <div class="sp-card-grid sp-scene-grid">
                 {% for item in Scenes %}
                 <a href="/activatescenes/?id={{item['scene_ID']}}" class="sp-scene-card"
                    style="--c1:{{ item.get('color') or '148,163,184' }};--c2:{{ item.get('color1') or item.get('color') or '148,163,184' }};">
                     <span class="sp-scene-band"></span>
                     <span class="sp-scene-name">{{item['sceneName']}}</span>
+                    {% if item.get('songs') or item.get('videos') %}
+                    <!-- Real-time combine: add this scene's tracks to the play
+                         queue (or pull them out) without activating it. Sits
+                         inside the activate link, so it stops the click. -->
+                    <button type="button" class="sp-scene-queue" data-scene="{{ item.scene_ID }}" data-state="{{ item.queued }}"
+                            onclick="event.preventDefault(); event.stopPropagation(); sceneQueueToggle(this);"
+                            title="Add this scene's songs to what's playing now (does not switch scene). Click again to take them out.">
+                        <span class="sp-scene-queue-on">&#10003; Queued</span><span class="sp-scene-queue-off">&#43; Queue</span><span class="sp-scene-queue-some">&#9681; Partly queued</span>
+                    </button>
+                    <span class="sp-scene-stats"
+                          title="{{ item.songs }} song{{ '' if item.songs == 1 else 's' }}{% if item.videos %}, {{ item.videos }} video{{ '' if item.videos == 1 else 's' }}{% endif %}{% if item.play_time %} — about {{ item.play_time }} of playback (counting loops; tracks still waiting for metadata add no time){% endif %}">
+                        {% if item.songs %}&#9835;&nbsp;{{ item.songs }}{% endif %}{% if item.videos %} &#9654;&nbsp;{{ item.videos }}{% endif %}{% if item.play_time %} <span class="sp-scene-time">&#9201;&nbsp;{{ item.play_time }}</span>{% endif %}
+                    </span>
+                    {% endif %}
                     {% if item.get('modelName') is not none or item.get('effectName') is not none %}
                     <span class="sp-scene-leds">
                         {% if item.get('modelName') is not none %}<span class="sp-led-tag" title="RPi LED pattern">R&nbsp;{{item['modelName']}}</span>{% endif %}
@@ -37,4 +59,57 @@
                 {% endfor %}
             </div>
         </div>
+<script>
+  // Scene-card queue toggle: combine scenes in real time. Adding never
+  // switches the scene; the header counts refresh from the same answer and
+  // a 5 s poll keeps every card's state honest as tracks play through.
+  // Scenes the DM queued from THIS page (by id) — the sources for "save this
+  // mix". Not derived from queue state: scenes that merely share songs with
+  // a queued one would otherwise sneak in (Chopin's tracks are Classical's).
+  const spMixPicked = new Set();
+  function sceneQueueToggle(btn) {
+    const want = btn.dataset.state !== 'all';
+    if (want) spMixPicked.add(btn.dataset.scene); else spMixPicked.delete(btn.dataset.scene);
+    btn.disabled = true;
+    fetch('/api/scenes/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_ID: parseInt(btn.dataset.scene, 10), queued: want }) })
+      .then(r => r.json()).then(d => {
+        btn.disabled = false;
+        if (!d.ok) return;
+        btn.dataset.state = d.queued || 'none';
+        spMixBar();
+        if (typeof songAndVideoCount === 'function') songAndVideoCount();
+      }).catch(() => { btn.disabled = false; });
+  }
+  function sceneQueuePoll() {
+    fetch('/api/scenes/queue-states').then(r => r.json()).then(d => {
+      if (!d.ok) return;
+      document.querySelectorAll('.sp-scene-queue').forEach(b => { b.dataset.state = d.states[b.dataset.scene] || 'none'; });
+      spMixBar();
+    }).catch(() => {});
+  }
+  // Show the "save mix" bar when two or more scenes are (partly) queued.
+  function spMixBar() {
+    // picked here AND still (at least partly) in the queue
+    const names = [...document.querySelectorAll('.sp-scene-queue')]
+      .filter(b => spMixPicked.has(b.dataset.scene) && (b.dataset.state === 'all' || b.dataset.state === 'some'))
+      .map(b => b.closest('.sp-scene-card').querySelector('.sp-scene-name').textContent.trim());
+    const bar = document.getElementById('sp-mix-bar');
+    if (!bar) return;
+    bar.style.display = names.length >= 2 ? 'flex' : 'none';
+    document.getElementById('sp-mix-label').textContent = names.length >= 2 ? 'Playing a mix of ' + names.join(' + ') + ':' : '';
+  }
+  function spSaveMix() {
+    const msg = document.getElementById('sp-mix-msg');
+    fetch('/api/smart-scenes/from-queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: document.getElementById('sp-mix-name').value, campaign_id: (document.getElementById('campaignDropdown') || {}).value,
+                             scene_ids: [...spMixPicked].map(x => parseInt(x, 10)) }) })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { msg.textContent = d.error || 'Could not save.'; return; }
+        msg.textContent = 'Saved "' + d.name + '" (' + d.added.music + ' songs, ' + d.added.video + ' videos). Reloading…'; setTimeout(() => location.reload(), 900);
+      }).catch(() => { msg.textContent = 'Could not save.'; });
+  }
+  setInterval(sceneQueuePoll, 5000);
+  spMixBar();
+</script>
 {% endblock %}

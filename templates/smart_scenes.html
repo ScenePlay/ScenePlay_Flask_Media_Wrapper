@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sp-ss .muted { color:var(--sp-muted); }
+  .sp-ss .facet { display:flex; flex-direction:column; gap:2px; min-width:180px; }
+  .sp-ss .facet select[multiple] { min-height:150px; font-size:.85em; }
+  .sp-ss table { width:100%; font-size:.85em; border-collapse:collapse; }
+  .sp-ss th, .sp-ss td { padding:4px 8px; border-bottom:1px solid var(--sp-border); vertical-align:top; }
+  .sp-ss th { text-align:left; }
+  .sp-ss .preview { max-height:32vh; overflow:auto; font-size:.82em; }
+</style>
+<div class="sp-page sp-ss">
+  {% set active = 'scenes' %}
+  <div class="sp-page-head">
+    <h1>Library Organizer <span class="muted" style="font-weight:normal;font-size:.6em;">· Smart Scenes</span></h1>
+  </div>
+  {% include '_library_nav.html' %}
+  <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
+    A smart scene fills itself from your library by metadata: pick any mix of genre, artist, kind (song / long track / mix),
+    decade and a word in the title, see what matches, and create the scene. It keeps its rule: new downloads that match are
+    added automatically, and <b>Refresh</b> re-checks any time. Songs you add by hand are never removed.
+    Genres come from Suggest Genres, artists from the Artists page — run those first for the best pickers.
+  </p>
+
+  <details class="sp-card" open>
+    <summary><h3>Build a scene</h3></summary>
+    <div class="d-flex gap-3 flex-wrap" style="margin:8px 0;">
+      <div class="facet"><label class="small"><b>Genre</b> <span class="muted">(any of)</span></label>
+        <select id="f-genres" multiple>{% for o in options.genres %}<option value="{{ o.value }}">{{ o.value }} ({{ o.count }})</option>{% endfor %}</select></div>
+      <div class="facet"><label class="small"><b>Artist</b> <span class="muted">(any of)</span></label>
+        <input type="search" class="form-control form-control-sm" placeholder="filter artists…" oninput="ssFilterArtists(this.value)">
+        <select id="f-artists" multiple>{% for o in options.artists %}<option value="{{ o.value }}">{{ o.value }} ({{ o.count }})</option>{% endfor %}</select></div>
+      <div class="facet"><label class="small"><b>Kind</b></label>
+        <select id="f-kinds" multiple style="min-height:80px;">{% for o in options.kinds %}<option value="{{ o.value }}">{{ o.label }} ({{ o.count }})</option>{% endfor %}</select>
+        <label class="small mt-2"><b>Decade</b></label>
+        <select id="f-decades" multiple style="min-height:80px;">{% for o in options.decades %}<option value="{{ o.value }}">{{ o.value }} ({{ o.count }})</option>{% endfor %}</select></div>
+      <div class="facet"><label class="small"><b>Word in title / channel</b></label>
+        <input type="text" id="f-text" class="form-control form-control-sm" placeholder="e.g. coffee">
+        <label class="small mt-2"><b>Draw from</b></label>
+        <label class="form-check small" style="margin:0;"><input class="form-check-input" type="checkbox" id="f-music" checked> <span class="form-check-label">Music</span></label>
+        <label class="form-check small" style="margin:0;"><input class="form-check-input" type="checkbox" id="f-video" checked> <span class="form-check-label">Videos</span></label>
+        <div class="d-flex gap-1 mt-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ssPreview()">&#128269; Preview matches</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ssReset()" title="Clear every selection, the filters, the preview and the name">&#8634; Reset</button>
+        </div>
+      </div>
+    </div>
+    <div id="ss-summary" class="small muted" style="margin:4px 0;"></div>
+    <div id="ss-preview" class="preview"></div>
+    <div class="d-flex gap-2 align-items-end flex-wrap" style="margin-top:10px;">
+      <div><label class="small">Scene name</label><input type="text" id="ss-name" class="form-control form-control-sm" placeholder="e.g. Jazz · Coffee mixes" style="min-width:240px;"></div>
+      <div><label class="small">Campaign</label>
+        <select id="ss-campaign" class="form-select form-select-sm">{% for c in campaigns %}<option value="{{ c.campaign_id }}" {% if c.campaign_name == 'Music' %}selected{% endif %}>{{ c.campaign_name }}</option>{% endfor %}</select></div>
+      <label class="form-check small" style="margin:0 0 6px;"><input class="form-check-input" type="checkbox" id="ss-auto" checked> <span class="form-check-label">Add new downloads automatically</span></label>
+      <button type="button" class="btn btn-primary btn-sm" onclick="ssCreate()">&#10003; Create smart scene</button>
+      <span class="muted small">or make an existing scene smart:</span>
+      <select id="ss-existing" class="form-select form-select-sm" style="max-width:220px;"><option value="">(choose scene)</option>{% for s in scenes %}<option value="{{ s.scene_ID }}">{{ s.sceneName }}</option>{% endfor %}</select>
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="ssAttach()">Attach rule</button>
+      <span id="ss-msg" class="small muted"></span>
+    </div>
+  </details>
+
+  <details class="sp-card">
+    <summary><h3>Bulk: one scene per artist or genre</h3></summary>
+    <div class="d-flex gap-2 align-items-end flex-wrap" style="margin:8px 0;">
+      <div><label class="small">One scene per</label>
+        <select id="bk-by" class="form-select form-select-sm"><option value="artist">artist</option><option value="genre">genre</option></select></div>
+      <div><label class="small">with at least</label><input type="number" id="bk-min" class="form-control form-control-sm" value="4" min="1" style="width:80px;"></div>
+      <div><label class="small">Campaign</label>
+        <select id="bk-campaign" class="form-select form-select-sm">{% for c in campaigns %}<option value="{{ c.campaign_id }}" {% if c.campaign_name == 'Music' %}selected{% endif %}>{{ c.campaign_name }}</option>{% endfor %}</select></div>
+      <div><label class="small">Name pattern</label><input type="text" id="bk-name" class="form-control form-control-sm" value="{value}" style="width:160px;" title="{value} is the artist / genre"></div>
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="ssBulk()">Create scenes</button>
+      <span id="bk-msg" class="small muted"></span>
+    </div>
+    <p class="muted small" style="margin:0;">Scenes whose name already exists in that campaign are skipped, so this is safe to run again later.</p>
+  </details>
+
+  <details class="sp-card" open>
+    <summary><h3>Smart scenes <span class="muted" style="font-weight:normal;font-size:.75em;">— {{ rules | length }}</span></h3></summary>
+    <div class="d-flex gap-2 align-items-center" style="margin:6px 0;">
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ssRefresh(null)">&#8635; Refresh all</button>
+      <span id="rl-msg" class="small muted"></span>
+    </div>
+    <table>
+      <thead><tr><th>Scene</th><th>Campaign</th><th>Rule</th><th>Songs</th><th>Videos</th><th>Auto</th><th>Last refresh</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rules %}
+      <tr data-scene="{{ r.scene_id }}">
+        <td><b>{{ r.name }}</b></td><td class="muted">{{ r.campaign }}</td><td>{{ r.summary }}</td>
+        <td>{{ r.music }}</td><td>{{ r.video }}</td><td>{{ '✓' if r.auto_refresh else '—' }}</td>
+        <td class="muted">{{ r.last_refresh }}{% if r.last_added %} (+{{ r.last_added }}){% endif %}</td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ssRefresh({{ r.scene_id }})">&#8635; Refresh</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="ssDrop({{ r.scene_id }}, '{{ r.name | e }}')" title="Stop deriving members — the scene and its songs stay">Unlink rule</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No smart scenes yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</div>
+<script>
+  const sel = id => [...document.getElementById(id).selectedOptions].map(o => o.value);
+  function ssRule() {
+    const media = []; if (document.getElementById('f-music').checked) media.push('music'); if (document.getElementById('f-video').checked) media.push('video');
+    return { genres: sel('f-genres'), artists: sel('f-artists'), kinds: sel('f-kinds'), decades: sel('f-decades'),
+             text: document.getElementById('f-text').value, media };
+  }
+  // Reset the builder: every multi-select, the artist filter box, the text
+  // field, media back to both, and the preview/name/message cleared.
+  function ssReset() {
+    ['f-genres', 'f-artists', 'f-kinds', 'f-decades'].forEach(id => {
+      [...document.getElementById(id).options].forEach(o => { o.selected = false; o.hidden = false; });
+    });
+    const af = document.querySelector('input[oninput^="ssFilterArtists"]'); if (af) af.value = '';
+    document.getElementById('f-text').value = '';
+    document.getElementById('f-music').checked = true; document.getElementById('f-video').checked = true;
+    document.getElementById('ss-name').value = '';
+    document.getElementById('ss-existing').value = '';
+    document.getElementById('ss-summary').textContent = ''; document.getElementById('ss-preview').innerHTML = ''; document.getElementById('ss-msg').textContent = '';
+  }
+  function ssFilterArtists(q) {
+    q = q.trim().toLowerCase();
+    [...document.getElementById('f-artists').options].forEach(o => { o.hidden = !!q && !o.textContent.toLowerCase().includes(q); });
+  }
+  function ssPreview() {
+    const box = document.getElementById('ss-preview'), sum = document.getElementById('ss-summary');
+    box.textContent = 'Matching…';
+    fetch('/api/smart-scenes/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule: ssRule() }) })
+      .then(r => r.json()).then(d => {
+        sum.textContent = d.summary + ' — ' + d.music.length + ' song' + (d.music.length === 1 ? '' : 's') + ', ' + d.video.length + ' video' + (d.video.length === 1 ? '' : 's');
+        box.innerHTML = (d.music.map(m => '&#9835; ' + esc(m.name)).concat(d.video.map(v => '&#9654; ' + esc(v.name))).join('<br>')) || '<span class="muted">Nothing matches.</span>';
+      }).catch(() => { box.textContent = 'Preview failed.'; });
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function ssCreate() {
+    const msg = document.getElementById('ss-msg');
+    const name = document.getElementById('ss-name').value.trim();
+    if (!name) { msg.textContent = 'Give the scene a name.'; return; }
+    fetch('/api/smart-scenes/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, campaign_id: document.getElementById('ss-campaign').value, rule: ssRule(), auto_refresh: document.getElementById('ss-auto').checked }) })
+      .then(r => r.json()).then(d => { if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        msg.textContent = 'Created with ' + d.added.music + ' songs, ' + d.added.video + ' videos. Reloading…'; setTimeout(() => location.reload(), 900); })
+      .catch(() => { msg.textContent = 'Failed.'; });
+  }
+  function ssAttach() {
+    const msg = document.getElementById('ss-msg'), sid = document.getElementById('ss-existing').value;
+    if (!sid) { msg.textContent = 'Choose a scene to attach the rule to.'; return; }
+    fetch('/api/smart-scenes/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_id: sid, rule: ssRule(), auto_refresh: document.getElementById('ss-auto').checked }) })
+      .then(r => r.json()).then(d => { if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        msg.textContent = 'Rule attached; added ' + d.added.music + ' songs, ' + d.added.video + ' videos. Reloading…'; setTimeout(() => location.reload(), 900); })
+      .catch(() => { msg.textContent = 'Failed.'; });
+  }
+  function ssRefresh(sceneId) {
+    const msg = document.getElementById('rl-msg');
+    fetch('/api/smart-scenes/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sceneId ? { scene_id: sceneId } : { all: true }) })
+      .then(r => r.json()).then(d => { msg.textContent = 'Refreshed. Reloading…'; setTimeout(() => location.reload(), 700); }).catch(() => { msg.textContent = 'Refresh failed.'; });
+  }
+  function ssDrop(sceneId, name) {
+    if (!confirm('Stop deriving "' + name + '" from its rule? The scene and everything in it stay.')) return;
+    fetch('/api/smart-scenes/drop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scene_id: sceneId }) })
+      .then(() => location.reload());
+  }
+  function ssBulk() {
+    const msg = document.getElementById('bk-msg');
+    const by = document.getElementById('bk-by').value, min = document.getElementById('bk-min').value;
+    if (!confirm('Create one scene per ' + by + ' with at least ' + min + ' matches?')) return;
+    fetch('/api/smart-scenes/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ by, min_count: min, campaign_id: document.getElementById('bk-campaign').value, name_format: document.getElementById('bk-name').value }) })
+      .then(r => r.json()).then(d => { if (!d.ok) { msg.textContent = d.error || 'Failed.'; return; }
+        msg.textContent = 'Created ' + d.made.length + ' scene' + (d.made.length === 1 ? '' : 's') + (d.made.length ? ': ' + d.made.map(m => m.name + ' (' + m.count + ')').join(', ') : '') + '. Reloading…'; setTimeout(() => location.reload(), 1200); })
+      .catch(() => { msg.textContent = 'Failed.'; });
+  }
+</script>
+{% endblock %}
