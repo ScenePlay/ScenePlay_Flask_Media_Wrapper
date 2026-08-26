@@ -90,6 +90,11 @@
                    class="form-control"
                    accept="image/png,image/jpeg,image/gif,image/webp"
                    onchange="previewNewPortrait(this)">
+            <input type="hidden" name="portrait_ref" id="new-portrait-ref">
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                    onclick="spPickAsset({kinds:['image'], onPick: it => { document.getElementById('new-portrait-ref').value = spAssetRef(it, 'portraits'); document.getElementById('new-portrait-input').value = ''; spAssetPreview(document.getElementById('new-portrait-ref-preview'), it); }})"
+                    title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
+            <div id="new-portrait-ref-preview" class="mt-1" style="display:none;"></div>
             <div id="new-portrait-preview" style="display:none;margin-top:4px;">
               <img id="new-portrait-img" src="" alt=""
                    style="width:88px;height:88px;object-fit:cover;border-radius:6px;

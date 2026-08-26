@@ -163,6 +163,8 @@
           <button type="button" class="btn btn-outline-secondary btn-sm"
                   onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadMonsterImage()">Set Picture</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="reuseMonsterImage()"
+                  title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
           <a id="homebrew-edit-link" href="#" class="btn btn-outline-secondary btn-sm">&#9998; Edit</a>
           <span id="hb-img-msg" class="small text-muted"></span>
         </div>
@@ -424,6 +426,25 @@ function renderDetail(templateId, data) {
 }
 
 // Upload / replace the picture on the currently-shown homebrew monster.
+// "Choose existing": point the homebrew monster at a shared upload by URL.
+function reuseMonsterImage() {
+  if (!_curTemplateId) return;
+  const msg = document.getElementById('hb-img-msg');
+  spPickAsset({ kinds: ['image'], onPick: it => {
+    if (msg) { msg.textContent = 'Linking…'; msg.style.color = ''; }
+    fetch(`/ttrpg/monsters/homebrew/${_curTemplateId}/image`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: it.url }) })
+      .then(r => r.json()).then(d => {
+        if (d && d.ok) {
+          const imgEl = document.getElementById('det-img');
+          if (imgEl) { imgEl.src = d.image_url + '?t=' + Date.now(); imgEl.style.display = ''; }
+          if (msg) { msg.textContent = 'Picture set (reused).'; msg.style.color = '#7bc77b'; }
+        } else if (msg) { msg.textContent = (d && d.error) || 'Failed.'; msg.style.color = '#e0a45c'; }
+      }).catch(() => { if (msg) { msg.textContent = 'Failed.'; msg.style.color = '#e0a45c'; } });
+  }});
+}
+
 function uploadMonsterImage() {
   const fileEl = document.getElementById('hb-img-file');
   const msg    = document.getElementById('hb-img-msg');

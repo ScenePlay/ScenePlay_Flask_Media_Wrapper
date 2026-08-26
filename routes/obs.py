@@ -4686,6 +4686,19 @@ def upload_image(slot):
             flash(f'{short} cleared.')
         return redirect(url_for('obs_bp.broadcast'))
     f = request.files.get('image')
+    ref = (request.form.get('ref') or '').strip()
+    if not (f and f.filename) and ref:
+        # "Choose existing": point the slot at a shared upload or a library
+        # video by reference — the stream pages resolve it like any name.
+        import shared_assets
+        from extensions import database
+        kinds = ('image',) if slot == 'yt_thumb' else ('image', 'video')
+        if not shared_assets.valid_ref(current_app.root_path, database, 'obs', ref, kinds=kinds):
+            flash('That file is not available for this slot.')
+            return redirect(url_for('obs_bp.broadcast'))
+        appsettingSet(setting, ref)
+        flash('Art set to an existing file — the stream pages pick it up within a few seconds.')
+        return redirect(url_for('obs_bp.broadcast'))
     if not f or not f.filename:
         flash('No image chosen.')
         return redirect(url_for('obs_bp.broadcast'))

@@ -174,6 +174,9 @@
             Change
           </label>
         </form>
+        <button class="btn btn-sm btn-outline-secondary w-100 mt-1" style="font-size:.7rem;"
+                onclick="spPickAsset({kinds:['image'], onPick: it => { const fd = new FormData(); fd.append('portrait_ref', spAssetRef(it, 'portraits')); fetch('{{ url_for('ttrpg.upload_portrait', character_id=char.character_id) }}', {method:'POST', body: fd}).then(() => location.reload()); }})"
+                title="Reuse a picture already on this server — nothing is copied">&#128444; Reuse Picture</button>
         {% endif %}
       </div>
 

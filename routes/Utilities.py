@@ -420,3 +420,140 @@ def processyt():
     # one remaining direct ALSA read; every other page already reads this way.
     volume = currentvolume()
     return render_template('utils.html',volume=volume)
+
+
+# ── Asset downloads ───────────────────────────────────────────────────────────
+# Utilities → Downloads: everything on disk (music, video, uploaded pictures)
+# with size and the metadata the app knows, each file downloadable on its
+# own or a whole category as a streamed zip. Read-only; DM-guarded by the
+# blueprint's before_request like the rest of Utilities.
+
+def _uploads_dir():
+    from flask import current_app
+    return os.path.join(current_app.root_path, 'static', 'uploads')
+
+
+@ut.route('/utilities/assets')
+def assets_page():
+    import assets_inventory as inv
+    from extensions import database
+    music = inv.media_rows(database, 'music')
+    video = inv.media_rows(database, 'video')
+    pics = inv.picture_rows(database, _uploads_dir())
+    # base.html's queue badge needs items/volume like every other page
+    return render_template('assets.html', music=music, video=video, pictures=pics,
+                           items=select_data_stats(), volume=currentvolume(),
+                           totals={'music': inv.totals(music), 'video': inv.totals(video),
+                                   'pictures': inv.totals(pics)})
+
+
+def _media_row(kind, media_id):
+    import assets_inventory as inv
+    from extensions import database
+    if kind not in inv.MEDIA_KINDS:
+        abort(404)
+    for r in inv.media_rows(database, kind):
+        if r['id'] == media_id:
+            return r
+    abort(404)
+
+
+@ut.route('/assets/download/<kind>/<int:media_id>')
+def asset_download_media(kind, media_id):
+    import assets_inventory as inv
+    r = _media_row(kind, media_id)
+    if not r['exists']:
+        abort(404)
+    # Downloaded under its metadata title, not the videoId filename.
+    return send_from_directory(r['dir'], r['file'], as_attachment=True,
+                               download_name=os.path.basename(inv.arc_name(r, kind)))
+
+
+@ut.route('/assets/download/picture/<folder>/<name>')
+def asset_download_picture(folder, name):
+    import assets_inventory as inv
+    if not inv.safe_picture_ref(folder, name):
+        abort(404)
+    return send_from_directory(os.path.join(_uploads_dir(), folder), name, as_attachment=True)
+
+
+@ut.route('/assets/zip/<kind>')
+def asset_zip(kind):
+    """One zip per category, streamed — a music library can be gigabytes, so
+    it is never assembled in memory or on disk first."""
+    import assets_inventory as inv
+    from flask import Response, stream_with_context
+    from extensions import database
+    if kind in inv.MEDIA_KINDS:
+        entries = [(inv.arc_name(r, kind), r['path'])
+                   for r in inv.media_rows(database, kind) if r['exists']]
+    elif kind == 'pictures':
+        entries = [(f"{r['folder']}/{r['file']}", r['path'])
+                   for r in inv.picture_rows(database, _uploads_dir())]
+    else:
+        abort(404)
+    if not entries:
+        abort(404)
+    resp = Response(stream_with_context(inv.zip_stream(entries)), mimetype='application/zip')
+    resp.headers['Content-Disposition'] = f'attachment; filename="sceneplay-{kind}.zip"'
+    return resp
+
+
+# ── Reuse existing assets (picker feed + inline video) ───────────────────────
+
+@ut.route('/utilities/assets/api/list')
+def assets_api_list():
+    """Picker feed: every picture upload and every library / uploaded video,
+    with a display URL, name, and the fields the picker needs to build a
+    shared reference (see shared_assets.py)."""
+    import assets_inventory as inv
+    from flask import url_for, jsonify as _j
+    from extensions import database
+    items = []
+    for r in inv.picture_rows(database, _uploads_dir()):
+        ext = r['file'].rsplit('.', 1)[-1].lower() if '.' in r['file'] else ''
+        kind = 'video' if ext in ('mp4', 'webm', 'ogv') else 'image'
+        items.append({'type': kind, 'source': 'upload', 'folder': r['folder'],
+                      'folder_label': r['folder_label'], 'file': r['file'], 'ext': ext,
+                      'name': r['used_by'] or r['file'], 'sub': r['folder_label'],
+                      # no ?v= cache-bust: this URL may be STORED in a record
+                      'url': url_for('static', filename=f"uploads/{r['folder']}/{r['file']}").split('?')[0],
+                      'size_h': r['size_h']})
+    for r in inv.media_rows(database, 'video'):
+        if not r['exists']:
+            continue
+        ext = r['file'].rsplit('.', 1)[-1].lower() if '.' in r['file'] else ''
+        thumb = _video_thumb(r['id'])
+        items.append({'type': 'video', 'source': 'library', 'id': r['id'], 'file': r['file'],
+                      'ext': ext, 'name': r['name'], 'sub': 'Video library' + (f" · {r['duration_h']}" if r['duration_h'] else ''),
+                      'url': url_for('ut.asset_media_video', media_id=r['id'], ext=ext),
+                      'thumb': thumb, 'size_h': r['size_h']})
+    return _j({'ok': True, 'items': items})
+
+
+def _video_thumb(media_id):
+    import sqlite3
+    from extensions import database
+    conn = sqlite3.connect(database)
+    try:
+        row = conn.execute("SELECT thumbnail FROM tblMediaMetadata WHERE media_type='video' "
+                           "AND media_id=? AND COALESCE(active,1)=1", (media_id,)).fetchone()
+    finally:
+        conn.close()
+    return (row[0] or '') if row else ''
+
+
+@ut.route('/assets/media/video/<int:media_id>.<ext>')
+def asset_media_video(media_id, ext):
+    """Inline (range-capable) stream of a library video, so a battle map or
+    OBS card can play it in place — the file stays in the library. Open
+    like static files: the OBS browser source and player pages have no
+    session (see _UT_OPEN_ENDPOINTS in app.py)."""
+    import shared_assets
+    from flask import send_file
+    from extensions import database
+    path, real_ext = shared_assets.library_video(database, media_id)
+    if not path or real_ext != ext.lower() or ext.lower() not in shared_assets.VIDEO_EXTS:
+        abort(404)
+    mime = {'mp4': 'video/mp4', 'webm': 'video/webm', 'ogv': 'video/ogg'}[ext.lower()]
+    return send_file(path, mimetype=mime, conditional=True)

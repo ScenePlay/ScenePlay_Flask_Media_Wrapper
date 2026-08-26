@@ -88,8 +88,13 @@
               {% endif %}
               <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp"
                      class="form-control">
+              <input type="hidden" name="image_ref" id="hb-image-ref">
               <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
                       onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
+                      onclick="spPickAsset({kinds:['image'], onPick: it => { document.getElementById('hb-image-ref').value = it.url; const f = document.querySelector('input[type=file][name=image]'); if (f) f.value = ''; spAssetPreview(document.getElementById('hb-image-ref-preview'), it); }})"
+                      title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
+              <span id="hb-image-ref-preview" class="d-inline-flex align-items-center" style="display:none;"></span>
               <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
                       onclick="openIconPrompt()" title="Generate an AI image prompt for this token">
                 &#127748; Icon Prompt

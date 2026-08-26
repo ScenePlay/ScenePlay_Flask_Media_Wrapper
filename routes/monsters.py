@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import uuid
 import threading
 import requests
@@ -32,6 +33,35 @@ def _save_monster_image(file_storage):
     fname = save_upload_downscaled(
         file_storage, os.path.join(current_app.root_path, MONSTER_IMG_DIR))
     return '/static/uploads/monsters/' + fname
+
+
+def _existing_image_url(raw):
+    """A picked existing picture as a root-relative /static/uploads URL,
+    validated against the disk; '' when it is not one of ours."""
+    import shared_assets
+    raw = (raw or '').strip()
+    m = re.match(r'^/static/uploads/([a-z]+)/([^/\\]+)$', raw)
+    if not m or m.group(1) not in shared_assets.FOLDERS:
+        return ''
+    path = os.path.join(current_app.root_path, 'static', 'uploads', m.group(1), m.group(2))
+    return raw if os.path.isfile(path) else ''
+
+
+def _drop_monster_image(old, template_id):
+    """Delete a homebrew monster's own upload when it is replaced — unless
+    another record points at the same file."""
+    import shared_assets
+    from extensions import database
+    if not (isinstance(old, str) and old.startswith('/static/uploads/monsters/')):
+        return
+    name = os.path.basename(old)
+    if shared_assets.referenced_elsewhere(database, 'monsters', name,
+                                          exclude=('tblMonsterTemplates', 'template_id', template_id)):
+        return
+    try:
+        os.remove(os.path.join(current_app.root_path, 'static', 'uploads', 'monsters', name))
+    except OSError:
+        pass
 import relay_broadcaster
 _sync_states = {}
 
@@ -382,7 +412,8 @@ def homebrew_new():
                 'actions': [],
                 'notes': request.form.get('notes', ''),
             }
-            img_url = _save_monster_image(request.files.get('image'))
+            img_url = (_save_monster_image(request.files.get('image'))
+                       or _existing_image_url(request.form.get('image_ref')))
             if img_url:
                 stats['image'] = img_url
             t = tblMonsterTemplates(
@@ -459,15 +490,10 @@ def homebrew_edit(template_id):
                 'notes': request.form.get('notes', ''),
             })
             # Optional new picture (replaces the previous local upload, if any).
-            new_img = _save_monster_image(request.files.get('image'))
+            new_img = (_save_monster_image(request.files.get('image'))
+                       or _existing_image_url(request.form.get('image_ref')))
             if new_img:
-                old = stats.get('image', '')
-                if isinstance(old, str) and old.startswith('/static/uploads/monsters/'):
-                    try:
-                        os.remove(os.path.join(current_app.root_path, 'static', 'uploads',
-                                               'monsters', os.path.basename(old)))
-                    except OSError:
-                        pass
+                _drop_monster_image(stats.get('image', ''), m.template_id)
                 stats['image'] = new_img
 
             m.name         = name
@@ -494,17 +520,13 @@ def homebrew_image(template_id):
     m = tblMonsterTemplates.query.get_or_404(template_id)
     if m.source != 'homebrew':
         return jsonify({'ok': False, 'error': 'Only homebrew monsters can have a custom image.'}), 400
-    img_url = _save_monster_image(request.files.get('image'))
+    data = request.get_json(silent=True) or {}
+    img_url = (_save_monster_image(request.files.get('image'))
+               or _existing_image_url(data.get('image_url') or request.form.get('image_ref')))
     if not img_url:
         return jsonify({'ok': False, 'error': 'No valid image (png/jpg/gif/webp).'}), 400
     stats = json.loads(m.stats_json or '{}')
-    old = stats.get('image', '')
-    if isinstance(old, str) and old.startswith('/static/uploads/monsters/'):
-        try:
-            os.remove(os.path.join(current_app.root_path, 'static', 'uploads',
-                                   'monsters', os.path.basename(old)))
-        except OSError:
-            pass
+    _drop_monster_image(stats.get('image', ''), m.template_id)
     stats['image'] = img_url
     m.stats_json = json.dumps(stats)
     db.session.commit()

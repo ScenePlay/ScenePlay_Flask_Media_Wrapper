@@ -503,6 +503,9 @@
           <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
                   onclick="pasteImageNear(this)"
                   title="Paste an image from the clipboard">&#128203;</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                  onclick="obsReuseArt(this.form, ['image','video'])"
+                  title="Reuse a picture or video already on this server — nothing is copied">&#128444;</button>
         </form>
         <form method="post"
               action="{{ url_for('obs_bp.upload_image', slot=img.slot) }}"
@@ -598,6 +601,9 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
                         onclick="pasteImageNear(this)"
                         title="Paste an image from the clipboard">&#128203;</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                        onclick="obsReuseArt(document.getElementById('obs-art-{{ slot }}'), ['image','video'])"
+                        title="Reuse a picture or video already on this server — nothing is copied">&#128444;</button>
                 {% if art.per_session %}
                 <button name="clear" value="1" form="obs-art-{{ slot }}"
                         class="btn btn-sm btn-outline-danger"
@@ -1603,6 +1609,9 @@
                  class="form-control form-control-sm" style="max-width:12rem;"
                  onchange="if (this.files.length) this.form.submit();">
           <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                  onclick="obsReuseArt(this.form, ['image'])"
+                  title="Reuse a picture already on this server — nothing is copied">&#128444;</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0"
                   onclick="pasteImageNear(this)"
                   title="Paste an image from the clipboard">&#128203;</button>
         </form>
@@ -2488,5 +2497,18 @@ function obsPoll() {
 }
 obsPoll();
 setInterval(obsPoll, 3000);
+</script>
+<script>
+// "Choose existing" for a show-art slot: submit the slot's own upload form
+// with a shared reference instead of a file (routes/obs.py upload_image).
+function obsReuseArt(form, kinds) {
+  if (!form) return;
+  spPickAsset({ kinds: kinds, onPick: it => {
+    let ref = form.querySelector('input[name=ref]');
+    if (!ref) { ref = document.createElement('input'); ref.type = 'hidden'; ref.name = 'ref'; form.appendChild(ref); }
+    ref.value = spAssetRef(it, 'obs');
+    form.submit();
+  }});
+}
 </script>
 {% endblock %}

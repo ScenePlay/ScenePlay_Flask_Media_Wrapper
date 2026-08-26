@@ -88,6 +88,33 @@ def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _drop_portrait(char):
+    """Remove a character's current portrait FILE before replacing it —
+    unless it is a shared reference (another record's file) or another
+    record still points at it (see shared_assets)."""
+    import shared_assets
+    from extensions import database
+    name = char.portrait_path
+    if not name or shared_assets.is_ref(name):
+        return
+    if shared_assets.referenced_elsewhere(database, 'portraits', name,
+                                          exclude=('tblCharacters', 'character_id', char.character_id)):
+        return
+    old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, name)
+    if os.path.exists(old):
+        os.remove(old)
+
+
+def _portrait_ref_from_form():
+    """A picked existing picture (portrait_ref) — validated, else ''."""
+    import shared_assets
+    from extensions import database
+    ref = (request.form.get('portrait_ref') or '').strip()
+    if ref and shared_assets.valid_ref(current_app.root_path, database, 'portraits', ref, kinds=('image',)):
+        return ref
+    return ''
+
+
 from routes._util import _now  # shared timestamp format (relay sync compares these strings)
 
 
@@ -273,13 +300,15 @@ def character_new():
                     created_at=_now(),
                 ))
 
-            # Portrait upload
+            # Portrait upload — or a picked existing picture (by reference)
             portrait = request.files.get('portrait')
             if portrait and portrait.filename and _allowed_file(portrait.filename):
                 from routes._util import save_upload_downscaled
                 filename = save_upload_downscaled(
                     portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
                 char.portrait_path = filename
+            elif _portrait_ref_from_form():
+                char.portrait_path = _portrait_ref_from_form()
 
             db.session.commit()
             if added_to_session:
@@ -605,14 +634,14 @@ def character_edit(character_id):
 
             portrait = request.files.get('portrait')
             if portrait and portrait.filename and _allowed_file(portrait.filename):
-                if char.portrait_path:
-                    old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
-                    if os.path.exists(old):
-                        os.remove(old)
+                _drop_portrait(char)
                 from routes._util import save_upload_downscaled
                 filename = save_upload_downscaled(
                     portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
                 char.portrait_path = filename
+            elif _portrait_ref_from_form():
+                _drop_portrait(char)
+                char.portrait_path = _portrait_ref_from_form()
 
             db.session.commit()
             return redirect(url_for('ttrpg.character_sheet', character_id=char.character_id))
@@ -653,12 +682,13 @@ def upload_portrait(character_id):
         return redirect(url_for('ttrpg.character_sheet', character_id=character_id))
 
     portrait = request.files.get('portrait')
-    if portrait and portrait.filename and _allowed_file(portrait.filename):
-        # Remove old portrait
-        if char.portrait_path:
-            old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
-            if os.path.exists(old):
-                os.remove(old)
+    if not (portrait and portrait.filename) and _portrait_ref_from_form():
+        # "Choose existing" from the sheet: point at the shared file.
+        _drop_portrait(char)
+        char.portrait_path = _portrait_ref_from_form()
+        db.session.commit()
+    elif portrait and portrait.filename and _allowed_file(portrait.filename):
+        _drop_portrait(char)
         from routes._util import save_upload_downscaled
         filename = save_upload_downscaled(
             portrait, os.path.join(current_app.root_path, PORTRAIT_FOLDER))
@@ -676,10 +706,7 @@ def portrait_paste(character_id):
     portrait = request.files.get('portrait')
     if not portrait:
         return jsonify({'ok': False, 'error': 'no file'}), 400
-    if char.portrait_path:
-        old = os.path.join(current_app.root_path, PORTRAIT_FOLDER, char.portrait_path)
-        if os.path.exists(old):
-            os.remove(old)
+    _drop_portrait(char)
     # Through the shared Pillow pipeline like every other upload: downscale,
     # opaque->JPEG. (This endpoint used to save raw bytes as .png — the
     # source of multi-MB portraits.)

@@ -271,8 +271,15 @@ def _allowed(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXT
 
 
-def _delete_bg_file(filename):
-    if not filename:
+def _delete_bg_file(filename, map_id=None):
+    """Remove a map's background file — never a shared reference, and never
+    a file another record still points at (see shared_assets)."""
+    import shared_assets
+    from extensions import database
+    if not filename or shared_assets.is_ref(filename):
+        return
+    if shared_assets.referenced_elsewhere(database, 'battlemaps', filename,
+                                          exclude=('tblBattleMaps', 'map_id', map_id)):
         return
     path = os.path.join(current_app.root_path, UPLOAD_FOLDER, filename)
     if os.path.exists(path):
@@ -436,7 +443,7 @@ def map_activate(map_id):
 def map_delete(map_id):
     bm = tblBattleMaps.query.get_or_404(map_id)
     session_id = bm.session_id
-    _delete_bg_file(bm.bg_image)
+    _delete_bg_file(bm.bg_image, bm.map_id)
     db.session.delete(bm)
     db.session.commit()
     flash('Map deleted.')
@@ -478,8 +485,29 @@ def map_edit(map_id):
 def map_bg(map_id):
     bm = tblBattleMaps.query.get_or_404(map_id)
     f = request.files.get('bg_image')
+    ref = (request.form.get('bg_ref') or '').strip()
+    if not (f and f.filename) and ref:
+        # "Choose existing": a picture from any upload folder, an uploaded
+        # video, or a library video — stored as a reference, nothing copied.
+        import shared_assets
+        from extensions import database
+        if not shared_assets.valid_ref(current_app.root_path, database, 'battlemaps', ref) \
+                and not (('/' not in ref) and os.path.isfile(
+                    os.path.join(current_app.root_path, UPLOAD_FOLDER, ref))):
+            if request.headers.get('X-Requested-With') == 'fetch':
+                return jsonify({'ok': False, 'error': 'That file is not available.'}), 400
+            flash('That file is not available.')
+            return redirect(url_for('battlemap_bp.manage'))
+        _delete_bg_file(bm.bg_image, bm.map_id)
+        bm.bg_image = ref
+        db.session.commit()
+        _push_map_state(bm)
+        if request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({'ok': True})
+        flash('Background set to an existing file.')
+        return redirect(url_for('battlemap_bp.manage'))
     if f and f.filename and _allowed(f.filename):
-        _delete_bg_file(bm.bg_image)
+        _delete_bg_file(bm.bg_image, bm.map_id)
         ext = f.filename.rsplit('.', 1)[1].lower()
         folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
         os.makedirs(folder, exist_ok=True)
@@ -505,7 +533,7 @@ def _store_bg_bytes(bm, raw, ext):
     ext = (ext or 'png').lower()
     if ext not in ALLOWED_EXT:
         ext = 'png'
-    _delete_bg_file(bm.bg_image)
+    _delete_bg_file(bm.bg_image, bm.map_id)
     folder = os.path.join(current_app.root_path, UPLOAD_FOLDER)
     os.makedirs(folder, exist_ok=True)
     is_video = ext in VIDEO_EXT
@@ -581,7 +609,7 @@ def map_bg_from_library(map_id):
     os.makedirs(folder, exist_ok=True)
     filename = f'{uuid.uuid4().hex}.{ext}'
     shutil.copyfile(src, os.path.join(folder, filename))
-    _delete_bg_file(bm.bg_image)
+    _delete_bg_file(bm.bg_image, bm.map_id)
     bm.bg_image = filename
     db.session.commit()
     _push_map_state(bm)
@@ -594,7 +622,7 @@ def map_bg_from_library(map_id):
 @dm_required
 def map_bg_clear(map_id):
     bm = tblBattleMaps.query.get_or_404(map_id)
-    _delete_bg_file(bm.bg_image)
+    _delete_bg_file(bm.bg_image, bm.map_id)
     bm.bg_image = ''
     db.session.commit()
     return redirect(url_for('battlemap_bp.session_maps', session_id=bm.session_id))

@@ -68,11 +68,16 @@
           </div>
           <div class="col-sm-3">
             <label class="form-label">Portrait</label>
-            <input type="file" name="portrait"
+            <input type="file" name="portrait" id="edit-portrait-input"
                    class="form-control"
                    accept="image/png,image/jpeg,image/gif,image/webp">
+            <input type="hidden" name="portrait_ref" id="edit-portrait-ref">
             <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
                     onclick="pasteImageNear(this)" title="Paste image from clipboard">&#128203; Paste</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                    onclick="spPickAsset({kinds:['image'], onPick: it => { document.getElementById('edit-portrait-ref').value = spAssetRef(it, 'portraits'); document.getElementById('edit-portrait-input').value = ''; spAssetPreview(document.getElementById('edit-portrait-ref-preview'), it); }})"
+                    title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
+            <div id="edit-portrait-ref-preview" class="mt-1" style="display:none;"></div>
             {% if char.portrait_path %}
             <div class="mt-1">
               <img src="{{ url_for('static', filename='uploads/portraits/' ~ char.portrait_path) }}"

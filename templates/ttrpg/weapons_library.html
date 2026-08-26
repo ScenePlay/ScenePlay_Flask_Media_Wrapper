@@ -150,6 +150,8 @@
           <span class="small text-muted">or URL:</span>
           <input type="text" name="image_url" class="form-control form-control-sm"
                  placeholder="https://…" style="max-width:260px;">
+          <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
+                  onclick="spReuseImageInto(this)" title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
         </div>
         <img id="add-img-preview" src="" alt=""
              style="display:none;margin-top:6px;max-height:80px;max-width:160px;
@@ -422,6 +424,8 @@
                   <input type="text" name="image_url" value="{{ w.image_url }}"
                          class="form-control form-control-sm"
                          placeholder="https://…" style="max-width:260px;">
+                  <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
+                  onclick="spReuseImageInto(this)" title="Reuse a picture already on this server — nothing is copied">&#128444; Choose existing</button>
                 </div>
                 <img id="edit-img-preview-{{ w.weapon_lib_id }}" src="" alt=""
                      style="display:none;margin-top:6px;max-height:80px;max-width:160px;
@@ -494,6 +498,22 @@ function showImageModal(url, name) {
   document.getElementById('img-modal-src').src = url;
   document.getElementById('img-modal-name').textContent = name;
   document.getElementById('img-modal').style.display = 'flex';
+}
+</script>
+<script>
+// "Choose existing" for the library forms: writes the picked file's URL into
+// the sibling image_url input (the record stores a URL, so nothing is copied)
+// and shows it in the form's preview image.
+function spReuseImageInto(btn) {
+  spPickAsset({ kinds: ['image'], onPick: it => {
+    const row = btn.parentElement;
+    const url = row.querySelector('input[name=image_url]');
+    if (url) url.value = it.url;
+    const file = row.querySelector('input[type=file]');
+    if (file) file.value = '';
+    const prev = row.parentElement.querySelector('img[id$="-preview"], img[id*="-preview-"]');
+    if (prev) { prev.src = it.url; prev.style.display = ''; }
+  }});
 }
 </script>
 {% endblock %}

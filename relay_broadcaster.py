@@ -272,8 +272,13 @@ def _battlemap_data(filename):
         return None, None, None
     try:
         from flask import current_app
-        path = os.path.join(current_app.root_path, 'static', 'uploads', 'battlemaps', filename)
+        import shared_assets
+        from extensions import database
+        # bare name, ../<folder>/<file>, or a library-video reference
+        path = shared_assets.resolve_path(current_app.root_path, database, 'battlemaps', filename)
     except RuntimeError:
+        return None, None, None
+    if not path:
         return None, None, None
     if not os.path.exists(path):
         return None, None, None

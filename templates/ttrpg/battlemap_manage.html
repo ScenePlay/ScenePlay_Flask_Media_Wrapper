@@ -177,6 +177,11 @@
                  style="font-size:.75rem;">
           <button class="btn btn-outline-secondary btn-sm flex-shrink-0">Upload BG</button>
           <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
+                  onclick="reuseMapBackground({{ m.map_id }}, this)"
+                  title="Reuse a picture or video already on this server (uploads or the video library) — nothing is copied">
+            &#128444; Choose existing
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
                   onclick="pasteMapBackground({{ m.map_id }}, this)"
                   title="Paste an image or video from the clipboard as this map's background">
             &#128203; Paste BG
@@ -629,6 +634,22 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='scripts/floorplan_prompt.js') }}"></script>
 <script src="{{ static_v('scripts/paste_image.js') }}"></script>
+<script>
+// "Choose existing" background: any upload folder picture, an uploaded video,
+// or a library video — stored as a reference on the map (see shared_assets.py).
+function reuseMapBackground(mapId, btn) {
+  spPickAsset({ kinds: ['image', 'video'], onPick: it => {
+    const fd = new FormData();
+    fd.append('bg_ref', spAssetRef(it, 'battlemaps'));
+    btn.disabled = true;
+    fetch(`/ttrpg/battlemap/${mapId}/bg`, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' } })
+      .then(r => r.json()).then(d => {
+        if (!d.ok) { alert(d.error || 'Could not set the background.'); btn.disabled = false; return; }
+        location.reload();
+      }).catch(() => { btn.disabled = false; alert('Could not set the background.'); });
+  }});
+}
+</script>
 <script src="{{ static_v('scripts/ai_generate.js') }}"></script>
 <script src="{{ static_v('scripts/texture_picker.js') }}"></script>
 <script>

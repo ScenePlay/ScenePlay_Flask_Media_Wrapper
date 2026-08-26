@@ -310,7 +310,9 @@ def _main_sceneplay_guard():
 main.before_request(_main_sceneplay_guard)
 
 _UT_OPEN_ENDPOINTS = {'ut.toggle_keep_music', 'ut.set_keep_music_off',
-                      'ut.set_keep_music_on', 'ut.processyt'}
+                      'ut.set_keep_music_on', 'ut.processyt',
+                      # library video streamed into map/OBS pages that load session-less
+                      'ut.asset_media_video'}
 
 
 def _ut_sceneplay_guard():

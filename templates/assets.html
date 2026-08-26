@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sp-assets table { width:100%; font-size:.85em; border-collapse:collapse; }
+  .sp-assets th, .sp-assets td { padding:4px 8px; border-bottom:1px solid var(--sp-border); vertical-align:top; }
+  .sp-assets th { text-align:left; position:sticky; top:0; background:var(--sp-surface, #fff); }
+  .sp-assets td.num { text-align:right; white-space:nowrap; }
+  .sp-assets .muted { color:var(--sp-muted); }
+  .sp-assets .missing td { opacity:.55; }
+  .sp-assets .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:6px 0 8px; }
+  .sp-assets .toolbar input { max-width:280px; }
+  .sp-assets .scroll { max-height:60vh; overflow:auto; }
+  .sp-assets .sp-dl { white-space:nowrap; font-weight:600; padding:2px 10px; }
+  .sp-assets .toolbar .btn-primary { font-weight:600; padding:6px 16px; font-size:.95em; }
+</style>
+<div class="sp-page sp-assets">
+  <div class="sp-page-head">
+    <h1>Downloads</h1>
+    <a href="{{ url_for('ut.main') }}" style="font-size:.85em;">&larr; Utilities</a>
+  </div>
+  <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
+    Everything stored on this box. Music and video are listed by the title yt-dlp reported
+    (your typed name, then the filename, when there is none); the download keeps that title as the filename.
+    Zips are streamed, so a large library starts downloading right away.
+  </p>
+
+  {% macro media_card(title, kind, rows, t) %}
+  <details class="sp-card" open>
+    <summary><h3>{{ title }} <span class="muted" style="font-weight:normal;font-size:.75em;">
+      — {{ t.count }} file{{ '' if t.count == 1 else 's' }}, {{ t.bytes_h }}{% if t.missing %}, {{ t.missing }} missing on disk{% endif %}</span></h3></summary>
+    <div class="toolbar">
+      <input type="search" class="form-control form-control-sm" placeholder="Filter…" oninput="spAssetFilter(this, '{{ kind }}-tbl')">
+      {% if t.count %}
+      <a class="btn btn-primary" href="{{ url_for('ut.asset_zip', kind=kind) }}"
+         title="All {{ t.count }} files as one zip ({{ t.bytes_h }}), stored uncompressed">&#11015; Download all {{ title | lower }} ({{ t.bytes_h }})</a>
+      {% endif %}
+    </div>
+    <div class="scroll">
+    <table id="{{ kind }}-tbl">
+      <thead><tr><th>Title</th><th>Channel</th><th>Length</th><th>Uploaded</th><th>File</th><th class="num">Size</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr class="{{ '' if r.exists else 'missing' }}">
+        <td>{{ r.name }}{% if r.display_name and r.display_name != r.name %}<div class="muted" style="font-size:.85em;">{{ r.display_name }}</div>{% endif %}</td>
+        <td>{{ r.uploader }}</td>
+        <td class="num">{{ r.duration_h }}</td>
+        <td class="num">{{ r.upload_date }}</td>
+        <td class="muted" style="word-break:break-all;">{{ r.file }}</td>
+        <td class="num">{{ r.size_h if r.exists else 'missing' }}</td>
+        <td class="num">{% if r.exists %}<a class="btn btn-sm btn-primary sp-dl" href="{{ url_for('ut.asset_download_media', kind=kind, media_id=r.id) }}" title="Download this file">&#11015; Download</a>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Nothing downloaded yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endmacro %}
+
+  {{ media_card('Music', 'music', music, totals.music) }}
+  {{ media_card('Videos', 'video', video, totals.video) }}
+
+  <details class="sp-card" open>
+    <summary><h3>Pictures <span class="muted" style="font-weight:normal;font-size:.75em;">
+      — {{ totals.pictures.count }} file{{ '' if totals.pictures.count == 1 else 's' }}, {{ totals.pictures.bytes_h }}</span></h3></summary>
+    <div class="toolbar">
+      <input type="search" class="form-control form-control-sm" placeholder="Filter…" oninput="spAssetFilter(this, 'pictures-tbl')">
+      {% if totals.pictures.count %}
+      <a class="btn btn-primary" href="{{ url_for('ut.asset_zip', kind='pictures') }}"
+         title="Every upload folder as one zip">&#11015; Download all pictures ({{ totals.pictures.bytes_h }})</a>
+      {% endif %}
+    </div>
+    <div class="scroll">
+    <table id="pictures-tbl">
+      <thead><tr><th></th><th>Folder</th><th>File</th><th>Used by</th><th class="num">Size</th><th></th></tr></thead>
+      <tbody>
+      {% for r in pictures %}
+      <tr>
+        <td><img src="{{ url_for('static', filename='uploads/' ~ r.folder ~ '/' ~ r.file) }}" alt="" loading="lazy"
+                 style="width:48px;height:32px;object-fit:cover;border-radius:3px;background:#222;"></td>
+        <td>{{ r.folder_label }}</td>
+        <td style="word-break:break-all;">{{ r.file }}</td>
+        <td>{{ r.used_by }}</td>
+        <td class="num">{{ r.size_h }}</td>
+        <td class="num"><a class="btn btn-sm btn-primary sp-dl" href="{{ url_for('ut.asset_download_picture', folder=r.folder, name=r.file) }}" title="Download this file">&#11015; Download</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No uploaded pictures.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+</div>
+<script>
+  // Client-side row filter per table: matches any cell text.
+  function spAssetFilter(input, tableId) {
+    const q = input.value.trim().toLowerCase();
+    document.querySelectorAll('#' + tableId + ' tbody tr').forEach(tr => {
+      tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none';
+    });
+  }
+</script>
+{% endblock %}
