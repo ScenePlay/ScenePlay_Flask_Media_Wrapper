@@ -1255,8 +1255,11 @@ def _apply_floorplan(bm, clean, warnings):
 
     db.session.commit()
     _push_map_state(bm)   # live map: remote 3D viewers rebuild on the next push
+    # The normalized plan rides along so the editor's autosave can adopt it
+    # without a re-fetch (which would drop its selection and undo history).
     return jsonify({'ok': True, 'version': fp.version, 'warnings': warnings,
-                    'summary': floorplan_mod.floorplan_summary(clean)})
+                    'summary': floorplan_mod.floorplan_summary(clean),
+                    'floorplan': clean})
 
 
 @battlemap_bp.route('/<int:map_id>/floorplan/history')

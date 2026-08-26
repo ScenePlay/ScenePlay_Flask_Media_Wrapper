@@ -167,34 +167,82 @@ window.BMFP = (function () {
       .catch(() => {});
   }
 
-  function save() {
-    if (!plan) return;
+  // ── autosave ───────────────────────────────────────────────────────────────
+  // Every edit (markDirty) schedules a save AUTOSAVE_MS later; edits made
+  // while a save is in flight trigger one more save when it lands. The
+  // working copy, selection and undo history are all kept across saves —
+  // only the server's normalized plan is adopted, and only when nothing
+  // changed underneath it. The manual Save button just saves right now.
+  const AUTOSAVE_MS = 1200;
+  let saveTimer = null;
+  let saving = false;
+  let editSeq = 0;             // bumped on every edit
+  let saveError = '';          // last rejection/network message for the status line
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, AUTOSAVE_MS);
+  }
+
+  function serializePlan() {
     plan.schema_version = 2;
     plan.format = 'sceneplay-floorplan';
     plan.grid = { cols: GRID_COLS, rows: GRID_ROWS };
     plan.default_wall_height_ft = wallHeightFt;
-    const btn = document.getElementById('fp-save-btn');
-    if (btn) btn.disabled = true;
+    return JSON.stringify({ floorplan: plan });
+  }
+
+  function save() {
+    if (!plan || !dirty) return;
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (saving) return;          // the in-flight save re-runs when it lands
+    const seq = editSeq;
+    saving = true;
+    updateStatus();
     fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ floorplan: plan }),
+      body: serializePlan(),
     }).then(r => r.json())
       .then(d => {
-        if (btn) btn.disabled = false;
+        saving = false;
         if (!d.ok) {
-          alert('Floorplan rejected:\n' + (d.errors || ['save failed']).join('\n'));
+          saveError = 'Not saved: ' + (d.errors || ['save failed']).join('; ');
+          updateStatus();
           return;
         }
-        // Re-fetch so the working copy matches the server's normalized
-        // geometry (clamping, door-id assignment, rounding).
-        if (window.BM3D && BM3D.setDraftFloorplan) BM3D.setDraftFloorplan(null);
-        load();
+        saveError = '';
+        version = d.version || version;
+        if (editSeq === seq) {
+          // Adopt the server's normalized geometry (clamping, rounding) —
+          // element order is preserved, so the selection and undo stacks
+          // still point at the same things.
+          if (d.floorplan) {
+            plan = d.floorplan;
+            plan.lights = plan.lights || [];
+            plan.props  = plan.props  || [];
+            plan.zones  = plan.zones  || [];
+          }
+          dirty = false;
+          // The 3D draft preview now matches the saved plan: release it so
+          // the viewer follows the version bump like every other viewer.
+          if (window.BM3D && BM3D.setDraftFloorplan) BM3D.setDraftFloorplan(null);
+          redraw();
+          renderSelUI();
+        } else {
+          save();                // edits landed mid-flight
+        }
+        updateStatus();
       })
-      .catch(() => { if (btn) btn.disabled = false; alert('Save failed (network).'); });
+      .catch(() => {
+        saving = false;
+        saveError = 'Save failed (network) — retrying';
+        updateStatus();
+        scheduleSave();
+      });
   }
 
   function revert() {
-    if (dirty && !confirm('Discard unsaved floorplan edits?')) return;
+    if (dirty && !confirm('Discard edits not yet autosaved?')) return;
     if (window.BM3D && BM3D.setDraftFloorplan) BM3D.setDraftFloorplan(null);
     load();
   }
@@ -210,8 +258,10 @@ window.BMFP = (function () {
 
   function markDirty() {
     dirty = true;
+    editSeq++;
     redraw();
     updateStatus();
+    scheduleSave();
   }
 
   function updateStatus() {
@@ -226,8 +276,8 @@ window.BMFP = (function () {
       (nl ? ` · ${nl} light${nl !== 1 ? 's' : ''}` : '') +
       (np ? ` · ${np} prop${np !== 1 ? 's' : ''}` : '') +
       (version ? ` · v${version}` : ' · unsaved map') +
-      (dirty ? '  (unsaved edits)' : '');
-    el.style.color = dirty ? 'var(--ttrpg-accent)' : '';
+      (saveError ? `  · ${saveError}` : saving ? '  · saving…' : dirty ? '  · autosave pending' : '');
+    el.style.color = saveError ? 'var(--bs-danger, #d9534f)' : dirty ? 'var(--ttrpg-accent)' : '';
   }
 
   // ── drawing the layer ──────────────────────────────────────────────────────
@@ -556,7 +606,10 @@ window.BMFP = (function () {
   }
 
   function setWallHeight(v) {
-    wallHeightFt = Math.max(1, Math.min(100, parseInt(v) || 10));
+    const h = Math.max(1, Math.min(100, parseInt(v) || 10));
+    if (h === wallHeightFt) return;
+    wallHeightFt = h;
+    if (plan) markDirty();       // default_wall_height_ft saves with the plan
   }
 
   function setWallStyle(v) {
@@ -1720,8 +1773,17 @@ window.BMFP = (function () {
         drag = null;
       }
     });
-    window.addEventListener('beforeunload', e => {
-      if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    // Leaving mid-debounce: fire the pending save with keepalive so it
+    // completes after the tab closes (same pattern as the map notes).
+    window.addEventListener('beforeunload', () => {
+      if (!plan || !dirty) return;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      try {
+        fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: serializePlan(), keepalive: true,
+        });
+      } catch (e) {}
     });
     // Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) while the panel is open — never
     // while typing in an input, and never stealing the browser's undo there.

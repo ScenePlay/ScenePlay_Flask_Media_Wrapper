@@ -97,7 +97,13 @@ PROP_TYPES = {'pillar', 'crate', 'barrel', 'table', 'chair', 'chest', 'statue',
               'tree', 'pine', 'dead_tree', 'bush', 'stump', 'log', 'boulder',
               'campfire', 'tent', 'cactus', 'well', 'cart',
               # modern / sci-fi
-              'console', 'wreck', 'barricade'}
+              'console', 'wreck', 'barricade',
+              # graveyard / crypt
+              'gravestone', 'grave_cross', 'tomb', 'mausoleum', 'obelisk',
+              'grave_mound', 'iron_fence', 'coffin', 'gallows',
+              # magic portals (walkable — tokens step through them)
+              'portal_arch', 'portal_ring', 'portal_circle', 'portal_mirror',
+              'portal_gate'}
 PROP_SCALE_RANGE = (0.25, 4.0)
 
 # Default surface bitmap per prop type (builtin texture-library slugs) —
@@ -115,6 +121,13 @@ PROP_DEFAULT_TEXTURES = {
     'boulder': 'cave_rock', 'campfire': 'cave_rock', 'tent': 'desert_sand',
     'cactus': 'mossy_grass', 'well': 'medieval_stone', 'cart': 'rough_planks',
     'console': 'hull_panels', 'wreck': 'rusty_metal', 'barricade': 'rough_planks',
+    'gravestone': 'medieval_stone', 'grave_cross': 'medieval_stone',
+    'tomb': 'stone_blocks', 'mausoleum': 'stone_blocks', 'obelisk': 'marble_floor',
+    'grave_mound': 'packed_dirt', 'iron_fence': 'rusty_metal',
+    'coffin': 'dark_wood_floor', 'gallows': 'rough_planks',
+    'portal_arch': 'marble_floor', 'portal_ring': 'marble_floor',
+    'portal_circle': 'marble_floor', 'portal_mirror': 'marble_floor',
+    'portal_gate': 'scorched_earth',
 }
 
 # Texture library slugs (see routes/textures.py). Shape-only validation here.

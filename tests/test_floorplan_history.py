@@ -85,6 +85,20 @@ class TestHistory:
         assert d['history'][0]['version'] == 1
         assert '1 walls' in d['history'][0]['summary']
 
+    def test_save_returns_normalized_plan(self, bm_client):
+        # The editor autosaves and adopts this instead of re-fetching (a
+        # re-fetch would drop its selection and undo history).
+        c, map_id, _ = bm_client
+        plan = _plan(3)
+        plan['props'] = [{'type': 'gravestone', 'x': 4, 'y': 4, 'scale': 9}]
+        d = _save(c, map_id, plan)
+        assert d['ok'] and d['version'] == 1
+        fp = d['floorplan']
+        assert fp['walls'][0]['x1'] == 3.0
+        assert fp['props'][0]['scale'] == 4.0          # clamped, like the DB copy
+        stored = c.get(f'/ttrpg/battlemap/{map_id}/floorplan').get_json()
+        assert stored['floorplan'] == fp
+
     def test_restore_replays_snapshot_and_is_undoable(self, bm_client):
         c, map_id, _ = bm_client
         _save(c, map_id, _plan(3))

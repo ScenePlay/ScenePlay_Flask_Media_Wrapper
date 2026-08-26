@@ -1233,6 +1233,13 @@ window.BM3D = (function () {
     dead_tree: 0x5f4a38, bush: 0x4a6b3a, stump: 0x6b4a2f, log: 0x6b4a2f,
     boulder: 0x7d7869, tent: 0x8a7a5c, cactus: 0x4a7a4a, cart: 0x7a5a38,
     console: 0x4a5560, wreck: 0x6b5a4a, barricade: 0x7a6a50,
+    // graveyard
+    gravestone: 0x8a877c, grave_cross: 0x8a877c, tomb: 0x84806f,
+    mausoleum: 0xffffff, obelisk: 0x9a968a, grave_mound: 0x5e4a36,
+    iron_fence: 0xffffff, coffin: 0x4e3a28, gallows: 0xffffff,
+    // portals: frame + bright baked surface (pair with a "glow" light)
+    portal_arch: 0xffffff, portal_ring: 0xffffff, portal_circle: 0xffffff,
+    portal_mirror: 0xffffff, portal_gate: 0xffffff,
   };
 
   // Default surface bitmap per prop type, from the builtin texture library —
@@ -1252,6 +1259,13 @@ window.BM3D = (function () {
     boulder: 'cave_rock', campfire: 'cave_rock', tent: 'desert_sand',
     cactus: 'mossy_grass', well: 'medieval_stone', cart: 'rough_planks',
     console: 'hull_panels', wreck: 'rusty_metal', barricade: 'rough_planks',
+    gravestone: 'medieval_stone', grave_cross: 'medieval_stone',
+    tomb: 'stone_blocks', mausoleum: 'stone_blocks', obelisk: 'marble_floor',
+    grave_mound: 'packed_dirt', iron_fence: 'rusty_metal',
+    coffin: 'dark_wood_floor', gallows: 'rough_planks',
+    portal_arch: 'marble_floor', portal_ring: 'marble_floor',
+    portal_circle: 'marble_floor', portal_mirror: 'marble_floor',
+    portal_gate: 'scorched_earth',
   };
 
   // Movement footprint per prop type, in FEET (circle around the prop's
@@ -1265,6 +1279,9 @@ window.BM3D = (function () {
     tree: 1.2, pine: 1.4, dead_tree: 1.0, stump: 1.0, log: 1.8,
     boulder: 2.0, campfire: 1.6, tent: 3.2, cactus: 1.0, well: 2.0,
     cart: 2.6, console: 2.2, wreck: 3.4, barricade: 2.4,
+    gravestone: 1.0, grave_cross: 0.8, tomb: 2.6, mausoleum: 4.6, obelisk: 1.4,
+    iron_fence: 2.4, coffin: 1.8, gallows: 3.0,   // grave_mound stays passable
+    // portal_* are absent on purpose: you walk THROUGH a portal
   };
 
   function _ft(v) { return v * FT; }
@@ -1510,6 +1527,122 @@ window.BM3D = (function () {
         _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(3.6), _ft(0.4)),
                  0.6, 0, 0, 1.8, 1.4, 0);
         _boxPart(p, 5.6, 0.5, 0.35, 0, 2.2, 0.5);
+        break;
+      case 'gravestone':                                 // rounded headstone + base
+        _boxPart(p, 2.0, 0.35, 1.0, 0, 0.17, 0);
+        _boxPart(p, 1.5, 2.2, 0.35, 0, 1.35, 0);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.75), _ft(0.75), _ft(0.35), 12),
+                 Math.PI / 2, 0, 0, 0, 2.45, 0);
+        break;
+      case 'grave_cross':                                // simple wooden/stone cross
+        _boxPart(p, 0.4, 3.6, 0.4, 0, 1.8, 0);
+        _boxPart(p, 2.0, 0.4, 0.4, 0, 2.7, 0);
+        break;
+      case 'tomb':                                       // sarcophagus / table tomb
+        _boxPart(p, 3.4, 0.4, 6.6, 0, 0.2, 0);
+        _boxPart(p, 2.8, 2.0, 6.0, 0, 1.4, 0);
+        _boxPart(p, 3.2, 0.45, 6.4, 0, 2.62, 0);
+        break;
+      case 'mausoleum':                                  // crypt: walls, roof, dark door
+        _boxPart(p, 9, 8, 9, 0, 4, 0);                   _colorLast(p, 0x8f8b7e);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(6.2), _ft(10)),
+                 0, 0, -1.1, -2.5, 9.3, 0);              _colorLast(p, 0x6d6960);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(6.2), _ft(10)),
+                 0, 0, 1.1, 2.5, 9.3, 0);                _colorLast(p, 0x6d6960);
+        _boxPart(p, 0.6, 7, 0.6, -2.9, 3.5, 4.8);        _colorLast(p, 0x9a968a);
+        _boxPart(p, 0.6, 7, 0.6, 2.9, 3.5, 4.8);         _colorLast(p, 0x9a968a);
+        _boxPart(p, 3.0, 5.6, 0.3, 0, 2.8, 4.6);         _colorLast(p, 0x1c1a18);
+        break;
+      case 'obelisk':                                    // plinth + tapered shaft + tip
+        _boxPart(p, 2.6, 1.2, 2.6, 0, 0.6, 0);
+        _cylPart(p, 0.55, 0.85, 8.5, 0, 5.45, 0, 4);
+        _cylPart(p, 0, 0.55, 1.2, 0, 10.3, 0, 4);
+        break;
+      case 'grave_mound':                                // fresh dug earth, walkable
+        var gm = new THREE.SphereGeometry(_ft(1.6), 9, 7);
+        gm.applyMatrix4(new THREE.Matrix4().makeScale(1, 0.55, 2));
+        _rotPart(p, gm, 0, 0, 0, 0, -0.3, 0);
+        break;
+      case 'iron_fence':                                 // spiked rail section along x
+        _boxPart(p, 5.6, 0.2, 0.15, 0, 0.8, 0);          _colorLast(p, 0x121212);
+        _boxPart(p, 5.6, 0.2, 0.15, 0, 3.4, 0);          _colorLast(p, 0x121212);
+        _boxPart(p, 0.4, 4.4, 0.4, -2.8, 2.2, 0);        _colorLast(p, 0x121212);
+        _boxPart(p, 0.4, 4.4, 0.4, 2.8, 2.2, 0);         _colorLast(p, 0x121212);
+        for (var fx = -2; fx <= 2; fx++) {
+          _boxPart(p, 0.2, 3.6, 0.2, fx * 1.0, 2.1, 0);  _colorLast(p, 0x121212);
+          _cylPart(p, 0, 0.2, 0.6, fx * 1.0, 4.2, 0, 4); _colorLast(p, 0x181818);
+        }
+        break;
+      case 'coffin':                                     // tapered box, lid ajar
+        _boxPart(p, 2.6, 1.4, 4.2, 0, 0.7, -0.9);       // shoulders
+        _boxPart(p, 1.9, 1.4, 2.4, 0, 0.7, 2.0);        // foot end, narrower
+        _rotPart(p, new THREE.BoxGeometry(_ft(2.7), _ft(0.2), _ft(6.6)),
+                 0, 0, 0.42, 1.55, 1.55, 0.2);          // lid slid off, leaning
+        break;
+      case 'gallows':                                    // platform, post, beam, noose
+        _boxPart(p, 7, 2.2, 7, 0, 1.1, 0);               _colorLast(p, 0x6b4a2f);
+        _boxPart(p, 0.6, 10, 0.6, -2.6, 7.2, 0);         _colorLast(p, 0x5a4030);
+        _boxPart(p, 5.4, 0.5, 0.5, -0.2, 12.0, 0);       _colorLast(p, 0x5a4030);
+        _rotPart(p, new THREE.BoxGeometry(_ft(0.4), _ft(2.6), _ft(0.4)),
+                 0, 0, 0.8, -1.5, 10.9, 0);              _colorLast(p, 0x5a4030);
+        _cylPart(p, 0.06, 0.06, 2.4, 1.6, 10.55, 0, 4);  _colorLast(p, 0xb8a888);
+        _rotPart(p, new THREE.TorusGeometry(_ft(0.45), _ft(0.07), 5, 10),
+                 0, 0, 0, 1.6, 8.9, 0);                  _colorLast(p, 0xb8a888);
+        break;
+      case 'portal_arch':                                // stone archway, shimmering fill
+        _boxPart(p, 1.2, 7.5, 1.2, -3.0, 3.75, 0);       _colorLast(p, 0x8d897c);
+        _boxPart(p, 1.2, 7.5, 1.2, 3.0, 3.75, 0);        _colorLast(p, 0x8d897c);
+        _rotPart(p, new THREE.TorusGeometry(_ft(3.0), _ft(0.6), 6, 12, Math.PI),
+                 0, 0, 0, 0, 7.5, 0);                    _colorLast(p, 0x8d897c);
+        _boxPart(p, 1.6, 0.8, 1.6, -3.0, 0.4, 0);        _colorLast(p, 0x7d7869);
+        _boxPart(p, 1.6, 0.8, 1.6, 3.0, 0.4, 0);         _colorLast(p, 0x7d7869);
+        _boxPart(p, 4.9, 7.4, 0.12, 0, 3.7, 0);          _colorLast(p, 0x7fd8ff);
+        _rotPart(p, new THREE.CircleGeometry(_ft(2.45), 16, 0, Math.PI),
+                 0, 0, 0, 0, 7.4, 0.07);                 _colorLast(p, 0x7fd8ff);
+        _rotPart(p, new THREE.CircleGeometry(_ft(2.45), 16, 0, Math.PI),
+                 0, Math.PI, 0, 0, 7.4, -0.07);          _colorLast(p, 0x7fd8ff);
+        break;
+      case 'portal_ring':                                // standing bronze ring, violet disc
+        _boxPart(p, 3.2, 0.8, 2.0, 0, 0.4, 0);           _colorLast(p, 0x6f6b60);
+        _rotPart(p, new THREE.TorusGeometry(_ft(3.4), _ft(0.45), 8, 20),
+                 0, 0, 0, 0, 4.2, 0);                    _colorLast(p, 0x8a6a3a);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(3.0), _ft(3.0), _ft(0.12), 20),
+                 Math.PI / 2, 0, 0, 0, 4.2, 0);          _colorLast(p, 0xb070ff);
+        break;
+      case 'portal_circle':                              // runic circle flat on the ground
+        _rotPart(p, new THREE.TorusGeometry(_ft(4.4), _ft(0.2), 5, 24),
+                 Math.PI / 2, 0, 0, 0, 0.12, 0);         _colorLast(p, 0x9fe0ff);
+        _rotPart(p, new THREE.TorusGeometry(_ft(3.2), _ft(0.15), 5, 20),
+                 Math.PI / 2, 0, 0, 0, 0.12, 0);         _colorLast(p, 0x9fe0ff);
+        for (var pc = 0; pc < 6; pc++) {
+          var pa = pc * Math.PI / 3;
+          _boxPart(p, 0.6, 0.1, 0.6, Math.cos(pa) * 3.8, 0.1, Math.sin(pa) * 3.8, pa);
+          _colorLast(p, 0xd8f4ff);
+        }
+        _cylPart(p, 2.4, 2.4, 0.08, 0, 0.06, 0, 20);     _colorLast(p, 0x6fc4ff);
+        break;
+      case 'portal_mirror':                              // tall framed mirror on feet
+        _boxPart(p, 1.6, 0.4, 0.9, -1.4, 0.2, 0);        _colorLast(p, 0x4e3a28);
+        _boxPart(p, 1.6, 0.4, 0.9, 1.4, 0.2, 0);         _colorLast(p, 0x4e3a28);
+        _boxPart(p, 4.2, 7.2, 0.4, 0, 3.8, 0);           _colorLast(p, 0x6b4a2f);
+        _boxPart(p, 3.4, 6.4, 0.5, 0, 3.8, 0);           _colorLast(p, 0xd8e4f0);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.9), _ft(0.9), _ft(0.4), 12),
+                 Math.PI / 2, 0, 0, 0, 7.6, 0);          _colorLast(p, 0x6b4a2f);
+        break;
+      case 'portal_gate':                                // jagged obsidian gate, fiery fill
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.5), _ft(1.2), _ft(8.5), 5),
+                 0, 0, 0.18, -3.2, 4.25, 0);             _colorLast(p, 0x1a1418);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.5), _ft(1.2), _ft(8.5), 5),
+                 0, 0, -0.18, 3.2, 4.25, 0);             _colorLast(p, 0x1a1418);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.2), _ft(0.8), _ft(4.0), 5),
+                 0, 0, 0.6, -4.2, 6.2, 0);               _colorLast(p, 0x1a1418);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.2), _ft(0.8), _ft(4.0), 5),
+                 0, 0, -0.6, 4.2, 6.2, 0);               _colorLast(p, 0x1a1418);
+        _rotPart(p, new THREE.CylinderGeometry(_ft(0.1), _ft(0.8), _ft(3.0), 5),
+                 0, 0, 0, 0, 8.2, 0);                    _colorLast(p, 0x1a1418);
+        _boxPart(p, 7.6, 0.9, 1.6, 0, 0.45, 0);          _colorLast(p, 0x2a2024);
+        _boxPart(p, 4.6, 7.2, 0.14, 0, 4.0, 0);          _colorLast(p, 0xff5a1a);
+        _boxPart(p, 2.6, 5.0, 0.2, 0, 3.6, 0);           _colorLast(p, 0xffc040);
         break;
       default:
         return null;

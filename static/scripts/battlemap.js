@@ -2919,7 +2919,7 @@ function bmSkyPick() {
     { value: 'morning', label: 'Morning' }, { value: 'afternoon', label: 'Afternoon' },
     { value: 'evening', label: 'Evening' }];
   const WEATHER = [
-    { value: 'clear', label: 'Sunny / clear' }, { value: 'cloudy', label: 'Cloudy' },
+    { value: 'clear', label: 'Clear' }, { value: 'cloudy', label: 'Cloudy' },
     { value: 'rain', label: 'Rain' }, { value: 'snow', label: 'Snow' },
     { value: 'storm', label: 'Storm (rain + lightning)' }];
   fetch(`/ttrpg/battlemap/${MAP_ID}/floorplan`).then(r => r.json()).then(async d => {
