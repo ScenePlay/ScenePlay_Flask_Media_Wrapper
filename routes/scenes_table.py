@@ -117,6 +117,17 @@ def unlink_rule():
     return jsonify({'ok': True})
 
 
+@sn.route('/api/scenes/reorder', methods=['POST'])
+def reorder():
+    """{scene_ids: [...]} in the wanted order → orderBy 1..n (home drag & drop)."""
+    from sql import set_scene_order
+    data = request.get_json(silent=True) or {}
+    ids = data.get('scene_ids')
+    if not isinstance(ids, list) or not ids:
+        abort(400)
+    return jsonify({'ok': True, 'updated': set_scene_order(ids)})
+
+
 @sn.route('/api/scenes/queue-states')
 def queue_states():
     """Home page poll: {scene_ID: all|some|none} so the cards' Queue toggles

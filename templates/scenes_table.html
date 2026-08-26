@@ -317,13 +317,31 @@
     <div class="modal-header"><h5 class="modal-title">New smart scene</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
-      <p class="small text-muted" style="margin:0 0 8px;">Pick what goes in: other scenes as sources, artists, a kind, a decade, a word.
-        Choices in one box are "any of"; across boxes they combine. The scene keeps its rule — new downloads that match are added automatically, and nothing you add by hand is ever removed.</p>
+      <p class="small text-muted" style="margin:0 0 8px;">Pick what goes in: other scenes as sources, artists, a kind, a decade, a word — from as many boxes as you like.
+        The scene keeps its rule: new downloads that match are added automatically, and nothing you add by hand is ever removed.</p>
+      <div class="small mb-2">
+        <b>Combine picks:</b>
+        <label class="ms-2"><input type="radio" name="sm-combine" value="any" checked> <b>any</b> of them <span class="text-muted">— everything in the picked scenes <i>plus</i> the picked artists <i>plus</i>…</span></label>
+        <label class="ms-3"><input type="radio" name="sm-combine" value="all"> <b>all</b> of them <span class="text-muted">— only songs matching every box (e.g. Jazz <i>and</i> mixes)</span></label>
+      </div>
+      <style>
+        /* Checkbox lists, not <select multiple>: a filtered multi-select
+           still range-selects the HIDDEN entries on shift-click / drag, which
+           quietly pulled every artist between two picks into a rule. */
+        .sm-list { border:1px solid var(--sp-border); border-radius:4px; padding:4px 6px; overflow:auto; font-size:.85em; background:var(--sp-surface); }
+        .sm-list label { display:block; margin:0; white-space:nowrap; cursor:pointer; }
+        .sm-list label.picked { font-weight:600; }
+        .sm-picked { font-size:.75em; color:var(--sp-muted); min-height:1.2em; }
+      </style>
       <div class="d-flex gap-3 flex-wrap">
-        <div><label class="small"><b>From scenes</b></label><br><select id="sm-scenes" multiple size="7" style="min-width:170px;font-size:.85em;"></select></div>
-        <div><label class="small"><b>Artists</b></label><br><input type="search" id="sm-artist-q" class="form-control form-control-sm mb-1" placeholder="filter…" style="max-width:170px;"><select id="sm-artists" multiple size="5" style="min-width:170px;font-size:.85em;"></select></div>
-        <div><label class="small"><b>Kind</b></label><br><select id="sm-kinds" multiple size="3" style="min-width:150px;font-size:.85em;"></select>
-             <label class="small mt-2"><b>Decade</b></label><br><select id="sm-decades" multiple size="3" style="min-width:150px;font-size:.85em;"></select></div>
+        <div><label class="small"><b>From scenes</b></label><input type="search" class="form-control form-control-sm mb-1 sm-filter" data-list="sm-scenes" placeholder="filter…" style="max-width:190px;">
+             <div id="sm-scenes" class="sm-list" style="width:190px;height:150px;"></div><div class="sm-picked" data-for="sm-scenes"></div></div>
+        <div><label class="small"><b>Genre</b> <span class="text-muted" title="From the YouTube tags, title and channel (or a label you set on the music table)">from metadata</span></label>
+             <div id="sm-genres" class="sm-list" style="width:170px;height:150px;"></div><div class="sm-picked" data-for="sm-genres"></div></div>
+        <div><label class="small"><b>Artists</b></label><input type="search" class="form-control form-control-sm mb-1 sm-filter" data-list="sm-artists" placeholder="filter…" style="max-width:190px;">
+             <div id="sm-artists" class="sm-list" style="width:190px;height:150px;"></div><div class="sm-picked" data-for="sm-artists"></div></div>
+        <div><label class="small"><b>Kind</b></label><div id="sm-kinds" class="sm-list" style="width:170px;"></div>
+             <label class="small mt-2"><b>Decade</b></label><div id="sm-decades" class="sm-list" style="width:170px;max-height:110px;"></div></div>
         <div><label class="small"><b>Word in title / channel</b></label><input type="text" id="sm-text" class="form-control form-control-sm" style="max-width:170px;">
              <div class="mt-2 small"><label><input type="checkbox" id="sm-music" checked> music</label> &nbsp; <label><input type="checkbox" id="sm-video" checked> videos</label></div></div>
       </div>
@@ -346,15 +364,16 @@
   // facet feed, once per open; the count re-queries on every change.
   let smTimer = null;
   function smRule() {
-    const sel = id => [...document.getElementById(id).selectedOptions].map(o => o.value);
+    const sel = id => [...document.querySelectorAll('#' + id + ' input:checked')].map(i => i.value);
     const media = []; if (document.getElementById('sm-music').checked) media.push('music'); if (document.getElementById('sm-video').checked) media.push('video');
-    return { scenes: sel('sm-scenes'), artists: sel('sm-artists'), kinds: sel('sm-kinds'), decades: sel('sm-decades'), text: document.getElementById('sm-text').value, media };
+    const combine = (document.querySelector('input[name="sm-combine"]:checked') || {}).value || 'any';
+    return { scenes: sel('sm-scenes'), genres: sel('sm-genres'), artists: sel('sm-artists'), kinds: sel('sm-kinds'), decades: sel('sm-decades'), text: document.getElementById('sm-text').value, media, combine };
   }
   function smCount() {
     clearTimeout(smTimer);
     smTimer = setTimeout(() => {
       const r = smRule();
-      if (!r.scenes.length && !r.artists.length && !r.kinds.length && !r.decades.length && !r.text.trim()) { document.getElementById('sm-count').textContent = 'Pick something to see how many match.'; return; }
+      if (!r.scenes.length && !r.genres.length && !r.artists.length && !r.kinds.length && !r.decades.length && !r.text.trim()) { document.getElementById('sm-count').textContent = 'Pick something to see how many match.'; return; }
       fetch('/api/smart-scenes/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rule: r }) })
         .then(x => x.json()).then(d => { document.getElementById('sm-count').textContent = d.summary + ' — ' + d.music.length + ' songs, ' + d.video.length + ' videos'; }).catch(() => {});
     }, 250);
@@ -362,19 +381,33 @@
   function spSmartSceneForm() {
     const m = document.getElementById('spSmartModal');
     fetch('/api/smart-scenes/facets').then(r => r.json()).then(d => {
-      const fill = (id, list, label) => { const s = document.getElementById(id); s.innerHTML = ''; list.forEach(o => { const e = document.createElement('option'); e.value = o.value; e.textContent = (label ? o.label : o.value) + ' (' + o.count + ')'; s.appendChild(e); }); };
-      fill('sm-scenes', d.options.scenes); fill('sm-artists', d.options.artists); fill('sm-kinds', d.options.kinds, true); fill('sm-decades', d.options.decades);
+      const fill = (id, list, label) => { const s = document.getElementById(id); s.innerHTML = ''; list.forEach(o => {
+          const l = document.createElement('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = o.value; cb.className = 'form-check-input me-1';
+          cb.onchange = () => { l.classList.toggle('picked', cb.checked); smPickedLine(id); smCount(); };
+          l.appendChild(cb); l.appendChild(document.createTextNode((label ? o.label : o.value) + ' (' + o.count + ')')); s.appendChild(l); }); };
+      fill('sm-scenes', d.options.scenes); fill('sm-genres', d.options.genres); fill('sm-artists', d.options.artists); fill('sm-kinds', d.options.kinds, true); fill('sm-decades', d.options.decades);
       const c = document.getElementById('sm-campaign'); c.innerHTML = ''; d.campaigns.forEach(x => { const e = document.createElement('option'); e.value = x.id; e.textContent = x.name; if (x.name === 'Music') e.selected = true; c.appendChild(e); });
-      ['sm-scenes', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => document.getElementById(id).onchange = smCount);
       document.getElementById('sm-text').oninput = smCount; document.getElementById('sm-music').onchange = smCount; document.getElementById('sm-video').onchange = smCount;
-      document.getElementById('sm-artist-q').oninput = function () { const q = this.value.trim().toLowerCase(); [...document.getElementById('sm-artists').options].forEach(o => { o.hidden = !!q && !o.textContent.toLowerCase().includes(q); }); };
+      document.querySelectorAll('input[name="sm-combine"]').forEach(r => r.onchange = smCount);
+      // Filter only hides rows; ticked rows stay ticked (and listed below the box).
+      document.querySelectorAll('.sm-filter').forEach(f => f.oninput = function () {
+        const q = this.value.trim().toLowerCase();
+        document.querySelectorAll('#' + this.dataset.list + ' label').forEach(l => { l.style.display = (!q || l.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+      });
       spSmartReset();
       bootstrap.Modal.getOrCreateInstance(m).show();
     }).catch(() => alert('Could not load the pickers.'));
   }
+  function smPickedLine(id) {
+    const el = document.querySelector('.sm-picked[data-for="' + id + '"]'); if (!el) return;
+    const picked = [...document.querySelectorAll('#' + id + ' input:checked')].map(i => i.value);
+    el.textContent = picked.length ? 'picked: ' + picked.join(', ') : '';
+  }
   function spSmartReset() {
-    ['sm-scenes', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => [...document.getElementById(id).options].forEach(o => { o.selected = false; o.hidden = false; }));
-    document.getElementById('sm-artist-q').value = ''; document.getElementById('sm-text').value = ''; document.getElementById('sm-name').value = '';
+    ['sm-scenes', 'sm-genres', 'sm-artists', 'sm-kinds', 'sm-decades'].forEach(id => { document.querySelectorAll('#' + id + ' input').forEach(i => { i.checked = false; }); document.querySelectorAll('#' + id + ' label').forEach(l => { l.classList.remove('picked'); l.style.display = ''; }); smPickedLine(id); });
+    document.querySelectorAll('.sm-filter').forEach(f => { f.value = ''; });
+    document.getElementById('sm-text').value = ''; document.getElementById('sm-name').value = '';
+    const anyR = document.querySelector('input[name="sm-combine"][value="any"]'); if (anyR) anyR.checked = true;
     document.getElementById('sm-music').checked = true; document.getElementById('sm-video').checked = true;
     document.getElementById('sm-count').textContent = 'Pick something to see how many match.'; document.getElementById('sm-msg').textContent = '';
   }

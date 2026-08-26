@@ -2454,3 +2454,27 @@ def scene_media_stats():
     for st in out.values():
         st['play_time'] = fmt_play_time(st['seconds'])
     return out
+
+
+def set_scene_order(scene_ids):
+    """Home-page drag and drop: the given scenes get orderBy 1..n in this
+    order. Scenes not listed (other campaigns, hidden) keep their own value.
+    Returns the number of rows updated."""
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    n = 0
+    try:
+        pos = 0
+        for sid in scene_ids:
+            try:
+                sid = int(sid)
+            except (TypeError, ValueError):
+                continue
+            pos += 1
+            c.execute("UPDATE tblScenes SET orderBy = ? WHERE scene_ID = ?", (pos, sid))
+            n += c.rowcount
+        conn.commit()
+    finally:
+        c.close()
+        conn.close()
+    return n

@@ -266,6 +266,7 @@
 .sp-scene-queue[data-state="some"] .sp-scene-queue-some { display: inline; }
 .sp-scene-queue[data-state="all"]  .sp-scene-queue-off,
 .sp-scene-queue[data-state="some"] .sp-scene-queue-off { display: none; }
+.sp-scene-card.sp-dragging { opacity: .45; outline: 2px dashed var(--sp-accent); }
 .sp-scene-stats {
     font-size: .72rem;
     color: var(--sp-muted);

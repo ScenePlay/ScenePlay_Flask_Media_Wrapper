@@ -53,8 +53,11 @@ class TestPlan:
         p = lo.plan(db, get, {'artist_min': 2, 'genre_min': 2})
         assert p['genres']['apply'] == 4 and p['genres']['names'] == ['Jazz', 'Rock']
         assert p['artists']['apply'] == 3          # 2 high (AC/DC) + 1 exact (Topic); song 3 is medium
-        # against today's labels no genre has any songs yet and no artist is set
-        assert p['scenes']['genres'] == [] and p['scenes']['artists'] == []
+        # no artist is set yet → no artist scenes; genres are DERIVED from the
+        # tags on the fly (smart_scenes.derived_genre), so genre scenes appear
+        # even before labels are written — still nothing is written by plan()
+        assert p['scenes']['artists'] == []
+        assert sorted(g['name'] for g in p['scenes']['genres']) == ['Jazz', 'Rock']
         assert _q(db, "SELECT COUNT(*) FROM tblMusic WHERE genre <> 0") == [(0,)]
         assert _q(db, "SELECT COUNT(*) FROM tblScenes") == [(2,)]
 

@@ -15,6 +15,15 @@
                             {% endif %}
                         {% endfor %}
                     </select>
+                    <!-- Card order: the scenes' own play order (the Order
+                         column on the Scenes table) or alphabetical. Remembered
+                         per browser; sorted in place, no reload. -->
+                    <label for="sceneSort" style="margin-left:10px;">Sort</label>
+                    <select id="sceneSort" class="form-select" onchange="spSortScenes(this.value, true)">
+                        <option value="order">Play order</option>
+                        <option value="name">Name</option>
+                    </select>
+                    <span id="sceneDragHint" class="small" style="color:var(--sp-muted);margin-left:8px;">drag cards to reorder</span>
                 </div>
             </div>
 
@@ -31,7 +40,7 @@
             </div>
             <div class="sp-card-grid sp-scene-grid">
                 {% for item in Scenes %}
-                <a href="/activatescenes/?id={{item['scene_ID']}}" class="sp-scene-card"
+                <a href="/activatescenes/?id={{item['scene_ID']}}" class="sp-scene-card" draggable="true" data-scene-id="{{ item['scene_ID'] }}"
                    style="--c1:{{ item.get('color') or '148,163,184' }};--c2:{{ item.get('color1') or item.get('color') or '148,163,184' }};">
                     <span class="sp-scene-band"></span>
                     <span class="sp-scene-name">{{item['sceneName']}}</span>
@@ -111,5 +120,64 @@
   }
   setInterval(sceneQueuePoll, 5000);
   spMixBar();
+
+  // Sort the scene cards in place. Cards arrive in play order from the
+  // server; that order is kept as data-order so switching back is exact.
+  function spSortScenes(mode, remember) {
+    const grid = document.querySelector('.sp-scene-grid');
+    if (!grid) return;
+    const cards = [...grid.querySelectorAll('.sp-scene-card')];
+    cards.forEach((c, i) => { if (c.dataset.order === undefined) c.dataset.order = i; });
+    const name = c => c.querySelector('.sp-scene-name').textContent.trim().toLowerCase();
+    cards.sort((a, b) => mode === 'name' ? name(a).localeCompare(name(b), undefined, { numeric: true })
+                                         : parseInt(a.dataset.order, 10) - parseInt(b.dataset.order, 10));
+    cards.forEach(c => grid.appendChild(c));
+    const sel = document.getElementById('sceneSort'); if (sel) sel.value = mode;
+    if (remember) { try { localStorage.setItem('sp-scene-sort', mode); } catch (e) {} }
+  }
+  try { spSortScenes(localStorage.getItem('sp-scene-sort') || 'order', false); } catch (e) {}
+
+  // ── Drag & drop reordering (Play order mode only) ──────────────────────
+  // Native HTML5 drag on the cards; the drop writes orderBy 1..n for every
+  // card on the page, so the new order holds on the Scenes table and after
+  // a reload. A drag never counts as a click (the card is an activate link).
+  let spDragging = null, spDragged = false;
+  function spDragEnabled() { return (document.getElementById('sceneSort') || {}).value !== 'name'; }
+  document.addEventListener('dragstart', e => {
+    const card = e.target.closest && e.target.closest('.sp-scene-card');
+    if (!card || !spDragEnabled()) { if (card) e.preventDefault(); return; }
+    spDragging = card; spDragged = false; card.classList.add('sp-dragging');
+    e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', card.dataset.sceneId); } catch (x) {}
+  });
+  document.addEventListener('dragover', e => {
+    const over = e.target.closest && e.target.closest('.sp-scene-card');
+    if (!spDragging || !over || over === spDragging) return;
+    e.preventDefault(); spDragged = true;
+    const r = over.getBoundingClientRect();
+    const before = (e.clientX - r.left) < r.width / 2;
+    over.parentNode.insertBefore(spDragging, before ? over : over.nextSibling);
+  });
+  document.addEventListener('dragend', () => {
+    if (!spDragging) return;
+    spDragging.classList.remove('sp-dragging');
+    const moved = spDragged; spDragging = null;
+    if (!moved) return;
+    const cards = [...document.querySelectorAll('.sp-scene-grid .sp-scene-card')];
+    cards.forEach((c, i) => { c.dataset.order = i; });        // new "play order" baseline
+    const hint = document.getElementById('sceneDragHint');
+    fetch('/api/scenes/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scene_ids: cards.map(c => parseInt(c.dataset.sceneId, 10)) }) })
+      .then(r => r.json()).then(d => { if (hint) hint.textContent = d.ok ? 'order saved' : 'could not save order'; setTimeout(() => { if (hint) hint.textContent = 'drag cards to reorder'; }, 2000); })
+      .catch(() => { if (hint) hint.textContent = 'could not save order'; });
+  });
+  // A card that was just dragged must not activate its scene on release.
+  document.addEventListener('click', e => {
+    const card = e.target.closest && e.target.closest('.sp-scene-card');
+    if (card && spDragged) { e.preventDefault(); spDragged = false; }
+  }, true);
+  const sortSel = document.getElementById('sceneSort');
+  const hintEl = document.getElementById('sceneDragHint');
+  if (sortSel && hintEl) sortSel.addEventListener('change', () => { hintEl.style.display = spDragEnabled() ? '' : 'none'; });
+  if (hintEl) hintEl.style.display = spDragEnabled() ? '' : 'none';
 </script>
 {% endblock %}

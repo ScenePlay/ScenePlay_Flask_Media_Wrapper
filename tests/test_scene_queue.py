@@ -86,3 +86,14 @@ def test_scene_delete_cascades(env):
     assert c.execute("SELECT COUNT(*) FROM tblMusicScene WHERE scene_ID=8").fetchone() == (1,), 'other scene untouched'
     assert c.execute("SELECT COUNT(*) FROM tblMusic").fetchone() == (4,), 'media rows kept'
     c.close()
+
+
+def test_set_scene_order(env):
+    c = sqlite3.connect(env)
+    c.execute("CREATE TABLE tblScenes (scene_ID INTEGER PRIMARY KEY, sceneName TEXT, active INT, orderBy INT, campaign_id INT)")
+    c.executemany("INSERT INTO tblScenes VALUES (?,?,1,?,1)", [(1, 'a', 1), (2, 'b', 2), (3, 'c', 3), (9, 'other', 40)])
+    c.commit(); c.close()
+    assert sql.set_scene_order([3, 'x', 1, 2]) == 3
+    c = sqlite3.connect(env)
+    assert c.execute("SELECT scene_ID, orderBy FROM tblScenes ORDER BY scene_ID").fetchall() == [(1, 2), (2, 3), (3, 1), (9, 40)]
+    c.close()

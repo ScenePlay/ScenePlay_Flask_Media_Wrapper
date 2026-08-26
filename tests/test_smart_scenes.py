@@ -16,7 +16,7 @@ def env(tmp_path):
     c.execute("CREATE TABLE lutGenre (genre_id INTEGER PRIMARY KEY, genre TEXT, directory TEXT, active INT, orderBY INT)")
     c.execute("CREATE TABLE tblMusic (song_id INTEGER PRIMARY KEY, song TEXT, displayName TEXT, genre INT, active INT DEFAULT 1)")
     c.execute("CREATE TABLE tblVideoMedia (video_ID INTEGER PRIMARY KEY, title TEXT, displayName TEXT, genre INT, active INT DEFAULT 1)")
-    c.execute("CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, uploader TEXT, duration INT, raw_json TEXT, artist TEXT DEFAULT '')")
+    c.execute("CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, uploader TEXT, description TEXT DEFAULT '', duration INT, raw_json TEXT, artist TEXT DEFAULT '')")
     c.execute("CREATE TABLE tblCampaigns (campaign_id INTEGER PRIMARY KEY, campaign_name TEXT)")
     c.execute("CREATE TABLE tblScenes (scene_ID INTEGER PRIMARY KEY, sceneName TEXT, active INT, orderBy INT, campaign_id INT)")
     c.execute("CREATE TABLE tblMusicScene (musicScene_ID INTEGER PRIMARY KEY, scene_ID INT, song_ID INT, orderBy INT, volume INT, loops INT)")
@@ -48,7 +48,7 @@ def _links(db, scene_id):
 class TestRules:
     def test_normalize_and_describe(self):
         r = ss.normalize({'genres': ['Jazz', ' Jazz '], 'kinds': ['mix', 'bogus'], 'media': ['music'], 'text': ' coffee '})
-        assert r == {'media': ['music'], 'genres': ['Jazz'], 'artists': [], 'kinds': ['mix'], 'decades': [], 'text': 'coffee', 'scenes': []}
+        assert r == {'media': ['music'], 'genres': ['Jazz'], 'artists': [], 'kinds': ['mix'], 'decades': [], 'text': 'coffee', 'scenes': [], 'combine': 'all'}
         assert ss.describe(r) == 'Jazz · Mix / ambience · "coffee" (music)'
         assert ss.describe({}) == 'everything (music + video)'
 
@@ -147,3 +147,37 @@ class TestSceneSources:
         ss.set_rule(env, 10, {'scenes': ['Jazz'], 'artists': ['AC/DC']})
         assert ss.refresh(env, 10) == {'music': 0, 'video': 0}, 'own members excluded as a source; nothing else in Jazz'
         assert _links(env, 10)[0] == [1]
+
+
+class TestCombineAny:
+    def test_union_across_categories(self, env):
+        c = sqlite3.connect(env)
+        c.execute("INSERT INTO tblScenes VALUES (10, 'Jazz', 1, 1, 1)")
+        c.executemany("INSERT INTO tblMusicScene (scene_ID, song_ID, orderBy, volume, loops) VALUES (?,?,1,100,0)", [(10, 1), (10, 2)])
+        c.commit(); c.close()
+        # Jazz scene (1,2) OR artist AC/DC (4,5) OR kind mix (3) → everything
+        r = {'scenes': ['Jazz'], 'artists': ['AC/DC'], 'kinds': ['mix'], 'combine': 'any'}
+        assert sorted(i for i, _ in ss.match(env, r)['music']) == [1, 2, 3, 4, 5]
+        assert [i for i, _ in ss.match(env, r)['video']] == [1], 'AC/DC video via the artist pick'
+        # same picks, intersection → nothing satisfies all three
+        assert ss.match(env, dict(r, combine='all'))['music'] == []
+        assert ss.describe(r) == 'from Jazz or AC/DC or Mix / ambience (music + video)'
+        assert ss.normalize({})['combine'] == 'all', 'older rules keep intersection semantics'
+
+
+class TestDerivedGenre:
+    def test_label_wins_else_tags(self):
+        assert ss.derived_genre('Rock', 'x', 'y', '', json.dumps({'tags': ['jazz']})) == 'Rock'
+        assert ss.derived_genre('', 'Blue in Green', 'chan', '', json.dumps({'tags': ['jazz', 'trumpet']})) == 'Jazz'
+        assert ss.derived_genre('', 'AC/DC - Thunderstruck', 'acdc', '', json.dumps({'tags': ['official video']})) == ''
+        assert ss.derived_genre('', 'AC/DC - Thunderstruck', 'acdc', 'hard rock classic', '{}') == 'Rock'
+
+    def test_genre_facet_and_match_use_derivation(self, env):
+        c = sqlite3.connect(env)
+        # song 4 has no label: give it rock tags; song 1 is labelled Jazz already
+        c.execute("UPDATE tblMediaMetadata SET raw_json=? WHERE media_type='music' AND media_id=4", (json.dumps({'tags': ['rock', 'live']}),))
+        c.execute("UPDATE tblMusic SET genre=0 WHERE song_id IN (4, 5)")
+        c.commit(); c.close()
+        opts = {o['value']: o['count'] for o in ss.facet_options(env)['genres']}
+        assert opts['Jazz'] == 3 and opts['Rock'] == 2, 'video (label Rock) + song 4 (tags)'
+        assert sorted(i for i, _ in ss.match(env, {'genres': ['rock'], 'media': ['music']})['music']) == [4]

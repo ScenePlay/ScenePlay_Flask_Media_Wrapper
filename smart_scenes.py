@@ -7,8 +7,13 @@ A rule is a small JSON object stored per scene in tblSceneRules:
      "kinds": ["mix"], "decades": ["1980s"], "text": "coffee",
      "scenes": ["Jazz", "Classical"]}       # drawn from OTHER scenes' members
 
-Every list is OR within itself and AND across fields; an empty field means
-"any". "scenes" makes a scene a SOURCE for another: "everything in Jazz and
+Every list is OR within itself. Across fields, "combine" decides:
+  "any" (the form's default) — a UNION: a song is in if it matches ANY
+        picked scene OR artist OR kind OR decade OR the word. Pick the Miles
+        scenes plus a couple of artists plus "1950s" and get all of them.
+  "all" — an intersection: every picked category must match ("Jazz AND
+        mixes"). Rules saved before this field existed keep "all".
+An empty field never restricts. "scenes" makes a scene a SOURCE for another: "everything in Jazz and
 Classical that is a mix" needs no genre label at all — the scene you built
 by hand is the taxonomy. A scene is never its own source. Members are matched against tblMusic / tblVideoMedia joined to
 tblMediaMetadata (genre via lutGenre, artist / duration / release_year via
@@ -24,8 +29,9 @@ import json
 import sqlite3
 
 import media_facets
+import genre_suggest
 
-FIELDS = ('media', 'genres', 'artists', 'kinds', 'decades', 'text', 'scenes')
+FIELDS = ('media', 'genres', 'artists', 'kinds', 'decades', 'text', 'scenes', 'combine')
 MEDIA = ('music', 'video')
 
 
@@ -44,6 +50,8 @@ def normalize(rule):
         v = r.get(f)
         if f == 'text':
             out[f] = (str(v or '')).strip()[:120]
+        elif f == 'combine':
+            out[f] = 'any' if str(v or '').strip().lower() == 'any' else 'all'
         else:
             vals = v if isinstance(v, (list, tuple)) else ([v] if v else [])
             vals = [str(x).strip() for x in vals if str(x).strip()]
@@ -63,17 +71,47 @@ def describe(rule):
     if r['text']:
         bits.append(f'"{r["text"]}"')
     media = ' + '.join(r['media']) if r['media'] != list(MEDIA) else 'music + video'
-    return (' · '.join(bits) or 'everything') + f' ({media})'
+    joiner = ' or ' if r['combine'] == 'any' else ' · '
+    return (joiner.join(bits) or 'everything') + f' ({media})'
+
+
+def derived_genre(genre_label, title, channel, description, raw_json):
+    """The genre a track is treated as: the stored lutGenre label when one is
+    set, else what the yt-dlp tags / title / channel / description say
+    (genre_suggest.TAG_RULES). YouTube has no genre field, so this is how
+    "Genre" becomes a pickable facet without a labelling step."""
+    if genre_label:
+        return genre_label
+    try:
+        info = json.loads(raw_json or '{}') if raw_json else {}
+    except ValueError:
+        info = {}
+    text = {'tags': ' | '.join(str(t).lower() for t in (info.get('tags') or [])),
+            'title': (title or '').lower(), 'channel': (channel or '').lower(),
+            'description': (description or '').lower()[:800]}
+    g, _f, _k = genre_suggest._tag_genre(text)
+    return g or ''
+
+
+def _genre_counts(conn):
+    counts = {}
+    for kind, tbl, pk in (('music', 'tblMusic', 'song_id'), ('video', 'tblVideoMedia', 'video_ID')):
+        for genre, title, chan, desc, raw in conn.execute(
+                f"SELECT COALESCE(g.genre,''), COALESCE(d.title,''), COALESCE(d.uploader,''), "
+                f"COALESCE(d.description,''), d.raw_json FROM {tbl} m "
+                f"LEFT JOIN tblMediaMetadata d ON d.media_type=? AND d.media_id=m.{pk} "
+                f"LEFT JOIN lutGenre g ON g.genre_id = m.genre", (kind,)):
+            dg = derived_genre(genre, title, chan, desc, raw)
+            if dg:
+                counts[dg] = counts.get(dg, 0) + 1
+    return sorted(counts.items(), key=lambda x: (-x[1], x[0].lower()))
 
 
 def facet_options(database):
     """What the builder can pick from, with counts."""
     conn = sqlite3.connect(database)
     try:
-        genres = conn.execute(
-            "SELECT g.genre, (SELECT COUNT(*) FROM tblMusic m WHERE m.genre=g.genre_id) + "
-            "(SELECT COUNT(*) FROM tblVideoMedia v WHERE v.genre=g.genre_id) "
-            "FROM lutGenre g WHERE g.genre <> '' ORDER BY g.genre").fetchall()
+        genres = _genre_counts(conn)
         artists = conn.execute(
             "SELECT artist, COUNT(*) FROM tblMediaMetadata WHERE COALESCE(artist,'') <> '' "
             "GROUP BY artist ORDER BY COUNT(*) DESC, artist").fetchall()
@@ -130,7 +168,7 @@ def match(database, rule, exclude_scene_id=None):
             rows = conn.execute(
                 f"SELECT m.{pk}, COALESCE(NULLIF(m.displayName,''), COALESCE(d.title, m.{namecol})), "
                 f"COALESCE(g.genre,''), COALESCE(d.artist,''), d.duration, d.raw_json, COALESCE(d.title,''), "
-                f"COALESCE(d.uploader,'') "
+                f"COALESCE(d.uploader,''), COALESCE(d.description,'') "
                 f"FROM {tbl} m LEFT JOIN tblMediaMetadata d ON d.media_type=? AND d.media_id=m.{pk} "
                 f"LEFT JOIN lutGenre g ON g.genre_id = m.genre "
                 f"WHERE COALESCE(m.active,1) = 1 AND m.{namecol} IS NOT NULL AND m.{namecol} <> '' "
@@ -138,23 +176,27 @@ def match(database, rule, exclude_scene_id=None):
             gset = {x.lower() for x in r['genres']}
             aset = {x.lower() for x in r['artists']}
             txt = r['text'].lower()
-            for rid, name, genre, artist, dur, raw, title, chan in rows:
-                if src[kind] is not None and rid not in src[kind]:
-                    continue
-                if gset and genre.lower() not in gset:
-                    continue
-                if aset and artist.lower() not in aset:
-                    continue
-                if r['kinds'] and media_facets.media_kind(dur) not in r['kinds']:
-                    continue
+            any_mode = r['combine'] == 'any'
+            for rid, name, genre, artist, dur, raw, title, chan, desc in rows:
+                # One verdict per picked category (unpicked ones never restrict)
+                tests = []
+                if src[kind] is not None:
+                    tests.append(rid in src[kind])
+                if gset:
+                    tests.append(derived_genre(genre, title, chan, desc, raw).lower() in gset)
+                if aset:
+                    tests.append(artist.lower() in aset)
+                if r['kinds']:
+                    tests.append(media_facets.media_kind(dur) in r['kinds'])
                 if r['decades']:
                     try:
                         info = json.loads(raw or '{}') if raw else {}
                     except ValueError:
                         info = {}
-                    if media_facets.decade(info, title) not in r['decades']:
-                        continue
-                if txt and txt not in f'{name} {title} {chan} {artist}'.lower():
+                    tests.append(media_facets.decade(info, title) in r['decades'])
+                if txt:
+                    tests.append(txt in f'{name} {title} {chan} {artist}'.lower())
+                if tests and not (any(tests) if any_mode else all(tests)):
                     continue
                 out[kind].append((rid, name))
     finally:
