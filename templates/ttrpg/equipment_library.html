@@ -67,6 +67,7 @@
     <option value="">All Sources</option>
     <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
     <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Homebrew</option>
+    <option value="dcc" {% if src == 'dcc' %}selected{% endif %}>Dungeon Crawler Carl</option>
   </select>
   <button type="submit" class="btn btn-sm btn-ttrpg">Search</button>
   <a href="{{ url_for('reference_bp.equipment_library') }}" class="btn btn-sm btn-outline-secondary">Clear</a>

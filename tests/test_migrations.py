@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0016_library_game_system'
+HEAD = '0017_item_library_game_system'
 
 
 def columns(path, table):
@@ -296,5 +296,28 @@ class TestLibraryGameSystem:
         run_upgrade(path)
         assert 'game_system' in columns(path, 'tblskillslibrary')
         assert q(path, "SELECT game_system FROM tblskillslibrary") == [('dnd5e',)]
+        run_upgrade(path)
+        assert q(path, "SELECT version_num FROM alembic_version") == [(HEAD,)]
+
+
+class TestItemLibraryGameSystem:
+    """0017: the four item libraries gain game_system (default dnd5e); lower-cased
+    table names (Eric's hand-made DB) are found too."""
+
+    def test_columns_added(self, tmp_path):
+        path = str(tmp_path / 'items.db')
+        conn = sqlite3.connect(path)
+        for stmt in OLD_SCHEMA:
+            conn.execute(stmt)
+        conn.execute("CREATE TABLE tblweaponslibrary (weapon_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, damage_dice TEXT, cost TEXT, source TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE tblArmorLibrary (armor_lib_id INTEGER PRIMARY KEY, name TEXT, source TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE tblEquipmentLibrary (equipment_lib_id INTEGER PRIMARY KEY, name TEXT, cost TEXT, source TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE tblMagicItemsLibrary (magic_item_lib_id INTEGER PRIMARY KEY, name TEXT, source TEXT, created_at TEXT)")
+        conn.execute("INSERT INTO tblweaponslibrary(name, damage_dice, cost, source, created_at) VALUES ('Dagger', '1d4', '2 gp', 'srd', 't')")
+        conn.commit(); conn.close()
+        run_upgrade(path)
+        for t in ('tblweaponslibrary', 'tblArmorLibrary', 'tblEquipmentLibrary', 'tblMagicItemsLibrary'):
+            assert 'game_system' in columns(path, t), t
+        assert q(path, "SELECT game_system FROM tblweaponslibrary") == [('dnd5e',)]
         run_upgrade(path)
         assert q(path, "SELECT version_num FROM alembic_version") == [(HEAD,)]

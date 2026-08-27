@@ -481,6 +481,7 @@ class tblWeaponsLibrary(db.Model):
     notes                  = db.Column(db.Text, default='')
     image_url              = db.Column(db.Text, default='')
     source                 = db.Column(db.Text, default='srd')
+    game_system            = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at             = db.Column(db.Text, nullable=False)
 
 
@@ -542,6 +543,7 @@ class tblArmorLibrary(db.Model):
     notes               = db.Column(db.Text, default='')
     image_url           = db.Column(db.Text, default='')
     source              = db.Column(db.Text, default='srd')     # srd / homebrew
+    game_system         = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at          = db.Column(db.Text, nullable=False)
 
 
@@ -815,6 +817,7 @@ class tblEquipmentLibrary(db.Model):
     cost             = db.Column(db.Text, default='')   # e.g. "5 gp"
     description      = db.Column(db.Text, default='')
     source           = db.Column(db.Text, default='srd')
+    game_system      = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at       = db.Column(db.Text, nullable=False)
 
 
@@ -856,6 +859,7 @@ class tblMagicItemsLibrary(db.Model):
     description       = db.Column(db.Text, default='')
     image_url         = db.Column(db.Text, default='')
     source            = db.Column(db.Text, default='srd')
+    game_system       = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at        = db.Column(db.Text, nullable=False)
 
 

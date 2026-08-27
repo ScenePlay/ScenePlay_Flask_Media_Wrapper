@@ -359,7 +359,8 @@
             {% if a.armor_category == 'Shield' %}&#9694;{% else %}&#9651;{% endif %}
             {{ a.armor_name }}
             <span style="color:var(--sp-muted);font-size:.7rem;">
-              {% if a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
+              {% if IS_DCC %}{{ (a.notes or 'DR').split(' — ')[0] }}
+              {% elif a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
               {% else %}{{ a.armor_class_base + a.ac_bonus }} AC{% endif %}
             </span>
           </span>
@@ -598,7 +599,7 @@
           <span class="qref-label">Armor</span>
           <div class="qref-chips">
             {% for a in char.armor %}
-            <span class="qref-chip" title="{{ a.armor_category }}">{% if a.armor_category == 'Shield' %}&#9694;{% else %}&#9651;{% endif %} {{ a.armor_name }} <span class="qref-sub">{{ a.armor_class_base + a.ac_bonus }} AC{% if a.equipped %} &#10003;{% endif %}</span></span>
+            <span class="qref-chip" title="{{ a.armor_category }}">{% if a.armor_category == 'Shield' %}&#9694;{% else %}&#9651;{% endif %} {{ a.armor_name }} <span class="qref-sub">{% if IS_DCC %}{{ (a.notes or 'DR').split(' — ')[0] }}{% else %}{{ a.armor_class_base + a.ac_bonus }} AC{% endif %}{% if a.equipped %} &#10003;{% endif %}</span></span>
             {% endfor %}
           </div>
         </div>
@@ -1321,7 +1322,8 @@
                     style="background:var(--sp-surface);border:1px solid var(--ttrpg-accent);font-size:.82rem;">
                 <span style="color:var(--ttrpg-accent);font-weight:600;">{{ a.armor_name }}</span>
                 <span class="text-muted small">
-                  {% if a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
+                  {% if IS_DCC %}{{ (a.notes or 'DR').split(' — ')[0] }}
+                  {% elif a.armor_category == 'Shield' %}+{{ a.armor_class_base + a.ac_bonus }} AC
                   {% else %}{{ a.armor_class_base + a.ac_bonus }} AC base{% endif %}
                 </span>
               </span>

@@ -825,9 +825,9 @@ def weapons_sync():
 @login_required
 def weapons_search():
     q = request.args.get('q', '').strip()
-    weapons = tblWeaponsLibrary.query.filter(
+    weapons = _system_filter(tblWeaponsLibrary.query.filter(
         tblWeaponsLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblWeaponsLibrary.name).limit(500).all()
+    ), tblWeaponsLibrary).order_by(tblWeaponsLibrary.name).limit(500).all()
     return jsonify([{
         'weapon_lib_id':          w.weapon_lib_id,
         'name':                   w.name,
@@ -1056,9 +1056,9 @@ def armor_add():
 @login_required
 def armor_search():
     q = request.args.get('q', '').strip()
-    armor = tblArmorLibrary.query.filter(
+    armor = _system_filter(tblArmorLibrary.query.filter(
         tblArmorLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblArmorLibrary.name).limit(500).all()
+    ), tblArmorLibrary).order_by(tblArmorLibrary.name).limit(500).all()
     return jsonify([{
         'armor_lib_id':      a.armor_lib_id,
         'name':              a.name,
@@ -1070,7 +1070,9 @@ def armor_search():
         'stealth_disadvantage': a.stealth_disadvantage,
         'cost':              a.cost,
         'weight':            a.weight,
+        'properties':        a.properties or '',
         'notes':             a.notes,
+        'game_system':       getattr(a, 'game_system', 'dnd5e') or 'dnd5e',
     } for a in armor])
 
 
@@ -1759,9 +1761,9 @@ def equipment_delete(equipment_lib_id):
 @login_required
 def equipment_search():
     q = request.args.get('q', '').strip()
-    items = tblEquipmentLibrary.query.filter(
+    items = _system_filter(tblEquipmentLibrary.query.filter(
         tblEquipmentLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblEquipmentLibrary.name).limit(500).all()
+    ), tblEquipmentLibrary).order_by(tblEquipmentLibrary.name).limit(500).all()
     return jsonify([{
         'equipment_lib_id': i.equipment_lib_id,
         'name':             i.name,
@@ -2539,6 +2541,8 @@ def reference_lookup(category):
     query = model.query
     if q:
         query = query.filter(model.name.ilike(f'%{q}%'))
+    if hasattr(model, 'game_system'):          # ?system=dcc|dnd5e|all (see _system_filter)
+        query = _system_filter(query, model)
     rows = query.order_by(model.name).limit(limit).all()
     return jsonify([to_dict(r) for r in rows])
 

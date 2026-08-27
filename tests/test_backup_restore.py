@@ -569,6 +569,41 @@ class TestMergeHomebrew:
         assert br.restore_merge(old_archive)['homebrew'] == 0
 
 
+class TestItemLibraryGameSystemMerge:
+    """0017 adds game_system to the item libraries. Merge copies by column
+    intersection, so archives from before and after the column both work."""
+
+    def _archive_from(self, env, src, label):
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label=label)
+        finally:
+            sql.database = old
+
+    def test_new_archive_into_old_live(self, env):
+        src = str(env['tmp'] / 'new.db'); make_db(src)
+        x(src, "ALTER TABLE tblWeaponsLibrary ADD COLUMN game_system TEXT NOT NULL DEFAULT 'dnd5e'")
+        x(src, "INSERT INTO tblWeaponsLibrary(name, source, game_system) VALUES ('Shotgun', 'dcc', 'dcc')")
+        assert br.restore_merge(self._archive_from(env, src, 'new'))['homebrew'] == 1
+        assert q(env['live'], "SELECT source FROM tblWeaponsLibrary WHERE name='Shotgun'") == [('dcc',)]
+
+    def test_old_archive_into_new_live(self, env):
+        x(env['live'], "ALTER TABLE tblWeaponsLibrary ADD COLUMN game_system TEXT NOT NULL DEFAULT 'dnd5e'")
+        src = str(env['tmp'] / 'old.db'); make_db(src)
+        x(src, "INSERT INTO tblWeaponsLibrary(name, source) VALUES ('Flail', 'homebrew')")
+        assert br.restore_merge(self._archive_from(env, src, 'old'))['homebrew'] == 1
+        assert q(env['live'], "SELECT game_system FROM tblWeaponsLibrary WHERE name='Flail'") == [('dnd5e',)]
+
+    def test_tag_travels_between_new_schemas(self, env):
+        x(env['live'], "ALTER TABLE tblWeaponsLibrary ADD COLUMN game_system TEXT NOT NULL DEFAULT 'dnd5e'")
+        src = str(env['tmp'] / 'new2.db'); make_db(src)
+        x(src, "ALTER TABLE tblWeaponsLibrary ADD COLUMN game_system TEXT NOT NULL DEFAULT 'dnd5e'")
+        x(src, "INSERT INTO tblWeaponsLibrary(name, source, game_system) VALUES ('Handgun', 'dcc', 'dcc')")
+        br.restore_merge(self._archive_from(env, src, 'new2'))
+        assert q(env['live'], "SELECT game_system FROM tblWeaponsLibrary WHERE name='Handgun'") == [('dcc',)]
+
+
 class TestMergeObsAdditions:
     """The OBS-era tables in the full merge: map prompts (local wins per
     map+kind), OBS scene bindings (local wins, ids remapped), and the dice
@@ -1492,7 +1527,7 @@ class TestLedSchemaRestore:
         assert p2['variance'] == [5, 6, 7] and p2['duration'] == 5 and p2['brightness'] == 0.6
         names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
         assert 'tblledtypemodel' not in names
-        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0016_library_game_system'
+        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0017_item_library_game_system'
 
     # -- merge ---------------------------------------------------------------
     def test_full_merge_old_archive_converts_every_row(self, env):

@@ -992,7 +992,8 @@ def push_library():
              'damage_type': w.damage_type or '',
              'two_handed_damage_dice': w.two_handed_damage_dice or '',
              'properties': w.properties or '', 'mastery': w.mastery or '',
-             'notes': w.notes or ''}
+             'notes': w.notes or '', 'cost': w.cost or '',
+             'game_system': getattr(w, 'game_system', 'dnd5e') or 'dnd5e'}
             for w in tblWeaponsLibrary.query.order_by(tblWeaponsLibrary.name).all()
         ],
         'armor': [
@@ -1000,13 +1001,15 @@ def push_library():
              'ac_base': a.armor_class_base, 'dex_bonus': bool(a.dex_bonus),
              'max_dex_bonus': a.max_dex_bonus, 'str_minimum': a.str_minimum,
              'stealth_disadvantage': bool(a.stealth_disadvantage),
-             'notes': a.notes or ''}
+             'notes': a.notes or '', 'properties': a.properties or '',
+             'game_system': getattr(a, 'game_system', 'dnd5e') or 'dnd5e'}
             for a in tblArmorLibrary.query.order_by(tblArmorLibrary.name).all()
         ],
         'equipment': [
             {'name': e.name, 'category': e.category or '',
              'subcategory': e.subcategory or '', 'weight': e.weight,
-             'cost': e.cost or '', 'description': e.description or ''}
+             'cost': e.cost or '', 'description': e.description or '',
+             'game_system': getattr(e, 'game_system', 'dnd5e') or 'dnd5e'}
             for e in tblEquipmentLibrary.query.order_by(tblEquipmentLibrary.name).all()
         ],
         'skills': [
@@ -1038,7 +1041,8 @@ def push_library():
         ],
         'magic_items': [
             {'name': m.name, 'category': m.category or '', 'rarity': m.rarity or '',
-             'attunement': bool(m.attunement), 'description': m.description or ''}
+             'attunement': bool(m.attunement), 'description': m.description or '',
+             'game_system': getattr(m, 'game_system', 'dnd5e') or 'dnd5e'}
             for m in tblMagicItemsLibrary.query.order_by(tblMagicItemsLibrary.name).all()
         ],
         'features': [

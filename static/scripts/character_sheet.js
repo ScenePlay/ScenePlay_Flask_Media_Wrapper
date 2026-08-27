@@ -55,6 +55,12 @@ function saveSkill(id) {
   }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
 }
 
+// Library pickers follow the sheet's game system: a crawler never sees the
+// SRD's gp-priced gear, a 5e character never sees loot-box DR armor.
+function _libSystem() {
+  return encodeURIComponent(typeof CHAR_SYSTEM !== 'undefined' ? CHAR_SYSTEM : 'all');
+}
+
 function saveItem(id) {
   fetch(`/ttrpg/inventory/${id}`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -339,9 +345,9 @@ function equipSearch(q) {
     // Mundane equipment AND magic items in one dropdown; magic entries carry a
     // tag and their rarity/attunement line rides into the item's notes on pick.
     Promise.all([
-      fetch(`/ttrpg/reference/equipment/search?q=${encodeURIComponent(q)}`)
+      fetch(`/ttrpg/reference/equipment/search?q=${encodeURIComponent(q)}&system=${_libSystem()}`)
         .then(r => r.json()).catch(() => []),
-      fetch(`/ttrpg/reference/lookup/magicitems?q=${encodeURIComponent(q)}&limit=10`)
+      fetch(`/ttrpg/reference/lookup/magicitems?q=${encodeURIComponent(q)}&limit=10&system=${_libSystem()}`)
         .then(r => r.json()).catch(() => []),
     ]).then(([equip, magic]) => {
         const results = [
@@ -525,7 +531,7 @@ function weapLibSearch(q) {
   const box = document.getElementById('weap-suggestions');
   // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _weapSearchTimer = setTimeout(() => {
-    fetch(`/ttrpg/reference/weapons/search?q=${encodeURIComponent(q)}`)
+    fetch(`/ttrpg/reference/weapons/search?q=${encodeURIComponent(q)}&system=${_libSystem()}`)
       .then(r => r.json()).then(results => {
         if (!results.length) { box.style.display = 'none'; return; }
         _weapResults = results;
@@ -693,7 +699,7 @@ function armorLibSearch(q) {
   const box = document.getElementById('armor-suggestions');
   // no minimum length: an empty query (a click) shows the full list, typing narrows it
   _armorSearchTimer = setTimeout(() => {
-    fetch(`/ttrpg/reference/armor/search?q=${encodeURIComponent(q)}`)
+    fetch(`/ttrpg/reference/armor/search?q=${encodeURIComponent(q)}&system=${_libSystem()}`)
       .then(r => r.json()).then(results => {
         if (!results.length) { box.style.display = 'none'; return; }
         _armorResults = results;
@@ -705,9 +711,11 @@ function armorLibSearch(q) {
             <div style="color:var(--ttrpg-accent);font-weight:600;">${a.name}</div>
             <div style="font-size:.7rem;color:var(--sp-muted);">
               ${a.armor_category}
-              — AC ${a.armor_category === 'Shield' ? '+' : ''}${a.armor_class_base}
+              ${a.game_system === 'dcc'
+                ? `— ${a.properties || 'DR'}`
+                : `— AC ${a.armor_category === 'Shield' ? '+' : ''}${a.armor_class_base}
               ${a.dex_bonus ? '+ DEX' + (a.max_dex_bonus !== null ? ` (max ${a.max_dex_bonus})` : '') : ''}
-              &bull; ${a.cost || '—'}
+              &bull; ${a.cost || '—'}`}
             </div>
           </div>`).join('');
         box.querySelectorAll('[data-idx]').forEach(el =>
@@ -724,7 +732,9 @@ function armorLibPick(a) {
   document.getElementById('new_armor_class_base').value = a.armor_class_base;
   document.getElementById('new_armor_dex_bonus').value  = a.dex_bonus;
   document.getElementById('new_armor_max_dex').value    = a.max_dex_bonus !== null ? a.max_dex_bonus : '';
-  document.getElementById('new_armor_notes').value      = a.notes || '';
+  // DCC: armor is Damage Resistance, not AC — keep the DR text on the row.
+  document.getElementById('new_armor_notes').value      = a.game_system === 'dcc'
+    ? [a.properties, a.notes].filter(Boolean).join(' — ') : (a.notes || '');
   document.getElementById('armor-suggestions').style.display = 'none';
   addArmorToChar();
 }

@@ -273,3 +273,57 @@ class TestRandomCrawler:
         assert ch.dcc()['applied'] == d['applied'] and ch.dcc()['popularity'] == d['dcc_popularity']
         assert any(r.resource_name == 'Mana' and r.max_val == ch.mana_max() for r in ch.resources)
         assert ch.notes and 'random crawler' in ch.notes[0].note_text
+
+
+class TestItemLibraries:
+    """Weapons / armor / gear / magic items are seeded as DCC rows (checked
+    against the DCC PDF: attack-skill weapons roll, armor is DR, loot has no
+    price) and the sheet pickers filter by system."""
+
+    def test_seed_tags_items_dcc_and_they_roll_or_are_free(self, lib_app):
+        from models.ttrpg import tblWeaponsLibrary, tblArmorLibrary, tblEquipmentLibrary, tblMagicItemsLibrary
+        a, dm, cid, models = lib_app
+        lib.seed(db, models, 't')
+        w = tblWeaponsLibrary.query.filter_by(game_system='dcc').all()
+        assert len(w) == 26 and all(x.damage_dice and x.cost == '' and x.source == 'dcc' for x in w)
+        by = {x.name: x for x in w}
+        assert (by['Warhammer'].damage_dice, by['Rapier'].damage_dice, by['Shotgun'].range_normal) == ('1d10', '1d6', 30)
+        assert 'Two-Handed' in by['Longsword'].properties and '+ Dex Mod' in by['Rapier'].properties
+        assert tblArmorLibrary.query.filter_by(game_system='dcc').count() == 7
+        assert all('DR' in x.properties or x.name in ('Shield', 'Looted Mob Armor') for x in tblArmorLibrary.query.filter_by(game_system='dcc'))
+        eq = {e.name: e for e in tblEquipmentLibrary.query.filter_by(game_system='dcc').all()}
+        assert '1d6 Bludgeoning' in eq['Stick of Basic Dynamite'].description
+        assert eq['Crafting Table (tier 1)'].cost == '25,000 gold' and eq['Healing Potion'].cost == ''
+        assert tblMagicItemsLibrary.query.filter_by(game_system='dcc').count() == 16
+
+    def test_pickers_filter_by_system(self, lib_app):
+        from models.ttrpg import tblWeaponsLibrary, tblEquipmentLibrary, tblMagicItemsLibrary
+        a, dm, cid, models = lib_app
+        lib.seed(db, models, 't')
+        db.session.add(tblWeaponsLibrary(api_index='dagger', name='Dagger', damage_dice='1d4', cost='2 gp', source='srd', created_at='t'))
+        db.session.add(tblEquipmentLibrary(api_index='rope-hempen', name='Rope, hempen (50 feet)', cost='1 gp', source='srd', created_at='t'))
+        db.session.add(tblMagicItemsLibrary(api_index='bag-of-holding', name='Bag of Holding', rarity='Uncommon', source='srd', created_at='t'))
+        db.session.commit()
+        c = a.test_client(user=dm)
+        dcc = c.get('/ttrpg/reference/weapons/search?q=dagger&system=dcc').get_json()
+        assert [w['name'] for w in dcc] == ['Dagger'] and dcc[0]['cost'] == '' if 'cost' in dcc[0] else True
+        assert len(c.get('/ttrpg/reference/weapons/search?q=dagger&system=all').get_json()) == 2
+        assert [w['name'] for w in c.get('/ttrpg/reference/weapons/search?q=dagger&system=dnd5e').get_json()] == ['Dagger']
+        assert c.get('/ttrpg/reference/weapons/search?q=shotgun&system=dnd5e').get_json() == []
+        assert [e['name'] for e in c.get('/ttrpg/reference/equipment/search?q=rope&system=dcc').get_json()] == ['Rope (50 feet)']
+        assert [m['name'] for m in c.get('/ttrpg/reference/lookup/magicitems?q=&limit=50&system=dnd5e').get_json()] == ['Bag of Holding']
+        assert len(c.get('/ttrpg/reference/lookup/magicitems?q=&limit=50&system=dcc').get_json()) == 16
+        # no system arg: everything, as before
+        assert len(c.get('/ttrpg/reference/weapons/search?q=dagger').get_json()) == 2
+
+    def test_relay_library_payload_carries_tag(self, lib_app, monkeypatch):
+        import relay_broadcaster as rb
+        a, dm, cid, models = lib_app
+        lib.seed(db, models, 't')
+        sent = {}
+        monkeypatch.setattr(rb, '_active', lambda: {'session_id': 's', 'url': 'u', 'secret': 'x'})
+        monkeypatch.setattr(rb, '_enqueue', lambda key, fn: fn())
+        monkeypatch.setattr(rb, '_post', lambda path, payload, cfg: sent.update(payload))
+        rb.push_library()
+        assert sent and {w['game_system'] for w in sent['weapons']} == {'dcc'}
+        assert all(a_['properties'] for a_ in sent['armor'] if a_['game_system'] == 'dcc')

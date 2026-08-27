@@ -22,7 +22,7 @@ Races:  name, size, move, stats ("+5 DEX, -2 CON"), skills (list of "+N Name"),
 Classes: name, types ("Bard, Rogue"), earth (bool), stats, skills, notes, prereq
 """
 
-VERSION = 2   # 2: corrections after checking the PDF column layout
+VERSION = 3   # 2: PDF column-layout corrections; 3: item libraries (weapons/armor/gear/magic)
 
 DCC_SOURCE = 'dcc'
 
@@ -536,6 +536,163 @@ CLASSES = [
 ]
 
 
+# ── Items ─────────────────────────────────────────────────────────────────────
+# DCC has no shop list: weapons ARE the Attack Skills (base die + Stat, p.79),
+# armor is Damage Resistance by Gear Slot (p.98, Table 25 p.116), and gear
+# comes out of loot boxes (p.215–218) — so costs are blank except where the
+# book prints a price. Anything that rolls carries its dice in the text so the
+# sheet's Hotlist chips and rollers can pick them up.
+
+_WEAPON_META = {   # name -> (category, range text, range ft)
+    'Bite': ('Natural', 'Melee', 5), 'Slice Attack': ('Natural', 'Melee', 5), 'Back Claw': ('Natural', 'Melee', 5),
+    'Unarmed Combat': ('Unarmed', 'Melee', 5), 'Pugilism': ('Unarmed', 'Melee', 5), 'Foot Soldier': ('Unarmed', 'Melee', 5),
+    'Noggin Nocker': ('Unarmed', 'Melee', 5), "Wrasslin'": ('Unarmed', 'Melee', 5),
+    'Crossbow': ('Ranged', 'Ranged', 50), 'Bow': ('Ranged', 'Ranged', 100), 'Handgun': ('Ranged', 'Ranged', 150),
+    'Javelin': ('Ranged', 'Ranged', 40), 'Shotgun': ('Ranged', 'Ranged', 30), 'Shuriken': ('Ranged', 'Ranged', 30),
+    'Slingshot': ('Ranged', 'Ranged', 30),
+    'Herding Weapons': ('Reach', 'Reach', 10), 'Lance': ('Reach', 'Reach', 10), 'Polearm': ('Reach', 'Reach', 10),
+    'Quarterstaff': ('Reach', 'Reach', 10),
+}
+
+
+def weapons():
+    """One weapon per Attack Skill that names base damage dice."""
+    import re as _re
+    out = []
+    for name, cat, stat, desc in SKILLS:
+        if cat != 'Attack':
+            continue
+        m = _re.search(r'(\d+d\d+)(?: \+ (Str|Dex|Con))? (\w+)', desc)
+        if not m:
+            continue
+        wcat, rng, ft = _WEAPON_META.get(name, ('Melee', 'Melee', 5))
+        props = [f'+ {m.group(2)} Mod' if m.group(2) else 'No Stat Mod']
+        if 'two hands' in desc.lower():
+            props.append('Two-Handed')
+        if 'ammo' in desc.lower():
+            props.append('Ammo')
+        if 'mounted' in desc.lower():
+            props.append('Mounted')
+        fav = _re.search(r'AI Favor (\d)', desc)
+        if fav:
+            props.append(f'AI Favor {fav.group(1)}')
+        out.append(dict(
+            api_index=api_index('weapon', name), name=name, weapon_category=wcat, weapon_range=rng,
+            damage_dice=m.group(1), damage_type=m.group(3), two_handed_damage_dice='',
+            two_handed_damage_type='', range_normal=ft, range_long=ft, weight=0, cost='',
+            properties=', '.join(props), mastery='', notes=f'{name} Attack Skill: {desc}',
+            image_url='', source=DCC_SOURCE, game_system='dcc'))
+    return out
+
+
+# (name, gear slot / category, DR, properties, notes)
+ARMOR = [
+    ('Bronze Armor (+1 DR)',   'Any Gear Slot', 1, '+1 DR',
+     'Mundane armor of your choice, but awkward: hockey pads, a heavy winter coat, a trash-can lid shield (Table 25, p.116).'),
+    ('Silver Armor (+2 DR)',   'Any Gear Slot', 2, '+2 DR, Anti-Piercing',
+     'Silver-tier loot: +2 Damage Resistance with the Anti-Piercing Benefit (p.95).'),
+    ('Gold Armor (+3 DR)',     'Any Gear Slot', 3, '+3 DR, Resistance to one uncommon damage type',
+     'Gold-tier loot: +3 Damage Resistance plus Resistance to an uncommon damage type (Table 10, p.93).'),
+    ('Platinum Armor (+4 DR)', 'Any Gear Slot', 4, '+4 DR, +5 Constitution, +3 Catcher or Taunt',
+     'Platinum-tier loot: +4 Damage Resistance, +5 Constitution, and +3 to the Catcher or Taunt Skill.'),
+    ('Random Piece of Armor (+1 DR)', 'Any Gear Slot', 1, '+1 DR',
+     'Typical Bronze loot-box find (p.216).'),
+    ('Looted Mob Armor',       'Any Gear Slot', 0, 'Lesser quality, lasts a day or two',
+     'Armor pulled off a dead Mob: lesser quality than even mundane loot-box gear, but it might last a day or two in a pinch (p.215).'),
+    ('Shield',                 'Hands/Holding', 0, 'Uses a Holding slot',
+     'A Shield takes up one Hands/Holding slot; a two-handed weapon means you cannot hold one (p.98). Pairs with the Shield Block Skill.'),
+]
+
+
+def armor():
+    return [dict(api_index=api_index('armor', n), name=n, armor_category=slot, armor_class_base=0,
+                 dex_bonus=0, max_dex_bonus=None, str_minimum=0, stealth_disadvantage=0, weight=0,
+                 cost='', properties=props, notes=notes, image_url='', source=DCC_SOURCE, game_system='dcc')
+            for n, slot, dr, props, notes in ARMOR]
+
+
+# (name, category, subcategory, cost, description). Dice live in the text.
+EQUIPMENT = [
+    # Healing & recovery
+    ('Healing Potion',              'Consumable', 'Potion', '', 'Heals 5 Health Bar slots. Drink as an Action (or from the Hotlist without drinking); healing potions can also be consumed as an Interrupt. No more than one potion every other round or you get Potion Sickness (Poison, 15 s).'),
+    ('Good Healing Potion',         'Consumable', 'Potion', '', 'Heals 6 Health Bar slots.'),
+    ('Gold Standard Healing Potion','Consumable', 'Potion', '', 'Heals 7 Health Bar slots and mends one Minor Injury.'),
+    ('Supreme Healing Potion',      'Consumable', 'Potion', '', 'Heals 8 Health Bar slots and mends one Minor or Major Injury; or deals 8d8 Holy damage to an undead Mob.'),
+    ('Heal Severe Injury Potion',   'Consumable', 'Potion', '', 'Heals 9 Health Bar slots and mends all Injuries.'),
+    ('Heal Pet Potion',             'Consumable', 'Potion', '', 'Heals a pet 5 Health Bar slots.'),
+    ('Mana Potion',                 'Consumable', 'Potion', '', 'Full Mana restore.'),
+    ('Good Mana Refill Potion',     'Consumable', 'Potion', '', 'Restores 15 Mana per round for 10 rounds.'),
+    ('Potion of +1 Skill',          'Consumable', 'Potion', '', 'Permanent: choose a Skill and gain 1 Rank in it (Silver loot).'),
+    ('Potion of +2 Skill',          'Consumable', 'Potion', '', 'Permanent: choose a Skill and gain 2 Ranks in it (Gold loot).'),
+    ('Potion of +3 Skill',          'Consumable', 'Potion', '', 'Permanent: choose a Skill and gain 3 Ranks in it (Platinum loot).'),
+    ('Bandages',                    'Consumable', 'Medical', '', 'Spend an Action to remove the Blood Trail Debuff. Loot boxes hold 1d6.'),
+    ('Poison Antidote',             'Consumable', 'Medical', '', 'Cures the Poison Debuff.'),
+    # Explosives (rollable)
+    ('Stick of Basic Dynamite',     'Consumable', 'Explosive', '', '1d6 Bludgeoning damage, 0 ft Blast radius + 5 ft Splash.'),
+    ('Stick of Good Goblin Dynamite','Consumable','Explosive', '', '2d6 Bludgeoning damage, 5 ft Blast radius + 5 ft Splash.'),
+    # Scratchers (rollable)
+    ('Medicine or Lube? Scratcher', 'Consumable', 'Scratcher', '', 'As an Action in combat, roll 1d2. On a 1, one target within 20 ft is covered in slippery lube (Staggered). On a 2, the target is affected by a Level 15 Heal Other Spell. Cooldown 30 minutes.'),
+    ('Nebular Roulette Scratcher',  'Consumable', 'Scratcher', '', 'As an Action in combat, roll 1d6. On a 1 you take 2d12+F Electric damage; on 2–6 the target takes 2d12+F Electric damage.'),
+    # Magic paper goods
+    ('Spell Scroll',                'Consumable', 'Scroll', '', 'One-shot cast of a named Spell at a set Rank, no Mana. Written as "Scroll of Spell name (Rank X)". Turns to dust after use (p.99).'),
+    ('Scroll of Upgrade',           'Consumable', 'Scroll', '', "Upgrades a crawler's signature weapon: roll d12 on Table 26 (p.117) for the name addition and Amazing Success effect."),
+    ('Spellbook',                   'Consumable', 'Book', '', 'Read once to learn a single Spell at a predefined Rank (roll 1d6−1, minimum Rank 1), then it disappears (p.99).'),
+    ('Magic Tome',                  'Consumable', 'Book', '', 'Learn a new, weak Spell (Bronze loot). Same rules as a Spellbook.'),
+    ('Magic Paper',                 'Crafting',   'Scroll-writing', '', 'Special linen paper for writing Scrolls with the Calligraphy Skill (Rank 10+).'),
+    # Mundane
+    ('Torches (×10)',               'Mundane', 'Light', '', 'Bright light for 20 ft and dim light for another 20 ft; burns out in about an hour.'),
+    ('Crawler Biscuits (×100)',     'Mundane', 'Food', '', 'Keeps crawlers fed. Among the most common loot-box finds.'),
+    ('Rope (50 feet)',              'Mundane', 'Gear', '', '50 feet of rope (Bronze item option).'),
+    ('Bicycle',                     'Mundane', 'Vehicle', '', 'Bronze item option. See Vehicles, p.72.'),
+    ('Canoe and Paddle',            'Mundane', 'Vehicle', '', 'Bronze item option; the paddle counts as a Staff.'),
+    ('Hang Glider',                 'Mundane', 'Vehicle', '', 'Bronze item option.'),
+    ('Misc. Junk',                  'Mundane', 'Junk', 'Sells for 1 gold', 'Set dressing and assorted crap; spend one point of Misc. Junk to produce any innocuous item. Sells for a non-negotiable 1 gold each; some merchants sell it for 2 (p.98). Dead Mobs carry 1d6.'),
+    ('Enhanced Pet Biscuit',        'Mundane', 'Pet', '', 'Lets a pet function as a crawler (p.99).'),
+    ('Magical Pet Carrier',         'Mundane', 'Pet', '', 'Lets a pet take a time-out in your Inventory without dying (p.98).'),
+    # Maps (Boss loot)
+    ('Neighborhood Map',            'Loot', 'Map', '', "Boss drop: adds the Neighborhood and every Mob in it to your minimap (dots only). Grinding 5+ hours counts as 6 (p.215)."),
+    ('Borough Field Guide',         'Loot', 'Map', '', 'Borough Boss drop: outlines the quadrants of a borough with Mob level range and type tooltips. Grinding 5+ hours counts as 7 (p.216).'),
+    ('Gold',                        'Loot', 'Currency', '', 'All your gold fits in one Inventory slot. Loot boxes: Bronze 1d10, Silver 1d10×100, Gold 1d6×1000, Platinum 2d6×1000, Legendary 1d10×10,000. Mob drops per body: 2nd Floor 1d6, 3rd 2d4, 4th 2d6, 5th 2d8.'),
+    # Crafting (the only printed prices)
+    ('Crafting Table (tier 1)',     'Crafting', 'Table', '25,000 gold', 'Crafting, Sapper, Engineer, Alchemy, or Metal Working Table. A brand-new tier-1 Table costs 25,000 gold (p.221).'),
+    ('Crafting Table Upgrade Coupon','Crafting','Coupon', '', 'Upgrades a Crafting Table one tier (buying the upgrade outright costs 250,000 gold, p.221).'),
+    ('Personal Space Coupon',       'Crafting', 'Coupon', '', 'Exchange with a Bopca to expand the room types in your personal space (p.216).'),
+]
+
+
+def equipment():
+    return [dict(api_index=api_index('equipment', n), name=n, category=cat, subcategory=sub, weight=0,
+                 cost=cost, description=desc, source=DCC_SOURCE, game_system='dcc')
+            for n, cat, sub, cost, desc in EQUIPMENT]
+
+
+# Sample magical gear from the loot tables (p.216–218): (name, gear slot, box tier, description)
+MAGIC_ITEMS = [
+    ('Silver Ring of +2 to a Stat', 'Accessory', 'Silver', '+2 to one Stat of your choice.'),
+    ('Golden Ring of +3 to a Stat', 'Accessory', 'Gold', '+3 to one Stat of your choice.'),
+    ('Interesting Item of +4 to a Stat', 'Accessory', 'Platinum', 'An interesting item granting +4 to a Stat.'),
+    ('Friendship Bracelet of [Race]kind', 'Accessory', 'Silver', 'Roll 1d10 for a Race (1–2 dwarven, 3–4 elven, 5–6 fairy, 7–8 orc, 9–10 skyfowl). Removes automatic hostility from Mobs and NPCs of that Race. Take it off or break it and they are automatically hostile for the rest of the Floor.'),
+    ('Bitch-Ass Buckler', 'Hands/Holding', 'Silver', '+1 Shield Block Skill. +3 Damage Resistance.'),
+    ('Bernie Boots', 'Feet', 'Silver', 'When you gain the Dying Debuff, you can still perform Move Actions and read HUD messages about moving in certain directions.'),
+    ('Big Purple Plume', 'Accessory', 'Silver', '+2 Charisma.'),
+    ('Enchanted Elbow Pads of the Elbow-Walking Turkeys', 'Arms', 'Gold', '+2 Damage Resistance. +2 Dexterity.'),
+    ('Skullcap of Sucking', 'Head', 'Gold', '+1 Damage Resistance. Each time you roll a Critical Fail, gain 1 AI Favor.'),
+    ('Tough Guy Tattoo', 'Accessory', 'Gold', '+3 Constitution. Add 10 to your 100% Health Bar slot.'),
+    ('Selfie Stick of the Self-Mutilator', 'Hand/Holding', 'Platinum', 'You have 1 fewer Health Bar slot while holding this. When you enter combat with a Minor Injury gain 1 Popularity (2 for a Major Injury) and an equal number of extra Actions each round of the combat.'),
+    ('Chesty Cheese Grater', 'Torso', 'Platinum', '+2 Damage Resistance. +5% Constitution. Damage Reflection 3:1 vs melee attacks (for every 3 Health Bar slots you lose, the attacker loses 1).'),
+    ('Enchanted Leggings of Insanity', 'Legs', 'Platinum', '+1 Damage Resistance. +3 Escape Artist Skill. You may fit your body south of your wedding tackle into any sized opening.'),
+    ('Enchanted Cloak of the Slippery Perv', 'Accessory', 'Legendary', '+6 Charisma. +3 Evade Buff when you accuse your attacker of wanting to "penetrate you" in a way you have never used previously.'),
+    ('Enchanted Wand of Incontinence', 'Hand/Holding', 'Legendary', '+10% Constitution. Once per session, as an Action, a creature within 30 ft voids its bowels and gains the Fatigued Debuff.'),
+    ('Hand Grips of Hella Holding', 'Hands/Holding', 'Legendary', '+10% Strength. +3 Damage Resistance. Nothing short of divine intervention can undo your grip.'),
+]
+
+
+def magic_items():
+    return [dict(api_index=api_index('magic', n), name=n, category=f'Gear Slot: {slot}', rarity=f'{tier} box',
+                 attunement=0, description=desc, image_url='', source=DCC_SOURCE, game_system='dcc')
+            for n, slot, tier, desc in MAGIC_ITEMS]
+
+
 # ── Seeding ───────────────────────────────────────────────────────────────────
 
 def _skill_row(name, cat, stat, desc):
@@ -567,9 +724,13 @@ def _class_row(c):
 def rows():
     """(model_name, [row dicts]) for every seeded table."""
     return [
-        ('tblSkillsLibrary',  [_skill_row(*s) for s in SKILLS]),
-        ('tblRacesLibrary',   [_race_row(r) for r in RACES]),
-        ('tblClassesLibrary', [_class_row(c) for c in CLASSES]),
+        ('tblSkillsLibrary',     [_skill_row(*s) for s in SKILLS]),
+        ('tblRacesLibrary',      [_race_row(r) for r in RACES]),
+        ('tblClassesLibrary',    [_class_row(c) for c in CLASSES]),
+        ('tblWeaponsLibrary',    weapons()),
+        ('tblArmorLibrary',      armor()),
+        ('tblEquipmentLibrary',  equipment()),
+        ('tblMagicItemsLibrary', magic_items()),
     ]
 
 
