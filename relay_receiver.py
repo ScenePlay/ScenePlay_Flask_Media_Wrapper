@@ -718,7 +718,12 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
         # Local is the authority for HP: apply the player's delta here, clamped
         # against the local hp_max. The result is pushed back to the relay/portal
         # via push_character_and_broadcast (character_sheet_updated).
-        delta = int(data.get('delta', 0))
+        if getattr(char, 'is_dcc', False) and data.get('damage') is not None:
+            import dice_systems
+            delta = -dice_systems.dcc_damage_slots(
+                data.get('damage'), char.dr_total(), char.hb_slot_value())
+        else:
+            delta = int(data.get('delta', 0))
         cur = char.hp_current or 0
         mx  = char.hp_max or 1
         char.hp_current = max(0, min(mx, cur + delta))
@@ -804,6 +809,8 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
                 skill_name=sname,
                 bonus=int(data.get('bonus', 0)),
                 proficient=int(bool(data.get('proficient', False))),
+                category=str(data.get('category', '') or '')[:20],
+                stat=str(data.get('stat', '') or '')[:5],
                 order_by=order,
             ))
 
@@ -821,6 +828,8 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
                 if 'new_name'   in data: s.skill_name = data['new_name']
                 if 'bonus'      in data: s.bonus      = int(data['bonus'])
                 if 'proficient' in data: s.proficient = int(bool(data['proficient']))
+                if 'category'   in data: s.category   = str(data['category'] or '')[:20]
+                if 'stat'       in data: s.stat       = str(data['stat'] or '')[:5]
                 break
 
     elif mutation_type == 'inventory_add':
@@ -845,6 +854,7 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
                 i.weight    = str(data.get('weight', i.weight))
                 i.notes     = data.get('notes', i.notes)
                 i.equipped  = int(bool(data.get('equipped', bool(i.equipped))))
+                if 'hotlist' in data: i.hotlist = int(bool(data['hotlist']))
                 break
 
     elif mutation_type == 'inventory_remove':
@@ -1003,6 +1013,17 @@ def _apply_mutation(char, mutation_type, data, relay_url, db):
                 else:
                     cur = getattr(char, key, None)
                     setattr(char, key, type(cur)(val) if cur is not None else int(val))
+        # Dungeon Crawler Carl sheet bag fields (dcc_dr, dcc_enh_str, …)
+        if getattr(char, 'is_dcc', False) and any(k.startswith('dcc_') for k in data):
+            import json as _json
+            import dice_systems
+            char.dcc_json = _json.dumps(dice_systems.dcc_merge_fields(data, char.dcc_json))
+
+    elif mutation_type == 'apply_library':
+        from models.ttrpg import apply_library_bonuses
+        kind = data.get('kind', 'race')
+        if kind in ('race', 'class'):
+            apply_library_bonuses(char, kind, db)
 
     elif mutation_type == 'portrait_upload':
         portrait_rel = data.get('portrait_url', '')

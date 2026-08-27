@@ -88,14 +88,15 @@
     </thead>
     <tbody>
       {% for item in items %}
-      <tr>
+      <tr class="data-row" id="row-{{ item.equipment_lib_id }}"
+          {% if item.description %}data-expandable="{{ item.equipment_lib_id }}" title="Click to show the full description"{% endif %}>
         <td>
           <span style="color:var(--ttrpg-accent);font-weight:600;">{{ item.name }}</span>
           {% if item.subcategory %}
           <span class="small text-muted ms-1">({{ item.subcategory }})</span>
           {% endif %}
           {% if item.description %}
-          <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ item.description[:180] }}{% if item.description|length > 180 %}…{% endif %}</div>
+          <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ item.description[:180] }}{% if item.description|length > 180 %}… <span style="color:var(--ttrpg-accent);">&#9660; more</span>{% endif %}</div>
           {% endif %}
         </td>
         <td class="small text-muted">{{ item.category or '—' }}</td>
@@ -111,6 +112,13 @@
           {% endif %}
         </td>
       </tr>
+      {% if item.description %}
+      <tr class="detail-row" id="detail-{{ item.equipment_lib_id }}" style="display:none;">
+        <td colspan="6">
+          <div class="small" style="white-space:pre-wrap;color:var(--sp-text);">{{ item.description }}</div>
+        </td>
+      </tr>
+      {% endif %}
       {% else %}
       <tr><td colspan="6" class="text-muted text-center py-4">
         No items yet — sync from the D&amp;D API or add a custom item.
@@ -123,7 +131,27 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+  tr.detail-row td { background: var(--sp-bg); border-top: none; padding: 8px 14px 10px; }
+  tr.data-row[data-expandable] { cursor: pointer; }
+  tr.data-row[data-expandable]:hover td { background: color-mix(in srgb, var(--sp-accent) 6%, transparent); }
+</style>
 <script>
+// Click a row to open its full description underneath (buttons/forms don't trigger it).
+function toggleDetail(id) {
+  const detail = document.getElementById('detail-' + id);
+  if (!detail) return;
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  const row = document.getElementById('row-' + id);
+  if (row) row.style.background = open ? '' : 'color-mix(in srgb, var(--sp-accent) 8%, transparent)';
+}
+document.addEventListener('click', e => {
+  const row = e.target.closest('tr.data-row[data-expandable]');
+  if (!row || e.target.closest('button, a, form, input, select, textarea, img')) return;
+  toggleDetail(row.dataset.expandable);
+});
+
 function toggleAddForm() {
   const f = document.getElementById('add-item-form');
   f.style.display = f.style.display === 'none' ? '' : 'none';

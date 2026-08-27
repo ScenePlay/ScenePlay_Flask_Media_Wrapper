@@ -32,6 +32,21 @@
               {% endfor %}
             </select>
           </div>
+          <div class="col-sm-6">
+            <label class="form-label">Game system</label>
+            <select name="game_system" id="gameSystem" class="form-select"
+                    onchange="document.getElementById('floorWrap').style.display = this.value === 'dcc' ? '' : 'none'">
+              {% for sid, gs in game_systems.items() %}
+              <option value="{{ sid }}">{{ gs.name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Sets which rules the dice rollers follow while this session is live.</div>
+          </div>
+          <div class="col-sm-6" id="floorWrap" style="display:none;">
+            <label class="form-label">Current Floor</label>
+            <input type="number" name="floor" class="form-control" value="3" min="1" max="18">
+            <div class="form-text">Dungeon Crawler Carl: target numbers are built from the Floor. Change it on the session page as the party descends.</div>
+          </div>
           <div class="col-12">
             <label class="form-label">Add Characters to Party</label>
             <div class="ttrpg-card p-2" style="border-color:var(--sp-border); max-height:220px; overflow-y:auto;">

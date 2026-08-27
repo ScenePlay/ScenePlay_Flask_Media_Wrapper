@@ -47,7 +47,10 @@ function saveSkill(id) {
     body: JSON.stringify({
       skill_name: document.getElementById('skill-name-' + id).value.trim(),
       bonus:      document.getElementById('skill-bonus-' + id).value,
-      proficient: document.getElementById('skill-prof-' + id).checked ? 1 : 0
+      proficient: document.getElementById('skill-prof-' + id).checked ? 1 : 0,
+      ...(document.getElementById('skill-cat-' + id) ? {
+        category: document.getElementById('skill-cat-' + id).value,
+        stat:     document.getElementById('skill-stat-' + id).value } : {})
     })
   }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
 }
@@ -59,7 +62,8 @@ function saveItem(id) {
       item_name: document.getElementById('item-name-' + id).value.trim(),
       quantity:  document.getElementById('item-qty-' + id).value,
       notes:     document.getElementById('item-notes-' + id).value,
-      equipped:  document.getElementById('item-equip-' + id).checked ? 1 : 0
+      equipped:  document.getElementById('item-equip-' + id).checked ? 1 : 0,
+      ...(document.getElementById('item-hot-' + id) ? { hotlist: document.getElementById('item-hot-' + id).checked ? 1 : 0 } : {})
     })
   }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
 }
@@ -122,24 +126,55 @@ function hpAmount() {
 }
 
 function applyHpDelta(delta) {
+  _postHp({delta});
+}
+
+// Dungeon Crawler Carl: the player types the DAMAGE number; the server takes
+// DR off first and turns the rest into Health Bar slots (one per Con Mod).
+function hbSlots() {
+  return parseInt(document.getElementById('hb_heal_slots').value) || 1;
+}
+function applyDccDamage() {
+  const damage = parseInt(document.getElementById('hp_amount').value) || 0;
+  _postHp({damage});
+}
+function _postHp(body) {
   fetch(`/ttrpg/character/${CHAR_ID}/hp-delta`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({delta})
+    body: JSON.stringify(body)
   }).then(r => r.json()).then(data => {
     if (!data.ok) return;
+    const delta = body.delta !== undefined ? body.delta : -(data.slots_lost || 0);
     // Voice the change on the device that applied it.
     if (delta < 0)      _sfx(data.hp_current <= 0 ? 'dead' : 'damage');
     else if (delta > 0) _sfx('heal');
     document.getElementById('hp_current_disp').textContent = data.hp_current;
-    updateHpBar(data.hp_pct);
+    updateHpBar(data.hp_pct, data.hp_current);
+    if (body.damage !== undefined && data.slots_lost === 0) {
+      const dying = document.getElementById('hb_dying');
+      // Tell the player why nothing happened — DR / slot threshold soaked it.
+      if (dying) { dying.style.display = ''; dying.textContent = `Shrugged off — ${body.damage} damage didn't reach a full slot (DR ${DCC_DR}, slot ${DCC_SLOT_VALUE}).`; dying.style.color = 'var(--sp-muted)'; setTimeout(() => { if (data.hp_current > 0) dying.style.display = 'none'; }, 3500); }
+    }
   });
 }
 
-function updateHpBar(pct) {
+function updateHpBar(pct, current) {
   const bar = document.getElementById('hp_bar');
-  bar.style.width = pct + '%';
-  bar.style.background = pct > 50 ? '#28a745' : pct > 20 ? '#ffc107' : '#dc3545';
+  if (bar) {
+    bar.style.width = pct + '%';
+    bar.style.background = pct > 50 ? '#28a745' : pct > 20 ? '#ffc107' : '#dc3545';
+  }
+  const slots = document.querySelectorAll('#hb_slots .hb-slot');
+  if (slots.length && current !== undefined) {        // DCC Health Bar
+    slots.forEach((el, i) => {
+      const full = i < current;
+      el.style.background = full ? (i < 2 ? '#dc3545' : i < 5 ? '#ffc107' : '#28a745') : 'transparent';
+      el.style.color = full ? '#fff' : 'var(--sp-muted)';
+    });
+    const dying = document.getElementById('hb_dying');
+    if (dying) { dying.style.display = current <= 0 ? '' : 'none'; if (current <= 0) { dying.textContent = '☠ Dying — must be healed to 10% or more'; dying.style.color = '#dc3545'; } }
+  }
   document.getElementById('hp_pct_disp').textContent = pct + '%';
 }
 
@@ -159,16 +194,24 @@ function stepAttr(field, which, delta, btn) {
   if (!box) return;
   const scoreEl = box.querySelector('.score');
   const modEl   = box.querySelector('.mod');
-  let score = parseInt(scoreEl.textContent) || 10;
+  const sys = typeof CHAR_SYSTEM !== 'undefined' ? CHAR_SYSTEM : 'dnd5e';
+  let score = parseInt(scoreEl.textContent) || (sys === 'dcc' ? 3 : 10);
   if (which === 'mod') {
     score = (Math.floor((score - 10) / 2) + delta) * 2 + 10;
   } else {
     score = score + delta;
   }
-  score = Math.max(1, Math.min(30, score));
-  const m = Math.floor((score - 10) / 2);
+  score = Math.max(1, Math.min(sys === 'dcc' ? 999 : 30, score));
   scoreEl.textContent = score;
-  modEl.textContent   = (m >= 0 ? '+' : '') + m;
+  if (sys === 'dcc') {
+    // The mod comes from the ENHANCED score; if no override is set it follows
+    // the base score we just changed.
+    const enh = box.querySelector('.dcc-enh');
+    if (!enh || enh.value === '') modEl.textContent = (v => (v >= 0 ? '+' : '') + v)(DiceCore.statMod('dcc', score));
+  } else {
+    const m = Math.floor((score - 10) / 2);
+    modEl.textContent   = (m >= 0 ? '+' : '') + m;
+  }
   saveField(field, score);   // persist; no page reload
 }
 
@@ -257,7 +300,9 @@ function addSkill() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({skill_name: name,
                           bonus: document.getElementById('new_skill_bonus').value,
-                          proficient: document.getElementById('new_skill_prof').checked ? 1 : 0})
+                          proficient: document.getElementById('new_skill_prof').checked ? 1 : 0,
+                          category: (document.getElementById('new_skill_category') || {}).value || '',
+                          stat:     (document.getElementById('new_skill_stat') || {}).value || ''})
   }).then(() => reloadKeepTab());
 }
 
@@ -279,6 +324,7 @@ function addItem() {
       quantity:  document.getElementById('new_item_qty').value,
       weight:    document.getElementById('new_item_weight').value,
       notes:     document.getElementById('new_item_notes').value,
+      hotlist:   (document.getElementById('new_item_hotlist') || {}).checked ? 1 : 0,
     })
   }).then(() => reloadKeepTab());
 }
@@ -866,7 +912,7 @@ function toggleDicePanel() {
   const p = document.getElementById('dice-panel');
   const open = p.style.display === 'none';
   p.style.display = open ? '' : 'none';
-  if (open) { selectDie(20); setAdvMode('normal'); startDicePoll(); fetchDiceFeed(); }
+  if (open) { selectDie(20); setAdvMode('normal'); initDiceSystem(); startDicePoll(); fetchDiceFeed(); }
   else       { stopDicePoll(); }
 }
 
@@ -921,6 +967,57 @@ function setAdvMode(mode) {
 
 function setMod(val) {
   document.getElementById('dice-modifier').value = val;
+}
+
+// ── Game system (DiceCore) ───────────────────────────────────
+// The active session decides the rules (D&D 5e or Dungeon Crawler Carl).
+// The panel explains the target number in plain words; the server does the
+// final judging and writes the outcome into the roll label.
+let _sysPanel = null;
+let _sysPollTimer = null;
+function initDiceSystem() {
+  if (!window.DiceCore || _sysPanel) return;
+  DiceCore.setSystem(typeof GAME_INFO !== 'undefined' ? GAME_INFO : null);
+  _sysPanel = DiceCore.mountSystemPanel(document.getElementById('dice-system-panel'), {
+    btnClass: 'btn btn-sm btn-outline-secondary',
+    quickContainer: document.getElementById('dice-quicklabels'),
+    labelInput: document.getElementById('dice-label'),
+    setDie: selectDie,
+    setCount: n => { document.getElementById('dice-count').value = n; },
+    getCount: () => parseInt(document.getElementById('dice-count').value) || 1,
+    setMod: setMod,
+    setAdv: setAdvMode,
+    getDamageDice: () => {
+      if (typeof READY_WEAPONS === 'undefined' || !READY_WEAPONS.length) return null;
+      const name = READY_WEAPONS[0], w = (typeof WEAPON_DICE !== 'undefined' && WEAPON_DICE[name]) || null;
+      const m = w && (w.dice || '').match(/(\d+)\s*d\s*(\d+)/i);
+      return m ? { count: parseInt(m[1], 10), sides: parseInt(m[2], 10), mod: w.bonus || 0, label: name + ' damage' } : null;
+    },
+  });
+  _applyStatModTable();
+}
+function _applyStatModTable() {
+  // Stat buttons follow the system's modifier table (DCC's is not (score-10)/2).
+  if (typeof STAT_SCORES === 'undefined') return;
+  const sys = typeof CHAR_SYSTEM !== 'undefined' ? CHAR_SYSTEM : DiceCore.getSystem().id;
+  document.querySelectorAll('.stat-mod-btn[data-stat]').forEach(b => {
+    const k = b.dataset.stat;
+    if (!(k in STAT_SCORES)) return;
+    const v = DiceCore.statMod(sys, STAT_SCORES[k]);
+    b.dataset.mod = v;
+    b.title = `${k}: ${v >= 0 ? '+' : ''}${v}`;
+    const sp = b.querySelector('span');
+    if (sp) sp.textContent = (v >= 0 ? '+' : '') + v;
+  });
+}
+function pollDiceSystem() {
+  fetch('/ttrpg/dice/system').then(r => r.json()).then(g => {
+    if (!_sysPanel) return;
+    // Only the live session's settings (e.g. the Floor) matter here; if the
+    // session runs a different game than this sheet, the sheet keeps its own.
+    if (typeof CHAR_SYSTEM !== 'undefined' && g.id !== CHAR_SYSTEM) return;
+    _sysPanel.refresh(g);
+  }).catch(() => {});
 }
 
 // Quick reference: click a skill/weapon chip to load it into the roller (d20 + mod + label).
@@ -980,6 +1077,7 @@ function doRoll() {
       char_name:    CHAR_NAME,
       count, sides: _diceSelected,
       modifier, label, adv_mode: _advMode,
+      ...(_sysPanel ? _sysPanel.getContext() : {}),
     })
   }).then(r => r.json()).then(d => {
     if (!d.ok) return;
@@ -1033,10 +1131,14 @@ function showLocalResult(d) {
   const labelHtml = d.label ? `<div style="color:var(--sp-muted);font-size:.78rem;margin-bottom:2px;">${_escH(d.label)}</div>` : '';
   const modeHtml  = _advLabel(d.adv_mode);
 
+  const outcomeHtml = (d.outcome && d.outcome.text)
+    ? `<div style="margin-top:4px;font-weight:600;color:${d.outcome.ok === false ? '#dc3545' : d.outcome.ok ? '#28a745' : 'inherit'};">${_escH(d.outcome.text)}</div>`
+    : '';
+
   document.getElementById('dice-result-inner').innerHTML =
     `${labelHtml}<div>${modeHtml}${diceHtml}` +
     `${modStr ? `<span style="color:var(--sp-muted);margin-left:4px;">${modStr}</span>` : ''}` +
-    ` <span style="margin:0 3px;opacity:.6;">&#8594;</span><span class="tot">${d.total}</span></div>`;
+    ` <span style="margin:0 3px;opacity:.6;">&#8594;</span><span class="tot">${d.total}</span></div>${outcomeHtml}`;
   document.getElementById('dice-result').style.display = '';
 }
 
@@ -1127,9 +1229,11 @@ function pollDiceFeed() {
 function startDicePoll() {
   stopDicePoll();
   _dicePollTimer = setInterval(pollDiceFeed, 3500);
+  _sysPollTimer  = setInterval(pollDiceSystem, 10000);   // Floor / system changes
 }
 function stopDicePoll() {
   if (_dicePollTimer) { clearInterval(_dicePollTimer); _dicePollTimer = null; }
+  if (_sysPollTimer)  { clearInterval(_sysPollTimer);  _sysPollTimer  = null; }
 }
 
 function resetDice() {
@@ -1138,6 +1242,7 @@ function resetDice() {
   document.getElementById('dice-label').value    = '';
   selectDie(20);
   setAdvMode('normal');
+  if (_sysPanel) _sysPanel.reset();
   document.getElementById('dice-result').style.display = 'none';
 }
 
@@ -1154,7 +1259,7 @@ function skillLibSearch(q) {
   const box = document.getElementById('skill-lib-suggestions');
   if (!box) return;
   _skillLibSearchTimer = setTimeout(() => {
-    fetch(`/ttrpg/reference/skills/search?q=${encodeURIComponent(q)}`)
+    fetch(`/ttrpg/reference/skills/search?q=${encodeURIComponent(q)}&system=${encodeURIComponent(typeof CHAR_SYSTEM !== 'undefined' ? CHAR_SYSTEM : 'all')}`)
       .then(r => r.json()).then(results => {
         if (!results.length) { box.style.display = 'none'; return; }
         _skillLibResults = results;
@@ -1164,8 +1269,10 @@ function skillLibSearch(q) {
                onmouseenter="this.style.background='color-mix(in srgb, var(--sp-accent) 10%, transparent)'"
                onmouseleave="this.style.background=''">
             <div style="color:var(--ttrpg-accent);font-weight:600;">${s.name}
+              ${s.category ? `<span style="font-size:.72rem;font-weight:normal;color:var(--sp-muted);margin-left:6px;">${s.category}</span>` : ''}
               ${s.ability_score ? `<span style="font-size:.72rem;font-weight:normal;color:var(--sp-muted);margin-left:6px;">${s.ability_score}</span>` : ''}
             </div>
+            ${s.game_system === 'dcc' && s.description ? `<div style="font-size:.7rem;color:var(--sp-muted);">${s.description.slice(0, 110)}</div>` : ''}
           </div>`).join('');
         box.querySelectorAll('[data-idx]').forEach(el =>
           el.addEventListener('click', () => skillLibPick(_skillLibResults[parseInt(el.dataset.idx)])));
@@ -1177,7 +1284,25 @@ function skillLibSearch(q) {
 function skillLibPick(s) {
   document.getElementById('new_skill_name').value = s.name;
   document.getElementById('skill-lib-suggestions').style.display = 'none';
+  // DCC library rows carry their category and Stat — preset the pickers.
+  const cat = document.getElementById('new_skill_category');
+  const st  = document.getElementById('new_skill_stat');
+  if (cat && s.category) cat.value = s.category;
+  if (st && s.ability_score) st.value = s.ability_score.toLowerCase();
   addSkill();
+}
+
+// Dungeon Crawler Carl: apply the Race's / Class's stat bonuses and granted
+// skill Ranks from the built-in library (once per race/class per sheet).
+function applyLibrary(kind) {
+  if (!confirm(`Apply this ${kind}'s Stat bonuses and Skill Ranks to the sheet? (Done once; "choose" bonuses are yours to add by hand.)`)) return;
+  fetch(`/ttrpg/character/${CHAR_ID}/apply-library`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kind})
+  }).then(r => r.json()).then(d => {
+    alert(d.msg || (d.ok ? 'Applied.' : 'Nothing applied.'));
+    if (d.ok) location.reload();
+  });
 }
 
 document.addEventListener('click', e => {
@@ -1207,7 +1332,9 @@ function refToggle(key) {
 function refSearch(key, q) {
   clearTimeout(_refTimers[key]);
   _refTimers[key] = setTimeout(() => {
-    const url = _refUrls[key] + '?q=' + encodeURIComponent(q) + '&limit=15';
+    // Skills/races/classes are per game system — a DCC sheet looks up DCC entries.
+    const sysArg = ['skills', 'races', 'classes'].includes(key) && typeof CHAR_SYSTEM !== 'undefined' ? '&system=' + encodeURIComponent(CHAR_SYSTEM) : '';
+    const url = _refUrls[key] + '?q=' + encodeURIComponent(q) + '&limit=15' + sysArg;
     fetch(url)
       .then(r => r.json())
       .then(items => {
@@ -1224,6 +1351,25 @@ function _escH(s) {
 }
 function _trunc(s, n) { s = s || ''; return s.length > n ? s.slice(0, n) + '…' : s; }
 
+// Long text in a reference card: show the first `n` characters with a
+// "▼ more" link that opens the full text in place (and "▲ less" to close).
+function _refDesc(text, n) {
+  text = String(text || '');
+  if (text.length <= n) return _escH(text);
+  return `<span class="ref-short">${_escH(text.slice(0, n))}… <a href="#" class="ref-more" style="color:var(--ttrpg-accent);text-decoration:none;white-space:nowrap;">&#9660; more</a></span>` +
+         `<span class="ref-full" style="display:none;">${_escH(text)} <a href="#" class="ref-less" style="color:var(--ttrpg-accent);text-decoration:none;white-space:nowrap;">&#9650; less</a></span>`;
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('a.ref-more, a.ref-less');
+  if (!a) return;
+  e.preventDefault();
+  const wrap = a.parentElement.parentElement;
+  const short = wrap.querySelector('.ref-short'), full = wrap.querySelector('.ref-full');
+  const opening = a.classList.contains('ref-more');
+  if (short) short.style.display = opening ? 'none' : '';
+  if (full)  full.style.display  = opening ? '' : 'none';
+});
+
 function _refCard(key, it) {
   const base = 'margin-bottom:6px;padding:7px 10px;border-radius:5px;border:1px solid var(--sp-border);background:var(--sp-surface);';
   switch (key) {
@@ -1239,7 +1385,7 @@ function _refCard(key, it) {
           <span>↔ ${_escH(it.range_text)}</span> &nbsp;
           <span>⧗ ${_escH(it.duration)}</span>
         </div>
-        ${it.description ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 140))}</div>` : ''}
+        ${it.description ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);">${_refDesc(it.description, 140)}</div>` : ''}
       </div>`;
     }
     case 'weapons': {
@@ -1254,7 +1400,7 @@ function _refCard(key, it) {
           ${it.weight ? ` &nbsp; ⚖ ${it.weight} lb` : ''}
         </div>
         ${it.properties ? `<div style="font-size:.7rem;color:var(--sp-muted);">${_escH(it.properties)}</div>` : ''}
-        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.notes, 400))}</div>` : ''}
+        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_refDesc(it.notes, 400)}</div>` : ''}
       </div>`;
     }
     case 'armor': {
@@ -1270,7 +1416,7 @@ function _refCard(key, it) {
           ${it.str_minimum ? ` &nbsp; STR ${it.str_minimum}+` : ''}
           ${it.cost ? ` &nbsp; 💰 ${_escH(it.cost)}` : ''}
         </div>
-        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.notes, 400))}</div>` : ''}
+        ${it.notes ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_refDesc(it.notes, 400)}</div>` : ''}
       </div>`;
     }
     case 'equipment': {
@@ -1282,14 +1428,14 @@ function _refCard(key, it) {
           ${it.cost ? `💰 ${_escH(it.cost)}` : ''}
           ${it.weight ? ` &nbsp; ⚖ ${it.weight} lb` : ''}
         </div>
-        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 120))}</div>` : ''}
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_refDesc(it.description, 120)}</div>` : ''}
       </div>`;
     }
     case 'feats': {
       return `<div style="${base}">
         <div style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</div>
         ${it.prerequisites ? `<div class="text-muted fst-italic" style="font-size:.75rem;">Req: ${_escH(it.prerequisites)}</div>` : ''}
-        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 160))}</div>` : ''}
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_refDesc(it.description, 160)}</div>` : ''}
       </div>`;
     }
     case 'skills': {
@@ -1297,33 +1443,35 @@ function _refCard(key, it) {
         <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
           ${it.ability_score ? `<span class="text-muted ms-2" style="font-size:.75rem;">(${_escH(it.ability_score)})</span>` : ''}
         </div>
-        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_escH(_trunc(it.description, 140))}</div>` : ''}
+        ${it.description ? `<div style="font-size:.75rem;color:var(--sp-text);">${_refDesc(it.description, 140)}</div>` : ''}
       </div>`;
     }
     case 'races': {
-      const traits = (it.traits_text || '').split('\n').filter(Boolean).slice(0, 4);
+      const traits = (it.traits_text || '').split('\n').filter(Boolean);
       return `<div style="${base}">
         <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
           ${it.size ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.size)} · ${it.speed}</span>` : ''}
         </div>
         ${it.ability_bonuses ? `<div style="font-size:.75rem;color:var(--ttrpg-accent);">${_escH(it.ability_bonuses)}</div>` : ''}
-        ${traits.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${traits.map(t => _escH(t)).join(' · ')}</div>` : ''}
+        ${traits.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${_refDesc(traits.join(' · '), 160)}</div>` : ''}
       </div>`;
     }
     case 'classes': {
       const spellBadge = it.spellcasting_ability
         ? `<span style="font-size:.68rem;padding:1px 5px;border-radius:6px;background:color-mix(in srgb,#7c5cbf 15%,transparent);border:1px solid #7c5cbf;color:#4b2b8c;">${_escH(it.spellcasting_ability)}</span>`
         : '';
-      const subs = (it.subclasses || '').split(',').filter(Boolean).slice(0, 4);
+      const subs = (it.subclasses || '').split(',').filter(Boolean);
       return `<div style="${base}">
         <div class="d-flex align-items-center gap-2">
           <span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
-          <span style="font-size:.75rem;padding:1px 6px;border-radius:8px;border:1px solid var(--sp-border);color:var(--ttrpg-accent);">d${it.hit_die}</span>
+          ${it.hit_die ? `<span style="font-size:.75rem;padding:1px 6px;border-radius:8px;border:1px solid var(--sp-border);color:var(--ttrpg-accent);">d${it.hit_die}</span>` : ''}
           ${spellBadge}
         </div>
         ${it.saving_throws ? `<div class="text-muted" style="font-size:.75rem;">Saves: ${_escH(it.saving_throws)}</div>` : ''}
-        ${it.skill_choices ? `<div style="font-size:.73rem;color:var(--sp-text);">${_escH(_trunc(it.skill_choices, 100))}</div>` : ''}
-        ${subs.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${subs.map(s => _escH(s.trim())).join(' · ')}</div>` : ''}
+        ${it.game_system === 'dcc' && it.proficiencies ? `<div style="font-size:.75rem;color:var(--ttrpg-accent);">${_escH(it.proficiencies)}</div>` : ''}
+        ${it.game_system === 'dcc' && it.description ? `<div style="font-size:.73rem;color:var(--sp-text);white-space:pre-wrap;">${_refDesc(it.description, 160)}</div>` : ''}
+        ${it.skill_choices ? `<div style="font-size:.73rem;color:var(--sp-text);">${_refDesc(it.skill_choices, 100)}</div>` : ''}
+        ${subs.length ? `<div style="font-size:.7rem;color:var(--sp-muted);">${it.game_system === 'dcc' ? 'Class type: ' : ''}${_refDesc(subs.map(s => s.trim()).join(' · '), 120)}</div>` : ''}
       </div>`;
     }
     default: {
@@ -1333,7 +1481,7 @@ function _refCard(key, it) {
       return `<div style="${base}">
         <div><span style="color:var(--ttrpg-accent);font-weight:600;">${_escH(it.name)}</span>
           ${it.sub ? `<span class="text-muted ms-2" style="font-size:.75rem;">${_escH(it.sub)}</span>` : ''}</div>
-        ${it.desc ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_escH(_trunc(it.desc, 600))}</div>` : ''}
+        ${it.desc ? `<div class="mt-1" style="font-size:.75rem;color:var(--sp-text);white-space:pre-wrap;">${_refDesc(it.desc, 600)}</div>` : ''}
       </div>`;
     }
   }

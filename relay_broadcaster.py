@@ -723,8 +723,13 @@ def _char_to_payload(char):
         'str': char.str_val, 'dex': char.dex_val,
         'con': char.con_val, 'int': char.int_val,
         'wis': char.wis_val, 'cha': char.cha_val,
+        # Game system + the Dungeon Crawler Carl sheet bag (portal re-skins
+        # the sheet from these; local stays the authority).
+        'game_system':        getattr(char, 'game_system', 'dnd5e') or 'dnd5e',
+        'dcc':                char.dcc() if getattr(char, 'is_dcc', False) else None,
         'skills': [
-            {'name': s.skill_name, 'bonus': s.bonus, 'proficient': bool(s.proficient)}
+            {'name': s.skill_name, 'bonus': s.bonus, 'proficient': bool(s.proficient),
+             'category': getattr(s, 'category', '') or '', 'stat': getattr(s, 'stat', '') or ''}
             for s in sorted(char.skills, key=lambda x: x.order_by)
         ],
         'resources': [
@@ -733,7 +738,8 @@ def _char_to_payload(char):
         ],
         'inventory': [
             {'name': i.item_name, 'qty': i.quantity, 'weight': i.weight or '',
-             'notes': i.notes or '', 'equipped': bool(i.equipped)}
+             'notes': i.notes or '', 'equipped': bool(i.equipped),
+             'hotlist': bool(getattr(i, 'hotlist', 0))}
             for i in sorted(char.inventory, key=lambda x: x.order_by)
         ],
         'feats': [
@@ -852,6 +858,30 @@ def push_all_characters():
                  len(characters))
 
     _enqueue('all-characters', _go)   # coalesce: latest full party wins
+    broadcast_game(sess)              # the rules the portal's roller follows
+
+
+def broadcast_game(sess=None):
+    """POST /api/v1/session/{id}/game — tell the portal which game system
+    (and per-session settings such as the DCC Floor) the ACTIVE session uses,
+    so remote players' dice rollers speak the same rules as the table's."""
+    cfg = _active()
+    if not cfg:
+        return
+    if sess is None:
+        from models.ttrpg import tblSessions
+        sess = tblSessions.query.filter_by(status='active').first()
+    if not sess:
+        return
+    payload = {'game': sess.game_info()}
+
+    def _go():
+        c = _exec_cfg()
+        if not c:
+            return
+        _send_small('game', payload, f'/api/v1/session/{c["session_id"]}/game', c)
+
+    _enqueue('game-system', _go)      # coalesce: latest wins
 
 
 def _in_active_session(char):
@@ -907,6 +937,17 @@ def push_character_and_broadcast(char):
               {'player_name': player_name}, c)
 
     _enqueue(f'character-bcast-{char.character_id}', _go)   # coalesce per character
+
+
+def _dcc_skill_category(sk):
+    if (getattr(sk, 'game_system', '') or '') != 'dcc':
+        return ''
+    import dcc_library
+    meta = dcc_library.SKILL_INDEX.get(sk.name)
+    if meta:
+        return meta[0]
+    head = (sk.description or '').split('.', 1)[0].strip()
+    return head if head in ('Attack', 'Spell', 'Utility', 'Passive') else ''
 
 
 def push_library():
@@ -970,19 +1011,25 @@ def push_library():
         ],
         'skills': [
             {'name': sk.name, 'ability': sk.ability_score or '',
-             'description': sk.description or ''}
+             'description': sk.description or '',
+             'game_system': getattr(sk, 'game_system', 'dnd5e') or 'dnd5e',
+             'category': _dcc_skill_category(sk)}
             for sk in tblSkillsLibrary.query.order_by(tblSkillsLibrary.name).all()
         ],
         'races': [
             {'name': r.name, 'speed': r.speed, 'size': r.size or '',
-             'ability_bonuses': r.ability_bonuses or '', 'traits': r.traits_text or ''}
+             'ability_bonuses': r.ability_bonuses or '', 'traits': r.traits_text or '',
+             'description': r.description or '',
+             'game_system': getattr(r, 'game_system', 'dnd5e') or 'dnd5e'}
             for r in tblRacesLibrary.query.order_by(tblRacesLibrary.name).all()
         ],
         'classes': [
             {'name': c.name, 'hit_die': c.hit_die,
              'saving_throws': c.saving_throws or '',
              'spellcasting_ability': c.spellcasting_ability or '',
-             'description': c.description or ''}
+             'description': c.description or '',
+             'stats': c.proficiencies or '', 'skills': c.skill_choices or '',
+             'game_system': getattr(c, 'game_system', 'dnd5e') or 'dnd5e'}
             for c in tblClassesLibrary.query.order_by(tblClassesLibrary.name).all()
         ],
         'conditions': [

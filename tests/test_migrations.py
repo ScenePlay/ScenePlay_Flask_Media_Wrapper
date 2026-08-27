@@ -28,7 +28,7 @@ OLD_SCHEMA = [
     "CREATE TABLE tblMediaMetadata (metadata_id INTEGER PRIMARY KEY, media_type TEXT, media_id INT, title TEXT, raw_json TEXT)",
 ]
 
-HEAD = '0013_prune_orphan_scene_links_again'
+HEAD = '0016_library_game_system'
 
 
 def columns(path, table):
@@ -228,3 +228,73 @@ def test_0012_prunes_links_to_missing_scenes(tmp_path):
     run_upgrade(path)
     assert q(path, "SELECT scene_ID, song_ID FROM tblMusicScene") == [(5, 1)]
     assert q(path, "SELECT scene_ID, video_ID FROM tblVideoScene") == [(5, 1)]
+
+
+class TestSessionGameSystem:
+    """0014: tblSessions gains game_system / system_settings with the D&D 5e
+    default; existing rows read as 5e; the guard is case-insensitive."""
+
+    @pytest.fixture(params=['tblSessions', 'tblsessions'])
+    def sessions_db(self, old_db, request):
+        conn = sqlite3.connect(old_db)
+        conn.execute(f"CREATE TABLE {request.param} (session_id INTEGER PRIMARY KEY, "
+                     "title TEXT, dm_notes TEXT, created_at TEXT)")
+        conn.execute(f"INSERT INTO {request.param} VALUES (1, 'Camp A', '', '2026-01-01 10:00:00')")
+        conn.commit()
+        conn.close()
+        return old_db
+
+    def test_columns_added_with_defaults(self, sessions_db):
+        run_upgrade(sessions_db)
+        cols = columns(sessions_db, 'tblSessions')
+        assert 'game_system' in cols and 'system_settings' in cols
+        assert q(sessions_db, "SELECT game_system, system_settings FROM tblSessions") == [('dnd5e', '{}')]
+        run_upgrade(sessions_db)   # second boot: no duplicate-column error
+        assert q(sessions_db, "SELECT version_num FROM alembic_version") == [(HEAD,)]
+
+
+class TestCharacterGameSystem:
+    """0015: per-character game system + DCC sheet columns, case-insensitive guard."""
+
+    @pytest.fixture(params=['tblCharacters', 'tblcharacters'])
+    def chars_db(self, tmp_path, request):
+        path = str(tmp_path / 'chars.db')
+        conn = sqlite3.connect(path)
+        for stmt in OLD_SCHEMA:
+            if 'tblCharacters' in stmt:
+                stmt = stmt.replace('tblCharacters', request.param)
+            conn.execute(stmt)
+        conn.execute(f"INSERT INTO {request.param}(character_id, user_id, name) VALUES (1, 1, 'Carl')")
+        conn.execute("CREATE TABLE tblCharacterSkills (skill_id INTEGER PRIMARY KEY, character_id INT, skill_name TEXT, bonus INT, proficient INT, order_by INT)")
+        conn.execute("CREATE TABLE tblCharacterInventory (item_id INTEGER PRIMARY KEY, character_id INT, item_name TEXT, quantity INT, weight TEXT, notes TEXT, equipped INT, order_by INT)")
+        conn.execute("INSERT INTO tblCharacterSkills VALUES (1, 1, 'Sneak', 2, 1, 0)")
+        conn.commit(); conn.close()
+        return path
+
+    def test_columns_added_with_defaults(self, chars_db):
+        run_upgrade(chars_db)
+        assert {'game_system', 'dcc_json'} <= set(columns(chars_db, 'tblCharacters'))
+        assert q(chars_db, "SELECT game_system, dcc_json FROM tblCharacters") == [('dnd5e', '{}')]
+        assert {'category', 'stat'} <= set(columns(chars_db, 'tblCharacterSkills'))
+        assert q(chars_db, "SELECT category, stat, bonus FROM tblCharacterSkills") == [('', '', 2)]
+        assert 'hotlist' in columns(chars_db, 'tblCharacterInventory')
+        run_upgrade(chars_db)   # idempotent
+        assert q(chars_db, "SELECT version_num FROM alembic_version") == [(HEAD,)]
+
+
+class TestLibraryGameSystem:
+    """0016: the three reference libraries gain game_system (default dnd5e)."""
+
+    def test_columns_added(self, tmp_path):
+        path = str(tmp_path / 'lib.db')
+        conn = sqlite3.connect(path)
+        for stmt in OLD_SCHEMA:
+            conn.execute(stmt)
+        conn.execute("CREATE TABLE tblskillslibrary (skill_lib_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, ability_score TEXT, description TEXT, source TEXT, created_at TEXT)")
+        conn.execute("INSERT INTO tblskillslibrary(name, ability_score, source, created_at) VALUES ('Stealth', 'DEX', 'srd', 't')")
+        conn.commit(); conn.close()
+        run_upgrade(path)
+        assert 'game_system' in columns(path, 'tblskillslibrary')
+        assert q(path, "SELECT game_system FROM tblskillslibrary") == [('dnd5e',)]
+        run_upgrade(path)
+        assert q(path, "SELECT version_num FROM alembic_version") == [(HEAD,)]

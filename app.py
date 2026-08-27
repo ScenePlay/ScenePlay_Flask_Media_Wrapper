@@ -382,6 +382,19 @@ with app.app_context():
             'Database schema migration failed — ScenePlay will not start on an '
             'inconsistent database. A pre-upgrade ScenePlay.db can be restored '
             'from backups/ if needed.') from _e
+    # Built-in Dungeon Crawler Carl library (skills/races/classes) — versioned,
+    # insert-if-missing, so fresh installs and upgrades both get it and edits
+    # are never overwritten (see dcc_library.py).
+    try:
+        import dcc_library
+        import models.ttrpg as _ttrpg_models
+        from routes._util import _now as _seed_now
+        _n = dcc_library.seed_if_needed(db, _ttrpg_models, _seed_now(),
+                                        appsettingGet, appsettingSet)
+        if _n:
+            print(f'DCC library: seeded {_n} built-in entries')
+    except Exception as _e:   # never block boot on reference data
+        print(f'DCC library seed skipped: {_e}')
 
 # Ensure all upload directories exist
 for _upload_dir in ('battlemaps', 'portraits', 'weapons', 'armor', 'monsters', 'textures'):

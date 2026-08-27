@@ -783,10 +783,17 @@ def get_pack(genre):
     return GENRE_PACKS.get(genre or '')
 
 
+# Packs kept for characters that already use them but no longer offered as a
+# choice. 'litrpg' was a 5e reskin of the dungeon-crawl setting; since Dungeon
+# Crawler Carl is now a real game system (dice_systems.py / dcc_library.py),
+# offering both under "D&D 5e" only invites picking the wrong one.
+HIDDEN_GENRES = frozenset({'litrpg'})
+
+
 def genre_labels():
-    """[(key, label)] for the dropdown, fantasy first."""
+    """[(key, label)] for the dropdown, fantasy first (hidden packs excluded)."""
     return [('fantasy', 'Fantasy (D&D)')] + \
-           [(k, p['label']) for k, p in GENRE_PACKS.items()]
+           [(k, p['label']) for k, p in GENRE_PACKS.items() if k not in HIDDEN_GENRES]
 
 
 def genre_display(genre, char_class, race):

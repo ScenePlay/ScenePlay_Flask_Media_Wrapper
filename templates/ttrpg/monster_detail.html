@@ -143,8 +143,16 @@
           <button class="btn btn-sm btn-outline-secondary" onclick="mdReset()"
                   title="Reset to 1d20 +0">&#8635;</button>
         </div>
-        <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
+        <!-- Quick labels rendered from DiceCore (per game system, shared across rollers) -->
         <div id="md-quicklabels" class="d-flex gap-1 mt-2 flex-wrap"></div>
+        <!-- Game-system panel: empty for D&D 5e. Under Dungeon Crawler Carl the
+             GM never rolls a d20 — players roll Evade against the Mob's number —
+             so this roller is mostly for damage there. -->
+        {% if game.id == 'dcc' %}
+        <div class="small mt-2" style="color:var(--sp-muted);">Dungeon Crawler Carl: the GM doesn't roll to attack &mdash;
+          players roll <b>Evade</b> against this Mob's number. Use this roller for damage and other dice.</div>
+        {% endif %}
+        <div id="md-system-panel" class="mt-2" style="display:none;"></div>
         <div id="md-result" class="mt-2" style="display:none;font-weight:600;"></div>
       </div>
 
@@ -272,9 +280,9 @@ const MD_NAME     = {{ (sm.display_name if sm else m.name) | tojson }};
 const MD_INSTANCE = {{ sm.monster_id if sm else 'null' }};
 const MD_HP_MAX   = {{ sm.hp_max if sm else 0 }};
 
-DiceCore.renderQuickLabels(document.getElementById('md-quicklabels'),
-                           document.getElementById('md-label'),
-                           'btn btn-sm btn-outline-secondary');
+const GAME_INFO = {{ game | tojson }};   // game system the rollers follow
+DiceCore.setSystem(GAME_INFO);
+let _mdSysPanel = null;   // mounted after the die/mode helpers exist (below)
 
 // ── Die / mode selection (same behavior as the sheet & map rollers) ─────────
 let _mdSides = 20;
@@ -339,10 +347,24 @@ function mdReset() {
   document.getElementById('md-result').style.display = 'none';
   mdSelectDie(20);
   mdSetAdvMode('normal');
+  if (_mdSysPanel) _mdSysPanel.reset();
 }
 
 mdSelectDie(20);
 mdSetAdvMode('normal');
+_mdSysPanel = DiceCore.mountSystemPanel(document.getElementById('md-system-panel'), {
+  btnClass: 'btn btn-sm btn-outline-secondary',
+  quickContainer: document.getElementById('md-quicklabels'),
+  labelInput: document.getElementById('md-label'),
+  setDie: mdSelectDie,
+  setCount: n => { document.getElementById('md-count').value = n; },
+  getCount: () => parseInt(document.getElementById('md-count').value) || 1,
+  setMod: mdSetMod,
+  setAdv: mdSetAdvMode,
+});
+setInterval(() => {   // Floor / system changes made on the session page
+  fetch('/ttrpg/dice/system').then(r => r.json()).then(g => _mdSysPanel.refresh(g)).catch(() => {});
+}, 10000);
 
 function mcAdjust(sign) {
   if (MD_INSTANCE === null) return;
@@ -378,6 +400,7 @@ function mdRoll() {
       modifier: parseInt(document.getElementById('md-mod').value) || 0,
       label:    document.getElementById('md-label').value.trim(),
       adv_mode: _mdAdv,
+      ...(_mdSysPanel ? _mdSysPanel.getContext() : {}),
     }),
   }).then(r => r.json()).then(d => {
     btn.disabled = false;
@@ -387,6 +410,7 @@ function mdRoll() {
     out.style.color = 'var(--ttrpg-accent)';
     const mode = d.adv_mode !== 'normal' ? ` [${d.adv_mode}]` : '';
     out.textContent = `${d.expression}${mode}${d.label ? ' ' + d.label : ''} → ${d.total}`;
+    if (d.outcome && d.outcome.ok === false) out.style.color = '#dc3545';
   }).catch(() => { btn.disabled = false; });
 }
 </script>

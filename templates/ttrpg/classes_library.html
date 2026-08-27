@@ -79,6 +79,13 @@
                placeholder="Blood Hunter" required autofocus>
       </div>
       <div>
+        <label class="form-label small text-muted mb-1">Game system</label>
+        <select name="game_system" class="form-select form-select-sm">
+          <option value="dnd5e">D&amp;D 5e</option>
+          <option value="dcc" {% if system == 'dcc' %}selected{% endif %}>Dungeon Crawler Carl</option>
+        </select>
+      </div>
+      <div>
         <label class="form-label small text-muted mb-1">Hit Die</label>
         <select name="hit_die" class="form-select form-select-sm">
           <option value="6">d6</option>
@@ -104,12 +111,12 @@
       <div class="full-width">
         <label class="form-label small text-muted mb-1">Proficiencies</label>
         <input type="text" name="proficiencies" class="form-control form-control-sm"
-               placeholder="Light armor, Medium armor, Simple weapons…">
+               placeholder="Light armor, Medium armor… (DCC: stat bonuses, e.g. +3 INT, +2 DEX)">
       </div>
       <div class="full-width">
         <label class="form-label small text-muted mb-1">Skill Choices</label>
         <input type="text" name="skill_choices" class="form-control form-control-sm"
-               placeholder="Choose 2 from Arcana, History, Insight…">
+               placeholder="Choose 2 from Arcana… (DCC: granted skills, one per line: +5 Arcane, +3 Salvage)">
       </div>
       <div class="full-width">
         <label class="form-label small text-muted mb-1">Subclasses (comma-separated)</label>
@@ -129,6 +136,10 @@
   </form>
 </div>
 
+<div class="mb-2 text-end"><form method="POST" action="{{ url_for('reference_bp.dcc_library_restore') }}" class="d-inline"
+      onsubmit="return confirm('Re-add any built-in Dungeon Crawler Carl entries that were deleted? Edited ones are left alone.')">
+  <button class="btn btn-outline-secondary btn-sm">&#8635; Restore built-in DCC entries</button>
+</form></div>
 <!-- Filter bar -->
 <div class="ttrpg-card p-3 mb-3">
   <form method="GET" action="{{ url_for('reference_bp.classes_library') }}" class="row g-2 align-items-end">
@@ -142,6 +153,15 @@
         <option value="">All</option>
         <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
         <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+        <option value="dcc"      {% if src == 'dcc'      %}selected{% endif %}>Built-in DCC</option>
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Game system</label>
+      <select name="system" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="dnd5e" {% if system == 'dnd5e' %}selected{% endif %}>D&amp;D 5e</option>
+        <option value="dcc"   {% if system == 'dcc'   %}selected{% endif %}>Dungeon Crawler Carl</option>
       </select>
     </div>
     <div class="col-auto">
@@ -162,9 +182,9 @@
       <tr>
         <th style="width:28px;"></th>
         <th>Class</th>
-        <th>Hit Die</th>
+        <th>{% if system == 'dcc' %}—{% else %}Hit Die{% endif %}</th>
         <th>Saving Throws</th>
-        <th>Subclasses</th>
+        <th>{% if system == 'dcc' %}Class type{% else %}Subclasses{% if not system %} / Class type{% endif %}{% endif %}</th>
         <th>Spellcasting</th>
         <th>Source</th>
         <th style="width:54px;"></th>
@@ -177,6 +197,11 @@
         <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
         <td>
           <span style="color:var(--ttrpg-accent);font-weight:600;">{{ c.name }}</span>
+          {% if c.source == 'dcc' %}
+          <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;border:1px solid var(--sp-border);
+                       color:var(--ttrpg-accent);background:color-mix(in srgb, var(--sp-accent) 12%, transparent);margin-left:4px;"
+                title="Built-in Dungeon Crawler Carl entry">DCC</span>
+          {% endif %}
           {% if c.source == 'homebrew' %}
           <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
                        border:1px solid var(--sp-border);color:var(--ttrpg-accent);
@@ -184,10 +209,11 @@
                        margin-left:4px;">Custom</span>
           {% endif %}
         </td>
-        <td><span class="hd-badge">d{{ c.hit_die }}</span></td>
+        <td>{% if c.hit_die %}<span class="hd-badge">d{{ c.hit_die }}</span>{% else %}<span class="text-muted small fst-italic">—</span>{% endif %}</td>
         <td class="small" style="color:var(--ttrpg-accent);">{{ c.saving_throws or '—' }}</td>
         <td>
           {% if c.subclasses %}
+            {% if c.game_system == 'dcc' %}<span class="text-muted small">Type:</span>{% endif %}
             {% for sub in c.subclasses.split(',')[:3] %}
             <span class="sub-tag me-1">{{ sub.strip() }}</span>
             {% endfor %}
@@ -207,7 +233,7 @@
         </td>
         <td class="small text-muted">{{ c.source }}</td>
         <td class="text-center" onclick="event.stopPropagation()">
-          {% if c.source == 'homebrew' %}
+          {% if c.source in ('homebrew', 'dcc') %}
           <form method="POST"
                 action="{{ url_for('reference_bp.class_delete', class_lib_id=c.class_lib_id) }}"
                 onsubmit="return confirm('Delete {{ c.name | e }}?')">
@@ -221,6 +247,12 @@
         <td colspan="8">
           <div class="row g-3">
             <div class="col-sm-5">
+              {% if c.game_system == 'dcc' %}
+              <div class="small mb-2">
+                <span class="text-muted">Stat bonuses:</span>
+                <span style="color:var(--ttrpg-accent);">{{ c.proficiencies or '—' }}</span>
+              </div>
+              {% else %}
               <div class="small mb-2">
                 <span class="text-muted">Hit Die:</span>
                 <span style="color:var(--ttrpg-accent);">d{{ c.hit_die }}</span>
@@ -228,6 +260,7 @@
                 <span class="text-muted">Saves:</span>
                 <span style="color:var(--ttrpg-accent);">{{ c.saving_throws or '—' }}</span>
               </div>
+              {% endif %}
               {% if c.spellcasting_ability %}
               <div class="small mb-2">
                 <span class="text-muted">Spellcasting:</span>
@@ -236,23 +269,23 @@
               {% endif %}
               {% if c.skill_choices %}
               <div class="small mb-2">
-                <span class="text-muted">Skills:</span>
-                <span style="color:var(--sp-text);">{{ c.skill_choices }}</span>
+                <span class="text-muted">{% if c.game_system == 'dcc' %}Granted skills:{% else %}Skills:{% endif %}</span>
+                <span style="color:var(--sp-text);white-space:pre-wrap;">{{ c.skill_choices }}</span>
               </div>
               {% endif %}
               {% if c.description %}
-              <div class="small text-muted fst-italic mt-1">{{ c.description }}</div>
+              <div class="small text-muted fst-italic mt-1" style="white-space:pre-wrap;">{{ c.description }}</div>
               {% endif %}
             </div>
             <div class="col-sm-4">
-              {% if c.proficiencies %}
+              {% if c.proficiencies and c.game_system != 'dcc' %}
               <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Proficiencies</div>
               <div class="small" style="color:var(--sp-text);">{{ c.proficiencies }}</div>
               {% endif %}
             </div>
             <div class="col-sm-3">
               {% if c.subclasses %}
-              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Subclasses</div>
+              <div class="small text-muted mb-1" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em;">{% if c.game_system == 'dcc' %}Class type{% else %}Subclasses{% endif %}</div>
               <div class="d-flex flex-wrap gap-1">
                 {% for sub in c.subclasses.split(',') %}
                 {% if sub.strip() %}

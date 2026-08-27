@@ -71,6 +71,13 @@
                placeholder="Aasimar" required autofocus>
       </div>
       <div>
+        <label class="form-label small text-muted mb-1">Game system</label>
+        <select name="game_system" class="form-select form-select-sm">
+          <option value="dnd5e">D&amp;D 5e</option>
+          <option value="dcc" {% if system == 'dcc' %}selected{% endif %}>Dungeon Crawler Carl</option>
+        </select>
+      </div>
+      <div>
         <label class="form-label small text-muted mb-1">Speed (ft)</label>
         <input type="number" name="speed" class="form-control form-control-sm" value="30" min="0">
       </div>
@@ -87,7 +94,7 @@
       <div>
         <label class="form-label small text-muted mb-1">Ability Bonuses</label>
         <input type="text" name="ability_bonuses" class="form-control form-control-sm"
-               placeholder="+2 STR, +1 CON">
+               placeholder="+2 STR, +1 CON  (DCC: +5 DEX, -2 CHA — INT covers wisdom)">
       </div>
       <div>
         <label class="form-label small text-muted mb-1">Languages</label>
@@ -97,7 +104,7 @@
       <div class="full-width">
         <label class="form-label small text-muted mb-1">Traits (one per line)</label>
         <textarea name="traits_text" class="form-control form-control-sm" rows="3"
-                  style="resize:vertical;" placeholder="Darkvision&#10;Fey Ancestry&#10;Trance"></textarea>
+                  style="resize:vertical;" placeholder="Darkvision&#10;Fey Ancestry&#10;Trance&#10;(DCC: +2 Climbing, +3 Web (Spell), +2 DR, See in total darkness…)"></textarea>
       </div>
       <div class="full-width">
         <label class="form-label small text-muted mb-1">Description / Notes</label>
@@ -112,6 +119,10 @@
   </form>
 </div>
 
+<div class="mb-2 text-end"><form method="POST" action="{{ url_for('reference_bp.dcc_library_restore') }}" class="d-inline"
+      onsubmit="return confirm('Re-add any built-in Dungeon Crawler Carl entries that were deleted? Edited ones are left alone.')">
+  <button class="btn btn-outline-secondary btn-sm">&#8635; Restore built-in DCC entries</button>
+</form></div>
 <!-- Filter bar -->
 <div class="ttrpg-card p-3 mb-3">
   <form method="GET" action="{{ url_for('reference_bp.races_library') }}" class="row g-2 align-items-end">
@@ -125,6 +136,15 @@
         <option value="">All</option>
         <option value="srd"      {% if src == 'srd'      %}selected{% endif %}>SRD</option>
         <option value="homebrew" {% if src == 'homebrew' %}selected{% endif %}>Custom</option>
+        <option value="dcc"      {% if src == 'dcc'      %}selected{% endif %}>Built-in DCC</option>
+      </select>
+    </div>
+    <div class="col-sm-2">
+      <label class="form-label small text-muted mb-1">Game system</label>
+      <select name="system" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="dnd5e" {% if system == 'dnd5e' %}selected{% endif %}>D&amp;D 5e</option>
+        <option value="dcc"   {% if system == 'dcc'   %}selected{% endif %}>Dungeon Crawler Carl</option>
       </select>
     </div>
     <div class="col-auto">
@@ -160,6 +180,11 @@
         <td class="text-center text-muted" style="font-size:.7rem;">&#9660;</td>
         <td>
           <span style="color:var(--ttrpg-accent);font-weight:600;">{{ r.name }}</span>
+          {% if r.source == 'dcc' %}
+          <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;border:1px solid var(--sp-border);
+                       color:var(--ttrpg-accent);background:color-mix(in srgb, var(--sp-accent) 12%, transparent);margin-left:4px;"
+                title="Built-in Dungeon Crawler Carl entry">DCC</span>
+          {% endif %}
           {% if r.source == 'homebrew' %}
           <span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
                        border:1px solid var(--sp-border);
@@ -194,7 +219,7 @@
         </td>
         <td class="text-muted small">{{ r.source }}</td>
         <td class="text-center" onclick="event.stopPropagation()">
-          {% if r.source == 'homebrew' %}
+          {% if r.source in ('homebrew', 'dcc') %}
           <form method="POST"
                 action="{{ url_for('reference_bp.race_delete', race_lib_id=r.race_lib_id) }}"
                 onsubmit="return confirm('Delete {{ r.name }}?')">

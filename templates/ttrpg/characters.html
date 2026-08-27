@@ -26,7 +26,7 @@
     <thead>
       <tr>
         <th>Name</th><th>Class</th><th>Race</th><th>Lv</th>
-        <th>HP</th><th>AC</th><th>Player</th><th></th>
+        <th>HP</th><th title="AC (D&amp;D 5e) or DR (Dungeon Crawler Carl)">AC / DR</th><th>Player</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -56,7 +56,7 @@
             </div>
           </div>
         </td>
-        <td>{{ char.ac }}</td>
+        <td>{% if char.is_dcc %}DR {{ char.dr_total() }}{% else %}{{ char.ac }}{% endif %}</td>
         <td>{{ char.user.display_name }}</td>
         <td>
           <form method="POST" action="{{ url_for('ttrpg.character_delete', character_id=char.character_id) }}"

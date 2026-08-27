@@ -1680,13 +1680,48 @@ function toggleMapDicePanel() {
     btn.classList.replace('btn-outline-secondary', 'btn-ttrpg');
     mapSelectDie(20);
     mapSetAdvMode('normal');
+    mapInitDiceSystem();
     mapFetchFeed();
     _mapDicePoll = setInterval(mapPollFeed, 3500);
+    _mapSysPoll  = setInterval(mapPollDiceSystem, 10000);   // Floor / system changes
   } else {
     p.style.display = 'none';
     btn.classList.replace('btn-ttrpg', 'btn-outline-secondary');
     clearInterval(_mapDicePoll);
+    clearInterval(_mapSysPoll);
   }
+}
+
+// ── Game system (DiceCore) ─────────────────────────────────────────────────
+// The active session decides the rules (D&D 5e or Dungeon Crawler Carl); the
+// panel turns "who's in the way" into the number to beat, the server judges.
+let _mapSysPanel = null;
+let _mapSysPoll  = null;
+function mapInitDiceSystem() {
+  if (!window.DiceCore || _mapSysPanel) return;
+  DiceCore.setSystem(typeof GAME_INFO !== 'undefined' ? GAME_INFO : null);
+  _mapSysPanel = DiceCore.mountSystemPanel(document.getElementById('map-dice-system-panel'), {
+    btnClass: 'btn btn-sm btn-outline-secondary',
+    quickContainer: document.getElementById('map-dice-quicklabels'),
+    labelInput: document.getElementById('map-dice-label'),
+    setDie: mapSelectDie,
+    setCount: n => { document.getElementById('map-dice-count').value = n; },
+    getCount: () => parseInt(document.getElementById('map-dice-count').value) || 1,
+    setMod: v => { document.getElementById('map-dice-mod').value = v; },
+    setAdv: mapSetAdvMode,
+    getDamageDice: () => {
+      const c = _mapRollerChar();
+      const w = c && (c.weapons || []).find(x => /\d+\s*d\s*\d+/i.test(x.dice || ''));
+      const m = w && w.dice.match(/(\d+)\s*d\s*(\d+)/i);
+      return m ? { count: parseInt(m[1], 10), sides: parseInt(m[2], 10), mod: w.dmg_bonus || 0, label: w.name + ' damage' } : null;
+    },
+  });
+}
+function mapPollDiceSystem() {
+  fetch('/ttrpg/dice/system').then(r => r.json()).then(g => {
+    if (!_mapSysPanel) return;
+    _mapSysPanel.refresh(g);
+  }).catch(() => {});
 }
 
 function minimizeMapDicePanel() {
@@ -1806,8 +1841,15 @@ function mapRenderStatMods() {
   const c = _mapRollerChar();
   if (!c || !c.mods) { host.style.display = 'none'; host.innerHTML = ''; return; }
   const sign = n => (n >= 0 ? '+' : '') + n;
-  const entries = ['STR','DEX','CON','INT','WIS','CHA']
-    .map(k => [k, c.mods[k] || 0]).concat([['PROF', c.prof || 2]]);
+  // Under Dungeon Crawler Carl the modifier table differs — recompute from
+  // the raw scores; PROF is a 5e concept and is dropped there.
+  // The CHARACTER's sheet system decides its stats (DCC has no Wisdom and a
+  // different modifier table); the session system only decides the roll rules.
+  const sysId = c.game_system || 'dnd5e';
+  const modOf = k => (sysId !== 'dnd5e' && c.scores && window.DiceCore)
+    ? DiceCore.statMod(sysId, c.scores[k]) : (c.mods[k] || 0);
+  const keys = sysId === 'dcc' ? ['STR','INT','CON','DEX','CHA'] : ['STR','DEX','CON','INT','WIS','CHA'];
+  const entries = keys.map(k => [k, modOf(k)]).concat(sysId === 'dnd5e' ? [['PROF', c.prof || 2]] : []);
   host.innerHTML = entries.map(([label, val]) =>
     `<button type="button" class="btn btn-sm btn-outline-secondary stat-mod-btn"
              data-mod="${val}" title="${label}: ${sign(val)}">${label}<br>
@@ -1950,6 +1992,7 @@ function mapDoRoll() {
       character_id: rc ? rc.id : null,
       char_name:    rc ? rc.name : MAP_ROLLER_NAME,
       count, sides: _mapDiceSel, modifier, label, adv_mode: _mapAdvMode,
+      ...(_mapSysPanel ? _mapSysPanel.getContext() : {}),
     })
   }).then(r => r.json()).then(d => {
     if (!d.ok) return;
@@ -1977,8 +2020,10 @@ function _mapShowResult(d) {
   }
   const mod = d.modifier !== 0 ? ` ${d.modifier > 0 ? '+' : ''}${d.modifier}` : '';
   const lbl = d.label ? `<div style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);font-size:.7rem;">${_mEsc(d.label)}</div>` : '';
+  const oc = (d.outcome && d.outcome.text)
+    ? `<div style="margin-top:3px;font-weight:600;color:${d.outcome.ok === false ? '#dc3545' : d.outcome.ok ? '#28a745' : 'inherit'};">${_mEsc(d.outcome.text)}</div>` : '';
   document.getElementById('map-dice-result-inner').innerHTML =
-    `${lbl}${_mapAdvLabel(d.adv_mode)}<div>${dh}${mod ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);margin-left:3px;">${mod}</span>` : ''} <span style="opacity:.5;">&#8594;</span> <span style="color:var(--ttrpg-accent);font-weight:bold;font-size:1rem;">${d.total}</span></div>`;
+    `${lbl}${_mapAdvLabel(d.adv_mode)}<div>${dh}${mod ? `<span style="color:color-mix(in srgb,var(--ttrpg-text) 70%,transparent);margin-left:3px;">${mod}</span>` : ''} <span style="opacity:.5;">&#8594;</span> <span style="color:var(--ttrpg-accent);font-weight:bold;font-size:1rem;">${d.total}</span></div>${oc}`;
   document.getElementById('map-dice-result').style.display = '';
 }
 
@@ -2083,6 +2128,7 @@ function mapResetDice() {
   document.getElementById('map-dice-label').value = '';
   mapSelectDie(20);
   mapSetAdvMode('normal');
+  if (_mapSysPanel) _mapSysPanel.reset();
   document.getElementById('map-dice-result').style.display = 'none';
 }
 

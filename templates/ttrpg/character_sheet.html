@@ -142,6 +142,7 @@
 {% block content %}
 {% set can_edit = current_user.is_dm() or char.user_id == current_user.user_id %}
 {% set mod = char.modifier %}
+{% set IS_DCC = char.is_dcc %}
 
 <div class="row g-3">
   <!-- ── Header ──────────────────────────────────────────────── -->
@@ -228,10 +229,62 @@
           {% endif %}
           {% endif %}
           {% if char.background %}&bull; {{ char.background }}{% endif %}
+          {% if dcc_pairing_warning %}
+          <div class="small mt-1" style="color:#dc3545;font-weight:600;">&#9888; {{ dcc_pairing_warning }}</div>
+          {% endif %}
+          {% if IS_DCC and can_edit %}
+          {% set applied = dcc.applied or [] %}
+          {% if char.race and ('race:' ~ char.race) not in applied %}
+          <button class="btn btn-sm btn-outline-secondary py-0 ms-1" style="font-size:.7rem;" onclick="applyLibrary('race')"
+                  title="Add this Race's Stat bonuses and Skill Ranks from the library">&#10010; Apply race bonuses</button>
+          {% endif %}
+          {% if char.char_class and ('class:' ~ char.char_class) not in applied %}
+          <button class="btn btn-sm btn-outline-secondary py-0 ms-1" style="font-size:.7rem;" onclick="applyLibrary('class')"
+                  title="Add this Class's Stat bonuses and Skill Ranks from the library">&#10010; Apply class bonuses</button>
+          {% endif %}
+          {% endif %}
         </div>
-        <div class="small text-muted">Player: {{ char.user.display_name }}</div>
+        <div class="small text-muted">Player: {{ char.user.display_name }}
+          {% if IS_DCC %}&bull; <span title="Game system">Dungeon Crawler Carl</span>
+          {% if dcc.crawler_number %}&bull; Crawler #{{ dcc.crawler_number }}{% endif %}
+          {% if dcc.pronouns %}&bull; {{ dcc.pronouns }}{% endif %}{% endif %}
+        </div>
 
-        <!-- HP controls -->
+        <!-- HP controls (D&D 5e) / Health Bar (Dungeon Crawler Carl) -->
+        {% if IS_DCC %}
+        <div class="mt-2" style="max-width:420px;">
+          <div class="d-flex justify-content-between align-items-center small mb-1">
+            <span>Health Bar <strong id="hp_pct_disp">{{ char.hp_pct() }}%</strong>
+              <span class="text-muted">(<span id="hp_current_disp">{{ char.hp_current }}</span> of {{ char.hp_max }} slots)</span></span>
+            <span class="text-muted" title="Each slot is worth your Con Mod. Damage below that is shrugged off.">each slot = {{ char.hb_slot_value() }}</span>
+          </div>
+          <div class="d-flex gap-1 mb-2" id="hb_slots">
+            {% for i in range(char.hp_max) %}
+            <div class="hb-slot{% if i < char.hp_current %} full{% endif %}"
+                 style="flex:1;height:22px;border:1px solid var(--ttrpg-accent);border-radius:4px;font-size:.68rem;
+                        display:flex;align-items:center;justify-content:center;
+                        background:{% if i < char.hp_current %}{% if i < 2 %}#dc3545{% elif i < 5 %}#ffc107{% else %}#28a745{% endif %}{% else %}transparent{% endif %};
+                        color:{% if i < char.hp_current %}#fff{% else %}var(--sp-muted){% endif %};"
+                 title="{{ (i + 1) * 10 }}%">{{ char.hb_slot_value() }}</div>
+            {% endfor %}
+          </div>
+          <div id="hb_dying" class="small fw-bold" style="color:#dc3545;{% if char.hp_current > 0 %}display:none;{% endif %}">&#9760; Dying — must be healed to 10% or more</div>
+          {% if can_edit %}
+          <div class="d-flex gap-1 align-items-center flex-wrap">
+            <button class="btn btn-sm btn-outline-danger px-2" onclick="applyDccDamage()"
+                    title="Enter the damage number. DR ({{ char.dr_total() }}) is taken off first, then each full {{ char.hb_slot_value() }} points costs one slot.">&#9660; Take damage</button>
+            <input type="number" id="hp_amount" class="form-control form-control-sm text-center"
+                   value="5" min="0" style="max-width:64px;" title="Damage dealt to you">
+            <span class="text-muted small">DR {{ char.dr_total() }} comes off first</span>
+            <button class="btn btn-sm btn-outline-success px-2 ms-2" onclick="applyHpDelta(+hbSlots())"
+                    title="Heal by slots (Heal spell = 2 slots = 20%)">&#9650; Heal</button>
+            <input type="number" id="hb_heal_slots" class="form-control form-control-sm text-center"
+                   value="2" min="1" max="10" style="max-width:56px;" title="Slots to heal (1 slot = 10%)">
+            <span class="text-muted small">slots</span>
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
         <div class="mt-2" style="max-width:340px;">
           <div class="d-flex justify-content-between align-items-center small mb-1">
             <span>HP <strong id="hp_current_disp">{{ char.hp_current }}</strong> / {{ char.hp_max }}</span>
@@ -254,14 +307,28 @@
           </div>
           {% endif %}
         </div>
+        {% endif %}
 
         <!-- Quick stats row -->
+        {% if IS_DCC %}
+        <div class="d-flex gap-3 mt-2 flex-wrap small">
+          <span title="Evade is a roll, not a number: d20 + 2 + Dex Mod + buffs, against the Mob's to-hit number">Evade <strong>d20 {{ '%+d' % char.evade_bonus() }}</strong></span>
+          <span title="Damage Resistance — subtracted from every hit before the Health Bar">DR <strong>{{ char.dr_total() }}</strong></span>
+          <span>Move <strong>{{ dcc.move }}</strong> / Step <strong>{{ dcc.step }}</strong> ft</span>
+          <span>Size <strong>{{ dcc.size }}</strong></span>
+          <span title="Starts at Cha Mod × 2">Popularity <strong>{{ dcc.popularity }}</strong></span>
+          <span>AI Favor <strong>{{ dcc.ai_favor }}</strong></span>
+          <span title="Max Mana = Intelligence score">Mana <strong>{{ char.mana_max() }}</strong></span>
+          {% if dcc.stat_points %}<span style="color:var(--ttrpg-accent);">&#9650; {{ dcc.stat_points }} Stat points to spend</span>{% endif %}
+        </div>
+        {% else %}
         <div class="d-flex gap-3 mt-2 flex-wrap small">
           <span>AC <strong>{{ char.ac }}</strong></span>
           <span>Speed <strong>{{ char.speed }}</strong></span>
           <span>Init <strong>{{ '%+d' % char.initiative_bonus }}</strong></span>
           <span>Pass. Perc. <strong>{{ char.passive_perception }}</strong></span>
         </div>
+        {% endif %}
 
         {% set equipped_weapons = char.weapons | selectattr('equipped', 'equalto', 1) | list %}
         {% set equipped_armor   = char.armor   | selectattr('equipped', 'equalto', 1) | list %}
@@ -415,21 +482,28 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" style="min-width:28px;padding:0 6px;"
                     onclick="var i=document.getElementById('dice-modifier');i.value=(parseInt(i.value)||0)+1">+</button>
             {% set pb = ((char.level - 1) // 4) + 2 %}
-            {% for label, val in [
-                ('STR', char.modifier(char.str_val)),
-                ('DEX', char.modifier(char.dex_val)),
-                ('CON', char.modifier(char.con_val)),
-                ('INT', char.modifier(char.int_val)),
-                ('WIS', char.modifier(char.wis_val)),
-                ('CHA', char.modifier(char.cha_val)),
-                ('PROF', pb)] %}
-            <button class="btn btn-sm btn-outline-secondary stat-mod-btn"
-                    onclick="setMod({{ val }})"
+            {% set ns = namespace(rows=[]) %}
+            {% for k in char.stat_keys() %}{% set ns.rows = ns.rows + [(k.upper(), char.stat_mod(k))] %}{% endfor %}
+            {% if not IS_DCC %}{% set ns.rows = ns.rows + [('PROF', pb)] %}{% endif %}
+            {% for label, val in ns.rows %}
+            <button class="btn btn-sm btn-outline-secondary stat-mod-btn" data-stat="{{ label }}"
+                    onclick="setMod(parseInt(this.dataset.mod))" data-mod="{{ val }}"
                     title="{{ label }}: {{ '%+d' % val }}">{{ label }}<br>
               <span style="font-size:.65rem;">{{ '%+d' % val }}</span>
             </button>
             {% endfor %}
+            {% if IS_DCC %}
+            <button class="btn btn-sm btn-outline-secondary stat-mod-btn" data-stat="EVADE"
+                    onclick="diceQuickSet({{ char.evade_bonus() }}, 'Evade'); if (_sysPanel) _sysPanel.setRollType('evade');"
+                    title="Evade: d20 + 2 + Dex Mod + buffs">EVADE<br>
+              <span style="font-size:.65rem;">{{ '%+d' % char.evade_bonus() }}</span>
+            </button>
+            {% endif %}
           </div>
+
+          <!-- Game-system panel (DiceCore.mountSystemPanel): empty for D&D 5e,
+               plain-language target-number helper for Dungeon Crawler Carl -->
+          <div id="dice-system-panel" style="display:none;"></div>
 
           <!-- Label + Roll button -->
           <div class="d-flex gap-2 align-items-center flex-wrap">
@@ -533,6 +607,46 @@
   <!-- ── Attributes ─────────────────────────────────────────── -->
   <div class="col-12">
     <div class="ttrpg-card p-3">
+      {% if IS_DCC %}
+      <h6 class="text-muted text-uppercase mb-1" style="letter-spacing:.08em;">The Five Core Stats</h6>
+      <div class="small text-muted mb-3">Top number is <b>Unenhanced</b> (your body). Bottom is <b>Enhanced</b> (with gear &amp; buffs) &mdash; the modifier comes from that one. Blank Enhanced = same as Unenhanced.</div>
+      <div class="d-flex gap-2 flex-wrap">
+        {% for k in char.stat_keys() %}
+        {% set field = k ~ '_val' %}
+        <div class="attr-box" style="min-width:96px;">
+          <div class="label" title="{{ dcc_stat_names[k] }}">{{ k.upper() }}</div>
+          {% if can_edit %}
+          <div class="attr-step">
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','score',-1,this)" title="&#8722;1">&minus;</button>
+            <div class="score editable" data-field="{{ field }}" onclick="startAttrEdit(this, false)" title="Unenhanced">{{ char.score(k) }}</div>
+            <button type="button" class="attr-stepbtn" onclick="stepAttr('{{ field }}','score',1,this)" title="+1">+</button>
+          </div>
+          <div class="d-flex align-items-center justify-content-center gap-1 my-1">
+            <span class="small text-muted" title="Enhanced score (gear, buffs)">Enh.</span>
+            <input type="number" class="form-control form-control-sm text-center dcc-enh" data-stat="{{ k }}"
+                   style="width:58px;padding:0 2px;" min="1" max="999"
+                   value="{{ dcc.enh.get(k, '') }}" placeholder="{{ char.score(k) }}"
+                   onchange="saveField('dcc_enh_{{ k }}', this.value, () => reloadKeepTab())">
+          </div>
+          <div class="mod" data-field="{{ field }}" title="From Table 2 (Stat Mods) on the Enhanced score">{{ '%+d' % char.stat_mod(k) }}</div>
+          {% else %}
+          <div class="score" data-field="{{ field }}">{{ char.score(k) }}</div>
+          <div class="small text-muted">Enh. {{ char.enhanced(k) }}</div>
+          <div class="mod" data-field="{{ field }}">{{ '%+d' % char.stat_mod(k) }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% if can_edit %}
+        <div class="attr-box" style="min-width:110px;border-style:dashed;">
+          <div class="label" title="3 per Level gained; spend them on any Stat">Stat points</div>
+          <input type="number" class="form-control form-control-sm text-center" style="width:64px;margin:6px auto;"
+                 min="0" value="{{ dcc.stat_points }}"
+                 onchange="saveField('dcc_stat_points', this.value, () => reloadKeepTab())">
+          <div class="small text-muted">to spend</div>
+        </div>
+        {% endif %}
+      </div>
+      {% else %}
       <h6 class="text-muted text-uppercase mb-3" style="letter-spacing:.08em;">Attributes</h6>
       <div class="d-flex gap-2 flex-wrap">
         {% for label, field, score in [
@@ -562,6 +676,7 @@
         </div>
         {% endfor %}
       </div>
+      {% endif %}
     </div>
   </div>
 
@@ -578,16 +693,19 @@
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-armor" style="color:var(--ttrpg-accent);">
           Armor{% if char.armor %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.armor|length }}</span>{% endif %}
         </button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">Currency</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-currency" style="color:var(--ttrpg-accent);">{% if IS_DCC %}Gold{% else %}Currency{% endif %}</button></li>
+        {% if IS_DCC %}
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-crawler" style="color:var(--ttrpg-accent);">Crawler</button></li>
+        {% endif %}
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-notes" style="color:var(--ttrpg-accent);">Notes{% if char.notes %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.notes|length }}</span>{% endif %}</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-feats" style="color:var(--ttrpg-accent);">
-          Feats{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
+          {% if IS_DCC %}Achievements{% else %}Feats{% endif %}{% if char.feats %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.feats|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-spells" style="color:var(--ttrpg-accent);">
           Spells{% if char.spells %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.spells|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-conditions" style="color:var(--ttrpg-accent);">
-          Conditions{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
+          {% if IS_DCC %}Debuffs{% else %}Conditions{% endif %}{% if char.conditions %} <span class="badge rounded-pill" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);font-size:.65rem;">{{ char.conditions|length }}</span>{% endif %}
         </button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-reference" style="color:var(--ttrpg-accent);">Reference</button></li>
       </ul>
@@ -620,6 +738,7 @@
             {% endif %}
           </div>
           {% endif %}
+          {% if IS_DCC %}<div class="small text-muted mb-2">&#9889; <b>Mana</b> is your Intelligence score (Max Mana {{ char.mana_max() }}) and updates when that Stat changes. Spend and regain it here.</div>{% endif %}
           <div id="resource-list">
             {% for r in char.resources | sort(attribute='order_by') %}
             <div id="res-{{ r.resource_id }}">
@@ -687,24 +806,48 @@
                             background:var(--sp-surface);border:1px solid var(--sp-border);
                             border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;"></div>
               </div>
+              {% if IS_DCC %}
+              <select id="new_skill_category" class="form-select form-select-sm" style="max-width:120px;" title="Skill category">
+                {% for c in dcc_skill_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+              <select id="new_skill_stat" class="form-select form-select-sm" style="max-width:150px;" title="Stat Mod this skill adds">
+                {% for k in char.stat_keys() %}<option value="{{ k }}">{{ dcc_stat_names[k] }} ({{ '%+d' % char.stat_mod(k) }})</option>{% endfor %}
+              </select>
+              <div class="d-flex align-items-center gap-1"><span class="small text-muted">Rank</span>
+              <input type="number" id="new_skill_bonus" class="form-control form-control-sm text-center" style="max-width:64px;" value="1" min="0" max="20"></div>
+              <input type="hidden" id="new_skill_prof">
+              {% else %}
               <input type="number" id="new_skill_bonus" class="form-control form-control-sm" placeholder="Bonus" style="max-width:80px;" value="0">
               <div class="form-check align-self-center ms-1">
                 <input class="form-check-input" type="checkbox" id="new_skill_prof">
                 <label class="form-check-label small" for="new_skill_prof">Prof.</label>
               </div>
+              {% endif %}
               <button class="btn btn-ttrpg btn-sm" onclick="addSkill()">Add</button>
             </div>
+            {% if IS_DCC %}<div class="small text-muted">Checks roll d20 + Stat Mod + Rank. Untrained = roll with Disadvantage, no Rank. <b>Passive</b> skills are never rolled. Rank-Up: after grinding hours equal to the Rank, roll a d20 &mdash; equal or higher than the Rank means +1 Rank (use the roller's <i>Skill Rank-Up Check</i>).</div>{% endif %}
           </div>
           {% endif %}
           <div id="skill-list">
             {% for s in char.skills | sort(attribute='order_by') %}
             <div id="skill-{{ s.skill_id }}">
               <div id="skill-view-{{ s.skill_id }}" class="d-flex align-items-center gap-2 mb-1">
+                {% if IS_DCC %}
+                <span style="min-width:160px; color:var(--ttrpg-accent);">{{ s.skill_name }}</span>
+                <span class="badge" style="background:var(--ttrpg-accent);color:var(--sp-on-accent);">Rank {{ s.bonus }}</span>
+                <span class="text-muted small">{{ s.category or '' }}{% if s.stat %} &bull; {{ s.stat.upper() }} {{ '%+d' % char.stat_mod(s.stat) }}{% endif %}</span>
+                {% if s.category != 'Passive' and s.stat %}
+                <button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.7rem;"
+                        onclick="diceQuickSet({{ char.stat_mod(s.stat) + (s.bonus or 0) }}, {{ s.skill_name | tojson }}); document.getElementById('dice-panel').style.display=''; initDiceSystem(); if (_sysPanel) _sysPanel.setRollType('{{ 'attack' if s.category == 'Attack' else 'check' }}');"
+                        title="Load d20 {{ '%+d' % (char.stat_mod(s.stat) + (s.bonus or 0)) }} into the roller">&#127922; Roll</button>
+                {% endif %}
+                {% else %}
                 <span style="min-width:160px; color:var(--ttrpg-accent);">
                   {% if s.proficient %}&#9733;{% else %}&#9734;{% endif %}
                   {{ s.skill_name }}
                 </span>
                 <span class="text-muted small">{{ '%+d' % s.bonus }}</span>
+                {% endif %}
                 {% if can_edit %}
                 <button class="btn btn-sm btn-outline-secondary px-2 ms-auto" title="Edit"
                         onclick="editToggle('skill', {{ s.skill_id }})">&#9998;</button>
@@ -717,6 +860,18 @@
                 <div class="d-flex gap-2 flex-wrap align-items-center">
                   <input type="text" value="{{ s.skill_name }}" id="skill-name-{{ s.skill_id }}"
                          class="form-control form-control-sm" style="max-width:160px;" placeholder="Skill name">
+                  {% if IS_DCC %}
+                  <select id="skill-cat-{{ s.skill_id }}" class="form-select form-select-sm" style="max-width:120px;">
+                    {% for c in dcc_skill_categories %}<option value="{{ c }}" {% if s.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                  </select>
+                  <select id="skill-stat-{{ s.skill_id }}" class="form-select form-select-sm" style="max-width:150px;">
+                    {% for k in char.stat_keys() %}<option value="{{ k }}" {% if s.stat == k %}selected{% endif %}>{{ dcc_stat_names[k] }}</option>{% endfor %}
+                  </select>
+                  <span class="small text-muted">Rank</span>
+                  <input type="number" value="{{ s.bonus }}" id="skill-bonus-{{ s.skill_id }}"
+                         class="form-control form-control-sm text-center" style="max-width:64px;" min="0" max="20">
+                  <input type="hidden" id="skill-prof-{{ s.skill_id }}">
+                  {% else %}
                   <input type="number" value="{{ s.bonus }}" id="skill-bonus-{{ s.skill_id }}"
                          class="form-control form-control-sm" style="max-width:75px;" placeholder="Bonus">
                   <div class="form-check mb-0">
@@ -724,6 +879,7 @@
                            {% if s.proficient %}checked{% endif %}>
                     <label class="form-check-label small" for="skill-prof-{{ s.skill_id }}">Prof.</label>
                   </div>
+                  {% endif %}
                   <button class="btn btn-ttrpg btn-sm" onclick="saveSkill({{ s.skill_id }})">Save</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm"
                           onclick="editToggle('skill', {{ s.skill_id }})">Cancel</button>
@@ -761,6 +917,12 @@
               <input type="text" id="new_item_notes" class="form-control form-control-sm"
                      placeholder="Notes" style="max-width:160px;">
               <input type="hidden" id="new_item_weight" value="">
+              {% if IS_DCC %}
+              <div class="form-check align-self-center">
+                <input class="form-check-input" type="checkbox" id="new_item_hotlist">
+                <label class="form-check-label small" for="new_item_hotlist" title="Your 10-slot Hotlist: instant access in combat">Hotlist</label>
+              </div>
+              {% endif %}
               <button class="btn btn-ttrpg btn-sm" onclick="addItem()">Add</button>
             </div>
 
@@ -789,12 +951,18 @@
             </div>
           </div>
           {% endif %}
+          {% if IS_DCC %}
+          {% set hot = char.inventory | selectattr('hotlist', 'equalto', 1) | list %}
+          <div class="small mb-2" style="color:{% if hot | length > 10 %}#dc3545{% else %}var(--sp-muted){% endif %};">
+            &#9889; Hotlist {{ hot | length }} / 10 slots &mdash; items marked <b>[H]</b> appear in your hand instantly. Inventory is weightless.
+          </div>
+          {% endif %}
           <div id="inventory-list">
             {% for item in char.inventory | sort(attribute='order_by') %}
             <div id="item-{{ item.item_id }}">
               <div id="item-view-{{ item.item_id }}" class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                 <span class="{% if item.equipped %}fw-bold{% endif %}" style="min-width:160px; color:var(--ttrpg-accent);">
-                  {% if item.equipped %}[E]{% endif %} {{ item.item_name }}
+                  {% if item.equipped %}[E]{% endif %}{% if IS_DCC and item.hotlist %}<span title="On the Hotlist">[H]</span>{% endif %} {{ item.item_name }}
                 </span>
                 <span class="text-muted small">x{{ item.quantity }}</span>
                 {% if item.notes %}<span class="text-muted small fst-italic">{{ item.notes }}</span>{% endif %}
@@ -819,6 +987,13 @@
                            {% if item.equipped %}checked{% endif %}>
                     <label class="form-check-label small" for="item-equip-{{ item.item_id }}">Equipped</label>
                   </div>
+                  {% if IS_DCC %}
+                  <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="item-hot-{{ item.item_id }}"
+                           {% if item.hotlist %}checked{% endif %}>
+                    <label class="form-check-label small" for="item-hot-{{ item.item_id }}">Hotlist</label>
+                  </div>
+                  {% endif %}
                   <button class="btn btn-ttrpg btn-sm" onclick="saveItem({{ item.item_id }})">Save</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm"
                           onclick="editToggle('item', {{ item.item_id }})">Cancel</button>
@@ -834,6 +1009,7 @@
 
         <!-- Weapons -->
         <div class="tab-pane fade" id="tab-weapons">
+          {% if IS_DCC %}<div class="small text-muted mb-2">&#9876; <b>Attacks:</b> To Hit = your Weapon Skill's Stat Mod + its Rank (put that in <i>Attack bonus</i>). Damage = the weapon's dice + Stat Mod (<i>Damage bonus</i>) plus the Rank damage die from Table 37 &mdash; the roller shows it under <i>Damage</i>. A Critical Hit doubles the base dice.</div>{% endif %}
           {% set all_weapons  = char.weapons | sort(attribute='order_by') %}
           {% set ready        = all_weapons | selectattr('equipped', 'equalto', 1) | list %}
           {% set stowed_weaps = all_weapons | selectattr('equipped', 'equalto', 0) | list %}
@@ -1112,6 +1288,7 @@
 
         <!-- Armor & Shields -->
         <div class="tab-pane fade" id="tab-armor">
+          {% if IS_DCC %}<div class="small text-muted mb-2">&#9651; In Dungeon Crawler Carl armor gives <b>Damage Resistance (DR)</b>, not AC &mdash; the AC numbers here are ignored. Set your armor's DR on the <b>Crawler</b> tab (currently DR {{ char.dr_total() }}).</div>{% endif %}
           {% set all_armor = char.armor | sort(attribute='order_by') %}
           {% set worn       = all_armor | selectattr('equipped', 'equalto', 1) | list %}
           {% set stowed     = all_armor | selectattr('equipped', 'equalto', 0) | list %}
@@ -1262,7 +1439,8 @@
         <!-- Currency -->
         <div class="tab-pane fade" id="tab-currency">
           <div class="d-flex gap-4 flex-wrap align-items-end mt-2">
-            {% for label, field, val in [('Gold','gold',char.gold),('Silver','silver',char.silver),('Copper','copper',char.copper)] %}
+            {% set coins = [('Gold','gold',char.gold)] if IS_DCC else [('Gold','gold',char.gold),('Silver','silver',char.silver),('Copper','copper',char.copper)] %}
+            {% for label, field, val in coins %}
             <div class="text-center">
               <label class="form-label" style="color:var(--ttrpg-accent);">{{ label }}</label><br>
               <input type="number" class="form-control text-center"
@@ -1616,7 +1794,8 @@
           {% if can_edit %}
           <button class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleCharCondPanel()">&#9763; Add Condition</button>
           <div id="char-cond-panel" class="d-flex flex-wrap gap-1" style="display:none!important;">
-            {% for cond, desc in conditions.items() %}
+            {% set cond_list = dcc_debuffs if IS_DCC else conditions %}
+            {% for cond, desc in cond_list.items() %}
             <button class="btn btn-sm btn-outline-secondary py-0 cond-tip"
                     data-bs-toggle="tooltip" data-bs-placement="top"
                     data-bs-custom-class="feat-tooltip"
@@ -1628,6 +1807,84 @@
         </div>
 
         <!-- Reference -->
+        {% if IS_DCC %}
+        <!-- Crawler: the Dungeon Crawler Carl-only sheet fields -->
+        <div class="tab-pane fade" id="tab-crawler">
+          {% macro dccnum(key, label, hint, min=0, max=999) -%}
+            <div>
+              <label class="form-label small text-muted mb-1" title="{{ hint }}">{{ label }}</label>
+              {% if can_edit %}
+              <input type="number" class="form-control form-control-sm text-center" style="max-width:90px;" min="{{ min }}" max="{{ max }}"
+                     value="{{ dcc[key] }}" onchange="saveField('dcc_{{ key }}', this.value, () => reloadKeepTab())">
+              {% else %}<div class="fw-bold">{{ dcc[key] }}</div>{% endif %}
+            </div>
+          {%- endmacro %}
+          {% macro dcctext(key, label, hint, rows=2) -%}
+            <div class="col-12 col-md-4">
+              <label class="form-label small text-muted mb-1" title="{{ hint }}">{{ label }}</label>
+              {% if can_edit %}
+              <textarea class="form-control form-control-sm" rows="{{ rows }}" placeholder="{{ hint }}"
+                        onchange="saveField('dcc_{{ key }}', this.value)">{{ dcc[key] }}</textarea>
+              {% else %}<div style="white-space:pre-wrap;">{{ dcc[key] or '—' }}</div>{% endif %}
+            </div>
+          {%- endmacro %}
+
+          <h6 class="text-muted text-uppercase mb-2" style="letter-spacing:.08em;">Defense</h6>
+          <div class="d-flex gap-3 flex-wrap align-items-end mb-3">
+            {{ dccnum('dr', 'Armor DR', 'Damage Resistance from the armor you wear — comes off every hit first') }}
+            {{ dccnum('dr_buffs', 'DR buffs', 'Extra DR from spells, potions or gear right now', -99) }}
+            <div><label class="form-label small text-muted mb-1">DR total</label><div class="fw-bold" style="font-size:1.2rem;color:var(--ttrpg-accent);">{{ char.dr_total() }}</div></div>
+            {{ dccnum('evade_buffs', 'Evade buffs', 'Bonuses to Evade from gear (e.g. a Rapier) or effects', -99) }}
+            <div><label class="form-label small text-muted mb-1">Evade roll</label><div class="fw-bold" style="font-size:1.2rem;color:var(--ttrpg-accent);">d20 {{ '%+d' % char.evade_bonus() }}</div><div class="small text-muted">2 + Dex Mod {{ '%+d' % char.stat_mod('dex') }} + buffs</div></div>
+          </div>
+
+          <h6 class="text-muted text-uppercase mb-2" style="letter-spacing:.08em;">Movement &amp; Size</h6>
+          <div class="d-flex gap-3 flex-wrap align-items-end mb-3">
+            {{ dccnum('move', 'Move (ft)', 'A Move action in combat — humans move 20 ft') }}
+            {{ dccnum('step', 'Step (ft)', 'A short Step — humans step 10 ft') }}
+            <div>
+              <label class="form-label small text-muted mb-1" title="Matters when attacking much bigger or smaller foes">Size</label>
+              {% if can_edit %}
+              <select class="form-select form-select-sm" style="max-width:170px;" onchange="saveField('dcc_size', this.value, () => reloadKeepTab())">
+                {% for v, name in dcc_sizes %}<option value="{{ v }}" {% if dcc.size == v %}selected{% endif %}>{{ name }}</option>{% endfor %}
+              </select>
+              {% else %}<div class="fw-bold">{{ dcc.size }}</div>{% endif %}
+            </div>
+          </div>
+
+          <h6 class="text-muted text-uppercase mb-2" style="letter-spacing:.08em;">Fame &amp; Favor</h6>
+          <div class="d-flex gap-3 flex-wrap align-items-end mb-3">
+            {{ dccnum('popularity', 'Popularity', 'Starts at Cha Mod × 2 (' ~ (char.stat_mod('cha') * 2) ~ '). Viewers love you… or not.') }}
+            {{ dccnum('ai_favor', 'AI Favor', 'Luck the System AI grants you. Humans start with 1 (+1d2 per weapon/spell rating).') }}
+            {{ dccnum('stat_points', 'Stat points to spend', '3 per Level gained — add them to any Stat') }}
+          </div>
+
+          <h6 class="text-muted text-uppercase mb-2" style="letter-spacing:.08em;">Who you are</h6>
+          <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-muted mb-1">Crawler number</label>
+              {% if can_edit %}<input type="text" class="form-control form-control-sm" value="{{ dcc.crawler_number }}" onchange="saveField('dcc_crawler_number', this.value)">{% else %}<div>{{ dcc.crawler_number or '—' }}</div>{% endif %}
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-muted mb-1">Gender / pronouns</label>
+              {% if can_edit %}<input type="text" class="form-control form-control-sm" value="{{ dcc.pronouns }}" onchange="saveField('dcc_pronouns', this.value)">{% else %}<div>{{ dcc.pronouns or '—' }}</div>{% endif %}
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-muted mb-1" title="The Floor this crawler entered the dungeon">Floor entered</label>
+              {% if can_edit %}<input type="text" class="form-control form-control-sm" value="{{ dcc.floor_entered }}" onchange="saveField('dcc_floor_entered', this.value)">{% else %}<div>{{ dcc.floor_entered or '—' }}</div>{% endif %}
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small text-muted mb-1" title="Race and Class are chosen on the Third Floor">Combat background</label>
+              <div class="small">{{ char.background or '—' }} <span class="text-muted">(edit via &#9998; Edit Sheet)</span></div>
+            </div>
+            {{ dcctext('past_trauma', 'Past Trauma', 'Table 22 — what the System AI dug up') }}
+            {{ dcctext('loose_ends', 'Loose Ends', 'Table 23 — unfinished business') }}
+            {{ dcctext('regrets', 'Regrets', 'Table 24 — what you never said or did') }}
+            {{ dcctext('grind_hours', 'Grinding hours', 'Hours banked toward Rank-Up checks, per skill (e.g. "Bow 3/4")', 3) }}
+          </div>
+        </div>
+        {% endif %}
+
         <div class="tab-pane fade" id="tab-reference">
 
           {% set my_race  = races_lib.get(char.race.lower())   if char.race       else None %}
@@ -1654,16 +1911,20 @@
                   {% if my_race.languages %}<span>{{ my_race.languages }}</span>{% endif %}
                 </div>
                 {% if my_race.traits_text %}
-                <div class="d-flex flex-wrap gap-1 mt-1">
-                  {% for t in my_race.traits_text.split('\n')[:5] %}{% if t.strip() %}
+                {% set race_traits = my_race.traits_text.split('\n') | map('trim') | reject('equalto', '') | list %}
+                <div class="d-flex flex-wrap gap-1 mt-1" id="race-traits">
+                  {% for t in race_traits %}
                   <span style="font-size:.68rem;padding:1px 5px;border-radius:6px;
                                background:color-mix(in srgb, var(--sp-accent) 10%, transparent);
-                               border:1px solid var(--sp-border);color:var(--sp-muted);">{{ t.strip() }}</span>
-                  {% endif %}{% endfor %}
-                  {% if my_race.traits_text.split('\n')|length > 5 %}
-                  <span class="text-muted" style="font-size:.68rem;">+{{ my_race.traits_text.split('\n')|length - 5 }} more</span>
+                               border:1px solid var(--sp-border);color:var(--sp-muted);{% if loop.index > 5 %}display:none;{% endif %}"
+                        {% if loop.index > 5 %}class="race-trait-extra"{% endif %}>{{ t }}</span>
+                  {% endfor %}
+                  {% if race_traits | length > 5 %}
+                  <a href="#" class="text-decoration-none" style="font-size:.68rem;color:var(--ttrpg-accent);"
+                     onclick="event.preventDefault(); const open = this.dataset.open === '1'; document.querySelectorAll('#race-traits .race-trait-extra').forEach(el => el.style.display = open ? 'none' : ''); this.dataset.open = open ? '0' : '1'; this.innerHTML = open ? '&#9660; +{{ race_traits | length - 5 }} more' : '&#9650; less';">&#9660; +{{ race_traits | length - 5 }} more</a>
                   {% endif %}
                 </div>
+                {% if my_race.description %}<div class="small text-muted mt-1" style="font-size:.72rem;">{{ my_race.description }}</div>{% endif %}
                 {% endif %}
                 {% elif char.race %}
                 <div class="small text-muted fst-italic">{{ char.race }} <span style="font-size:.72rem;">(not in library)</span></div>
@@ -1685,8 +1946,12 @@
                 </div>
                 {% if my_class %}
                 <div style="color:var(--ttrpg-accent);font-weight:600;">{{ my_class.name }}
-                  <span style="font-size:.75rem;color:var(--sp-muted);font-weight:normal;margin-left:4px;">d{{ my_class.hit_die }}</span>
+                  {% if my_class.hit_die %}<span style="font-size:.75rem;color:var(--sp-muted);font-weight:normal;margin-left:4px;">d{{ my_class.hit_die }}</span>{% endif %}
                 </div>
+                {% if my_class.game_system == 'dcc' %}
+                {% if my_class.proficiencies %}<div class="small" style="color:var(--ttrpg-accent);">{{ my_class.proficiencies }}</div>{% endif %}
+                {% if my_class.description %}<div class="small text-muted mt-1" style="white-space:pre-wrap;font-size:.72rem;">{{ my_class.description }}</div>{% endif %}
+                {% endif %}
                 <div class="d-flex gap-3 small text-muted mt-1 flex-wrap">
                   {% if my_class.saving_throws %}<span>Saves: <span style="color:var(--ttrpg-accent);">{{ my_class.saving_throws }}</span></span>{% endif %}
                   {% if my_class.spellcasting_ability %}<span style="font-size:.7rem;padding:1px 6px;border-radius:8px;
@@ -1694,17 +1959,21 @@
                     {{ my_class.spellcasting_ability }}</span>{% endif %}
                 </div>
                 {% if my_class.skill_choices %}
-                <div class="small text-muted mt-1">{{ my_class.skill_choices }}</div>
+                <div class="small text-muted mt-1" style="white-space:pre-wrap;">{{ my_class.skill_choices }}</div>
                 {% endif %}
                 {% if my_class.subclasses %}
-                <div class="d-flex flex-wrap gap-1 mt-1">
-                  {% for s in my_class.subclasses.split(',')[:4] %}{% if s.strip() %}
+                {% set class_subs = my_class.subclasses.split(',') | map('trim') | reject('equalto', '') | list %}
+                <div class="d-flex flex-wrap gap-1 mt-1 align-items-center" id="class-subs">
+                  {% if my_class.game_system == 'dcc' %}<span class="text-muted" style="font-size:.68rem;" title="DCC has no subclasses — each Class belongs to one or more Class Types">Class type:</span>{% endif %}
+                  {% for s in class_subs %}
                   <span style="font-size:.68rem;padding:1px 5px;border-radius:6px;
                                background:color-mix(in srgb, var(--sp-accent) 10%, transparent);
-                               border:1px solid var(--sp-border);color:var(--sp-muted);">{{ s.strip() }}</span>
-                  {% endif %}{% endfor %}
-                  {% if my_class.subclasses.split(',')|length > 4 %}
-                  <span class="text-muted" style="font-size:.68rem;">+{{ my_class.subclasses.split(',')|length - 4 }} more</span>
+                               border:1px solid var(--sp-border);color:var(--sp-muted);{% if loop.index > 4 %}display:none;{% endif %}"
+                        {% if loop.index > 4 %}class="class-sub-extra"{% endif %}>{{ s }}</span>
+                  {% endfor %}
+                  {% if class_subs | length > 4 %}
+                  <a href="#" class="text-decoration-none" style="font-size:.68rem;color:var(--ttrpg-accent);"
+                     onclick="event.preventDefault(); const open = this.dataset.open === '1'; document.querySelectorAll('#class-subs .class-sub-extra').forEach(el => el.style.display = open ? 'none' : ''); this.dataset.open = open ? '0' : '1'; this.innerHTML = open ? '&#9660; +{{ class_subs | length - 4 }} more' : '&#9650; less';">&#9660; +{{ class_subs | length - 4 }} more</a>
                   {% endif %}
                 </div>
                 {% endif %}
@@ -1801,7 +2070,9 @@
               ('weaponprops', 'Weapon Properties', '🏷'),
               ('weapons',     'Weapons',           '⚔'),
             ] %}
-            {% for key, label, icon in lib_sections %}
+            {# 5e-only libraries have no meaning on a Dungeon Crawler Carl sheet #}
+            {% set dcc_hidden = ['subclasses', 'features', 'traits', 'feats'] if IS_DCC else [] %}
+            {% for key, label, icon in lib_sections if key not in dcc_hidden %}
             <div class="ref-section mb-1" style="border:1px solid var(--sp-border);border-radius:6px;overflow:hidden;">
               <button class="ref-section-hdr w-100 text-start d-flex justify-content-between align-items-center px-3 py-2"
                       style="background:var(--sp-surface);border:none;color:var(--ttrpg-accent);font-size:.85rem;cursor:pointer;"
@@ -1848,6 +2119,17 @@
           </div>
           <button type="submit" class="btn btn-sm btn-ttrpg">Reassign</button>
         </form>
+
+        <!-- Game system this sheet follows -->
+        <div>
+          <label class="form-label small mb-1" title="Which rules the sheet is laid out for">Game system</label>
+          <select class="form-select form-select-sm" style="min-width:200px;"
+                  onchange="if (confirm('Switch this sheet to ' + this.options[this.selectedIndex].text + '?')) saveField('game_system', this.value, () => location.reload()); else this.value = '{{ char.game_system or 'dnd5e' }}';">
+            {% for sid, gs in game_systems.items() %}
+            <option value="{{ sid }}" {% if (char.game_system or 'dnd5e') == sid %}selected{% endif %}>{{ gs.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
         <!-- Remove character -->
         <form method="POST" action="{{ url_for('ttrpg.character_delete', character_id=char.character_id) }}"
@@ -1936,9 +2218,16 @@
 const CHAR_ID = {{ char.character_id }};
 const CAN_EDIT = {{ 'true' if can_edit else 'false' }};
 const CHAR_NAME = '{{ char.name | e }}';
-DiceCore.renderQuickLabels(document.getElementById('dice-quicklabels'),
-                           document.getElementById('dice-label'),
-                           'btn btn-sm btn-outline-secondary');
+// Game system the rollers follow (the active session's; D&D 5e when none).
+const GAME_INFO = {{ game | tojson }};
+const CHAR_SYSTEM = {{ (char.game_system or 'dnd5e') | tojson }};   // the SHEET's rules
+const STAT_SCORES = { {% for k in char.stat_keys() %}{{ k.upper() }}: {{ char.enhanced(k) }}{% if not loop.last %}, {% endif %}{% endfor %} };
+const DCC_SLOT_VALUE = {{ char.hb_slot_value() if IS_DCC else 0 }};
+// Ready weapons (for the roller's Damage chip): first equipped one wins.
+const READY_WEAPONS = {{ (char.weapons | selectattr('equipped', 'equalto', 1) | sort(attribute='order_by') | map(attribute='weapon_name') | list) | tojson }};
+const WEAPON_DICE = { {% for w in char.weapons %}{{ w.weapon_name | tojson }}: { dice: {{ (w.damage_dice or '') | tojson }}, bonus: {{ w.damage_bonus or 0 }} }{% if not loop.last %}, {% endif %}{% endfor %} };
+const DCC_DR = {{ char.dr_total() if IS_DCC else 0 }};
+document.addEventListener('DOMContentLoaded', () => { if (typeof initDiceSystem === 'function') initDiceSystem(); });
 
 const DEX_MOD = {{ char.modifier(char.dex_val) }};
 

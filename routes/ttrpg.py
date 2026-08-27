@@ -20,6 +20,58 @@ from models.ttrpg import tblSessionMonsters as _tblSessionMonsters
 from routes.auth import dm_required
 from routes.monsters import condition_texts
 import relay_broadcaster
+import dice_systems
+
+
+def active_game_info():
+    """Game-system info for the dice rollers: the ACTIVE session's choice,
+    or the D&D 5e default when no session is live."""
+    return tblSessions.active_game_info()
+
+
+def _game_fields_from(src):
+    """(game_system, system_settings_json) from a form/JSON dict; unknown
+    system ids fall back to the default."""
+    import json as _json
+    sys_id = (src.get('game_system') or dice_systems.DEFAULT_SYSTEM).strip()
+    if sys_id not in dice_systems.SYSTEMS:
+        sys_id = dice_systems.DEFAULT_SYSTEM
+    raw = {}
+    if src.get('floor') not in (None, ''):
+        raw['floor'] = src.get('floor')
+    return sys_id, _json.dumps(dice_systems.normalize_settings(sys_id, raw))
+
+
+def _dcc_fields_from(src, base=None):
+    return dice_systems.dcc_merge_fields(src, base)
+
+
+def _dcc_pairing_warning(char):
+    """Text if the sheet pairs an Earth Class with an Alien Race, else ''."""
+    if char is None or not getattr(char, 'is_dcc', False) or not (char.race and char.char_class):
+        return ''
+    cls = tblClassesLibrary.query.filter(db.func.lower(tblClassesLibrary.name) == char.char_class.strip().lower(),
+                                         tblClassesLibrary.game_system == 'dcc').first()
+    race = tblRacesLibrary.query.filter(db.func.lower(tblRacesLibrary.name) == char.race.strip().lower(),
+                                        tblRacesLibrary.game_system == 'dcc').first()
+    if cls and race and 'Earth Class' in (cls.description or '') and (race.description or '').startswith('Alien Race'):
+        return f'{cls.name} is an Earth Class, but {race.name} is an Alien Race — Alien Races cannot take Earth Classes (p.128).'
+    return ''
+
+
+def _sheet_context(char):
+    """Template context shared by the sheet pages: system vocabulary."""
+    return {
+        'dcc_pairing_warning': _dcc_pairing_warning(char),
+        'game': active_game_info(),
+        'game_systems': dice_systems.SYSTEMS,
+        'dcc': char.dcc() if char is not None else dice_systems.dcc_defaults(),
+        'dcc_debuffs': dice_systems.DCC_DEBUFFS,
+        'dcc_stat_names': dice_systems.DCC_STAT_NAMES,
+        'dcc_skill_categories': dice_systems.DCC_SKILL_CATEGORIES,
+        'dcc_sizes': dice_systems.DCC_SIZES,
+    }
+
 
 ttrpg = Blueprint('ttrpg', __name__, url_prefix='/ttrpg')
 
@@ -229,6 +281,14 @@ def my_character():
 def character_random():
     """Roll a complete random character (level, stats, name, traits) as JSON
     for the create-character form to fill in."""
+    if request.args.get('system') == 'dcc':
+        # Dungeon Crawler Carl crawler (Chapter 3): First Floor = fresh from the
+        # collapse; Third Floor = Level 10 with a Race and Class from the library.
+        import dcc_randgen
+        floor = 'third' if request.args.get('floor') == 'third' else 'first'
+        races = tblRacesLibrary.query.filter_by(game_system='dcc').all()
+        classes = tblClassesLibrary.query.filter_by(game_system='dcc').all()
+        return jsonify(dcc_randgen.generate_crawler(floor, races=races, classes=classes))
     from char_randgen import generate_character
     try:
         min_level = int(request.args.get('min_level', 1))
@@ -275,8 +335,48 @@ def character_new():
                 active     = 1,
                 created_at = _now(),
             )
+            # Game system: the form's choice, else whatever the live session runs.
+            gs = (request.form.get('game_system') or active_game_info()['id']).strip()
+            char.game_system = gs if gs in dice_systems.SYSTEMS else dice_systems.DEFAULT_SYSTEM
+            if char.is_dcc:
+                import json as _json
+                char.dcc_json = _json.dumps(_dcc_fields_from(request.form))
+                # Health Bar: 10 slots, all full. hp_* count SLOTS under DCC so
+                # tokens, the relay and HP bars keep working unchanged.
+                char.hp_max = dice_systems.DCC_HB_SLOTS
+                char.hp_current = dice_systems.DCC_HB_SLOTS
             db.session.add(char)
             db.session.flush()  # get character_id before portrait save
+            if char.is_dcc:
+                db.session.add(tblCharacterResources(
+                    character_id=char.character_id, resource_name='Mana',
+                    current_val=char.mana_max(), max_val=char.mana_max(), order_by=0))
+                # Skills / starting items / applied bonuses from the crawler randomizer
+                import json as _json
+                try:
+                    r_skills = _json.loads(request.form.get('dcc_skills_json') or '[]')
+                    r_items = _json.loads(request.form.get('dcc_items_json') or '[]')
+                    r_applied = _json.loads(request.form.get('dcc_applied_json') or '[]')
+                except ValueError:
+                    r_skills, r_items, r_applied = [], [], []
+                for i, sk in enumerate(r_skills[:40]):
+                    if not isinstance(sk, dict) or not str(sk.get('name', '')).strip():
+                        continue
+                    db.session.add(tblCharacterSkills(
+                        character_id=char.character_id, skill_name=str(sk['name'])[:60],
+                        bonus=max(0, min(20, int(sk.get('rank', 1) or 1))), proficient=1,
+                        category=str(sk.get('category', ''))[:20], stat=str(sk.get('stat', ''))[:5],
+                        order_by=i))
+                for i, it in enumerate(r_items[:30]):
+                    if not str(it).strip():
+                        continue
+                    db.session.add(tblCharacterInventory(
+                        character_id=char.character_id, item_name=str(it)[:120], quantity=1,
+                        weight='', notes='', equipped=0, order_by=i))
+                if r_applied:
+                    bag = char.dcc()
+                    bag['applied'] = [str(a)[:80] for a in r_applied if isinstance(a, str)][:4]
+                    char.dcc_json = _json.dumps(bag)
 
             # Optional: drop the new character straight into a session's party.
             # DM only — party management is a DM concern everywhere else.
@@ -325,6 +425,7 @@ def character_new():
                      .order_by(tblSessions.created_at.desc())
                      .all()) if current_user.is_dm() else []
     return render_template('ttrpg/character_new.html', error=error,
+                           **_sheet_context(None),
                            genre_options=genre_labels(),
                            genre_client_data=client_data(),
                            open_sessions=open_sessions)
@@ -478,7 +579,13 @@ def character_sheet(character_id):
     genre_art = _pack['art_style'] if _pack else []
     genre_label = _pack['label'] if _pack else ''
 
+    ctx = _sheet_context(char)
+    if ctx['game']['id'] != (char.game_system or 'dnd5e'):
+        # The roller on a sheet follows the SHEET's system (see dice_roll).
+        ctx['game'] = {'id': char.game_system or 'dnd5e',
+                       'name': dice_systems.system(char.game_system)['name'], 'settings': {}}
     return render_template('ttrpg/character_sheet.html', char=char,
+                           **ctx,
                            all_players=all_players, conditions=condition_texts(),
                            races_lib=races_lib, classes_lib=classes_lib,
                            class_features=class_features,
@@ -514,9 +621,19 @@ def save_field(character_id):
         setattr(char, field, int(value or 0))
     elif field in text_fields:
         setattr(char, field, str(value or ''))
+    elif field == 'game_system':
+        char.game_system = value if value in dice_systems.SYSTEMS else dice_systems.DEFAULT_SYSTEM
+        if char.is_dcc and char.hp_max != dice_systems.DCC_HB_SLOTS:
+            char.hp_max = dice_systems.DCC_HB_SLOTS      # switch to a 10-slot Health Bar
+            char.hp_current = dice_systems.DCC_HB_SLOTS
+    elif field.startswith('dcc_'):
+        import json as _json
+        char.dcc_json = _json.dumps(_dcc_fields_from({field: value}, char.dcc_json))
     else:
         return jsonify({'ok': False, 'error': 'unknown field'}), 400
 
+    if char.is_dcc:
+        _sync_mana(char)
     db.session.commit()
     if field in ('hp_current', 'hp_max'):
         token_id = relay_broadcaster.find_token_id('player', char.character_id)
@@ -524,6 +641,35 @@ def save_field(character_id):
             relay_broadcaster.broadcast_token_health(token_id, char.hp_current, char.hp_max)
     relay_broadcaster.push_character(char)
     return jsonify({'ok': True, 'hp_pct': char.hp_pct()})
+
+
+def _sync_mana(char):
+    """DCC: Max Mana tracks the Enhanced Intelligence score (1:1)."""
+    for r in char.resources:
+        if r.resource_name.strip().lower() == 'mana':
+            if r.max_val != char.mana_max():
+                r.max_val = char.mana_max()
+                r.current_val = min(r.current_val, r.max_val)
+            return
+
+
+@ttrpg.route('/character/<int:character_id>/apply-library', methods=['POST'])
+@login_required
+def apply_library(character_id):
+    """DCC: apply Race/Class bonuses from the library to the sheet (once each)."""
+    from models.ttrpg import apply_library_bonuses
+    char = tblCharacters.query.get_or_404(character_id)
+    if not current_user.is_dm() and char.user_id != current_user.user_id:
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+    kind = (request.get_json(silent=True) or {}).get('kind', 'race')
+    if kind not in ('race', 'class'):
+        return jsonify({'ok': False, 'msg': 'kind must be race or class'}), 400
+    out = apply_library_bonuses(char, kind, db)
+    if out['ok']:
+        _sync_mana(char)
+        db.session.commit()
+        relay_broadcaster.push_character(char)
+    return jsonify(out)
 
 
 # ── HP delta (apply damage / healing by amount) ───────────────────────────────
@@ -535,14 +681,23 @@ def hp_delta(character_id):
     if not current_user.is_dm() and char.user_id != current_user.user_id:
         return jsonify({'ok': False, 'error': 'forbidden'}), 403
     data = request.get_json()
-    delta = int(data.get('delta', 0))
+    slots = None
+    if char.is_dcc and data.get('damage') is not None:
+        # Dungeon Crawler Carl: damage → Health Bar slots (DR first, then one
+        # slot per full Con Mod; leftovers ignored — p.93).
+        slots = dice_systems.dcc_damage_slots(data.get('damage'), char.dr_total(),
+                                              char.hb_slot_value())
+        delta = -slots
+    else:
+        delta = int(data.get('delta', 0))
     char.hp_current = max(0, min(char.hp_max, char.hp_current + delta))
     db.session.commit()
     token_id = relay_broadcaster.find_token_id('player', char.character_id)
     if token_id:
         relay_broadcaster.broadcast_token_health(token_id, char.hp_current, char.hp_max)
     relay_broadcaster.push_character(char)
-    return jsonify({'ok': True, 'hp_current': char.hp_current, 'hp_pct': char.hp_pct()})
+    return jsonify({'ok': True, 'hp_current': char.hp_current, 'hp_pct': char.hp_pct(),
+                    'slots_lost': slots})
 
 
 # ── Character condition add / remove ──────────────────────────────────────────
@@ -631,6 +786,15 @@ def character_edit(character_id):
             char.gold   = int(request.form.get('gold', char.gold) or 0)
             char.silver = int(request.form.get('silver', char.silver) or 0)
             char.copper = int(request.form.get('copper', char.copper) or 0)
+            gs = request.form.get('game_system')
+            if gs in dice_systems.SYSTEMS:
+                char.game_system = gs
+            if char.is_dcc:
+                import json as _json
+                char.dcc_json = _json.dumps(_dcc_fields_from(request.form, char.dcc_json))
+                char.hp_max = dice_systems.DCC_HB_SLOTS
+                char.hp_current = max(0, min(char.hp_max, char.hp_current))
+                _sync_mana(char)
 
             portrait = request.files.get('portrait')
             if portrait and portrait.filename and _allowed_file(portrait.filename):
@@ -646,7 +810,8 @@ def character_edit(character_id):
             db.session.commit()
             return redirect(url_for('ttrpg.character_sheet', character_id=char.character_id))
 
-    return render_template('ttrpg/character_edit.html', char=char, error=error)
+    return render_template('ttrpg/character_edit.html', char=char, error=error,
+                           **_sheet_context(char))
 
 
 # ── Assign character to a different player (DM only) ──────────────────────────
@@ -785,6 +950,8 @@ def skill_add(character_id):
         skill_name   = data.get('skill_name', '').strip(),
         bonus        = int(data.get('bonus', 0) or 0),
         proficient   = int(data.get('proficient', 0) or 0),
+        category     = (data.get('category') or '')[:20],
+        stat         = (data.get('stat') or '')[:5],
         order_by     = len(char.skills),
     )
     db.session.add(s)
@@ -807,6 +974,8 @@ def skill_update(skill_id):
     s.skill_name = data.get('skill_name', s.skill_name)
     s.bonus      = int(data.get('bonus', s.bonus) or 0)
     s.proficient = int(data.get('proficient', s.proficient) or 0)
+    if 'category' in data: s.category = (data.get('category') or '')[:20]
+    if 'stat' in data:     s.stat = (data.get('stat') or '')[:5]
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -827,6 +996,7 @@ def inventory_add(character_id):
         weight       = data.get('weight', ''),
         notes        = data.get('notes', ''),
         equipped     = int(data.get('equipped', 0) or 0),
+        hotlist      = int(data.get('hotlist', 0) or 0),
         order_by     = len(char.inventory),
     )
     db.session.add(item)
@@ -851,6 +1021,8 @@ def inventory_update(item_id):
     item.weight    = data.get('weight', item.weight)
     item.notes     = data.get('notes', item.notes)
     item.equipped  = int(data.get('equipped', item.equipped) or 0)
+    if 'hotlist' in data:
+        item.hotlist = int(data.get('hotlist') or 0)
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -1093,6 +1265,24 @@ def dice_roll():
     modifier  = max(-99, min(99, int(data.get('modifier', 0) or 0)))
     label     = (data.get('label') or '').strip()[:80]
     adv_mode  = data.get('adv_mode', 'normal')
+    # Game-system context (dice_systems.py). The SYSTEM is always the active
+    # session's — a stale page can't roll under other rules — while the
+    # target number / roll type come from the roller's controls.
+    game       = active_game_info()
+    if char_id:
+        # A sheet rolls under the CHARACTER's rules: a 5e sheet in a DCC session
+        # (or vice versa) shouldn't be judged by the other game's table.
+        _ch = db.session.get(tblCharacters, int(char_id)) if str(char_id).isdigit() else None
+        if _ch is not None and (_ch.game_system or 'dnd5e') != game['id']:
+            game = {'id': _ch.game_system or 'dnd5e',
+                    'name': dice_systems.system(_ch.game_system)['name'], 'settings': {}}
+    roll_type  = (data.get('roll_type') or 'other')[:20]
+    difficulty = data.get('difficulty')
+    rank       = data.get('rank')
+    try:
+        floor = int(data.get('floor', game['settings'].get('floor', 0)) or 0)
+    except (TypeError, ValueError):
+        floor = int(game['settings'].get('floor', 0) or 0)
 
     if sides not in (2, 4, 6, 8, 10, 12, 20, 100):
         sides = 20
@@ -1111,6 +1301,11 @@ def dice_roll():
     expr = f'{num}d{sides}'
     if modifier > 0:  expr += f'+{modifier}'
     elif modifier < 0: expr += str(modifier)
+
+    natural = kept if adv_mode != 'normal' else (dice[0] if len(dice) == 1 else None)
+    outcome = dice_systems.evaluate(game['id'], sides, natural, total, roll_type,
+                                    difficulty, floor, rank)
+    label = dice_systems.annotate_label(label, outcome, difficulty)[:120]
 
     roll = tblDiceRolls(
         character_id = char_id,
@@ -1148,7 +1343,18 @@ def dice_roll():
         'char_name': char_name, 'expression': expr, 'label': label,
         'dice': dice, 'modifier': modifier, 'total': total,
         'adv_mode': adv_mode, 'rolled_at': roll.rolled_at,
+        'outcome': outcome, 'difficulty': difficulty, 'system': game['id'],
     })
+
+
+@ttrpg.route('/dice/system')
+@login_required
+def dice_system():
+    """Which game system the rollers should follow right now (the active
+    session's), plus its per-session settings (e.g. the DCC Floor). Rollers
+    poll this alongside the feed so a mid-session Floor change reaches every
+    open page."""
+    return jsonify(active_game_info())
 
 
 def clear_roll_history():
@@ -1245,6 +1451,7 @@ def session_new():
             if campaign_id:
                 campaign_id = int(campaign_id)
 
+            game_system, system_settings = _game_fields_from(request.form)
             sess = tblSessions(
                 title          = title,
                 session_number = int(request.form.get('session_number', 1) or 1),
@@ -1252,6 +1459,8 @@ def session_new():
                 status         = 'planning',
                 session_date   = request.form.get('session_date', ''),
                 created_at     = _now(),
+                game_system    = game_system,
+                system_settings= system_settings,
             )
             db.session.add(sess)
             db.session.flush()
@@ -1272,6 +1481,7 @@ def session_new():
 
     return render_template('ttrpg/session_new.html',
                            campaigns=campaigns,
+                           game_systems=dice_systems.SYSTEMS,
                            characters=characters,
                            error=error,
                            today=datetime.now().strftime('%Y-%m-%d'))
@@ -1306,6 +1516,8 @@ def session_detail(session_id):
     return render_template('ttrpg/session_detail.html',
                            sess=sess,
                            campaigns=campaigns,
+                           game_systems=dice_systems.SYSTEMS,
+                           game=sess.game_info(),
                            all_chars=all_chars,
                            party_ids=party_ids,
                            conditions=condition_texts(),
@@ -1483,11 +1695,18 @@ def session_edit(session_id):
     if 'campaign_id' in data:
         cid = data['campaign_id']
         sess.campaign_id = int(cid) if cid else None
+    if 'game_system' in data or 'floor' in data:
+        src = {'game_system': data.get('game_system') or sess.game_system,
+               'floor': data.get('floor', sess.game_info()['settings'].get('floor'))}
+        sess.game_system, sess.system_settings = _game_fields_from(src)
     db.session.commit()
+    if sess.status == 'active':
+        relay_broadcaster.broadcast_game(sess)   # remote rollers follow the change
     campaign_name = sess.campaign.campaign_name if sess.campaign else None
     return jsonify({'ok': True, 'campaign_name': campaign_name,
                     'title': sess.title, 'session_number': sess.session_number,
-                    'session_date': sess.session_date})
+                    'session_date': sess.session_date,
+                    'game': sess.game_info()})
 
 
 @ttrpg.route('/sessions/<int:session_id>/party/add', methods=['POST'])

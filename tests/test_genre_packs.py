@@ -52,7 +52,7 @@ def test_genre_display_and_fallbacks():
     assert gp.generate_genre_name('fantasy', 5, _rng()) is None
     labels = gp.genre_labels()
     assert labels[0][0] == 'fantasy'
-    assert len(labels) == 1 + len(gp.GENRE_PACKS)
+    assert len(labels) == 1 + len(gp.GENRE_PACKS) - len(gp.HIDDEN_GENRES)
 
 
 def test_client_data_shape():
@@ -143,3 +143,11 @@ def test_icon_prompt_client_data():
         assert entry['label'], key
         assert len(entry['topdown']) >= 2, key
         assert len(entry['portrait']) >= 2, key
+
+
+def test_litrpg_skin_hidden_from_dropdown_but_still_resolves():
+    """DCC is a real system now — the 5e 'Dungeon Crawl' reskin stays for
+    existing characters but is no longer offered as a genre choice."""
+    keys = [k for k, _ in gp.genre_labels()]
+    assert 'litrpg' not in keys and 'fantasy' in keys and 'voidmarines' in keys
+    assert gp.get_pack('litrpg') is not None          # old characters keep their skin

@@ -33,11 +33,11 @@ SCHEMA = [
     "CREATE TABLE tblMonsterTemplates (template_id INTEGER PRIMARY KEY, api_index TEXT, name TEXT, cr TEXT, monster_type TEXT, size TEXT, hp_max INT, ac INT, source TEXT, stats_json TEXT, created_at TEXT)",
     # full-merge (TTRPG tree + lighting) tables
     "CREATE TABLE tblUsers (user_id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT, display_name TEXT, role TEXT, active INT, created_at TEXT)",
-    "CREATE TABLE tblCharacters (character_id INTEGER PRIMARY KEY, user_id INT NOT NULL, name TEXT, char_class TEXT, level INT, hp_current INT, hp_max INT, active INT, created_at TEXT)",
+    "CREATE TABLE tblCharacters (character_id INTEGER PRIMARY KEY, user_id INT NOT NULL, name TEXT, char_class TEXT, level INT, hp_current INT, hp_max INT, active INT, created_at TEXT, game_system TEXT NOT NULL DEFAULT 'dnd5e', dcc_json TEXT NOT NULL DEFAULT '{}')",
     "CREATE TABLE tblCharacterWeapons (char_weapon_id INTEGER PRIMARY KEY, character_id INT, weapon_lib_id INT, weapon_name TEXT, damage_dice TEXT, equipped INT, order_by INT)",
     "CREATE TABLE tblCharacterNotes (note_id INTEGER PRIMARY KEY, character_id INT, note_text TEXT, created_at TEXT)",
     "CREATE TABLE tblWeaponsLibrary (weapon_lib_id INTEGER PRIMARY KEY, name TEXT, source TEXT)",
-    "CREATE TABLE tblSessions (session_id INTEGER PRIMARY KEY, title TEXT, session_number INT, campaign_id INT, status TEXT, dm_notes TEXT, session_date TEXT, created_at TEXT)",
+    "CREATE TABLE tblSessions (session_id INTEGER PRIMARY KEY, title TEXT, session_number INT, campaign_id INT, status TEXT, dm_notes TEXT, session_date TEXT, created_at TEXT, game_system TEXT NOT NULL DEFAULT 'dnd5e', system_settings TEXT NOT NULL DEFAULT '{}')",
     "CREATE TABLE tblSessionParty (sp_id INTEGER PRIMARY KEY, session_id INT, character_id INT, is_active INT, joined_at TEXT)",
     "CREATE TABLE tblSessionMonsters (monster_id INTEGER PRIMARY KEY, session_id INT, template_id INT, display_name TEXT, hp_current INT, hp_max INT, ac INT, initiative INT, conditions TEXT, is_alive INT, sort_order INT)",
     "CREATE TABLE tblSessionNotes (note_id INTEGER PRIMARY KEY, session_id INT, title TEXT, body TEXT, sort_order INT, created_at TEXT, updated_at TEXT)",
@@ -1491,7 +1491,7 @@ class TestLedSchemaRestore:
         assert p2['variance'] == [5, 6, 7] and p2['duration'] == 5 and p2['brightness'] == 0.6
         names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
         assert 'tblledtypemodel' not in names
-        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0013_prune_orphan_scene_links_again'
+        assert q(env['live'], "SELECT version_num FROM alembic_version")[0][0] == '0016_library_game_system'
 
     # -- merge ---------------------------------------------------------------
     def test_full_merge_old_archive_converts_every_row(self, env):
@@ -1537,3 +1537,124 @@ class TestLedSchemaRestore:
         assert s['lighting'] == 1                     # beam kept (params defaulted), disco dropped
         rows = self._live_rows(env, 'Bridge')
         assert rows[0][0] == 'beam' and json.loads(rows[0][1]) == led_patterns.defaults('beam')
+
+
+class TestSessionGameSystemRestore:
+    """tblSessions.game_system / system_settings (migration 0014) must survive
+    every restore path: replace-with-new keeps the DM's choice, replace-with-
+    old (pre-0014 archive) gains the columns with the D&D 5e default, and both
+    archive shapes merge cleanly (_common_cols only copies what both have)."""
+
+    OLD_SESSIONS = ("CREATE TABLE tblSessions (session_id INTEGER PRIMARY KEY, title TEXT, "
+                    "session_number INT, campaign_id INT, status TEXT, dm_notes TEXT, "
+                    "session_date TEXT, created_at TEXT)")
+
+    def _src(self, env, name, old=False):
+        src = str(env['tmp'] / name)
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if old and 'CREATE TABLE tblSessions ' in stmt:
+                stmt = self.OLD_SESSIONS
+            conn.execute(stmt)
+        conn.execute("INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        if old:
+            conn.execute("INSERT INTO tblSessions(title, session_number, status, created_at) "
+                         "VALUES ('Ep1', 1, 'planning', 't')")
+        else:
+            conn.execute("INSERT INTO tblSessions(title, session_number, status, created_at, game_system, system_settings) "
+                         "VALUES ('Ep1', 1, 'planning', 't', 'dcc', '{\"floor\": 5}')")
+        conn.commit()
+        conn.close()
+        return src
+
+    def _archive(self, src, label):
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label=label)
+        finally:
+            sql.database = old
+
+    @staticmethod
+    def _game(env):
+        return q(env['live'], "SELECT game_system, system_settings FROM tblSessions WHERE title='Ep1'")
+
+    def test_replace_new_backup_keeps_choice(self, env):
+        br.restore_replace(self._archive(self._src(env, 'new.db'), 'new'), include_uploads=False)
+        assert self._game(env) == [('dcc', '{"floor": 5}')]
+
+    def test_replace_old_backup_gains_default(self, env):
+        archive = self._archive(self._src(env, 'old.db', old=True), 'old')
+        app = TestLedSchemaRestore._app(self, env)
+        with app.app_context():
+            br.restore_replace(archive, include_uploads=False)
+        assert self._game(env) == [('dnd5e', '{}')]
+
+    def test_merge_old_archive(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        br.restore_merge(self._archive(self._src(env, 'old.db', old=True), 'old'),
+                         include_uploads=False, full=True, fallback_user_id=1)
+        assert self._game(env) == [('dnd5e', '{}')]
+
+    def test_merge_new_archive(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        br.restore_merge(self._archive(self._src(env, 'new.db'), 'new'),
+                         include_uploads=False, full=True, fallback_user_id=1)
+        assert self._game(env) == [('dcc', '{"floor": 5}')]
+
+
+class TestCharacterGameSystemRestore:
+    """tblCharacters.game_system / dcc_json (migration 0015) across every
+    restore path — the DCC sheet bag must come back byte-for-byte."""
+
+    OLD_CHARS = ("CREATE TABLE tblCharacters (character_id INTEGER PRIMARY KEY, user_id INT NOT NULL, "
+                 "name TEXT, char_class TEXT, level INT, hp_current INT, hp_max INT, active INT, created_at TEXT)")
+    BAG = '{"dr": 2, "move": 20, "popularity": 4}'
+
+    def _src(self, env, name, old=False):
+        src = str(env['tmp'] / name)
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if old and 'CREATE TABLE tblCharacters ' in stmt:
+                stmt = self.OLD_CHARS
+            conn.execute(stmt)
+        conn.execute("INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        if old:
+            conn.execute("INSERT INTO tblCharacters(user_id, name, level, active, created_at) VALUES (1, 'Carl', 3, 1, 't')")
+        else:
+            conn.execute("INSERT INTO tblCharacters(user_id, name, level, active, created_at, game_system, dcc_json) "
+                         "VALUES (1, 'Carl', 3, 1, 't', 'dcc', ?)", (self.BAG,))
+        conn.commit(); conn.close()
+        return src
+
+    def _archive(self, src, label):
+        old = sql.database
+        sql.database = src
+        try:
+            return br.create_backup(label=label)
+        finally:
+            sql.database = old
+
+    @staticmethod
+    def _row(env):
+        return q(env['live'], "SELECT game_system, dcc_json FROM tblCharacters WHERE name='Carl'")
+
+    def test_replace_new_keeps_bag(self, env):
+        br.restore_replace(self._archive(self._src(env, 'new.db'), 'new'), include_uploads=False)
+        assert self._row(env) == [('dcc', self.BAG)]
+
+    def test_replace_old_gains_default(self, env):
+        app = TestLedSchemaRestore._app(self, env)
+        with app.app_context():
+            br.restore_replace(self._archive(self._src(env, 'old.db', old=True), 'old'), include_uploads=False)
+        assert self._row(env) == [('dnd5e', '{}')]
+
+    def test_merge_old_and_new(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        br.restore_merge(self._archive(self._src(env, 'old.db', old=True), 'old'),
+                         include_uploads=False, full=True, fallback_user_id=1)
+        assert self._row(env) == [('dnd5e', '{}')]
+        x(env['live'], "DELETE FROM tblCharacters")
+        br.restore_merge(self._archive(self._src(env, 'new.db'), 'new'),
+                         include_uploads=False, full=True, fallback_user_id=1)
+        assert self._row(env) == [('dcc', self.BAG)]

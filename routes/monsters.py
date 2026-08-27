@@ -302,7 +302,7 @@ def view(template_id):
         cr_val = 0
     prof = max(2, 2 + (math.ceil(cr_val) - 1) // 4)
     return render_template('ttrpg/monster_detail.html', m=m, stats=stats,
-                           sm=sm, prof=prof)
+                           sm=sm, prof=prof, game=tblSessions.active_game_info())
 
 
 # ── Add to session ────────────────────────────────────────────────────────────

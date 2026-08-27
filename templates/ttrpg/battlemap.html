@@ -1564,8 +1564,12 @@
        same semantics as the sheet's stat row: click loads the Mod box. -->
   <div id="map-dice-statmods" class="d-flex gap-1 mb-2 flex-wrap" style="display:none;"></div>
 
-  <!-- Quick labels rendered from DiceCore.QUICK_LABELS (shared across rollers) -->
+  <!-- Quick labels rendered from DiceCore (per game system, shared across rollers) -->
   <div id="map-dice-quicklabels" class="d-flex gap-1 mb-2 flex-wrap"></div>
+
+  <!-- Game-system panel (DiceCore.mountSystemPanel): empty for D&D 5e,
+       plain-language target-number helper for Dungeon Crawler Carl -->
+  <div id="map-dice-system-panel" style="display:none;"></div>
 
   <!-- Rolling-as character selector (users can play several characters; the
        DM can roll for anyone in the party). Hidden when there is no choice. -->
@@ -1718,12 +1722,10 @@ const CURRENT_USER_ID = {{ current_user.user_id }};
 let   MOVE_SCALE     = {{ bm.movement_scale or 1.0 }};  // feet = squares × 5 × MOVE_SCALE
 const MAP_ROLLER_NAME = '{{ roller_name | e }}';
 const ROLLER_CHARS = {{ roller_chars | tojson }};  // characters this user may roll as
+const GAME_INFO    = {{ game | tojson }};          // game system the rollers follow
 const FLOORPLAN_VERSION = {{ floorplan_version or 'null' }};
 const BM3D_AVAILABLE    = {{ 'true' if bm3d_available else 'false' }};
 const OBS_ENABLED       = {{ 'true' if obs_enabled else 'false' }};
-DiceCore.renderQuickLabels(document.getElementById('map-dice-quicklabels'),
-                           document.getElementById('map-dice-label'),
-                           'btn btn-sm btn-outline-secondary');
 
 {% if bm3d_available %}
 // ── 3D mode loader ────────────────────────────────────────────────────────────

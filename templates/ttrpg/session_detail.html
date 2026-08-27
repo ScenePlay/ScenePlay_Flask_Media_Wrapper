@@ -77,6 +77,21 @@
         {% endfor %}
       </select>
     </div>
+    <div class="col-sm-4">
+      <label class="form-label small mb-1">Game system</label>
+      <select id="editGameSystem" class="form-select form-select-sm"
+              onchange="document.getElementById('editFloorWrap').style.display = this.value === 'dcc' ? '' : 'none'">
+        {% for sid, gs in game_systems.items() %}
+        <option value="{{ sid }}" {% if game.id == sid %}selected{% endif %}>{{ gs.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Which rules the dice rollers follow while this session is live.</div>
+    </div>
+    <div class="col-sm-2" id="editFloorWrap" {% if game.id != 'dcc' %}style="display:none;"{% endif %}>
+      <label class="form-label small mb-1">Current Floor</label>
+      <input type="number" id="editFloor" class="form-control form-control-sm"
+             value="{{ game.settings.floor or 3 }}" min="1" max="18">
+    </div>
   </div>
   <div class="mt-2 d-flex gap-2 justify-content-end">
     <span id="sessEditSaved" class="small text-success align-self-center" style="display:none;">Saved</span>
@@ -140,7 +155,7 @@
           <div class="flex-grow-1" style="min-width:0;">
             <a href="{{ url_for('ttrpg.character_sheet', character_id=char.character_id) }}"
                style="color:var(--ttrpg-accent);" class="text-truncate d-block fw-bold">{{ char.name }}</a>
-            <div class="small text-muted">{{ char.user.display_name }} &bull; HP {{ char.hp_current }}/{{ char.hp_max }}</div>
+            <div class="small text-muted">{{ char.user.display_name }} &bull; {% if char.is_dcc %}Health Bar {{ char.hp_pct() }}%{% else %}HP {{ char.hp_current }}/{{ char.hp_max }}{% endif %}</div>
             <div class="progress mt-1" style="height:5px;background:var(--sp-border);">
               <div class="progress-bar"
                    style="width:{{ char.hp_pct() }}%;
@@ -403,6 +418,8 @@ function saveSessionEdit() {
     session_number: document.getElementById('editNumber').value,
     session_date:   document.getElementById('editDate').value,
     campaign_id:    document.getElementById('editCampaign').value || null,
+    game_system:    document.getElementById('editGameSystem').value,
+    floor:          document.getElementById('editFloor').value,
   };
   fetch(`/ttrpg/sessions/${SESSION_ID}/edit`, {
     method: 'POST',
@@ -410,6 +427,11 @@ function saveSessionEdit() {
     body: JSON.stringify(payload),
   }).then(r => r.json()).then(d => {
     if (!d.ok) return;
+    const gameEl = document.getElementById('sessGameName');
+    if (gameEl && d.game) {
+      gameEl.textContent = d.game.name +
+        (d.game.id === 'dcc' ? ` — Floor ${d.game.settings.floor}` : '');
+    }
     // Update heading
     document.getElementById('sessHeading').textContent =
       `Session #${d.session_number}: ${d.title}`;

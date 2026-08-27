@@ -1,3 +1,4 @@
+import re
 from extensions import db
 from datetime import datetime
 
@@ -133,6 +134,10 @@ class tblCharacters(db.Model):
     # hatch for anyone running their own capture and WINS when set.
     video_stream_id = db.Column(db.Text, default='')
     video_feed_url  = db.Column(db.Text, default='')
+    # Game system this sheet follows (dice_systems.SYSTEMS) and the Dungeon
+    # Crawler Carl-only fields, kept as one JSON bag (migration 0015).
+    game_system    = db.Column(db.Text, default='dnd5e', server_default='dnd5e')
+    dcc_json       = db.Column(db.Text, default='{}', server_default='{}')
 
     # Relationships
     resources   = db.relationship('tblCharacterResources',   backref='character', cascade='all, delete-orphan', lazy=True)
@@ -147,7 +152,59 @@ class tblCharacters(db.Model):
     user        = db.relationship('tblUsers', backref='characters', lazy=True)
 
     def modifier(self, score):
+        """5e modifier of a raw score. System-aware callers use stat_mod()."""
         return (score - 10) // 2
+
+    # ── game-system helpers ────────────────────────────────────────────────
+    STAT_KEYS = ('str', 'dex', 'con', 'int', 'wis', 'cha')
+
+    @property
+    def is_dcc(self):
+        return (self.game_system or 'dnd5e') == 'dcc'
+
+    def stat_keys(self):
+        """The stats this sheet has — DCC drops Wisdom (p.56)."""
+        import dice_systems as ds
+        return list(ds.DCC_STATS) if self.is_dcc else list(self.STAT_KEYS)
+
+    def score(self, key):
+        return getattr(self, f'{key}_val', 10) or 0
+
+    def dcc(self):
+        """Parsed dcc_json with defaults (see dice_systems.dcc_defaults)."""
+        import dice_systems as ds
+        return ds.dcc_bag(self.dcc_json)
+
+    def enhanced(self, key):
+        """Enhanced score (base + gear/buffs); DCC only, else the base score."""
+        if not self.is_dcc:
+            return self.score(key)
+        v = self.dcc()['enh'].get(key)
+        try:
+            return int(v) if v not in (None, '') else self.score(key)
+        except (TypeError, ValueError):
+            return self.score(key)
+
+    def stat_mod(self, key):
+        """Modifier under this sheet's system (DCC: Table 2 on the Enhanced score)."""
+        import dice_systems as ds
+        return ds.stat_mod(self.game_system or 'dnd5e', self.enhanced(key))
+
+    def hb_slot_value(self):
+        """DCC: what one Health Bar slot is worth (the Con Mod)."""
+        return max(1, self.stat_mod('con'))
+
+    def mana_max(self):
+        """DCC: Max Mana equals the Enhanced Intelligence score (1:1)."""
+        return self.enhanced('int')
+
+    def evade_bonus(self):
+        """DCC Evade = d20 + 2 + Dex Mod + buffs (p.105); this is the flat part."""
+        return 2 + self.stat_mod('dex') + int(self.dcc().get('evade_buffs') or 0)
+
+    def dr_total(self):
+        d = self.dcc()
+        return int(d.get('dr') or 0) + int(d.get('dr_buffs') or 0)
 
     def hp_pct(self):
         if self.hp_max == 0:
@@ -217,6 +274,7 @@ class tblCharacterInventory(db.Model):
     weight       = db.Column(db.Text, default='')
     notes        = db.Column(db.Text, default='')
     equipped     = db.Column(db.Integer, default=0)
+    hotlist      = db.Column(db.Integer, default=0, server_default='0')   # DCC 10-slot Hotlist
     order_by     = db.Column(db.Integer, default=0)
 
 
@@ -226,8 +284,10 @@ class tblCharacterSkills(db.Model):
     skill_id     = db.Column(db.Integer, primary_key=True)
     character_id = db.Column(db.Integer, db.ForeignKey('tblCharacters.character_id'), nullable=False)
     skill_name   = db.Column(db.Text, nullable=False)
-    bonus        = db.Column(db.Integer, default=0)
+    bonus        = db.Column(db.Integer, default=0)   # 5e: bonus; DCC: Rank 0-20
     proficient   = db.Column(db.Integer, default=0)
+    category     = db.Column(db.Text, default='', server_default='')   # DCC: Attack/Spell/Utility/Passive
+    stat         = db.Column(db.Text, default='', server_default='')   # DCC: str/int/con/dex/cha
     order_by     = db.Column(db.Integer, default=0)
 
 
@@ -263,10 +323,38 @@ class tblSessions(db.Model):
     dm_notes       = db.Column(db.Text, default='')
     session_date   = db.Column(db.Text, default='')
     created_at     = db.Column(db.Text, nullable=False)
+    # Which rules the dice roller follows for this session (dice_systems.py):
+    # 'dnd5e' (default) or 'dcc'. system_settings is JSON with the system's
+    # per-session knobs, e.g. {"floor": 3} for Dungeon Crawler Carl.
+    game_system     = db.Column(db.Text, default='dnd5e', server_default='dnd5e')
+    system_settings = db.Column(db.Text, default='{}', server_default='{}')
 
     campaign = db.relationship('tblcampaigns', backref='ttrpg_sessions', lazy=True)
     session_notes = db.relationship('tblSessionNotes', backref='session',
                                     cascade='all, delete-orphan', lazy=True)
+
+    def game_info(self):
+        """{'id', 'name', 'settings'} for the dice roller (never None)."""
+        import json as _json
+        import dice_systems as ds
+        sys_id = self.game_system if self.game_system in ds.SYSTEMS else ds.DEFAULT_SYSTEM
+        try:
+            raw = _json.loads(self.system_settings or '{}')
+        except (TypeError, ValueError):
+            raw = {}
+        return {'id': sys_id, 'name': ds.SYSTEMS[sys_id]['name'],
+                'settings': ds.normalize_settings(sys_id, raw)}
+
+    @classmethod
+    def active_game_info(cls):
+        """Game-system info the dice rollers follow right now: the ACTIVE
+        session's choice, or the D&D 5e default when no session is live."""
+        import dice_systems as ds
+        sess = cls.query.filter_by(status='active').first()
+        if sess:
+            return sess.game_info()
+        return {'id': ds.DEFAULT_SYSTEM, 'name': ds.SYSTEMS[ds.DEFAULT_SYSTEM]['name'],
+                'settings': {}}
 
 
 class tblSessionNotes(db.Model):
@@ -666,6 +754,7 @@ class tblSkillsLibrary(db.Model):
     ability_score = db.Column(db.Text, default='')        # STR, DEX, CON, INT, WIS, CHA
     description   = db.Column(db.Text, default='')
     source        = db.Column(db.Text, default='srd')
+    game_system   = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at    = db.Column(db.Text, nullable=False)
 
 
@@ -681,6 +770,7 @@ class tblRacesLibrary(db.Model):
     languages     = db.Column(db.Text, default='')
     description   = db.Column(db.Text, default='')
     source        = db.Column(db.Text, default='srd')
+    game_system   = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at    = db.Column(db.Text, nullable=False)
 
 
@@ -741,6 +831,7 @@ class tblClassesLibrary(db.Model):
     spellcasting_ability = db.Column(db.Text, default='')        # "INT" / "" if non-caster
     description          = db.Column(db.Text, default='')
     source               = db.Column(db.Text, default='srd')
+    game_system   = db.Column(db.Text, default='dnd5e', server_default='dnd5e')   # dnd5e | dcc
     created_at           = db.Column(db.Text, nullable=False)
 
 
@@ -840,3 +931,72 @@ class tblRulesLibrary(db.Model):
     description = db.Column(db.Text, default='')          # full SRD rules prose (markdown-ish)
     source      = db.Column(db.Text, default='srd')
     created_at  = db.Column(db.Text, nullable=False)
+
+
+def apply_library_bonuses(char, kind, db):
+    """Dungeon Crawler Carl: apply a Race or Class's Stat bonuses and granted
+    Skill Ranks to a character from the library row that matches its
+    race/char_class. Idempotent per (kind, name) — recorded in dcc_json.
+    Returns {'ok', 'msg', 'stats', 'skills'}."""
+    import json as _json
+    import dice_systems as ds
+    import dcc_library as lib
+    if not getattr(char, 'is_dcc', False):
+        return {'ok': False, 'msg': 'Only Dungeon Crawler Carl sheets apply Race/Class bonuses.'}
+    name = (char.race if kind == 'race' else char.char_class or '').strip()
+    if not name:
+        return {'ok': False, 'msg': f'Pick a {kind} first.'}
+    model = tblRacesLibrary if kind == 'race' else tblClassesLibrary
+    row = model.query.filter(db.func.lower(model.name) == name.lower(),
+                             model.game_system == 'dcc').first()
+    if not row:
+        return {'ok': False, 'msg': f'"{name}" is not in the Dungeon Crawler Carl {kind} library.'}
+    # The one hard pairing rule (p.128): Earth Classes are only open to
+    # Earth-based Races. Alien Races get their own perks instead.
+    if kind == 'class' and 'Earth Class' in (row.description or ''):
+        race_row = tblRacesLibrary.query.filter(
+            db.func.lower(tblRacesLibrary.name) == (char.race or '').strip().lower(),
+            tblRacesLibrary.game_system == 'dcc').first()
+        if race_row and (race_row.description or '').startswith('Alien Race'):
+            return {'ok': False,
+                    'msg': f'{row.name} is an Earth Class — it is only available to Earth-based Races, '
+                           f'and {race_row.name} is an Alien Race. Pick another Class (or Race) first.'}
+    bag = char.dcc()
+    applied = list(bag.get('applied') or [])
+    key = f'{kind}:{row.name}'
+    if key in applied:
+        return {'ok': False, 'msg': f'{row.name} bonuses were already applied to this sheet.'}
+    stats = lib.stat_bonuses(row.ability_bonuses if kind == 'race' else row.proficiencies)
+    lines = (row.traits_text if kind == 'race' else row.skill_choices or '').split('\n')
+    skills = lib.skill_bonuses(lines)
+    for k, n in stats.items():
+        setattr(char, f'{k}_val', max(1, (getattr(char, f'{k}_val') or 0) + n))
+    have = {s.skill_name.lower(): s for s in char.skills}
+    granted = []
+    for n, sname in skills:
+        meta = lib.SKILL_INDEX.get(sname)
+        row_s = have.get(sname.lower())
+        if row_s:
+            row_s.bonus = min(10, (row_s.bonus or 0) + n)      # Rank cap 10 during selection
+        else:
+            db.session.add(tblCharacterSkills(
+                character_id=char.character_id, skill_name=sname, bonus=min(10, n), proficient=1,
+                category=meta[0] if meta else '', stat=(meta[1].lower() if meta and meta[1] else ''),
+                order_by=len(char.skills) + len(granted)))
+        granted.append(f'{sname} +{n}')
+    if kind == 'race':
+        try:
+            bag['move'] = int(row.speed or bag['move'])
+        except (TypeError, ValueError):
+            pass
+        m = re.search(r'\((\d)\)', row.size or '')
+        if m:
+            bag['size'] = int(m.group(1))
+    applied.append(key)
+    bag['applied'] = applied
+    char.dcc_json = _json.dumps(bag)
+    db.session.commit()
+    stat_txt = ', '.join(f'{k.upper()} {n:+d}' for k, n in stats.items()) or 'no stat changes'
+    return {'ok': True, 'msg': f'{row.name}: {stat_txt}; skills: {", ".join(granted) or "none"}. '
+                               'Choice bonuses ("choose", "split") are yours to add by hand.',
+            'stats': stats, 'skills': granted}

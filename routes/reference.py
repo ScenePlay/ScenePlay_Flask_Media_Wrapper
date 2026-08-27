@@ -1319,6 +1319,49 @@ def sync_skills_from_api(state=None):
 
 # ── Skills library routes ──────────────────────────────────────────────────────
 
+def _game_system_arg(src):
+    """'dnd5e' | 'dcc' from a form/query dict (anything else → dnd5e)."""
+    import dice_systems
+    v = (src.get('game_system') or '').strip()
+    return v if v in dice_systems.SYSTEMS else dice_systems.DEFAULT_SYSTEM
+
+
+def _skill_category(s):
+    """DCC skill category: from the built-in data, else the 'Category.' prefix a
+    DM typed into a custom row's description."""
+    import dcc_library
+    if s.game_system != 'dcc':
+        return ''
+    meta = dcc_library.SKILL_INDEX.get(s.name)
+    if meta:
+        return meta[0]
+    head = (s.description or '').split('.', 1)[0].strip()
+    return head if head in ('Attack', 'Spell', 'Utility', 'Passive') else ''
+
+
+def _system_filter(query, model):
+    """Search endpoints: `?system=dcc` narrows to that system; `?system=all`
+    or no arg returns everything (old callers keep working)."""
+    system = request.args.get('system', '').strip()
+    if system and system != 'all':
+        return query.filter(model.game_system == system)
+    return query
+
+
+@reference_bp.route('/library/dcc/restore', methods=['POST'])
+@login_required
+@dm_required
+def dcc_library_restore():
+    """Re-insert any built-in Dungeon Crawler Carl entries that were deleted.
+    Edited rows are untouched (matched by api_index)."""
+    import dcc_library
+    import models.ttrpg as _m
+    n = dcc_library.seed(db, _m, _now())
+    flash(f'Restored {n} built-in Dungeon Crawler Carl entries.' if n
+          else 'All built-in Dungeon Crawler Carl entries are already present.')
+    return redirect(request.referrer or url_for('reference_bp.skills_library'))
+
+
 @reference_bp.route('/skills')
 @login_required
 @dm_required
@@ -1332,10 +1375,13 @@ def skills_library():
         skills = skills.filter(tblSkillsLibrary.name.ilike(f'%{q}%'))
     if src:
         skills = skills.filter(tblSkillsLibrary.source == src)
+    system = request.args.get('system', '').strip()
+    if system:
+        skills = skills.filter(tblSkillsLibrary.game_system == system)
     skills = skills.order_by(tblSkillsLibrary.ability_score, tblSkillsLibrary.name).all()
     current_api = get_api_base()
     return render_template('ttrpg/skills_library.html',
-                           skills=skills, total=total, q=q, src=src,
+                           skills=skills, total=total, q=q, src=src, system=system,
                            current_api=current_api,
                            api_options=API_OPTIONS)
 
@@ -1373,6 +1419,7 @@ def skill_add_to_lib():
         description   = request.form.get('description', '').strip(),
         source        = 'homebrew',
         created_at    = _now(),
+        game_system = _game_system_arg(request.form),
     )
     db.session.add(skill)
     db.session.commit()
@@ -1385,7 +1432,7 @@ def skill_add_to_lib():
 @dm_required
 def skill_lib_delete(skill_lib_id):
     skill = tblSkillsLibrary.query.get_or_404(skill_lib_id)
-    if skill.source != 'homebrew':
+    if skill.source not in ('homebrew', 'dcc'):
         flash('Only custom skills can be deleted.')
         return redirect(url_for('reference_bp.skills_library'))
     name = skill.name
@@ -1399,15 +1446,19 @@ def skill_lib_delete(skill_lib_id):
 @login_required
 def skills_search():
     q = request.args.get('q', '').strip()
-    skills = tblSkillsLibrary.query.filter(
-        tblSkillsLibrary.name.ilike(f'%{q}%')
-    ).order_by(tblSkillsLibrary.ability_score, tblSkillsLibrary.name).limit(30).all()
+    skills = tblSkillsLibrary.query.filter(tblSkillsLibrary.name.ilike(f'%{q}%'))
+    skills = _system_filter(skills, tblSkillsLibrary)
+    skills = skills.order_by(tblSkillsLibrary.ability_score, tblSkillsLibrary.name).limit(40).all()
+    import dcc_library
     return jsonify([{
         'skill_lib_id': s.skill_lib_id,
         'name':         s.name,
         'ability_score': s.ability_score,
         'description':  s.description,
         'source':       s.source,
+        'game_system':  s.game_system or 'dnd5e',
+        # DCC: category (Attack/Spell/Utility/Passive) so the sheet can preset it
+        'category':     _skill_category(s),
     } for s in skills])
 
 
@@ -1478,10 +1529,13 @@ def races_library():
         races = races.filter(tblRacesLibrary.name.ilike(f'%{q}%'))
     if src:
         races = races.filter(tblRacesLibrary.source == src)
+    system = request.args.get('system', '').strip()
+    if system:
+        races = races.filter(tblRacesLibrary.game_system == system)
     races = races.order_by(tblRacesLibrary.name).all()
     current_api = get_api_base()
     return render_template('ttrpg/races_library.html',
-                           races=races, total=total, q=q, src=src,
+                           races=races, total=total, q=q, src=src, system=system,
                            current_api=current_api,
                            api_options=API_OPTIONS)
 
@@ -1523,6 +1577,7 @@ def race_add():
         description     = request.form.get('description', '').strip(),
         source          = 'homebrew',
         created_at      = _now(),
+        game_system = _game_system_arg(request.form),
     )
     db.session.add(race)
     db.session.commit()
@@ -1535,7 +1590,7 @@ def race_add():
 @dm_required
 def race_delete(race_lib_id):
     race = tblRacesLibrary.query.get_or_404(race_lib_id)
-    if race.source != 'homebrew':
+    if race.source not in ('homebrew', 'dcc'):
         flash('Only custom races can be deleted.')
         return redirect(url_for('reference_bp.races_library'))
     name = race.name
@@ -1799,10 +1854,13 @@ def classes_library():
         classes = classes.filter(tblClassesLibrary.name.ilike(f'%{q}%'))
     if src:
         classes = classes.filter(tblClassesLibrary.source == src)
+    system = request.args.get('system', '').strip()
+    if system:
+        classes = classes.filter(tblClassesLibrary.game_system == system)
     classes = classes.order_by(tblClassesLibrary.name).all()
     current_api = get_api_base()
     return render_template('ttrpg/classes_library.html',
-                           classes=classes, total=total, q=q, src=src,
+                           classes=classes, total=total, q=q, src=src, system=system,
                            current_api=current_api, api_options=API_OPTIONS)
 
 
@@ -1844,6 +1902,7 @@ def class_add():
         description          = request.form.get('description', '').strip(),
         source               = 'homebrew',
         created_at           = _now(),
+        game_system = _game_system_arg(request.form),
     )
     db.session.add(cls)
     db.session.commit()
@@ -1856,7 +1915,7 @@ def class_add():
 @dm_required
 def class_delete(class_lib_id):
     cls = tblClassesLibrary.query.get_or_404(class_lib_id)
-    if cls.source != 'homebrew':
+    if cls.source not in ('homebrew', 'dcc'):
         flash('Only custom classes can be deleted.')
         return redirect(url_for('reference_bp.classes_library'))
     name = cls.name
@@ -1870,8 +1929,8 @@ def class_delete(class_lib_id):
 @login_required
 def races_search():
     q = request.args.get('q', '').strip()
-    races = tblRacesLibrary.query.filter(
-        tblRacesLibrary.name.ilike(f'%{q}%')
+    races = _system_filter(tblRacesLibrary.query.filter(
+        tblRacesLibrary.name.ilike(f'%{q}%')), tblRacesLibrary
     ).order_by(tblRacesLibrary.name).limit(500).all()
     return jsonify([{
         'race_lib_id':    r.race_lib_id,
@@ -1882,6 +1941,7 @@ def races_search():
         'traits_text':    r.traits_text,
         'languages':      r.languages,
         'description':    r.description,
+        'game_system':    r.game_system or 'dnd5e',
     } for r in races])
 
 
@@ -2507,8 +2567,8 @@ def sync_run(job_type):
 @login_required
 def classes_search():
     q = request.args.get('q', '').strip()
-    classes = tblClassesLibrary.query.filter(
-        tblClassesLibrary.name.ilike(f'%{q}%')
+    classes = _system_filter(tblClassesLibrary.query.filter(
+        tblClassesLibrary.name.ilike(f'%{q}%')), tblClassesLibrary
     ).order_by(tblClassesLibrary.name).limit(500).all()
     return jsonify([{
         'class_lib_id':         c.class_lib_id,
@@ -2520,4 +2580,5 @@ def classes_search():
         'subclasses':           c.subclasses,
         'spellcasting_ability': c.spellcasting_ability,
         'description':          c.description,
+        'game_system':          c.game_system or 'dnd5e',
     } for c in classes])

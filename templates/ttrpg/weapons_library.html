@@ -229,8 +229,9 @@
     </thead>
     <tbody>
       {% for w in weapons %}
-      <!-- Display row -->
-      <tr class="data-row" id="row-{{ w.weapon_lib_id }}">
+      <!-- Display row (click to open the full properties / notes underneath) -->
+      <tr class="data-row" id="row-{{ w.weapon_lib_id }}"
+          {% if w.properties or w.notes %}data-expandable="{{ w.weapon_lib_id }}" title="Click to show the full description"{% endif %}>
         <td class="text-center">
           <button class="btn btn-outline-secondary btn-sm py-0 px-1"
                   onclick="toggleEdit({{ w.weapon_lib_id }})" title="Edit">&#9998;</button>
@@ -281,7 +282,7 @@
         <td>
           {% if w.properties %}
           {% if w.source == 'srd-magic' %}
-          <span class="text-muted small fst-italic">{{ w.properties[:60] }}{% if w.properties|length > 60 %}…{% endif %}</span>
+          <span class="text-muted small fst-italic">{{ w.properties[:60] }}{% if w.properties|length > 60 %}… <span style="color:var(--ttrpg-accent);">&#9660; more</span>{% endif %}</span>
           {% else %}
           {% for prop in w.properties.split(', ') %}
           <span class="prop-tag me-1">{{ prop }}</span>
@@ -301,6 +302,20 @@
           </form>
         </td>
       </tr>
+      {% if w.properties or w.notes %}
+      <tr class="detail-row" id="detail-{{ w.weapon_lib_id }}" style="display:none;">
+        <td colspan="11">
+          {% if w.properties %}
+          <div class="small text-muted mb-1" style="font-weight:600;">{% if w.source == 'srd-magic' %}Description{% else %}Properties{% endif %}</div>
+          <div class="small mb-2" style="white-space:pre-wrap;color:var(--sp-text);">{{ w.properties }}</div>
+          {% endif %}
+          {% if w.notes %}
+          <div class="small text-muted mb-1" style="font-weight:600;">Notes</div>
+          <div class="small" style="white-space:pre-wrap;color:var(--sp-text);">{{ w.notes }}</div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endif %}
 
       <!-- Inline edit row (hidden by default) -->
       <tr class="edit-row" id="edit-{{ w.weapon_lib_id }}" style="display:none;">
@@ -471,7 +486,27 @@
 
 {% block scripts %}
 <script src="{{ static_v('scripts/paste_image.js') }}"></script>
+<style>
+  tr.detail-row td { background: var(--sp-bg); border-top: none; padding: 8px 14px 10px; }
+  tr.data-row[data-expandable] { cursor: pointer; }
+  tr.data-row[data-expandable]:hover td { background: color-mix(in srgb, var(--sp-accent) 6%, transparent); }
+</style>
 <script>
+// Click a row to open its full description underneath (buttons/forms don't trigger it).
+function toggleDetail(id) {
+  const detail = document.getElementById('detail-' + id);
+  if (!detail) return;
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  const row = document.getElementById('row-' + id);
+  if (row) row.style.background = open ? '' : 'color-mix(in srgb, var(--sp-accent) 8%, transparent)';
+}
+document.addEventListener('click', e => {
+  const row = e.target.closest('tr.data-row[data-expandable]');
+  if (!row || e.target.closest('button, a, form, input, select, textarea, img')) return;
+  toggleDetail(row.dataset.expandable);
+});
+
 function toggleAddForm() {
   const f = document.getElementById('add-weapon-form');
   f.style.display = f.style.display === 'none' ? '' : 'none';

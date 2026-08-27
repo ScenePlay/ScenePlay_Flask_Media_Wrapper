@@ -694,6 +694,7 @@ def map_view(map_id):
             'name': char.name,
             # Ability modifiers + proficiency bonus, so the map roller can
             # offer the same STR/DEX/… quick-mod buttons as the sheet.
+            'game_system': getattr(char, 'game_system', 'dnd5e') or 'dnd5e',
             'mods': {'STR': char.modifier(char.str_val),
                      'DEX': char.modifier(char.dex_val),
                      'CON': char.modifier(char.con_val),
@@ -701,6 +702,11 @@ def map_view(map_id):
                      'WIS': char.modifier(char.wis_val),
                      'CHA': char.modifier(char.cha_val)},
             'prof': ((char.level - 1) // 4) + 2,
+            # Raw scores too: under Dungeon Crawler Carl the modifier table
+            # differs, so the roller recomputes mods client-side (DiceCore).
+            'scores': {'STR': char.str_val, 'DEX': char.dex_val,
+                       'CON': char.con_val, 'INT': char.int_val,
+                       'WIS': char.wis_val, 'CHA': char.cha_val},
             'skills': [{'name': s.skill_name, 'bonus': s.bonus or 0,
                         'proficient': bool(s.proficient)}
                        for s in sorted(char.skills, key=lambda x: x.order_by)],
@@ -753,6 +759,7 @@ def map_view(map_id):
 
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
+                           game=tblSessions.active_game_info(),
                            monsters=monsters, party=party,
                            on_map_monster_ids=on_map_monster_ids,
                            on_map_player_ids=on_map_player_ids,

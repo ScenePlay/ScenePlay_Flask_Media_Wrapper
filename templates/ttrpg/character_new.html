@@ -14,6 +14,10 @@
         </button>
         <div class="d-flex align-items-center gap-1">
           <span class="text-muted" style="font-size:.75rem;">Level</span>
+          <select id="rand-dcc-floor" class="form-select form-select-sm" style="display:none;width:auto;" title="Where the crawler starts">
+            <option value="third" selected>Third Floor crawler — Level 10 with Race and Class (the usual start)</option>
+            <option value="first">First Floor crawler — Level 1, Human, no Class yet (by the book)</option>
+          </select>
           <input type="number" id="rand-min-level" value="1" min="1" max="20"
                  class="form-control form-control-sm text-center"
                  style="width:58px;" title="Minimum random level">
@@ -34,8 +38,23 @@
 
       <form method="POST" enctype="multipart/form-data">
         <input type="hidden" name="genre" id="form-genre" value="fantasy">
+        <input type="hidden" name="dcc_skills_json" id="dcc-skills-json" value="">
+        <input type="hidden" name="dcc_items_json" id="dcc-items-json" value="">
+        <input type="hidden" name="dcc_applied_json" id="dcc-applied-json" value="">
 
         <!-- Identity -->
+        <h6 class="text-muted mt-3 mb-2 text-uppercase" style="letter-spacing:.08em;">Game system</h6>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <select name="game_system" id="gameSystemSel" class="form-select" onchange="spApplyGameSystem(this)">
+              {% for sid, gs in game_systems.items() %}
+              <option value="{{ sid }}" {% if game.id == sid %}selected{% endif %}>{{ gs.name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Which rules this sheet is laid out for. Pre-set from the live session.</div>
+          </div>
+        </div>
+
         <h6 class="text-muted mt-3 mb-2 text-uppercase" style="letter-spacing:.08em;">Identity</h6>
         <div class="row g-3">
           <div class="col-sm-6">
@@ -76,7 +95,7 @@
             <label class="form-label">Level</label>
             <input type="number" name="level" class="form-control" value="1" min="1" max="30">
           </div>
-          <div class="col-sm-3">
+          <div class="only-5e col-sm-3">
             <label class="form-label">Subclass</label>
             <input type="text" name="subclass" class="form-control" placeholder="Champion… (level 3+)">
           </div>
@@ -126,7 +145,8 @@
           {% endif %}
         </div>
 
-        <!-- Combat stats -->
+        <!-- Combat stats (D&D 5e) -->
+        <div class="only-5e">
         <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Combat Stats</h6>
         <div class="row g-3">
           <div class="col-4 col-sm-2">
@@ -150,12 +170,13 @@
             <input type="number" name="passive_perception" class="form-control" value="10">
           </div>
         </div>
+        </div>
 
         <!-- Attributes -->
         <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Attributes</h6>
         <div class="row g-3">
           {% for label, field in [('STR','str_val'),('DEX','dex_val'),('CON','con_val'),('INT','int_val'),('WIS','wis_val'),('CHA','cha_val')] %}
-          <div class="col-4 col-sm-2">
+          <div class="col-4 col-sm-2{% if field == 'wis_val' %} only-5e{% endif %}">
             <label class="form-label">{{ label }}</label>
             <input type="number" name="{{ field }}" class="form-control text-center"
                    value="10" min="1" max="30">
@@ -176,13 +197,48 @@
             <label class="form-label">Gold</label>
             <input type="number" name="gold" class="form-control" value="0" min="0">
           </div>
-          <div class="col-4 col-sm-2">
+          <div class="col-4 col-sm-2 only-5e">
             <label class="form-label">Silver</label>
             <input type="number" name="silver" class="form-control" value="0" min="0">
           </div>
-          <div class="col-4 col-sm-2">
+          <div class="col-4 col-sm-2 only-5e">
             <label class="form-label">Copper</label>
             <input type="number" name="copper" class="form-control" value="0" min="0">
+          </div>
+        </div>
+
+
+        <!-- Dungeon Crawler Carl-only fields (shown when that system is picked) -->
+        <div class="only-dcc" style="display:none;">
+          <h6 class="text-muted mt-4 mb-2 text-uppercase" style="letter-spacing:.08em;">Crawler</h6>
+          <div class="small text-muted mb-2">Health is a 10-slot <b>Health Bar</b> (each slot = Con Mod) &mdash; it fills in automatically. Mana = Intelligence. No AC: armor gives <b>DR</b>, and you <b>Evade</b> with d20 + 2 + Dex Mod.</div>
+          <div class="row g-3">
+            <div class="col-4 col-sm-2"><label class="form-label">Armor DR</label>
+              <input type="number" name="dcc_dr" class="form-control" value="{{ dcc.dr }}" min="0"></div>
+            <div class="col-4 col-sm-2"><label class="form-label">Move (ft)</label>
+              <input type="number" name="dcc_move" class="form-control" value="{{ dcc.move }}" min="0"></div>
+            <div class="col-4 col-sm-2"><label class="form-label">Step (ft)</label>
+              <input type="number" name="dcc_step" class="form-control" value="{{ dcc.step }}" min="0"></div>
+            <div class="col-4 col-sm-2"><label class="form-label">Size</label>
+              <select name="dcc_size" class="form-select">{% for v, name in dcc_sizes %}<option value="{{ v }}" {% if dcc.size == v %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+            <div class="col-4 col-sm-2"><label class="form-label" title="Starts at Cha Mod × 2">Popularity</label>
+              <input type="number" name="dcc_popularity" class="form-control" value="{{ dcc.popularity }}" min="0"></div>
+            <div class="col-4 col-sm-2"><label class="form-label">AI Favor</label>
+              <input type="number" name="dcc_ai_favor" class="form-control" value="{{ dcc.ai_favor }}" min="0"></div>
+            <div class="col-6 col-sm-3"><label class="form-label">Crawler number</label>
+              <input type="text" name="dcc_crawler_number" class="form-control" value="{{ dcc.crawler_number }}"></div>
+            <div class="col-6 col-sm-3"><label class="form-label">Gender / pronouns</label>
+              <input type="text" name="dcc_pronouns" class="form-control" value="{{ dcc.pronouns }}"></div>
+            <div class="col-6 col-sm-3"><label class="form-label">Floor entered</label>
+              <input type="text" name="dcc_floor_entered" class="form-control" value="{{ dcc.floor_entered }}"></div>
+            <div class="col-6 col-sm-3"><label class="form-label" title="3 per Level gained">Stat points to spend</label>
+              <input type="number" name="dcc_stat_points" class="form-control" value="{{ dcc.stat_points }}" min="0"></div>
+            <div class="col-12 col-md-4"><label class="form-label">Past Trauma</label>
+              <textarea name="dcc_past_trauma" rows="2" class="form-control" placeholder="Table 22">{{ dcc.past_trauma }}</textarea></div>
+            <div class="col-12 col-md-4"><label class="form-label">Loose Ends</label>
+              <textarea name="dcc_loose_ends" rows="2" class="form-control" placeholder="Table 23">{{ dcc.loose_ends }}</textarea></div>
+            <div class="col-12 col-md-4"><label class="form-label">Regrets</label>
+              <textarea name="dcc_regrets" rows="2" class="form-control" placeholder="Table 24">{{ dcc.regrets }}</textarea></div>
           </div>
         </div>
 
@@ -229,6 +285,7 @@
     </div>
   </div>
 </div>
+
 
 {% endblock %}
 
@@ -291,7 +348,7 @@ function newLibSearch(type, q) {
   clearTimeout(_newLibTimers[type]);
   const box = document.getElementById(type === 'class' ? 'new-class-suggestions' : 'new-race-suggestions');
   _newLibTimers[type] = setTimeout(() => {
-    fetch(_newLibUrls[type] + '?q=' + encodeURIComponent(q))
+    fetch(_newLibUrls[type] + '?q=' + encodeURIComponent(q) + '&system=' + encodeURIComponent((document.getElementById('gameSystemSel') || {}).value || 'all'))
       .then(r => r.json())
       .then(data => {
         const results = Array.isArray(data) ? data : (data.results || []);
@@ -337,6 +394,28 @@ async function randomizeCharacter() {
   btn.textContent = 'Rolling…';
 
   try {
+    const sysSel = document.getElementById('gameSystemSel');
+    if (sysSel && sysSel.value === 'dcc') {
+      // Dungeon Crawler Carl crawler — a different generator, different fields.
+      const floor = (document.getElementById('rand-dcc-floor') || {}).value || 'first';
+      const r = await fetch("{{ url_for('ttrpg.character_random') }}" + '?system=dcc&floor=' + floor);
+      const c = await r.json();
+      const set = (sel, v) => { const el = document.querySelector(sel); if (el) el.value = v; };
+      set('[name="name"]', c.name); set('[name="level"]', c.level); set('[name="background"]', c.background);
+      document.getElementById('new-char-class').value = c.char_class || '';
+      document.getElementById('new-race').value = c.race || '';
+      ['str_val','int_val','con_val','dex_val','cha_val','gold'].forEach(f => set('[name="' + f + '"]', c[f]));
+      document.querySelectorAll('input[name$="_val"]').forEach(inp => { inp.dataset.touched = '1'; });
+      ['dcc_move','dcc_step','dcc_size','dcc_popularity','dcc_ai_favor','dcc_dr','dcc_crawler_number',
+       'dcc_past_trauma','dcc_loose_ends','dcc_regrets','dcc_floor_entered','dcc_stat_points'].forEach(f => set('[name="' + f + '"]', c[f]));
+      document.getElementById('dcc-skills-json').value  = JSON.stringify(c.skills || []);
+      document.getElementById('dcc-items-json').value   = JSON.stringify(c.items || []);
+      document.getElementById('dcc-applied-json').value = JSON.stringify(c.applied || []);
+      document.getElementById('traits-note').value = c.traits_note || '';
+      btn.disabled = false;
+      btn.innerHTML = '<span class="dice-ico">&#127922;</span> Randomize';
+      return;
+    }
     const lo = parseInt(document.getElementById('rand-min-level').value) || 1;
     const hi = parseInt(document.getElementById('rand-max-level').value) || 20;
     const r = await fetch("{{ url_for('ttrpg.character_random') }}"
@@ -522,5 +601,33 @@ function _ncFallbackCopy(ta, onDone) {
   ta.setAttribute('readonly', '');
   window.getSelection().removeAllRanges();
 }
+</script>
+
+<script>
+// Game-system switch: D&D 5e-only fields (WIS, AC, speed, initiative, passive
+// perception, silver/copper, subclass, HP) hide under Dungeon Crawler Carl and
+// the Crawler block appears. Stat inputs get DCC-sized defaults.
+function spApplyGameSystem(sel) {
+  const dcc = sel.value === 'dcc';
+  ['rand-min-level', 'rand-max-level'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = dcc ? 'none' : ''; });
+  document.querySelectorAll('#rand-min-level ~ span, #rand-min-level ~ .text-muted').forEach(el => { el.style.display = dcc ? 'none' : ''; });
+  const fl = document.getElementById('rand-dcc-floor'); if (fl) fl.style.display = dcc ? '' : 'none';
+  const gsel = document.getElementById('rand-genre'); if (gsel) gsel.style.display = dcc ? 'none' : '';
+  ['dcc-skills-json', 'dcc-items-json', 'dcc-applied-json'].forEach(id => { const el = document.getElementById(id); if (el && !dcc) el.value = ''; });
+  document.querySelectorAll('.only-5e').forEach(el => { el.style.display = dcc ? 'none' : ''; });
+  document.querySelectorAll('.only-dcc').forEach(el => { el.style.display = dcc ? '' : 'none'; });
+  document.querySelectorAll('input[name$="_val"]').forEach(inp => {
+    inp.max = dcc ? 999 : 30;
+    if (dcc && !inp.dataset.touched && (parseInt(inp.value) || 10) === 10 && inp.name !== 'wis_val') inp.value = 3;
+    if (!dcc && !inp.dataset.touched && (parseInt(inp.value) || 3) === 3) inp.value = 10;
+  });
+  const bg = document.querySelector('[name="background"]');
+  if (bg) bg.placeholder = dcc ? 'Combat background: Athlete, Gaming Geek, Militant, Outdoorsy…' : 'Soldier, Noble…';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('input[name$="_val"]').forEach(inp => inp.addEventListener('input', () => { inp.dataset.touched = '1'; }));
+  const sel = document.getElementById('gameSystemSel');
+  if (sel) spApplyGameSystem(sel);
+});
 </script>
 {% endblock %}
