@@ -189,7 +189,13 @@ window.BMFP = (function () {
     plan.format = 'sceneplay-floorplan';
     plan.grid = { cols: GRID_COLS, rows: GRID_ROWS };
     plan.default_wall_height_ft = wallHeightFt;
-    return JSON.stringify({ floorplan: plan });
+    // A room that hasn't been painted yet (+ New room, then a pause) has no
+    // areas; the server rejects such zones, so keep them local until they
+    // have a rect instead of letting an autosave throw the new room away.
+    const out = Object.assign({}, plan, {
+      zones: (plan.zones || []).filter(z => (z.rects || []).length),
+    });
+    return JSON.stringify({ floorplan: out });
   }
 
   function save() {
@@ -217,10 +223,18 @@ window.BMFP = (function () {
           // element order is preserved, so the selection and undo stacks
           // still point at the same things.
           if (d.floorplan) {
+            const localZones = plan.zones || [];
+            const activeId = localZones[activeZone] ? localZones[activeZone].id : null;
+            const unpainted = localZones.filter(z => !(z.rects || []).length);
             plan = d.floorplan;
             plan.lights = plan.lights || [];
             plan.props  = plan.props  || [];
-            plan.zones  = plan.zones  || [];
+            plan.zones  = (plan.zones || []).concat(unpainted);   // still being drawn
+            if (activeId !== null) {
+              const ai = plan.zones.findIndex(z => z.id === activeId);
+              activeZone = ai === -1 ? Math.min(activeZone, plan.zones.length - 1) : ai;
+            }
+            renderZoneUI();
           }
           dirty = false;
           // The 3D draft preview now matches the saved plan: release it so
@@ -704,7 +718,7 @@ window.BMFP = (function () {
     activeZone = plan.zones.length - 1;
     markDirty();
     renderZoneUI();
-    setTool('zone');   // straight into painting rects for the new zone
+    if (tool !== 'zone') setTool('zone');   // straight into painting — setTool toggles, so don't flip it OFF
   }
 
   function deleteZone() {
@@ -1656,7 +1670,7 @@ window.BMFP = (function () {
       markDirty();
     } else if (d.kind === 'zone') {
       const zn = plan.zones && plan.zones[activeZone];
-      if (!zn) return;
+      if (!zn) { alert('Press "+ New room" first, or pick a room in the list, then paint its floor.'); return; }
       const x1 = Math.min(d.start.x, d.end.x), x2 = Math.max(d.start.x, d.end.x);
       const y1 = Math.min(d.start.y, d.end.y), y2 = Math.max(d.start.y, d.end.y);
       if (x1 === x2 || y1 === y2) return;
