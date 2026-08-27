@@ -709,6 +709,7 @@ function pollState() {
       _fpvSync(d.floorplan_version);
       _fpvDoorSync(d.doors);
       _obsSync(d.obs);
+      collapseSync(d.collapse);
     })
     .catch(() => { _pollFails++; })
     .finally(() => _schedulePoll());
@@ -1701,6 +1702,7 @@ function mapInitDiceSystem() {
   if (!window.DiceCore || _mapSysPanel) return;
   DiceCore.setSystem(typeof GAME_INFO !== 'undefined' ? GAME_INFO : null);
   _mapSysPanel = DiceCore.mountSystemPanel(document.getElementById('map-dice-system-panel'), {
+    collapsible: true,
     btnClass: 'btn btn-sm btn-outline-secondary',
     quickContainer: document.getElementById('map-dice-quicklabels'),
     labelInput: document.getElementById('map-dice-label'),
@@ -1871,37 +1873,51 @@ function mapRenderQuickRef() {
     `<button type="button" class="qref-chip qref-click" title="${_mEsc(title)}" ${attrs}>${body}</button>`;
   const sign = n => (n >= 0 ? '+' : '') + n;
   const rows = [];
+  if (c && c.game_system === 'dcc') rows.push(['Hotlist', !(c.hotlist || []).length
+    ? '<span class="qref-chip" style="opacity:.7;">&#9889; Empty &mdash; tick <b>Hotlist</b> on an item in Inventory (10 slots)</span>'
+    : c.hotlist.map((it, i) => {
+    const d = window.DiceCore ? DiceCore.parseDice(it.notes) : null;
+    return chip(`data-qr="hotlist" data-i="${i}"`,
+         (d ? `Roll ${it.name} — ${it.notes}` : `Load ${it.name} into the roller` + (it.notes ? ' — ' + it.notes : '')) + (it.qty > 1 ? ` (x${it.qty})` : ''),
+         `&#9889; ${_mEsc(it.name)}${it.qty > 1 ? ` <span class="qref-sub">x${it.qty}</span>` : ''}`).replace('class="qref-chip qref-click"', 'class="qref-chip qref-click qref-has-use"')
+      + `<button type="button" class="qref-use" data-qruse="${i}" title="Use one ${_mEsc(it.name)} (${it.qty} left)${it.qty <= 1 ? ' — removes it from the inventory' : ''}">&#8722;1</button>`;
+  }).join(''), 'hotlist']);
   if (c && c.skills.length) rows.push(['Skills', c.skills.map((s, i) =>
     chip(`data-qr="skill" data-i="${i}"`,
          `Roll ${s.name} check (d20 ${sign(s.bonus)})`,
-         `${s.proficient ? '&#9733; ' : ''}${_mEsc(s.name)} <span class="qref-sub">${sign(s.bonus)}</span>`)).join('')]);
+         `${s.proficient ? '&#9733; ' : ''}${_mEsc(s.name)} <span class="qref-sub">${sign(s.bonus)}</span>`)).join(''), 'skills']);
   if (c && c.weapons.length) rows.push(['Weapons', c.weapons.map((w, i) =>
     chip(`data-qr="weapon" data-i="${i}"`,
          w.dice ? `Roll ${w.name} damage — ${w.dice}${w.dmg_bonus ? '+' + w.dmg_bonus : ''} ${w.dmg_type}`
                 : `Roll ${w.name} attack (d20 ${sign(w.atk_bonus)})`,
          `&#9876; ${_mEsc(w.name)} <span class="qref-sub">${w.dice
              ? _mEsc(w.dice + (w.dmg_bonus ? '+' + w.dmg_bonus : '') + ' ' + w.dmg_type)
-             : sign(w.atk_bonus)}</span>`)).join('')]);
+             : sign(w.atk_bonus)}</span>`)).join(''), 'weapons']);
   if (c && c.spells.some(sp => sp.dice)) rows.push(['Spells', c.spells.map((sp, i) => sp.dice
     ? chip(`data-qr="spell" data-i="${i}"`,
            `Roll ${sp.name} damage (${sp.dice})`,
            `&#10039; ${_mEsc(sp.name)} <span class="qref-sub">${_mEsc(sp.dice)}</span>`)
-    : '').join('')]);
+    : '').join(''), 'spells']);
   if (!rows.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
   host.innerHTML =
-    '<div class="qref-title">Quick Reference <span class="qref-hint">&mdash; click to load the roll</span></div>'
-    + rows.map(([label, chips]) =>
-        `<div class="qref-row"><span class="qref-label">${label}</span><div class="qref-chips">${chips}</div></div>`).join('');
+    '<div class="qref-title">Quick Reference <span class="qref-hint">&mdash; click to load the roll &middot; click a heading to fold it</span></div>'
+    + rows.map(([label, chips, key]) =>
+        `<div class="qref-row" data-qref="${key}"><span class="qref-label">${label}</span><div class="qref-chips">${chips}</div></div>`).join('');
   host.style.display = '';
+  if (window.DiceCore) DiceCore.bindCollapsibles(host, 'map');
 }
 
 // One delegated handler instead of per-chip inline JS (names stay escaped).
 document.getElementById('map-dice-quickref').addEventListener('click', e => {
-  const btn = e.target.closest('[data-qr]');
   const c = _mapRollerChar();
+  const use = e.target.closest('[data-qruse]');
+  if (use && c) { mapHotlistUse(c, parseInt(use.dataset.qruse, 10)); return; }
+  const btn = e.target.closest('[data-qr]');
   if (!btn || !c) return;
   const i = parseInt(btn.dataset.i, 10);
-  if (btn.dataset.qr === 'skill') {
+  if (btn.dataset.qr === 'hotlist') {
+    const it = (c.hotlist || [])[i]; if (it) mapHotlistQuickRoll(it);
+  } else if (btn.dataset.qr === 'skill') {
     const s = c.skills[i]; mapQuickSet(s.bonus, s.name);
   } else if (btn.dataset.qr === 'weapon') {
     const w = c.weapons[i]; mapWeaponQuickRoll(w.dice, w.dmg_bonus, w.atk_bonus, w.name);
@@ -1916,6 +1932,33 @@ function mapQuickSet(modVal, label) {
   document.getElementById('map-dice-mod').value   = modVal;
   document.getElementById('map-dice-label').value = label;
   mapSelectDie(20);
+}
+
+// "−1" on a Hotlist chip: consume one via the sheet's inventory endpoint;
+// the last one is deleted. The roster copy is patched so the chip updates now.
+function mapHotlistUse(c, i) {
+  const it = (c.hotlist || [])[i]; if (!it) return;
+  if (it.qty <= 1) {
+    if (!confirm(`Use the last ${it.name}? It will be removed from the inventory.`)) return;
+    fetch(`/ttrpg/inventory/${it.id}`, { method: 'DELETE' })
+      .then(() => { c.hotlist.splice(i, 1); mapRenderQuickRef(); });
+    return;
+  }
+  fetch(`/ttrpg/inventory/${it.id}`, { method: 'POST', headers: {'Content-Type': 'application/json'},
+         body: JSON.stringify({ quantity: it.qty - 1 }) })
+    .then(r => r.json()).then(d => { if (d.ok) { it.qty -= 1; mapRenderQuickRef(); } });
+}
+
+// Hotlist item (DCC): dice in its notes load a damage roll, else just the label.
+function mapHotlistQuickRoll(item) {
+  const p = DiceCore.hotlistPreset(item);
+  if (p.sides) {
+    document.getElementById('map-dice-count').value = p.count;
+    mapSelectDie(p.sides);
+    document.getElementById('map-dice-mod').value = p.mod || 0;
+  }
+  document.getElementById('map-dice-label').value = p.label;
+  if (typeof _mapSysPanel !== 'undefined' && _mapSysPanel) _mapSysPanel.setRollType(p.rollType || 'other');
 }
 
 function mapQuickSetDamage(diceStr, label) {
@@ -3012,3 +3055,73 @@ document.addEventListener('DOMContentLoaded', () => {
     .then(d => { const s = (d && d.floorplan && d.floorplan.sky) || {}; _bmPaintSky(s.time || '', s.weather || 'clear'); })
     .catch(() => {});
 });
+
+
+// ── DCC level collapse ────────────────────────────────────────────────────────
+// The session's countdown + note ride the state poll (`collapse`, null under
+// 5e). The DM edits them here; the server pushes the same settings to the
+// portal (broadcast_game) and the OBS map source polls them too.
+let _collapse = (typeof COLLAPSE_INIT !== 'undefined') ? COLLAPSE_INIT : null;
+let _collapseTick = null;
+
+function collapseSync(c) {
+  const before = JSON.stringify(_collapse), after = JSON.stringify(c || null);
+  if (before === after) return;
+  _collapse = c || null;
+  const btn = document.getElementById('collapse-toggle-btn');
+  if (btn) btn.style.display = _collapse ? '' : 'none';
+  if (!_collapse) { const p = document.getElementById('collapse-panel'); if (p) p.style.display = 'none'; }
+  _collapseFillPanel();
+  collapseRender();
+}
+
+function collapseRender() {
+  const el = document.getElementById('collapse-banner'); if (!el) return;
+  const r = window.DiceCore ? DiceCore.collapseText(_collapse) : { text: '', state: 'none' };
+  el.textContent = r.text;
+  el.className = 'sp-collapse-banner ' + r.state;
+  el.style.display = r.state === 'none' ? 'none' : '';
+  const running = _collapse && _collapse.at > 0;
+  if (running && !_collapseTick) _collapseTick = setInterval(collapseRender, 1000);
+  if (!running && _collapseTick) { clearInterval(_collapseTick); _collapseTick = null; }
+}
+
+function _collapseFillPanel() {
+  const note = document.getElementById('collapse-note');
+  if (note && document.activeElement !== note) note.value = (_collapse && _collapse.note) || '';
+}
+
+function toggleCollapsePanel() {
+  const p = document.getElementById('collapse-panel'); if (!p) return;
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+  if (p.style.display === '') _collapseFillPanel();
+}
+
+function _collapsePost(fields) {
+  if (typeof SESSION_ID === 'undefined' || SESSION_ID === null) return;
+  fetch(`/ttrpg/sessions/${SESSION_ID}/edit`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(fields)
+  }).then(r => r.json()).then(d => {
+    if (!d.ok || !d.game) return;
+    const st = d.game.settings || {};
+    collapseSync(d.game.id === 'dcc' ? { floor: st.floor, at: st.collapse_at || 0, note: st.collapse_note || '' } : null);
+    const ok = document.getElementById('collapse-saved');
+    if (ok) { ok.style.display = ''; setTimeout(() => { ok.style.display = 'none'; }, 1500); }
+  }).catch(() => {});
+}
+
+function collapseStart() {
+  const num = id => Math.max(0, parseInt(document.getElementById(id).value, 10) || 0);
+  const mins = Math.max(1, num('collapse-days') * 1440 + num('collapse-hours') * 60 + num('collapse-mins'));
+  _collapsePost({ collapse_at: Math.floor(Date.now() / 1000) + mins * 60,
+                  collapse_note: document.getElementById('collapse-note').value });
+}
+function collapseAdjust(mins) {
+  const now = Math.floor(Date.now() / 1000);
+  const base = (_collapse && _collapse.at > now) ? _collapse.at : now;
+  _collapsePost({ collapse_at: Math.max(now + 1, base + mins * 60) });
+}
+function collapseClear() { _collapsePost({ collapse_at: 0 }); }
+function collapseSaveNote() { _collapsePost({ collapse_note: document.getElementById('collapse-note').value }); }
+
+collapseRender();

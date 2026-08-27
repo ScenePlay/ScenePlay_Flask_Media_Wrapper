@@ -980,6 +980,7 @@ function initDiceSystem() {
   DiceCore.setSystem(typeof GAME_INFO !== 'undefined' ? GAME_INFO : null);
   _sysPanel = DiceCore.mountSystemPanel(document.getElementById('dice-system-panel'), {
     btnClass: 'btn btn-sm btn-outline-secondary',
+    collapsible: true,
     quickContainer: document.getElementById('dice-quicklabels'),
     labelInput: document.getElementById('dice-label'),
     setDie: selectDie,
@@ -995,6 +996,7 @@ function initDiceSystem() {
     },
   });
   _applyStatModTable();
+  DiceCore.bindCollapsibles(document.getElementById('dice-quickref'), 'sheet');
 }
 function _applyStatModTable() {
   // Stat buttons follow the system's modifier table (DCC's is not (score-10)/2).
@@ -1025,6 +1027,33 @@ function diceQuickSet(modVal, label) {
   document.getElementById('dice-modifier').value = modVal;
   document.getElementById('dice-label').value    = label;
   selectDie(20);
+}
+
+// Click a Hotlist item (DCC): dice in its notes load a damage roll, otherwise
+// the item just labels the next roll so the feed shows what was used.
+function hotlistQuickRoll(name, notes) {
+  const p = DiceCore.hotlistPreset({ name, notes });
+  if (p.sides) {
+    document.getElementById('dice-count').value    = p.count;
+    selectDie(p.sides);
+    document.getElementById('dice-modifier').value = p.mod || 0;
+  }
+  document.getElementById('dice-label').value = p.label;
+  if (_sysPanel) _sysPanel.setRollType(p.rollType || 'other');
+}
+
+// "−1" on a Hotlist chip: consume one. The last one leaves the inventory
+// (the server clamps quantity to ≥1, so 0 means delete).
+function hotlistUse(id, qty, name) {
+  if (qty <= 1) {
+    if (!confirm(`Use the last ${name}? It will be removed from your inventory.`)) return;
+    fetch(`/ttrpg/inventory/${id}`, { method: 'DELETE' }).then(() => reloadKeepTab());
+    return;
+  }
+  fetch(`/ttrpg/inventory/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ quantity: qty - 1 })
+  }).then(r => r.json()).then(d => { if (d.ok) reloadKeepTab(); });
 }
 
 // Load a spell's damage dice into the roller (count + die, e.g. 8d6).

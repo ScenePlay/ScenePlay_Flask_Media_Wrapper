@@ -68,7 +68,8 @@ class TestDiceSystemEndpoint:
     def test_reports_active_session_system(self, dice_app):
         a, dm, sid, _ = dice_app
         d = a.test_client(user=dm).get('/ttrpg/dice/system').get_json()
-        assert d == {'id': 'dcc', 'name': 'Dungeon Crawler Carl', 'settings': {'floor': 3}}
+        assert d == {'id': 'dcc', 'name': 'Dungeon Crawler Carl',
+                     'settings': {'floor': 3, 'collapse_at': 0, 'collapse_note': ''}}
 
     def test_default_when_no_active_session(self, dice_app):
         from models.ttrpg import tblSessions
@@ -142,9 +143,31 @@ class TestSessionEdit:
         r = a.test_client(user=dm).post(f'/ttrpg/sessions/{sid}/edit',
                                         json={'game_system': 'dcc', 'floor': 7})
         d = r.get_json()
-        assert d['ok'] and d['game'] == {'id': 'dcc', 'name': 'Dungeon Crawler Carl', 'settings': {'floor': 7}}
-        assert json.loads(db.session.get(tblSessions, sid).system_settings) == {'floor': 7}
+        assert d['ok'] and d['game'] == {'id': 'dcc', 'name': 'Dungeon Crawler Carl',
+                                         'settings': {'floor': 7, 'collapse_at': 0, 'collapse_note': ''}}
+        assert json.loads(db.session.get(tblSessions, sid).system_settings)['floor'] == 7
         assert pushed and pushed[-1]['settings']['floor'] == 7
+
+    def test_level_collapse_edits_keep_floor_and_broadcast(self, dice_app):
+        """The map page's live widget sends only the collapse fields; the Floor
+        and everything else must survive, and the portal gets the change."""
+        from models.ttrpg import tblSessions
+        a, dm, sid, pushed = dice_app
+        c = a.test_client(user=dm)
+        c.post(f'/ttrpg/sessions/{sid}/edit', json={'floor': 5})
+        d = c.post(f'/ttrpg/sessions/{sid}/edit',
+                   json={'collapse_at': 1800000000, 'collapse_note': 'Stairs: NE tower'}).get_json()
+        assert d['game']['settings'] == {'floor': 5, 'collapse_at': 1800000000, 'collapse_note': 'Stairs: NE tower'}
+        assert pushed[-1]['settings']['collapse_at'] == 1800000000
+        # clearing the countdown keeps the note; junk is coerced, notes are capped
+        d = c.post(f'/ttrpg/sessions/{sid}/edit', json={'collapse_at': 0}).get_json()
+        assert d['game']['settings']['collapse_at'] == 0 and d['game']['settings']['collapse_note'] == 'Stairs: NE tower'
+        d = c.post(f'/ttrpg/sessions/{sid}/edit', json={'collapse_at': 'soon', 'collapse_note': 'x' * 500}).get_json()
+        assert d['game']['settings']['collapse_at'] == 0 and len(d['game']['settings']['collapse_note']) == 200
+        assert json.loads(db.session.get(tblSessions, sid).system_settings)['floor'] == 5
+        # 5e sessions carry no collapse keys at all
+        d = c.post(f'/ttrpg/sessions/{sid}/edit', json={'game_system': 'dnd5e'}).get_json()
+        assert d['game']['settings'] == {}
 
     def test_unknown_system_falls_back(self, dice_app):
         a, dm, sid, pushed = dice_app

@@ -29,6 +29,7 @@ from models.scenes import tblscenes
 from routes.auth import dm_required
 from sql import appsettingGet, appsettingSet
 import obs_layout
+import dice_systems
 
 log = logging.getLogger(__name__)
 
@@ -4949,6 +4950,9 @@ def map_state():
         'look_at': look_at_point(),
         'map_name': bm.name,
         'zoom': _zoom_cfg(),
+        # DCC level-collapse banner (None under 5e) — drawn over the map
+        # source so the stream sees the countdown the table sees.
+        'collapse': dice_systems.collapse_info(sess.game_info()),
         # The effective mode: a pin overrides the configured one for as long
         # as it is held. The Broadcast page and the sidebar button keep
         # reading map_mode(), so what the DM chose still shows as chosen.

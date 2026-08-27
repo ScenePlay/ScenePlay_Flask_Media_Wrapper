@@ -89,11 +89,35 @@ def normalize_settings(system_id, raw):
     """Coerce a stored/submitted settings dict to the system's known keys."""
     out = {}
     if system_id == 'dcc':
+        raw = raw or {}
         try:
-            out['floor'] = max(1, min(18, int((raw or {}).get('floor', 3))))
+            out['floor'] = max(1, min(18, int(raw.get('floor', 3))))
         except (TypeError, ValueError):
             out['floor'] = 3
+        # Level collapse (the floor's countdown): epoch seconds when the level
+        # comes down, 0 = no countdown running; plus a one-line note the DM
+        # edits live on the map ("Stairs: NE tower & S hall"). Shown on the
+        # local map, the remote portal and the OBS map source.
+        try:
+            out['collapse_at'] = max(0, int(float(raw.get('collapse_at') or 0)))
+        except (TypeError, ValueError):
+            out['collapse_at'] = 0
+        out['collapse_note'] = str(raw.get('collapse_note') or '').strip()[:200]
     return out
+
+
+def collapse_info(game_info):
+    """The level-collapse banner payload for a map viewer (local map poll,
+    OBS map source), or None when the session isn't Dungeon Crawler Carl.
+    {'floor', 'at' (epoch seconds, 0 = no countdown), 'note'}."""
+    if not game_info or game_info.get('id') != 'dcc':
+        return None
+    st = game_info.get('settings') or {}
+    try:
+        at = max(0, int(st.get('collapse_at') or 0))
+    except (TypeError, ValueError):
+        at = 0
+    return {'floor': st.get('floor', 3), 'at': at, 'note': str(st.get('collapse_note') or '')}
 
 
 # ── Dungeon Crawler Carl sheet vocabulary ────────────────────────────────────

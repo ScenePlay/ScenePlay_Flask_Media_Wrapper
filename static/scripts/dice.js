@@ -42,6 +42,25 @@
             { getContext(), refresh(game), reset() }. getContext() gives the
             fields to send with / evaluate a roll:
             { roll_type, difficulty, floor, rank, untrained, crit }.
+            opts.collapsible: true adds a fold caret to the panel header so a
+            crawler can tuck the target-number helper away (remembered per
+            browser in localStorage).
+     DiceCore.parseDice(text)            -> { count, sides, mod } | null
+                                            ("2d4+2 healing" -> 2, 4, 2)
+     DiceCore.hotlistPreset(item)        -> what a Hotlist chip loads into a
+                                            roller: { label, count?, sides?,
+                                            mod?, rollType? }. Items whose
+                                            notes name dice ("2d6 fire") load
+                                            those as a damage roll; anything
+                                            else just labels the roll.
+     DiceCore.collapseText(info, nowSec) -> { text, state } for the DCC
+                                            level-collapse banner (info =
+                                            {floor, at, note} from settings)
+     DiceCore.bindCollapsibles(root, prefix)
+         -> every `.qref-row[data-qref]` (and `.sp-collapsible[data-qref]`)
+            under `root` gets a fold toggle on its label; state persists in
+            localStorage under `sp.dice.collapse.<prefix>.<key>`. Re-run after
+            re-rendering the rows — safe to call repeatedly.
 */
 window.DiceCore = (function () {
   'use strict';
@@ -326,6 +345,113 @@ window.DiceCore = (function () {
   // Kept for older callers: the 5e list.
   const QUICK_LABELS = SYSTEMS.dnd5e.quick.slice();
 
+  // "2d6", "2d4+2 healing", "1d8 -1" -> { count, sides, mod }; null when the
+  // text names no dice.
+  function parseDice(text) {
+    const m = String(text || '').match(/(\d+)\s*d\s*(\d+)\s*([+-]\s*\d+)?/i);
+    if (!m) return null;
+    return { count: parseInt(m[1], 10), sides: parseInt(m[2], 10),
+             mod: m[3] ? parseInt(m[3].replace(/\s+/g, ''), 10) : 0 };
+  }
+
+  // A crawler's 10-slot Hotlist in the roller: the item's notes are the only
+  // free text it has, so dice written there ("2d6 fire", "heals 2d4+2") make
+  // the chip load a damage roll; a plain item just labels the next roll so the
+  // feed shows what was used.
+  function hotlistPreset(item) {
+    item = item || {};
+    const name = String(item.name || item.item_name || 'Item');
+    const d = parseDice(item.notes);
+    if (!d) return { label: name };
+    return { label: name, count: d.count, sides: d.sides, mod: d.mod, rollType: 'damage' };
+  }
+
+  // ── DCC level collapse banner ────────────────────────────────────────────
+  // info = {floor, at (epoch s, 0 = none), note} from the session settings.
+  // Returns { text, state } — state: 'none' | 'note' | 'countdown' | 'warn'
+  // (under 5 min) | 'down' (time's up). One formatter so the local map, the
+  // portal and the OBS source (which carries a copy) read identically.
+  function collapseText(info, nowSec) {
+    if (!info) return { text: '', state: 'none' };
+    const at = parseInt(info.at, 10) || 0, note = String(info.note || '').trim();
+    if (!at) return note ? { text: '\u23F1 Level collapse \u2014 ' + note, state: 'note' } : { text: '', state: 'none' };
+    const now = nowSec != null ? nowSec : Math.floor(Date.now() / 1000);
+    const rem = at - now;
+    if (rem <= 0) return { text: '\uD83D\uDCA5 LEVEL COLLAPSED' + (note ? ' \u2014 ' + note : ''), state: 'down' };
+    const days = Math.floor(rem / 86400), h = Math.floor((rem % 86400) / 3600),
+          m = Math.floor((rem % 3600) / 60), sec = rem % 60;
+    const pad = n => (n < 10 ? '0' : '') + n;
+    // "2d 03:14:05" past a day, "1:02:05" under one, "7:30" under an hour
+    const clock = days ? days + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(sec)
+                : (h ? h + ':' + pad(m) : String(m)) + ':' + pad(sec);
+    return { text: '\u26A0 LEVEL COLLAPSE IN ' + clock + (note ? ' \u2014 ' + note : ''),
+             state: rem < 300 ? 'warn' : 'countdown' };
+  }
+
+  // ── Collapsible sections ─────────────────────────────────────────────────
+  // The DCC roller grew tall (target-number helper + Skills/Weapons/Hotlist
+  // rows). Any `.qref-row[data-qref]` gets a fold toggle on its label; the
+  // choice sticks per browser so a phone at the table stays tidy.
+  const _COLLAPSE_NS = 'sp.dice.collapse.';
+  function _collapseGet(key) {
+    try { return localStorage.getItem(_COLLAPSE_NS + key) === '1'; } catch (e) { return false; }
+  }
+  function _collapseSet(key, on) {
+    try { localStorage.setItem(_COLLAPSE_NS + key, on ? '1' : '0'); } catch (e) { /* private mode */ }
+  }
+  function _ensureCollapseCss() {
+    if (document.getElementById('sp-dice-collapse-css')) return;
+    const st = document.createElement('style');
+    st.id = 'sp-dice-collapse-css';
+    st.textContent =
+      '.qref-row.sp-can-collapse .qref-label{cursor:pointer;user-select:none;white-space:nowrap;}' +
+      '.qref-row.sp-can-collapse .qref-label::before{content:"\\25BE";display:inline-block;width:.9em;font-size:.8em;opacity:.7;}' +
+      '.qref-row.sp-collapsed .qref-label::before{content:"\\25B8";}' +
+      '.qref-row.sp-collapsed .qref-chips{display:none;}' +
+      '.qref-row .sp-collapse-count{opacity:.6;margin-left:2px;}' +
+      '.qref-row.sp-can-collapse .qref-label:hover{color:var(--ttrpg-accent,var(--accent,inherit));}' +
+      '.qref-use{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;margin-left:-3px;padding:0 4px;border:1px solid var(--sp-border,var(--border,#888));border-left:none;border-radius:0 10px 10px 0;background:transparent;color:inherit;font-size:.68rem;line-height:1;cursor:pointer;opacity:.75;}' +
+      '.qref-use:hover{opacity:1;color:var(--ttrpg-accent,var(--accent,inherit));border-color:var(--ttrpg-accent,var(--accent,inherit));}' +
+      '.qref-chip.qref-has-use{border-top-right-radius:0;border-bottom-right-radius:0;}' +
+      '.sp-syspanel-fold{background:none;border:none;color:inherit;cursor:pointer;padding:0 4px;font-size:.9em;line-height:1;opacity:.75;}' +
+      '.sp-syspanel-fold:hover{opacity:1;}';
+    document.head.appendChild(st);
+  }
+  function _applyCollapse(row, key, on) {
+    row.classList.toggle('sp-collapsed', on);
+    const lbl = row.querySelector('.qref-label');
+    if (!lbl) return;
+    let cnt = lbl.querySelector('.sp-collapse-count');
+    if (on) {
+      const n = row.querySelectorAll('.qref-chip').length;
+      if (!cnt) { cnt = document.createElement('span'); cnt.className = 'sp-collapse-count'; lbl.appendChild(cnt); }
+      cnt.textContent = n ? '(' + n + ')' : '';
+    } else if (cnt) cnt.remove();
+    lbl.setAttribute('aria-expanded', on ? 'false' : 'true');
+    lbl.title = (on ? 'Show ' : 'Hide ') + (lbl.dataset.spName || 'section');
+    void key;
+  }
+  function bindCollapsibles(root, prefix) {
+    if (!root) return;
+    _ensureCollapseCss();
+    prefix = prefix ? prefix + '.' : '';
+    root.querySelectorAll('.qref-row[data-qref]').forEach(row => {
+      const key = prefix + row.dataset.qref;
+      const lbl = row.querySelector('.qref-label');
+      if (!lbl) return;
+      if (!row.classList.contains('sp-can-collapse')) {
+        row.classList.add('sp-can-collapse');
+        lbl.dataset.spName = lbl.textContent.trim();
+        lbl.setAttribute('role', 'button');
+        lbl.tabIndex = 0;
+        const toggle = () => { const on = !row.classList.contains('sp-collapsed'); _collapseSet(key, on); _applyCollapse(row, key, on); };
+        lbl.addEventListener('click', toggle);
+        lbl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      }
+      _applyCollapse(row, key, _collapseGet(key));
+    });
+  }
+
   // ── System panel (DOM) ────────────────────────────────────────────────────
   // One shared UI so every roller explains the rules the same way. Written for
   // people who don't want to learn formulas: pick what you're rolling, say who
@@ -344,6 +470,7 @@ window.DiceCore = (function () {
     none:      'No target — just roll the dice',
   };
   const _DEFAULT_KIND = { check: 'unopposed', attack: 'mob', evade: 'mob', stat: 'stat' };
+  const _PANEL_KEY = 'syspanel';   // localStorage key for the folded helper
 
   function mountSystemPanel(container, opts) {
     opts = opts || {};
@@ -380,10 +507,13 @@ window.DiceCore = (function () {
       const rt = state.rollType;
       const kind = state.kind || _DEFAULT_KIND[rt] || 'none';
       const isCheck = ['check', 'attack', 'evade', 'stat'].includes(rt);
+      const folded = !!opts.collapsible && _collapseGet(_PANEL_KEY);
+      if (opts.collapsible) _ensureCollapseCss();
       let h = `<div class="sp-syspanel" style="border:1px dashed var(--ttrpg-accent,#888);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:.82rem;">`;
-      h += `<div class="d-flex justify-content-between align-items-center mb-1" style="gap:8px;">` +
-           `<strong>${esc(_game.name)}</strong>` +
+      h += `<div class="d-flex justify-content-between align-items-center${folded ? '' : ' mb-1'}" style="gap:8px;">` +
+           `<strong>${opts.collapsible ? `<button type="button" class="sp-syspanel-fold" id="sp-fold" title="${folded ? 'Show' : 'Hide'} the target-number helper" aria-expanded="${folded ? 'false' : 'true'}">${folded ? '&#9656;' : '&#9662;'}</button>` : ''}${esc(_game.name)}</strong>` +
            `<span class="small" title="The DM sets the Floor on the session page">Floor <b>${floor()}</b></span></div>`;
+      h += `<div class="sp-syspanel-body"${folded ? ' style="display:none;"' : ''}>`;
       h += `<label class="small mb-0">What are you rolling?</label>` +
            sel('sp-rt', SYSTEMS.dcc.rollTypes, rt);
       if (isCheck) {
@@ -420,12 +550,14 @@ window.DiceCore = (function () {
       } else {
         h += `<div class="small mt-1">Just roll — no rules applied.</div>`;
       }
-      h += '</div>';
+      h += '</div></div>';
       container.innerHTML = h;
       container.querySelectorAll('.sp-syspanel-in').forEach(el => {
         el.addEventListener('change', onInput);
         if (el.type === 'number') el.addEventListener('input', onInput);
       });
+      const fold = container.querySelector('#sp-fold');
+      if (fold) fold.addEventListener('click', () => { _collapseSet(_PANEL_KEY, !_collapseGet(_PANEL_KEY)); render(); });
     }
 
     function onInput(ev) {
@@ -520,11 +652,6 @@ window.DiceCore = (function () {
       if (p.sides && opts.setDie) opts.setDie(p.sides);
       if (p.rollType) setRollType(p.rollType);
     }
-    // "2d6" -> {count, sides}; null when the text isn't dice
-    function parseDice(text) {
-      const m = String(text || '').match(/(\d+)\s*d\s*(\d+)/i);
-      return m ? { count: parseInt(m[1], 10), sides: parseInt(m[2], 10) } : null;
-    }
     render();
     if (opts.quickContainer && opts.labelInput) {
       renderQuickLabels(opts.quickContainer, opts.labelInput, opts.btnClass || 'btn btn-sm btn-outline-secondary', _applyPreset);
@@ -533,7 +660,7 @@ window.DiceCore = (function () {
   }
 
   return { rand, roll, expr, breakdown, critFumble, critFumbleFromRecord,
-           QUICK_LABELS, renderQuickLabels,
+           QUICK_LABELS, renderQuickLabels, parseDice, hotlistPreset, bindCollapsibles, collapseText,
            SYSTEMS, DEFAULT_SYSTEM, setSystem, getSystem, statMod, difficulty,
            rankDamage, evaluate, annotateLabel, mountSystemPanel };
 })();

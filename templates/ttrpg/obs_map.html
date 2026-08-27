@@ -70,6 +70,16 @@
              display: none; }
 
   /* Idle: the title card. */
+  /* DCC level collapse — top centre, over the map (never over the title card) */
+  #collapse { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 7;
+              display: none; max-width: 80vw; padding: 6px 18px; border-radius: 8px;
+              font: 800 1.6vw/1.3 system-ui, sans-serif; letter-spacing: .06em; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; background: rgba(20,20,28,.82);
+              color: #f1e2b8; border: 2px solid #c9a84c; text-shadow: 0 1px 2px #000; }
+  #collapse.note { font-weight: 600; letter-spacing: .02em; }
+  #collapse.warn { background: #7a2e00; color: #ffe2b8; border-color: #ff9a3c; animation: collapse-pulse 1s ease-in-out infinite; }
+  #collapse.down { background: #6b1a1a; color: #ffd0d0; border-color: #ff5252; animation: collapse-pulse .6s ease-in-out infinite; }
+  @keyframes collapse-pulse { 50% { filter: brightness(1.4); } }
   #title { position: absolute; inset: 0; display: none;
            align-items: center; justify-content: center; flex-direction: column;
            gap: 14px; background: #0c0d12; }
@@ -104,6 +114,7 @@
     <canvas id="bm3d-canvas" style="width:100%;height:100%;display:block;"></canvas>
   </div>
   <div id="through"></div>
+  <div id="collapse"></div>
   <div id="title" class="fade">
     <img id="title-img" alt="">
     <video id="title-vid" muted loop autoplay playsinline
@@ -839,7 +850,42 @@ function hide3d() {
   }
 }
 
+// ── DCC level collapse banner ─────────────────────────────────────────────────
+// Copy of DiceCore.collapseText (static/scripts/dice.js) — this page loads no
+// shared JS on purpose; keep the two in step.
+let collapseInfo = null, collapseTimer = null;
+function collapseText(info, nowSec) {
+  if (!info) return { text: '', state: 'none' };
+  const at = parseInt(info.at, 10) || 0, note = String(info.note || '').trim();
+  if (!at) return note ? { text: '\u23F1 Level collapse \u2014 ' + note, state: 'note' } : { text: '', state: 'none' };
+  const now = nowSec != null ? nowSec : Math.floor(Date.now() / 1000);
+  const rem = at - now;
+  if (rem <= 0) return { text: '\uD83D\uDCA5 LEVEL COLLAPSED' + (note ? ' \u2014 ' + note : ''), state: 'down' };
+  const days = Math.floor(rem / 86400), h = Math.floor((rem % 86400) / 3600),
+        m = Math.floor((rem % 3600) / 60), sec = rem % 60;
+  const pad = n => (n < 10 ? '0' : '') + n;
+  // "2d 03:14:05" past a day, "1:02:05" under one, "7:30" under an hour
+  const clock = days ? days + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(sec)
+              : (h ? h + ':' + pad(m) : String(m)) + ':' + pad(sec);
+  return { text: '\u26A0 LEVEL COLLAPSE IN ' + clock + (note ? ' \u2014 ' + note : ''),
+           state: rem < 300 ? 'warn' : 'countdown' };
+}
+function collapseRender() {
+  const box = el('collapse'); if (!box) return;
+  const r = collapseText(collapseInfo);
+  box.textContent = r.text; box.className = r.state;
+  box.style.display = r.state === 'none' ? 'none' : '';
+  const running = collapseInfo && collapseInfo.at > 0;
+  if (running && !collapseTimer) collapseTimer = setInterval(collapseRender, 1000);
+  if (!running && collapseTimer) { clearInterval(collapseTimer); collapseTimer = null; }
+}
+function collapseApply(info) {
+  if (JSON.stringify(info || null) === JSON.stringify(collapseInfo)) return;
+  collapseInfo = info || null; collapseRender();
+}
+
 function apply(d) {
+  collapseApply(d && d.live ? d.collapse : null);
   if (!d || !d.live) {
     showTitle(d && d.title); lastSig = 'idle';
     auto3d = false; autoPending = false; hide3d(); return;

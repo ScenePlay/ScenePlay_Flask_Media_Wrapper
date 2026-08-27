@@ -538,11 +538,25 @@
       </div>
 
       <!-- Quick reference: skills / weapons / spells / armor / feats -->
-      {% if char.skills or char.weapons or char.spells or char.armor or char.feats %}
-      <div class="dice-quickref">
-        <div class="qref-title">Quick Reference <span class="qref-hint">&#8212; click a skill or weapon to load the roll</span></div>
+      {% set hot_items = char.inventory | selectattr('hotlist', 'equalto', 1) | sort(attribute='order_by') | list if IS_DCC else [] %}
+      {% if char.skills or char.weapons or char.spells or char.armor or char.feats or IS_DCC %}
+      <div class="dice-quickref" id="dice-quickref">
+        <div class="qref-title">Quick Reference <span class="qref-hint">&#8212; click a skill or weapon to load the roll &middot; click a heading to fold it</span></div>
+        {% if IS_DCC %}
+        <div class="qref-row" data-qref="hotlist">
+          <span class="qref-label">Hotlist</span>
+          <div class="qref-chips">
+            {% if not hot_items %}<span class="qref-chip" style="opacity:.7;">&#9889; Empty &mdash; tick <b>Hotlist</b> on an item in Inventory (10 slots)</span>{% endif %}
+            {% for item in hot_items %}
+            <button class="qref-chip qref-click{% if can_edit %} qref-has-use{% endif %}" onclick='hotlistQuickRoll({{ item.item_name | tojson }}, {{ (item.notes or "") | tojson }})'
+                    title="{% if item.notes %}{{ item.item_name }} &#8212; {{ item.notes }}{% else %}Load {{ item.item_name }} into the roller{% endif %}{% if item.quantity > 1 %} (x{{ item.quantity }}){% endif %}">&#9889; {{ item.item_name }}{% if item.quantity > 1 %} <span class="qref-sub">x{{ item.quantity }}</span>{% endif %}</button>{% if can_edit %}<button type="button" class="qref-use" onclick='hotlistUse({{ item.item_id }}, {{ item.quantity }}, {{ item.item_name | tojson }})'
+                    title="Use one {{ item.item_name }} ({{ item.quantity }} left){% if item.quantity <= 1 %} &#8212; removes it from your inventory{% endif %}">&#8722;1</button>{% endif %}
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
         {% if char.skills %}
-        <div class="qref-row">
+        <div class="qref-row" data-qref="skills">
           <span class="qref-label">Skills</span>
           <div class="qref-chips">
             {% for s in char.skills | sort(attribute='order_by') %}
@@ -553,7 +567,7 @@
         </div>
         {% endif %}
         {% if char.weapons %}
-        <div class="qref-row">
+        <div class="qref-row" data-qref="weapons">
           <span class="qref-label">Weapons</span>
           <div class="qref-chips">
             {% for w in char.weapons | sort(attribute='order_by') %}
@@ -564,7 +578,7 @@
         </div>
         {% endif %}
         {% if char.spells %}
-        <div class="qref-row">
+        <div class="qref-row" data-qref="spells">
           <span class="qref-label">Spells</span>
           <div class="qref-chips">
             {% for cs in char.spells | sort(attribute='spell_level') %}
@@ -580,7 +594,7 @@
         </div>
         {% endif %}
         {% if char.armor %}
-        <div class="qref-row">
+        <div class="qref-row" data-qref="armor">
           <span class="qref-label">Armor</span>
           <div class="qref-chips">
             {% for a in char.armor %}
@@ -590,7 +604,7 @@
         </div>
         {% endif %}
         {% if char.feats %}
-        <div class="qref-row">
+        <div class="qref-row" data-qref="feats">
           <span class="qref-label">Feats</span>
           <div class="qref-chips">
             {% for f in char.feats | sort(attribute='order_by') %}

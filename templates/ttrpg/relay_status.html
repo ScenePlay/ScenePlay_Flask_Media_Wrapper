@@ -41,7 +41,9 @@
             {% endif %}
           </span>
         </div>
-        <form method="post" action="{{ url_for('relay_admin_bp.toggle') }}">
+        <form method="post" action="{{ url_for('relay_admin_bp.toggle') }}" id="relayToggleForm"
+              data-enabling="{{ '0' if cfg.enabled == '1' else '1' }}" data-code="{{ cfg.code or '' }}">
+          <input type="hidden" name="session_mode" id="relaySessionMode" value="">
           <button class="btn btn-sm {% if cfg.enabled == '1' %}btn-outline-danger{% else %}btn-ttrpg{% endif %}">
             {% if cfg.enabled == '1' %}Disable Relay{% else %}Enable Relay{% endif %}
           </button>
@@ -329,6 +331,33 @@
   }
 
   setInterval(tick, 10000);
+})();
+</script>
+{% endblock %}
+{% block scripts %}
+<script>
+// Enabling the relay: ask which session to engage — keep the join code the
+// players already have, or mint a new one. Dropdown modal, never a typed
+// number (spPickOption in site.js). No previous code → new session, no ask.
+(function () {
+  const form = document.getElementById('relayToggleForm');
+  if (!form || form.dataset.enabling !== '1') return;
+  form.addEventListener('submit', async ev => {
+    const mode = document.getElementById('relaySessionMode');
+    if (mode.value) return;                       // second pass: chosen, let it go
+    ev.preventDefault();
+    const code = form.dataset.code;
+    if (!code) { mode.value = 'new'; form.submit(); return; }
+    const pick = await spPickOption('Engage relay',
+      'Players log in with a join code. Keep the one they already have, or start fresh?',
+      'Session code',
+      [{ value: 'reuse', label: `Use existing code ${code}` },
+       { value: 'new',   label: 'Generate a new code' }],
+      'Enable');
+    if (!pick) return;                            // cancelled: relay stays off
+    mode.value = pick;
+    form.submit();
+  });
 })();
 </script>
 {% endblock %}

@@ -720,6 +720,12 @@ def map_view(map_id):
                         'level': cs.spell_level,
                         'prepared': bool(cs.prepared)}
                        for cs in sorted(char.spells, key=lambda x: (x.spell_level, x.order_by))],
+            # Dungeon Crawler Carl: the 10-slot Hotlist (instant-access items)
+            # so the roller can show what's in hand. Empty for 5e sheets.
+            'hotlist': [{'id': i.item_id, 'name': i.item_name, 'qty': i.quantity or 1, 'notes': i.notes or ''}
+                        for i in sorted(char.inventory, key=lambda x: x.order_by)
+                        if getattr(i, 'hotlist', 0)]
+                       if (getattr(char, 'game_system', 'dnd5e') or 'dnd5e') == 'dcc' else [],
         }
 
     roller_chars = [
@@ -760,6 +766,7 @@ def map_view(map_id):
     return render_template('ttrpg/battlemap.html',
                            bm=bm, sess=sess,
                            game=tblSessions.active_game_info(),
+                           collapse=_collapse_state(bm),
                            monsters=monsters, party=party,
                            on_map_monster_ids=on_map_monster_ids,
                            on_map_player_ids=on_map_player_ids,
@@ -916,7 +923,16 @@ def map_state(map_id):
         'floorplan_version': fp.version if fp else None,
         'doors':         doors,
         'obs':           _obs_poll_state(),
+        # DCC level-collapse banner (None under 5e): the DM edits it live on
+        # the map page; everyone's poll picks it up.
+        'collapse':      _collapse_state(bm),
     })
+
+
+def _collapse_state(bm):
+    import dice_systems
+    sess = db.session.get(tblSessions, bm.session_id)
+    return dice_systems.collapse_info(sess.game_info()) if sess else None
 
 
 def _obs_poll_state():

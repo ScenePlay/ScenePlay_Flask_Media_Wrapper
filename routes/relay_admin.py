@@ -251,16 +251,38 @@ def toggle():
         import relay_guard
         appsettingSet('relay_boot_tripped', '')
         relay_guard.arm()
+        # Which relay session to engage — the status page asks the DM
+        # (dropdown) before submitting:
+        #   'reuse'  recreate the session under the code players already
+        #            have (same as ↺ Reuse Code)
+        #   'new'    mint a fresh code (same as ↻ New Session)
+        #   ''       legacy/plain enable: leave the relay session alone
+        mode = (request.form.get('session_mode') or '').strip()
+        code = None
+        if mode in ('reuse', 'new'):
+            cfg = _relay_cfg()
+            if mode == 'reuse' and cfg['session_id'] and cfg['code']:
+                code, _sid = _start_session(requested_id=cfg['session_id'],
+                                            requested_code=cfg['code'])
+            else:
+                code, _sid = _start_session()
         _start_receiver()
         import relay_ws
         relay_ws.start(current_app._get_current_object())
-        import relay_broadcaster
-        relay_broadcaster.push_all_characters()
-        relay_broadcaster.push_session_users()
-        relay_broadcaster.push_character_feeds()
-        relay_broadcaster.push_library()   # same set as generate-code / Party Sync
+        if code is None:
+            # _start_session already pushed the party into the fresh session.
+            import relay_broadcaster
+            relay_broadcaster.push_all_characters()
+            relay_broadcaster.push_session_users()
+            relay_broadcaster.push_character_feeds()
+            relay_broadcaster.push_library()   # same set as generate-code / Party Sync
         relay_guard.disarm_after_grace()
-        flash('Relay enabled — receiver started and party synced.')
+        if code:
+            flash(f'Relay enabled — join code {code}'
+                  + (' (unchanged, players keep it)' if mode == 'reuse' else ' (new — send it to the players)')
+                  + '. Party pushed.')
+        else:
+            flash('Relay enabled — receiver started and party synced.')
     else:
         import relay_ws
         relay_ws.stop()

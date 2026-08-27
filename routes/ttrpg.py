@@ -39,6 +39,9 @@ def _game_fields_from(src):
     raw = {}
     if src.get('floor') not in (None, ''):
         raw['floor'] = src.get('floor')
+    for k in ('collapse_at', 'collapse_note'):     # DCC level-collapse banner
+        if k in src and src[k] is not None:
+            raw[k] = src[k]
     return sys_id, _json.dumps(dice_systems.normalize_settings(sys_id, raw))
 
 
@@ -1695,9 +1698,12 @@ def session_edit(session_id):
     if 'campaign_id' in data:
         cid = data['campaign_id']
         sess.campaign_id = int(cid) if cid else None
-    if 'game_system' in data or 'floor' in data:
-        src = {'game_system': data.get('game_system') or sess.game_system,
-               'floor': data.get('floor', sess.game_info()['settings'].get('floor'))}
+    GAME_KEYS = ('game_system', 'floor', 'collapse_at', 'collapse_note')
+    if any(k in data for k in GAME_KEYS):
+        cur = sess.game_info()['settings']
+        src = {'game_system': data.get('game_system') or sess.game_system}
+        for k in GAME_KEYS[1:]:          # keep what wasn't sent (live map edits send only collapse_*)
+            src[k] = data.get(k, cur.get(k))
         sess.game_system, sess.system_settings = _game_fields_from(src)
     db.session.commit()
     if sess.status == 'active':

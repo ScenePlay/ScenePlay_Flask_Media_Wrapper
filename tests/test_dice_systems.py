@@ -124,11 +124,21 @@ class TestAnnotateLabel:
 
 class TestSettings:
     def test_floor_clamped(self):
-        assert ds.normalize_settings('dcc', {'floor': 0}) == {'floor': 1}
-        assert ds.normalize_settings('dcc', {'floor': '99'}) == {'floor': 18}
-        assert ds.normalize_settings('dcc', {'floor': 'x'}) == {'floor': 3}
-        assert ds.normalize_settings('dcc', None) == {'floor': 3}
+        assert ds.normalize_settings('dcc', {'floor': 0})['floor'] == 1
+        assert ds.normalize_settings('dcc', {'floor': '99'})['floor'] == 18
+        assert ds.normalize_settings('dcc', {'floor': 'x'})['floor'] == 3
+        assert ds.normalize_settings('dcc', None) == {'floor': 3, 'collapse_at': 0, 'collapse_note': ''}
         assert ds.normalize_settings('dnd5e', {'floor': 4}) == {}
+
+    def test_level_collapse_settings(self):
+        s = ds.normalize_settings('dcc', {'collapse_at': '1800000000.7', 'collapse_note': '  Stairs NE  '})
+        assert s['collapse_at'] == 1800000000 and s['collapse_note'] == 'Stairs NE'
+        assert ds.normalize_settings('dcc', {'collapse_at': -5})['collapse_at'] == 0
+        assert ds.normalize_settings('dcc', {'collapse_at': 'never'})['collapse_at'] == 0
+        assert ds.collapse_info({'id': 'dnd5e', 'settings': {}}) is None
+        info = ds.collapse_info({'id': 'dcc', 'settings': {'floor': 4, 'collapse_at': 99, 'collapse_note': 'n'}})
+        assert info == {'floor': 4, 'at': 99, 'note': 'n'}
+        assert ds.collapse_info({'id': 'dcc', 'settings': {'floor': 4}}) == {'floor': 4, 'at': 0, 'note': ''}
 
     def test_system_fallback(self):
         assert ds.system('nope')['id'] == 'dnd5e'

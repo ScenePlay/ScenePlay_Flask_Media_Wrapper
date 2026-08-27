@@ -4,6 +4,7 @@ Five stats with Table 2 modifiers off the Enhanced score, a 10-slot Health Bar
 (hp_* count slots), damage → slots through DR, Mana = Intelligence, ranked
 skills, the Hotlist, and the dcc_json bag round-tripping through save-field."""
 import json
+import os
 
 import pytest
 from flask import Blueprint, Flask
@@ -11,6 +12,8 @@ from flask_login import FlaskLoginClient, LoginManager
 
 from extensions import db
 import dice_systems as ds
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture()
@@ -22,7 +25,7 @@ def dcc_app(monkeypatch):
     monkeypatch.setattr(relay_broadcaster, 'push_character', lambda c: None)
     monkeypatch.setattr(relay_broadcaster, 'find_token_id', lambda *a: None)
 
-    a = Flask(__name__)
+    a = Flask(__name__, root_path=REPO)   # real templates, for page renders
     a.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite://'
     a.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     a.secret_key = 't'
@@ -32,6 +35,10 @@ def dcc_app(monkeypatch):
     stub = Blueprint('auth', __name__)
     stub.add_url_rule('/login', 'login', lambda: ('login', 200))
     a.register_blueprint(stub)
+    # base.html links to a couple of dozen blueprints this fixture doesn't
+    # mount; any unknown endpoint becomes a dead '/stub/<endpoint>' href.
+    a.url_build_error_handlers.append(lambda err, endpoint, values: '/stub/' + endpoint)
+    a.jinja_env.globals['static_v'] = lambda f: '/static/' + f    # app.py's mtime cache-buster
     a.test_client_class = FlaskLoginClient
     with a.app_context():
         db.create_all()
@@ -187,3 +194,50 @@ class TestRelayPayload:
         relay_receiver._apply_mutation(ch, 'hp_delta', {'damage': 9}, '', db)
         assert ch.dcc()['popularity'] == 6 and ch.stat_mod('str') == 5
         assert ch.hp_current == 7
+
+
+class TestHotlistInRoller:
+    """The crawler's Hotlist shows up in the dice roller's Quick Reference."""
+
+    def test_sheet_roller_lists_hotlist_items(self, dcc_app):
+        a, dm, cid = dcc_app
+        c = a.test_client(user=dm)
+        c.post(f'/ttrpg/character/{cid}/inventory',
+               json={'item_name': 'Healing potion', 'hotlist': 1, 'notes': 'heals 2d4+2'})
+        c.post(f'/ttrpg/character/{cid}/inventory', json={'item_name': 'Rope', 'hotlist': 0})
+        html = c.get(f'/ttrpg/character/{cid}').get_data(as_text=True)
+        assert 'data-qref="hotlist"' in html
+        assert 'hotlistQuickRoll("Healing potion", "heals 2d4+2")' in html
+        assert 'hotlistQuickRoll("Rope"' not in html          # not on the Hotlist
+        # every quick-reference row is foldable
+        assert 'data-qref="skills"' in html or 'data-qref="weapons"' in html or 'data-qref="hotlist"' in html
+
+    def test_use_one_button_and_last_one_deletes(self, dcc_app):
+        from models.ttrpg import tblCharacterInventory
+        a, dm, cid = dcc_app
+        c = a.test_client(user=dm)
+        iid = c.post(f'/ttrpg/character/{cid}/inventory',
+                     json={'item_name': 'Bomb', 'hotlist': 1, 'quantity': 2}).get_json()['item_id']
+        html = c.get(f'/ttrpg/character/{cid}').get_data(as_text=True)
+        assert f'hotlistUse({iid}, 2, "Bomb")' in html
+        # the "−1" path: quantity-only save keeps the rest of the row intact
+        c.post(f'/ttrpg/inventory/{iid}', json={'quantity': 1})
+        it = db.session.get(tblCharacterInventory, iid)
+        assert (it.quantity, it.hotlist, it.item_name) == (1, 1, 'Bomb')
+        c.delete(f'/ttrpg/inventory/{iid}')
+        assert db.session.get(tblCharacterInventory, iid) is None
+
+    def test_empty_hotlist_still_shows_row(self, dcc_app):
+        a, dm, cid = dcc_app
+        html = a.test_client(user=dm).get(f'/ttrpg/character/{cid}').get_data(as_text=True)
+        assert 'data-qref="hotlist"' in html and 'tick <b>Hotlist</b>' in html
+
+    def test_5e_sheet_has_no_hotlist_row(self, dcc_app):
+        from models.ttrpg import tblCharacters
+        a, dm, cid = dcc_app
+        ch = db.session.get(tblCharacters, cid)
+        ch.game_system = 'dnd5e'; db.session.commit()
+        c = a.test_client(user=dm)
+        c.post(f'/ttrpg/character/{cid}/inventory', json={'item_name': 'Potion', 'hotlist': 1})
+        html = c.get(f'/ttrpg/character/{cid}').get_data(as_text=True)
+        assert 'data-qref="hotlist"' not in html
