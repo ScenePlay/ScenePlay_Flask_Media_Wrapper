@@ -1000,3 +1000,23 @@ def apply_library_bonuses(char, kind, db):
     return {'ok': True, 'msg': f'{row.name}: {stat_txt}; skills: {", ".join(granted) or "none"}. '
                                'Choice bonuses ("choose", "split") are yours to add by hand.',
             'stats': stats, 'skills': granted}
+
+
+class tblHandouts(db.Model):
+    """Uploaded PDF handouts (rulebooks, adventure modules, player letters)
+    read in the page-turning viewer (routes/handouts.py). The file lives at
+    static/uploads/handouts/<filename> (uuid-named, so it travels with
+    Backup → Restore like every other upload folder). `page_count` is filled
+    in by the viewer the first time the document opens (pdf.js counts it in
+    the browser — no server-side PDF parser); `last_page` is the resume
+    point, saved as the reader turns pages."""
+    __tablename__ = 'tblHandouts'
+
+    handout_id = db.Column(db.Integer, primary_key=True)
+    title      = db.Column(db.Text, nullable=False)
+    filename   = db.Column(db.Text, nullable=False, unique=True)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    page_count = db.Column(db.Integer, nullable=True)
+    last_page  = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.Text, nullable=True)

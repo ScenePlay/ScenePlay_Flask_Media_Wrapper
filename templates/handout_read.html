@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>{{ handout.title }} — ScenePlay</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
+<style>
+  /* Standalone full-viewport reader (no site chrome — the book IS the page). */
+  html, body { height:100%; margin:0; overflow:hidden; background:#1c1a17; color:#e8e2d6;
+               font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #bar { position:fixed; top:0; left:0; right:0; height:44px; display:flex; align-items:center; gap:10px;
+         padding:0 12px; background:rgba(20,18,15,.92); border-bottom:1px solid #3a352d; z-index:20;
+         font-size:.9em; transition:opacity .3s; }
+  #bar.hidden { opacity:0; pointer-events:none; }
+  #bar a { color:#e8e2d6; text-decoration:none; opacity:.85; }
+  #bar a:hover { opacity:1; text-decoration:underline; }
+  #bar .title { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
+  #bar button, #bar input { background:#2b2822; color:#e8e2d6; border:1px solid #4a443a; border-radius:6px;
+                            padding:4px 9px; font:inherit; }
+  #bar button:hover { background:#3a352d; cursor:pointer; }
+  #bar button:disabled { opacity:.35; cursor:default; }
+  #bar input[type=number] { width:64px; text-align:center; -moz-appearance:textfield; }
+  #bar input::-webkit-outer-spin-button, #bar input::-webkit-inner-spin-button { -webkit-appearance:none; }
+  #bar .pages { white-space:nowrap; opacity:.8; }
+  #stage { position:absolute; inset:44px 0 0 0; display:flex; align-items:center; justify-content:center;
+           user-select:none; -webkit-user-select:none; touch-action:none; overflow:hidden; }
+  body.chromeless #stage { inset:0; }
+  #bookWrap { position:relative; }
+  #book { position:relative; width:100%; }
+  #book .page { background:#f4efe4; overflow:hidden;
+                box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  #book .page canvas { display:block; width:100%; height:100%; }
+  #book .page[data-density="hard"] { background:#e9dfcc; }
+  .stf__wrapper { margin:0 auto; }
+  .stf__block { box-shadow:0 30px 60px rgba(0,0,0,.6); }
+  #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.1em;
+             opacity:.8; z-index:30; pointer-events:none; }
+  #loading.done { display:none; }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:rgba(20,18,15,.9);
+           padding:6px 14px; border-radius:8px; font-size:.85em; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  @media (max-width: 640px) { #bar .pages, #bar .lbl { display:none; } }
+</style>
+</head>
+<body>
+<div id="bar">
+  <a href="{{ url_for('handouts_bp.index') }}" title="Back to Handouts">&larr; Handouts</a>
+  <span class="title">{{ handout.title }}</span>
+  <button id="btnFirst" title="First page (Home)">&#9198;</button>
+  <button id="btnPrev" title="Previous (←)">&#9664;</button>
+  <label class="lbl">Page <input type="number" id="pageInput" min="1" value="{{ handout.last_page }}"></label>
+  <span class="pages">of <span id="pageCount">?</span></span>
+  <button id="btnNext" title="Next (→)">&#9654;</button>
+  <button id="btnLast" title="Last page (End)">&#9197;</button>
+  <button id="btnFull" title="Fullscreen (F)">&#x26F6;</button>
+</div>
+<div id="stage">
+  <div id="loading">Opening&hellip;</div>
+  <div id="bookWrap"><div id="book"></div></div>
+</div>
+<div id="toast"></div>
+<script src="{{ url_for('static', filename='scripts/page-flip.browser.js') }}"></script>
+<script type="module">
+  import * as pdfjsLib from "{{ url_for('static', filename='scripts/pdfjs/pdf.min.mjs') }}";
+  import { HandoutReader } from "{{ url_for('static', filename='scripts/handout_reader.js') }}";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "{{ url_for('static', filename='scripts/pdfjs/pdf.worker.min.mjs') }}";
+  new HandoutReader(pdfjsLib, {
+    url: "{{ url_for('handouts_bp.file', handout_id=handout.id) }}",
+    progressUrl: "{{ url_for('handouts_bp.progress', handout_id=handout.id) }}",
+    startPage: {{ handout.last_page }},
+  });
+</script>
+</body>
+</html>

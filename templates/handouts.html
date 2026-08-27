@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sp-handouts table { width:100%; font-size:.9em; border-collapse:collapse; }
+  .sp-handouts th, .sp-handouts td { padding:6px 8px; border-bottom:1px solid var(--sp-border); vertical-align:middle; }
+  .sp-handouts th { text-align:left; }
+  .sp-handouts td.num { text-align:right; white-space:nowrap; }
+  .sp-handouts .muted { color:var(--sp-muted); }
+  .sp-handouts .missing td { opacity:.55; }
+  .sp-handouts .actions { white-space:nowrap; text-align:right; }
+  .sp-handouts .actions .btn { margin-left:4px; }
+  .sp-handouts .upload-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .sp-handouts .upload-row input[type=text] { max-width:320px; }
+  .sp-handouts .upload-row input[type=file] { max-width:360px; }
+  .sp-handouts .title-cell { cursor:text; }
+  .sp-handouts .title-cell:hover { text-decoration:underline dotted; }
+</style>
+<div class="sp-page sp-handouts">
+  <div class="sp-page-head">
+    <h1>Handouts</h1>
+    <a href="{{ url_for('ut.main') }}" style="font-size:.85em;">&larr; Utilities</a>
+  </div>
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}
+    <div class="alert alert-warning" style="margin:6px 0;">{{ m }}</div>
+    {% endfor %}
+  {% endwith %}
+  <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
+    Upload any PDF — a rulebook, an adventure module, a player letter — and read it as a
+    page-turning book. Nothing is converted: pages render in the browser as you turn them,
+    and each document remembers where you left off.
+  </p>
+
+  <details class="sp-card" open>
+    <summary><h3>Add a PDF</h3></summary>
+    <form method="post" action="{{ url_for('handouts_bp.upload') }}" enctype="multipart/form-data" id="handoutUpload">
+      <div class="upload-row">
+        <input type="file" name="pdf" accept="application/pdf,.pdf" required class="form-control form-control-sm">
+        <input type="text" name="title" class="form-control form-control-sm" placeholder="Title (blank = file name)" maxlength="120">
+        <input type="submit" class="btn btn-primary btn-sm" value="Upload" id="handoutUploadBtn">
+        <span class="muted" style="font-size:.8em;">PDF only, up to {{ max_mb }} MB.</span>
+      </div>
+    </form>
+  </details>
+
+  <details class="sp-card" open>
+    <summary><h3>Library <span class="muted" style="font-weight:normal;font-size:.75em;">— {{ handouts|length }} document{{ '' if handouts|length == 1 else 's' }}</span></h3></summary>
+    <table id="handout-tbl">
+      <thead><tr><th>Title</th><th>Pages</th><th>Last read</th><th>Added</th><th class="num">Size</th><th></th></tr></thead>
+      <tbody>
+      {% for h in handouts %}
+      <tr class="{{ '' if h.on_disk else 'missing' }}" data-id="{{ h.id }}">
+        <td><span class="title-cell" title="Click to rename" onclick="spHandoutRename({{ h.id }}, this)">{{ h.title }}</span>
+          {% if not h.on_disk %}<span class="muted" style="font-size:.8em;"> (file missing on disk)</span>{% endif %}</td>
+        <td>{{ h.page_count if h.page_count else '—' }}</td>
+        <td>{% if h.page_count %}page {{ h.last_page }}{% else %}<span class="muted">not opened yet</span>{% endif %}</td>
+        <td class="muted">{{ h.created_at[:10] }}</td>
+        <td class="num">{{ h.size_h }}</td>
+        <td class="actions">
+          {% if h.on_disk %}
+          <a class="btn btn-sm btn-primary" href="{{ url_for('handouts_bp.read', handout_id=h.id) }}">&#128214; Read</a>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('handouts_bp.file', handout_id=h.id, dl=1) }}" title="Download the PDF">&#11015;</a>
+          {% endif %}
+          <input type="button" class="btn btn-sm btn-outline-danger" value="Delete" data-id="{{ h.id }}" data-title="{{ h.title }}" onclick="spHandoutDelete(this)">
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No handouts yet — upload a PDF above.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</div>
+<script>
+  document.getElementById('handoutUpload').addEventListener('submit', function () {
+    const b = document.getElementById('handoutUploadBtn');
+    b.value = 'Uploading…'; b.disabled = true;
+  });
+  function spHandoutDelete(btn) {
+    const id = btn.dataset.id, title = btn.dataset.title;
+    if (!confirm('Delete "' + title + '"? The PDF file is removed from this box.')) return;
+    btn.disabled = true;
+    fetch('/handouts/' + id + '/delete?format=json', {method: 'POST'})
+      .then(r => r.json())
+      .then(j => { if (j.ok) location.reload(); else { btn.disabled = false; alert(j.error || 'Delete failed'); } })
+      .catch(() => { btn.disabled = false; alert('Delete failed'); });
+  }
+  function spHandoutRename(id, el) {
+    const current = el.textContent.trim();
+    const next = prompt('Rename handout', current);
+    if (next === null || !next.trim() || next.trim() === current) return;
+    fetch('/handouts/' + id + '/rename', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({title: next.trim()})
+    }).then(r => r.json())
+      .then(j => { if (j.ok) el.textContent = j.title; else alert(j.error || 'Rename failed'); })
+      .catch(() => alert('Rename failed'));
+  }
+</script>
+{% endblock %}

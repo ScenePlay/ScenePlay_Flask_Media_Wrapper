@@ -69,7 +69,7 @@ MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
     'tblSessionNotes', 'tblBattleMapNotes', 'tblBattleMapPrompts',
     'tblObsPanelNotes', 'tblObsSceneMap', 'tblDiceRolls', 'tblCronSchedule',
     'tblScenePattern', 'tblWledPattern', 'tblServersIP',
-    'tblServerRole', 'tblTextures',
+    'tblServerRole', 'tblTextures', 'tblHandouts',
 ))
 MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
     'tblUsers',          # accounts/password hashes never merge; replace mode moves them
@@ -991,6 +991,24 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
                 continue
             _copy_row(c, 'tblTextures', data)
             s['textures'] = s.get('textures', 0) + 1
+
+    # -- PDF handouts (standalone, filename-deduped, local wins) ------------
+    # Filenames are uuids, so a match means the very same upload came round
+    # again (a re-merge of the same archive); the PDF itself lives under
+    # static/uploads/handouts/ and travels with include_uploads.
+    if (_src_has(c, 'tblHandouts')
+            and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND lower(name)='tblhandouts'").fetchone()):
+        hcols = _common_cols(c, 'tblHandouts', exclude=('handout_id',))
+        for row in c.execute(f"SELECT {', '.join(hcols)} FROM src.tblHandouts").fetchall():
+            data = dict(zip(hcols, row))
+            fname = (data.get('filename') or '').strip()
+            if not fname:
+                continue
+            if c.execute("SELECT 1 FROM tblHandouts WHERE filename=?", (fname,)).fetchone():
+                continue
+            _copy_row(c, 'tblHandouts', data)
+            s['handouts'] = s.get('handouts', 0) + 1
 
     return s
 

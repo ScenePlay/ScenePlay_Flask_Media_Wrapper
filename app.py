@@ -25,6 +25,7 @@ from routes.ai import ai_bp
 from routes.reference import reference_bp
 from routes.relay_admin import relay_admin_bp
 from routes.obs import obs_bp
+from routes.handouts import handouts_bp
 
 from defaultData import *
 from sql import *
@@ -360,6 +361,7 @@ app.register_blueprint(ai_bp)
 app.register_blueprint(reference_bp)
 app.register_blueprint(relay_admin_bp)
 app.register_blueprint(obs_bp)
+app.register_blueprint(handouts_bp)
 
 # Startup schema sync. create_table()/db.create_all() only CREATE missing
 # tables — they never alter existing ones. Column adds, indexes and seed fixes

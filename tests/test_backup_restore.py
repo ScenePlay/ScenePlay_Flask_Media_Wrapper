@@ -48,6 +48,7 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapFloorplans (floorplan_id INTEGER PRIMARY KEY, map_id INT UNIQUE, json_data TEXT, version INT, updated_at TEXT)",
     "CREATE TABLE tblBattleMapDoors (row_id INTEGER PRIMARY KEY, map_id INT, door_key TEXT, is_open INT, updated_at TEXT, UNIQUE(map_id, door_key))",
     "CREATE TABLE tblTextures (texture_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT, source TEXT, filename TEXT, tile_ft REAL, created_at TEXT)",
+    "CREATE TABLE tblHandouts (handout_id INTEGER PRIMARY KEY, title TEXT NOT NULL, filename TEXT NOT NULL UNIQUE, size_bytes INT, page_count INT, last_page INT, created_at TEXT, updated_at TEXT)",
     # OBS-integration tables (added alongside the broadcast work)
     "CREATE TABLE tblBattleMapPrompts (prompt_id INTEGER PRIMARY KEY, map_id INT, kind TEXT, prompt_text TEXT, settings_json TEXT, updated_at TEXT)",
     "CREATE TABLE tblObsSceneMap (obs_map_id INTEGER PRIMARY KEY, entity_type TEXT, entity_id INT, entity_key TEXT, scene_name TEXT, source_name TEXT, auto_created INT, sort_order INT, updated_at TEXT)",
@@ -1658,3 +1659,105 @@ class TestCharacterGameSystemRestore:
         br.restore_merge(self._archive(self._src(env, 'new.db'), 'new'),
                          include_uploads=False, full=True, fallback_user_id=1)
         assert self._row(env) == [('dcc', self.BAG)]
+
+
+class TestHandoutRestore:
+    """PDF handouts (tblHandouts + uploads/handouts/<uuid>.pdf) survive every
+    restore path: replace with a NEW archive keeps rows + files; replace with
+    an OLD archive (pre-handouts box, no table) creates the empty table via
+    create_all; merge copies rows + files with filename dedup, local wins."""
+
+    HANDOUT_DDL = next(st for st in SCHEMA if 'CREATE TABLE tblHandouts ' in st)
+
+    def _src(self, env, name, with_table=True, rows=()):
+        src = str(env['tmp'] / name)
+        conn = sqlite3.connect(src)
+        for stmt in SCHEMA:
+            if not with_table and 'CREATE TABLE tblHandouts ' in stmt:
+                continue
+            conn.execute(stmt)
+        conn.execute("INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        conn.execute("INSERT INTO tblScenes(scene_ID, sceneName, active, orderBy) VALUES (1, 'Bridge', 1, 0)")
+        for title, fname, pages, last in rows:
+            conn.execute("INSERT INTO tblHandouts(title, filename, size_bytes, page_count, last_page, created_at) "
+                         "VALUES (?, ?, 12, ?, ?, 't')", (title, fname, pages, last))
+        conn.commit()
+        conn.close()
+        return src
+
+    def _archive(self, env, src, files=(), label='pdf'):
+        src_uploads = env['tmp'] / (label + '-uploads')
+        (src_uploads / 'handouts').mkdir(parents=True)
+        for fname, blob in files:
+            (src_uploads / 'handouts' / fname).write_bytes(blob)
+        old_db, old_up = sql.database, br.UPLOADS_DIR
+        sql.database, br.UPLOADS_DIR = src, str(src_uploads)
+        try:
+            return br.create_backup(label=label)
+        finally:
+            sql.database, br.UPLOADS_DIR = old_db, old_up
+
+    def _app(self, env):
+        import os as _os
+        from flask import Flask
+        from flask_migrate import Migrate
+        from extensions import db
+        import models.ttrpg  # noqa: F401  (tblHandouts must be registered for create_all)
+        app = Flask(__name__)
+        app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{env['live']}"
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        Migrate(app, db, directory=_os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'migrations'))
+        return app
+
+    NEW_ROWS = [('Players Handbook', 'a' * 32 + '.pdf', 320, 41),
+                ('Letter from the Duke', 'b' * 32 + '.pdf', 1, 1)]
+    FILES = [('a' * 32 + '.pdf', b'%PDF-A'), ('b' * 32 + '.pdf', b'%PDF-B')]
+
+    def test_replace_new_archive_keeps_rows_and_files(self, env):
+        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS), self.FILES)
+        app = self._app(env)
+        with app.app_context():
+            br.restore_replace(archive, include_uploads=True)
+        assert q(env['live'], "SELECT title, filename, page_count, last_page FROM tblHandouts ORDER BY title") == [
+            ('Letter from the Duke', 'b' * 32 + '.pdf', 1, 1),
+            ('Players Handbook', 'a' * 32 + '.pdf', 320, 41)]
+        assert (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).read_bytes() == b'%PDF-A'
+
+    def test_replace_old_archive_creates_empty_table(self, env):
+        archive = self._archive(env, self._src(env, 'old.db', with_table=False), label='old')
+        app = self._app(env)
+        with app.app_context():
+            br.restore_replace(archive, include_uploads=False)
+        names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert 'tblhandouts' in names
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(0,)]
+        cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblHandouts)")]
+        for col in ('handout_id', 'title', 'filename', 'size_bytes', 'page_count', 'last_page', 'created_at'):
+            assert col in cols
+
+    def test_merge_new_archive_dedups_by_filename_local_wins(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        (env['uploads'] / 'handouts').mkdir()
+        (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).write_bytes(b'%PDF-LOCAL')
+        x(env['live'], "INSERT INTO tblHandouts(title, filename, size_bytes, page_count, last_page, created_at) "
+                       "VALUES ('My PHB', ?, 12, 320, 200, 't')", ('a' * 32 + '.pdf',))
+        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS), self.FILES)
+        s = br.restore_merge(archive, include_uploads=True, full=True, fallback_user_id=1)
+        assert s['handouts'] == 1                       # the Duke's letter arrives
+        assert q(env['live'], "SELECT title, last_page FROM tblHandouts ORDER BY title") == [
+            ('Letter from the Duke', 1), ('My PHB', 200)]   # local title + bookmark kept
+        assert (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).read_bytes() == b'%PDF-LOCAL'
+        assert (env['uploads'] / 'handouts' / ('b' * 32 + '.pdf')).read_bytes() == b'%PDF-B'
+        # idempotent
+        s2 = br.restore_merge(archive, include_uploads=True, full=True, fallback_user_id=1)
+        assert s2.get('handouts', 0) == 0
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(2,)]
+
+    def test_merge_old_archive_without_table_is_a_noop(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        archive = self._archive(env, self._src(env, 'old.db', with_table=False), label='old')
+        s = br.restore_merge(archive, include_uploads=False, full=True, fallback_user_id=1)
+        assert s.get('handouts', 0) == 0
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(0,)]
