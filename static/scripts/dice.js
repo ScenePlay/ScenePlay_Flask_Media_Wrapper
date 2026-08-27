@@ -508,7 +508,10 @@ window.DiceCore = (function () {
         // The ready weapon's damage dice (+ its damage bonus as the mod); a
         // bare fist (1d4 under DCC, 1d6 under 5e) when nothing is equipped.
         const w = opts.getDamageDice ? opts.getDamageDice() : null;
-        const fallback = { count: 1, sides: _game.id === 'dcc' ? 4 : 6, mod: null, label: null };
+        // Say WHY it's a fist, so a weapon with blank dice gets fixed instead of
+        // silently rolling 1d4 forever.
+        const fallback = { count: 1, sides: _game.id === 'dcc' ? 4 : 6, mod: 0,
+                           label: 'Unarmed damage — no dice on your equipped weapon (set them on the Weapons tab)' };
         p = Object.assign({}, p, w || fallback);
         if (p.mod !== null && p.mod !== undefined && opts.setMod) opts.setMod(p.mod);
         if (p.label && opts.labelInput) opts.labelInput.value = p.label;
