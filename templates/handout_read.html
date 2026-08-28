@@ -23,11 +23,17 @@
   #bar input[type=number] { width:64px; text-align:center; -moz-appearance:textfield; }
   #bar input::-webkit-outer-spin-button, #bar input::-webkit-inner-spin-button { -webkit-appearance:none; }
   #bar .pages { white-space:nowrap; opacity:.8; }
+  #bar #btnZoomReset { min-width:54px; }
   #stage { position:absolute; inset:44px 0 0 0; display:flex; align-items:center; justify-content:center;
            user-select:none; -webkit-user-select:none; touch-action:none; overflow:hidden; }
   body.chromeless #stage { inset:0; }
-  #bookWrap { position:relative; }
-  #book { position:relative; width:100%; }
+  #stage.zoomed { cursor:grab; }
+  #stage.zoomed.panning { cursor:grabbing; }
+  #bookWrap { position:relative; transform-origin:50% 50%; }
+  /* page-flip mirrors its minWidth setting into an inline min-width here; in
+     single-page mode that setting is a huge sentinel (see handout_reader.js),
+     so the inline style must never win — the wrapper alone sizes the book. */
+  #book { position:relative; width:100%; min-width:0 !important; }
   #book .page { background:#f4efe4; overflow:hidden;
                 box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
   #book .page canvas { display:block; width:100%; height:100%; }
@@ -40,7 +46,7 @@
   #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:rgba(20,18,15,.9);
            padding:6px 14px; border-radius:8px; font-size:.85em; opacity:0; transition:opacity .3s; pointer-events:none; }
   #toast.show { opacity:1; }
-  @media (max-width: 640px) { #bar .pages, #bar .lbl { display:none; } }
+  @media (max-width: 640px) { #bar .pages, #bar .lbl, #bar #btnZoomReset { display:none; } }
 </style>
 </head>
 <body>
@@ -53,6 +59,10 @@
   <span class="pages">of <span id="pageCount">?</span></span>
   <button id="btnNext" title="Next (→)">&#9654;</button>
   <button id="btnLast" title="Last page (End)">&#9197;</button>
+  <button id="btnZoomOut" title="Zoom out (&minus;)">&minus;</button>
+  <button id="btnZoomReset" title="Reset zoom (0)">100%</button>
+  <button id="btnZoomIn" title="Zoom in (+)">+</button>
+  <button id="btnSingle" title="Single page (S)">&#9647;</button>
   <button id="btnFull" title="Fullscreen (F)">&#x26F6;</button>
 </div>
 <div id="stage">
