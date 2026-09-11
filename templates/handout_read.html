@@ -46,6 +46,41 @@
   #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:rgba(20,18,15,.9);
            padding:6px 14px; border-radius:8px; font-size:.85em; opacity:0; transition:opacity .3s; pointer-events:none; }
   #toast.show { opacity:1; }
+  /* bookmark ribbon: a CSS pseudo-element so a page re-render (innerHTML
+     swap) can't wipe it, and page-flip's cloneNode copies keep it too */
+  #book .page.marked::after { content:""; position:absolute; top:0; right:6%; width:4.5%; min-width:14px; max-width:34px;
+    aspect-ratio:1/2.4; background:#b83a2c; z-index:5; pointer-events:none;
+    clip-path:polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); box-shadow:0 2px 4px rgba(0,0,0,.35); }
+  #bar #btnBookmark.on { background:#6b2a22; border-color:#b83a2c; }
+  #bar #btnMarks.on { background:#3a352d; }
+  #marks { position:fixed; top:44px; right:0; bottom:0; width:min(340px, 92vw); background:rgba(28,26,23,.97);
+           border-left:1px solid #3a352d; z-index:25; display:flex; flex-direction:column;
+           transform:translateX(100%); transition:transform .25s; box-shadow:-10px 0 30px rgba(0,0,0,.4); }
+  #marks.open { transform:none; }
+  body.chromeless #marks { top:0; }
+  #marks .hd { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #3a352d; }
+  #marks .hd h3 { margin:0; font-size:.95em; flex:1; }
+  #marks .hd button, #marks .add button { background:#2b2822; color:#e8e2d6; border:1px solid #4a443a; border-radius:6px;
+                       padding:3px 8px; font:inherit; cursor:pointer; }
+  #marks .hd button:hover, #marks .add button:hover { background:#3a352d; }
+  #marks .add { display:flex; gap:6px; padding:8px 10px; border-bottom:1px solid #3a352d; align-items:center; }
+  #marks .add input { background:#1c1a17; color:#e8e2d6; border:1px solid #4a443a; border-radius:6px; padding:4px 8px; font:inherit; min-width:0; }
+  #marks .add input[type=number] { width:60px; text-align:center; -moz-appearance:textfield; }
+  #marks .add input[type=text] { flex:1; }
+  #marks .add input::-webkit-outer-spin-button, #marks .add input::-webkit-inner-spin-button { -webkit-appearance:none; }
+  #marks .body { flex:1; overflow:auto; padding:6px 0 20px; font-size:.9em; }
+  #marks h4 { margin:10px 12px 4px; font-size:.75em; text-transform:uppercase; letter-spacing:.06em; opacity:.6; }
+  #marks .empty { padding:4px 12px 8px; opacity:.55; font-size:.85em; }
+  #marks .row { display:flex; align-items:center; gap:6px; padding:4px 8px 4px 12px; cursor:pointer; }
+  #marks .row:hover { background:rgba(255,255,255,.06); }
+  #marks .row.cur { background:rgba(184,58,44,.22); }
+  #marks .row .lbl { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #marks .row .lbl input { width:100%; background:#1c1a17; color:#e8e2d6; border:1px solid #b83a2c; border-radius:4px; padding:2px 6px; font:inherit; }
+  #marks .row .pg { opacity:.6; font-variant-numeric:tabular-nums; min-width:2.5em; text-align:right; }
+  #marks .row .ico { opacity:.5; background:none; border:0; color:inherit; cursor:pointer; padding:0 4px; font:inherit; }
+  #marks .row .ico:hover { opacity:1; }
+  #marks .row.toc { padding-left:calc(12px + var(--d, 0) * 14px); }
+  #marks .row.toc .lbl { white-space:normal; }
   @media (max-width: 640px) { #bar .pages, #bar .lbl, #bar #btnZoomReset { display:none; } }
 </style>
 </head>
@@ -55,7 +90,7 @@
   <span class="title">{{ handout.title }}</span>
   <button id="btnFirst" title="First page (Home)">&#9198;</button>
   <button id="btnPrev" title="Previous (←)">&#9664;</button>
-  <label class="lbl">Page <input type="number" id="pageInput" min="1" value="{{ handout.last_page }}"></label>
+  <label class="lbl">Page <input type="number" id="pageInput" min="1" value="{{ start_page }}"></label>
   <span class="pages">of <span id="pageCount">?</span></span>
   <button id="btnNext" title="Next (→)">&#9654;</button>
   <button id="btnLast" title="Last page (End)">&#9197;</button>
@@ -63,8 +98,24 @@
   <button id="btnZoomReset" title="Reset zoom (0)">100%</button>
   <button id="btnZoomIn" title="Zoom in (+)">+</button>
   <button id="btnSingle" title="Single page (S)">&#9647;</button>
+  <button id="btnBookmark" title="Bookmark this page (B)">&#128278;</button>
+  <button id="btnMarks" title="Bookmarks &amp; contents (M)">&#9776;</button>
   <button id="btnFull" title="Fullscreen (F)">&#x26F6;</button>
 </div>
+<aside id="marks" aria-label="Bookmarks and contents">
+  <div class="hd"><h3>Bookmarks</h3><button id="marksClose" title="Close (Esc)">&#10005;</button></div>
+  <form class="add" id="markAdd">
+    <label>Page <input type="number" id="markPage" min="1" value="{{ start_page }}"></label>
+    <input type="text" id="markLabel" placeholder="Label (optional)" maxlength="80">
+    <button type="submit" title="Add bookmark">Add</button>
+  </form>
+  <div class="body">
+    <h4>Your bookmarks</h4>
+    <div id="markList"></div>
+    <h4>Contents</h4>
+    <div id="tocList"><div class="empty">Reading the PDF's table of contents&hellip;</div></div>
+  </div>
+</aside>
 <div id="stage">
   <div id="loading">Opening&hellip;</div>
   <div id="bookWrap"><div id="book"></div></div>
@@ -78,7 +129,9 @@
   new HandoutReader(pdfjsLib, {
     url: "{{ url_for('handouts_bp.file', handout_id=handout.id) }}",
     progressUrl: "{{ url_for('handouts_bp.progress', handout_id=handout.id) }}",
-    startPage: {{ handout.last_page }},
+    bookmarksUrl: "{{ url_for('handouts_bp.bookmarks', handout_id=handout.id) }}",
+    startPage: {{ start_page }},
+    bookmarks: {{ handout.bookmarks|tojson }},
   });
 </script>
 </body>

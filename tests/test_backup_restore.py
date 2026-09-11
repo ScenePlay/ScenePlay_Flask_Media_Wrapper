@@ -49,6 +49,7 @@ SCHEMA = [
     "CREATE TABLE tblBattleMapDoors (row_id INTEGER PRIMARY KEY, map_id INT, door_key TEXT, is_open INT, updated_at TEXT, UNIQUE(map_id, door_key))",
     "CREATE TABLE tblTextures (texture_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT, source TEXT, filename TEXT, tile_ft REAL, created_at TEXT)",
     "CREATE TABLE tblHandouts (handout_id INTEGER PRIMARY KEY, title TEXT NOT NULL, filename TEXT NOT NULL UNIQUE, size_bytes INT, page_count INT, last_page INT, created_at TEXT, updated_at TEXT)",
+    "CREATE TABLE tblHandoutBookmarks (bookmark_id INTEGER PRIMARY KEY, handout_id INT NOT NULL, page INT NOT NULL, label TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(handout_id, page))",
     # OBS-integration tables (added alongside the broadcast work)
     "CREATE TABLE tblBattleMapPrompts (prompt_id INTEGER PRIMARY KEY, map_id INT, kind TEXT, prompt_text TEXT, settings_json TEXT, updated_at TEXT)",
     "CREATE TABLE tblObsSceneMap (obs_map_id INTEGER PRIMARY KEY, entity_type TEXT, entity_id INT, entity_key TEXT, scene_name TEXT, source_name TEXT, auto_created INT, sort_order INT, updated_at TEXT)",
@@ -1704,11 +1705,15 @@ class TestHandoutRestore:
 
     HANDOUT_DDL = next(st for st in SCHEMA if 'CREATE TABLE tblHandouts ' in st)
 
-    def _src(self, env, name, with_table=True, rows=()):
+    def _src(self, env, name, with_table=True, rows=(), marks=(), with_marks_table=True):
+        """`marks`: (handout filename, page, label) — bookmarks keyed by the
+        handout's filename so the src ids can differ from the live ones."""
         src = str(env['tmp'] / name)
         conn = sqlite3.connect(src)
         for stmt in SCHEMA:
             if not with_table and 'CREATE TABLE tblHandouts ' in stmt:
+                continue
+            if (not with_table or not with_marks_table) and 'CREATE TABLE tblHandoutBookmarks ' in stmt:
                 continue
             conn.execute(stmt)
         conn.execute("INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
@@ -1716,6 +1721,9 @@ class TestHandoutRestore:
         for title, fname, pages, last in rows:
             conn.execute("INSERT INTO tblHandouts(title, filename, size_bytes, page_count, last_page, created_at) "
                          "VALUES (?, ?, 12, ?, ?, 't')", (title, fname, pages, last))
+        for fname, page, label in marks:
+            conn.execute("INSERT INTO tblHandoutBookmarks(handout_id, page, label, created_at) "
+                         "SELECT handout_id, ?, ?, 't' FROM tblHandouts WHERE filename=?", (page, label, fname))
         conn.commit()
         conn.close()
         return src
@@ -1749,9 +1757,11 @@ class TestHandoutRestore:
     NEW_ROWS = [('Players Handbook', 'a' * 32 + '.pdf', 320, 41),
                 ('Letter from the Duke', 'b' * 32 + '.pdf', 1, 1)]
     FILES = [('a' * 32 + '.pdf', b'%PDF-A'), ('b' * 32 + '.pdf', b'%PDF-B')]
+    MARKS = [('a' * 32 + '.pdf', 41, 'Spellcasting'), ('a' * 32 + '.pdf', 7, 'Combat'),
+             ('b' * 32 + '.pdf', 1, 'The seal')]
 
     def test_replace_new_archive_keeps_rows_and_files(self, env):
-        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS), self.FILES)
+        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS, marks=self.MARKS), self.FILES)
         app = self._app(env)
         with app.app_context():
             br.restore_replace(archive, include_uploads=True)
@@ -1759,6 +1769,23 @@ class TestHandoutRestore:
             ('Letter from the Duke', 'b' * 32 + '.pdf', 1, 1),
             ('Players Handbook', 'a' * 32 + '.pdf', 320, 41)]
         assert (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).read_bytes() == b'%PDF-A'
+        assert q(env['live'], "SELECT h.title, b.page, b.label FROM tblHandoutBookmarks b "
+                              "JOIN tblHandouts h USING(handout_id) ORDER BY h.title, b.page") == [
+            ('Letter from the Duke', 1, 'The seal'),
+            ('Players Handbook', 7, 'Combat'), ('Players Handbook', 41, 'Spellcasting')]
+
+    def test_replace_pre_bookmark_archive_creates_bookmark_table(self, env):
+        # an archive from a box with handouts but no bookmarks yet
+        archive = self._archive(env, self._src(env, 'mid.db', rows=self.NEW_ROWS, with_marks_table=False),
+                                self.FILES, label='mid')
+        app = self._app(env)
+        with app.app_context():
+            br.restore_replace(archive, include_uploads=True)
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(2,)]
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandoutBookmarks") == [(0,)]
+        cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblHandoutBookmarks)")]
+        for col in ('bookmark_id', 'handout_id', 'page', 'label', 'created_at'):
+            assert col in cols
 
     def test_replace_old_archive_creates_empty_table(self, env):
         archive = self._archive(env, self._src(env, 'old.db', with_table=False), label='old')
@@ -1766,7 +1793,7 @@ class TestHandoutRestore:
         with app.app_context():
             br.restore_replace(archive, include_uploads=False)
         names = {r[0].lower() for r in q(env['live'], "SELECT name FROM sqlite_master WHERE type='table'")}
-        assert 'tblhandouts' in names
+        assert 'tblhandouts' in names and 'tblhandoutbookmarks' in names
         assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(0,)]
         cols = [r[1] for r in q(env['live'], "PRAGMA table_info(tblHandouts)")]
         for col in ('handout_id', 'title', 'filename', 'size_bytes', 'page_count', 'last_page', 'created_at'):
@@ -1776,19 +1803,37 @@ class TestHandoutRestore:
         x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
         (env['uploads'] / 'handouts').mkdir()
         (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).write_bytes(b'%PDF-LOCAL')
-        x(env['live'], "INSERT INTO tblHandouts(title, filename, size_bytes, page_count, last_page, created_at) "
-                       "VALUES ('My PHB', ?, 12, 320, 200, 't')", ('a' * 32 + '.pdf',))
-        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS), self.FILES)
+        x(env['live'], "INSERT INTO tblHandouts(handout_id, title, filename, size_bytes, page_count, last_page, created_at) "
+                       "VALUES (9, 'My PHB', ?, 12, 320, 200, 't')", ('a' * 32 + '.pdf',))
+        # the local reader already marked page 41 under its own name
+        x(env['live'], "INSERT INTO tblHandoutBookmarks(handout_id, page, label, created_at) VALUES (9, 41, 'Magic', 't')")
+        archive = self._archive(env, self._src(env, 'new.db', rows=self.NEW_ROWS, marks=self.MARKS), self.FILES)
         s = br.restore_merge(archive, include_uploads=True, full=True, fallback_user_id=1)
         assert s['handouts'] == 1                       # the Duke's letter arrives
         assert q(env['live'], "SELECT title, last_page FROM tblHandouts ORDER BY title") == [
-            ('Letter from the Duke', 1), ('My PHB', 200)]   # local title + bookmark kept
+            ('Letter from the Duke', 1), ('My PHB', 200)]   # local title + resume point kept
         assert (env['uploads'] / 'handouts' / ('a' * 32 + '.pdf')).read_bytes() == b'%PDF-LOCAL'
         assert (env['uploads'] / 'handouts' / ('b' * 32 + '.pdf')).read_bytes() == b'%PDF-B'
+        # bookmarks follow their handout under the LIVE id (src PHB was id 1,
+        # local is 9); page 41 keeps the local label, page 7 is new
+        assert s['handout_bookmarks'] == 2
+        assert q(env['live'], "SELECT h.title, b.page, b.label FROM tblHandoutBookmarks b "
+                              "JOIN tblHandouts h USING(handout_id) ORDER BY h.title, b.page") == [
+            ('Letter from the Duke', 1, 'The seal'),
+            ('My PHB', 7, 'Combat'), ('My PHB', 41, 'Magic')]
         # idempotent
         s2 = br.restore_merge(archive, include_uploads=True, full=True, fallback_user_id=1)
-        assert s2.get('handouts', 0) == 0
+        assert s2.get('handouts', 0) == 0 and s2.get('handout_bookmarks', 0) == 0
         assert q(env['live'], "SELECT COUNT(*) FROM tblHandouts") == [(2,)]
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandoutBookmarks") == [(3,)]
+
+    def test_merge_pre_bookmark_archive_brings_handouts_only(self, env):
+        x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")
+        archive = self._archive(env, self._src(env, 'mid.db', rows=self.NEW_ROWS, with_marks_table=False),
+                                self.FILES, label='mid')
+        s = br.restore_merge(archive, include_uploads=True, full=True, fallback_user_id=1)
+        assert s['handouts'] == 2 and s.get('handout_bookmarks', 0) == 0
+        assert q(env['live'], "SELECT COUNT(*) FROM tblHandoutBookmarks") == [(0,)]
 
     def test_merge_old_archive_without_table_is_a_noop(self, env):
         x(env['live'], "INSERT INTO tblUsers(username, display_name, role, active) VALUES ('dm', 'DM', 'dm', 1)")

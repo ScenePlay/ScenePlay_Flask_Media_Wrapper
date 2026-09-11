@@ -1024,3 +1024,25 @@ class tblHandouts(db.Model):
     last_page  = db.Column(db.Integer, nullable=False, default=1)
     created_at = db.Column(db.Text, nullable=False)
     updated_at = db.Column(db.Text, nullable=True)
+    bookmarks  = db.relationship('tblHandoutBookmarks', backref='handout',
+                                 cascade='all, delete-orphan', lazy=True,
+                                 order_by='tblHandoutBookmarks.page')
+
+
+class tblHandoutBookmarks(db.Model):
+    """Reader bookmarks on a handout: one named marker per page (the reader
+    toggles a ribbon on the page; `label` defaults to "Page N" and can be
+    renamed in the bookmark panel). Distinct from tblHandouts.last_page, which
+    is the automatic resume point. Rows die with their handout (ORM cascade —
+    SQLite doesn't enforce the FK) and merge with it in Backup → Restore
+    (backup_restore.py copies them under the remapped handout_id, page-deduped,
+    local wins)."""
+    __tablename__ = 'tblHandoutBookmarks'
+    __table_args__ = (db.UniqueConstraint('handout_id', 'page', name='uq_handout_bookmark_page'),)
+
+    bookmark_id = db.Column(db.Integer, primary_key=True)
+    handout_id  = db.Column(db.Integer, db.ForeignKey('tblHandouts.handout_id', ondelete='CASCADE'),
+                            nullable=False, index=True)
+    page        = db.Column(db.Integer, nullable=False)
+    label       = db.Column(db.Text, nullable=False, default='')
+    created_at  = db.Column(db.Text, nullable=False)

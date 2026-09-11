@@ -17,7 +17,7 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
 from flask_login import login_required
 
 from extensions import db
-from models.ttrpg import tblHandouts
+from models.ttrpg import tblHandoutBookmarks, tblHandouts
 from routes._util import _now
 from routes.auth import dm_required
 
@@ -29,6 +29,7 @@ UPLOAD_FOLDER = os.path.join('static', 'uploads', 'handouts')
 # scripts/setup mentions the nginx client_max_body_size fix.
 MAX_PDF_BYTES = 300 * 1024 * 1024
 TITLE_MAX = 120
+LABEL_MAX = 80
 FILENAME_RE = re.compile(r'^[0-9a-f]{32}\.pdf$')
 
 
@@ -61,6 +62,15 @@ def _human_size(n):
         n /= 1024
 
 
+def _bookmark_view(bm):
+    return {'id': bm.bookmark_id, 'page': bm.page, 'label': bm.label,
+            'created_at': bm.created_at}
+
+
+def _bookmarks(row):
+    return [_bookmark_view(b) for b in sorted(row.bookmarks, key=lambda b: (b.page, b.bookmark_id))]
+
+
 def _row_view(row):
     return {
         'id': row.handout_id,
@@ -71,7 +81,27 @@ def _row_view(row):
         'last_page': row.last_page or 1,
         'created_at': row.created_at,
         'on_disk': os.path.isfile(_file_path(row)),
+        'bookmarks': _bookmarks(row),
     }
+
+
+def _clamp_page(row, raw):
+    """A page number from the client: int, >= 1, and never past the known
+    page count (0 when unusable)."""
+    try:
+        page = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    if page < 1:
+        return 0
+    if row.page_count:
+        page = min(page, row.page_count)
+    return page
+
+
+def _clean_label(raw, fallback):
+    label = re.sub(r'\s+', ' ', str(raw or '')).strip()
+    return (label or fallback)[:LABEL_MAX]
 
 
 @handouts_bp.route('/')
@@ -193,7 +223,12 @@ def read(handout_id):
     if not os.path.isfile(_file_path(row)):
         flash(f'"{row.title}" is missing on disk — restore it or upload again.')
         return redirect(url_for('handouts_bp.index'))
-    return render_template('handout_read.html', handout=_row_view(row))
+    view = _row_view(row)
+    # ?page=N (a bookmark link from the list page) opens there instead of at
+    # the resume point; the viewer clamps again once it knows the real count.
+    start = _clamp_page(row, request.args.get('page'))
+    return render_template('handout_read.html', handout=view,
+                           start_page=start or view['last_page'])
 
 
 @handouts_bp.route('/<int:handout_id>/progress', methods=['POST'])
@@ -224,3 +259,76 @@ def progress(handout_id):
     db.session.commit()
     return jsonify({'ok': True, 'last_page': row.last_page,
                     'page_count': row.page_count})
+
+
+# ---------------------------------------------------------------------------
+# Bookmarks — one named marker per page (tblHandoutBookmarks)
+# ---------------------------------------------------------------------------
+
+@handouts_bp.route('/<int:handout_id>/bookmarks')
+@login_required
+@dm_required
+def bookmarks(handout_id):
+    row = db.session.get(tblHandouts, handout_id)
+    if row is None:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    return jsonify({'ok': True, 'bookmarks': _bookmarks(row)})
+
+
+@handouts_bp.route('/<int:handout_id>/bookmarks', methods=['POST'])
+@login_required
+@dm_required
+def bookmark_add(handout_id):
+    """{page, label?}: add a bookmark on `page`, or — since a page carries at
+    most one — rename the existing one when a label is sent. Returns the
+    bookmark plus the full (page-ordered) list so the viewer just replaces
+    its copy."""
+    row = db.session.get(tblHandouts, handout_id)
+    if row is None:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    data = request.get_json(silent=True) or request.form
+    page = _clamp_page(row, data.get('page'))
+    if not page:
+        return jsonify({'ok': False, 'error': 'page must be a number from 1'}), 400
+    existing = next((b for b in row.bookmarks if b.page == page), None)
+    created = existing is None
+    if existing is None:
+        existing = tblHandoutBookmarks(handout_id=row.handout_id, page=page,
+                                       label=_clean_label(data.get('label'), f'Page {page}'),
+                                       created_at=_now())
+        db.session.add(existing)
+    elif data.get('label') is not None:
+        existing.label = _clean_label(data.get('label'), existing.label)
+    row.updated_at = _now()
+    db.session.commit()
+    return jsonify({'ok': True, 'created': created, 'bookmark': _bookmark_view(existing),
+                    'bookmarks': _bookmarks(row)})
+
+
+@handouts_bp.route('/<int:handout_id>/bookmarks/<int:bookmark_id>/rename', methods=['POST'])
+@login_required
+@dm_required
+def bookmark_rename(handout_id, bookmark_id):
+    bm = db.session.get(tblHandoutBookmarks, bookmark_id)
+    if bm is None or bm.handout_id != handout_id:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    data = request.get_json(silent=True) or request.form
+    bm.label = _clean_label(data.get('label'), bm.label)
+    bm.handout.updated_at = _now()
+    db.session.commit()
+    return jsonify({'ok': True, 'bookmark': _bookmark_view(bm),
+                    'bookmarks': _bookmarks(bm.handout)})
+
+
+@handouts_bp.route('/<int:handout_id>/bookmarks/<int:bookmark_id>/delete', methods=['POST'])
+@login_required
+@dm_required
+def bookmark_delete(handout_id, bookmark_id):
+    bm = db.session.get(tblHandoutBookmarks, bookmark_id)
+    if bm is None or bm.handout_id != handout_id:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    row = bm.handout
+    db.session.delete(bm)
+    row.updated_at = _now()
+    db.session.commit()
+    return jsonify({'ok': True, 'bookmarks': _bookmarks(row)})

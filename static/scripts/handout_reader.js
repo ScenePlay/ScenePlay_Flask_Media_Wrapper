@@ -40,6 +40,9 @@ export class HandoutReader {
     this.tx = 0;
     this.ty = 0;
     this.maxZoom = 4;
+    this.marks = new Map();            // page -> {id, page, label}
+    (opts.bookmarks || []).forEach((b) => this.marks.set(b.page, b));
+    this.toc = null;                   // flattened outline, resolved lazily
     this.$ = (id) => document.getElementById(id);
     this.stage = this.$('stage');
     this.book = this.$('book');
@@ -84,6 +87,7 @@ export class HandoutReader {
       d.dataset.page = n;
       // a stiff cover front and back, bendable paper between
       d.dataset.density = (n === 1 || n === this.numPages) ? 'hard' : 'soft';
+      if (this.marks.has(n)) d.classList.add('marked');
       this.book.appendChild(d);
     }
     this._sizeWrapper();
@@ -284,6 +288,214 @@ export class HandoutReader {
     this.$('btnNext').disabled = this.$('btnLast').disabled = lastShown >= this.numPages - 1;
     const label = (!portrait && idx > 0 && idx + 1 < this.numPages) ? (idx + 1) + '–' + (idx + 2) : String(idx + 1);
     document.title = label + ' / ' + this.numPages + ' — ' + document.title.replace(/^.*? — /, '');
+    this._updateMarkUI();
+  }
+
+  /* ---------- bookmarks ---------- */
+  /* The page the bookmark button acts on: the one in the page box (the left
+   * page of a spread). The panel's Add form takes any page number. */
+  _curPage() {
+    return this.flip ? this.flip.getCurrentPageIndex() + 1 : this.page;
+  }
+
+  _updateMarkUI() {
+    const b = this.$('btnBookmark');
+    if (!b) return;
+    const cur = this._curPage();
+    const on = this.marks.has(cur);
+    b.classList.toggle('on', on);
+    b.title = (on ? 'Remove bookmark on page ' : 'Bookmark page ') + cur + ' (B)';
+    const mp = this.$('markPage');
+    if (mp && document.activeElement !== mp) mp.value = cur;
+    this._renderMarkList();
+  }
+
+  toggleBookmark(page) {
+    page = page || this._curPage();
+    const have = this.marks.get(page);
+    if (have) return this.removeBookmark(have);
+    return this.addBookmark(page, '');
+  }
+
+  async addBookmark(page, label) {
+    page = Math.max(1, Math.min(this.numPages || page, parseInt(page, 10) || this._curPage()));
+    const j = await this._api(this.opts.bookmarksUrl, { page, label: label || null });
+    if (!j) return;
+    this._setMarks(j.bookmarks);
+    this._toast((j.created ? 'Bookmarked page ' : 'Renamed bookmark on page ') + page);
+  }
+
+  async removeBookmark(bm) {
+    const j = await this._api(this.opts.bookmarksUrl + '/' + bm.id + '/delete', {});
+    if (!j) return;
+    this._setMarks(j.bookmarks);
+    this._toast('Bookmark removed');
+  }
+
+  async renameBookmark(bm, label) {
+    label = (label || '').trim();
+    if (!label || label === bm.label) return;
+    const j = await this._api(this.opts.bookmarksUrl + '/' + bm.id + '/rename', { label });
+    if (j) this._setMarks(j.bookmarks);
+  }
+
+  async _api(url, body) {
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!j.ok) { this._toast(j.error || 'Bookmark failed'); return null; }
+      return j;
+    } catch (e) {
+      this._toast('Bookmark failed — is the box reachable?');
+      return null;
+    }
+  }
+
+  _setMarks(list) {
+    this.marks.clear();
+    (list || []).forEach((b) => this.marks.set(b.page, b));
+    if (this.book) {
+      this.book.querySelectorAll('.page').forEach((el) => {
+        el.classList.toggle('marked', this.marks.has(parseInt(el.dataset.page, 10)));
+      });
+    }
+    this._updateMarkUI();
+  }
+
+  _renderMarkList() {
+    const box = this.$('markList');
+    if (!box || box.querySelector('input')) return;   // a rename is in progress
+    box.innerHTML = '';
+    const list = Array.from(this.marks.values()).sort((a, b) => a.page - b.page);
+    if (!list.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = 'No bookmarks yet — press B on a page, or add one above.';
+      box.appendChild(e);
+      return;
+    }
+    const shown = this._visiblePages();
+    list.forEach((bm) => {
+      const row = document.createElement('div');
+      row.className = 'row' + (shown.indexOf(bm.page) !== -1 ? ' cur' : '');
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = bm.label;
+      lbl.title = 'Go to page ' + bm.page + ' (double-click to rename)';
+      const pg = document.createElement('span');
+      pg.className = 'pg';
+      pg.textContent = 'p. ' + bm.page;
+      const ren = document.createElement('button');
+      ren.className = 'ico';
+      ren.type = 'button';
+      ren.innerHTML = '&#9998;';
+      ren.title = 'Rename bookmark';
+      const del = document.createElement('button');
+      del.className = 'ico';
+      del.type = 'button';
+      del.innerHTML = '&#10005;';
+      del.title = 'Remove bookmark';
+      row.appendChild(lbl); row.appendChild(pg); row.appendChild(ren); row.appendChild(del);
+      // a click anywhere on the row jumps; renaming is the pencil (or a
+      // double-click on the label) so a jump never turns into an edit
+      row.addEventListener('click', () => { if (!lbl.querySelector('input')) this.goto(bm.page); });
+      ren.addEventListener('click', (e) => { e.stopPropagation(); this._editLabel(lbl, bm); });
+      lbl.addEventListener('dblclick', (e) => { e.stopPropagation(); this._editLabel(lbl, bm); });
+      del.addEventListener('click', (e) => { e.stopPropagation(); this.removeBookmark(bm); });
+      box.appendChild(row);
+    });
+  }
+
+  /* Swap the label for an input; Enter/blur saves, Esc reverts. */
+  _editLabel(lbl, bm) {
+    if (lbl.querySelector('input')) return;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = 80;
+    inp.value = bm.label;
+    lbl.textContent = '';
+    lbl.appendChild(inp);
+    inp.focus();
+    inp.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const v = inp.value;
+      lbl.textContent = bm.label;
+      if (save) this.renameBookmark(bm, v);
+    };
+    inp.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  togglePanel(open) {
+    const p = this.$('marks');
+    if (!p) return;
+    if (open === undefined) open = !p.classList.contains('open');
+    p.classList.toggle('open', open);
+    this.$('btnMarks').classList.toggle('on', open);
+    if (open) { this._renderMarkList(); this._loadToc(); }
+  }
+
+  /* The PDF's own outline (what Acrobat calls "Bookmarks"), flattened with a
+   * depth per row. Destinations are resolved to page numbers one by one;
+   * anything that fails to resolve is simply left out. */
+  async _loadToc() {
+    if (this.toc !== null || !this.pdf) return;
+    this.toc = [];
+    const box = this.$('tocList');
+    const flat = [];
+    const walk = (items, depth) => {
+      (items || []).forEach((it) => {
+        if (flat.length < 600) flat.push({ title: (it.title || '').trim(), dest: it.dest, depth });
+        walk(it.items, depth + 1);
+      });
+    };
+    try {
+      walk(await this.pdf.getOutline(), 0);
+      for (const it of flat) {
+        if (!it.title) continue;
+        try {
+          let dest = it.dest;
+          if (typeof dest === 'string') dest = await this.pdf.getDestination(dest);
+          if (!Array.isArray(dest) || !dest.length) continue;
+          const ref = dest[0];
+          const page = (typeof ref === 'number') ? ref + 1 : (await this.pdf.getPageIndex(ref)) + 1;
+          if (page >= 1 && page <= this.numPages) this.toc.push({ title: it.title, page, depth: it.depth });
+        } catch (e) { /* unresolvable entry */ }
+      }
+    } catch (e) {
+      console.warn('outline failed', e);
+    }
+    box.innerHTML = '';
+    if (!this.toc.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = 'This PDF has no table of contents.';
+      box.appendChild(e);
+      return;
+    }
+    this.toc.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'row toc';
+      row.style.setProperty('--d', Math.min(t.depth, 5));
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t.title;
+      const pg = document.createElement('span');
+      pg.className = 'pg';
+      pg.textContent = 'p. ' + t.page;
+      row.appendChild(lbl); row.appendChild(pg);
+      row.addEventListener('click', () => this.goto(t.page));
+      box.appendChild(row);
+    });
   }
 
   _toast(msg) {
@@ -322,8 +534,25 @@ export class HandoutReader {
     input.addEventListener('change', () => this.goto(input.value));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); e.stopPropagation(); });
 
+    this.$('btnBookmark').onclick = () => this.toggleBookmark();
+    this.$('btnMarks').onclick = () => this.togglePanel();
+    this.$('marksClose').onclick = () => this.togglePanel(false);
+    const addForm = this.$('markAdd');
+    addForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const lbl = this.$('markLabel');
+      this.addBookmark(this.$('markPage').value, lbl.value);
+      lbl.value = '';
+    });
+    // typing in the panel must not turn pages
+    addForm.addEventListener('keydown', (e) => e.stopPropagation());
+    this._updateMarkUI();
+
     document.addEventListener('keydown', (e) => {
       if (e.target === input) return;
+      const tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'Escape' && this.$('marks').classList.contains('open')) { this.togglePanel(false); return; }
       switch (e.key) {
         case 'ArrowRight': case 'PageDown': case ' ': case 'ArrowDown': e.preventDefault(); this.next(); break;
         case 'ArrowLeft': case 'PageUp': case 'ArrowUp': case 'Backspace': e.preventDefault(); this.prev(); break;
@@ -331,6 +560,8 @@ export class HandoutReader {
         case 'End': e.preventDefault(); this.goto(this.numPages); break;
         case 'f': case 'F': this._fullscreen(); break;
         case 's': case 'S': this.toggleSingle(); break;
+        case 'b': case 'B': this.toggleBookmark(); break;
+        case 'm': case 'M': this.togglePanel(); break;
         case 'g': case 'G': input.focus(); input.select(); break;
         case '+': case '=': this._setZoom(this.zoom * 1.25); break;
         case '-': case '_': this._setZoom(this.zoom / 1.25); break;

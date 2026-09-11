@@ -69,7 +69,7 @@ MERGE_COVERED_TABLES = frozenset(t.lower() for t in (
     'tblSessionNotes', 'tblBattleMapNotes', 'tblBattleMapPrompts',
     'tblObsPanelNotes', 'tblObsSceneMap', 'tblDiceRolls', 'tblCronSchedule',
     'tblScenePattern', 'tblWledPattern', 'tblServersIP',
-    'tblServerRole', 'tblTextures', 'tblHandouts',
+    'tblServerRole', 'tblTextures', 'tblHandouts', 'tblHandoutBookmarks',
 ))
 MERGE_EXCLUDED_TABLES = frozenset(t.lower() for t in (
     'tblUsers',          # accounts/password hashes never merge; replace mode moves them
@@ -1000,15 +1000,38 @@ def _merge_full(c, genre_map, campaign_map, scene_map, media_map, fallback_user_
             and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
                           "AND lower(name)='tblhandouts'").fetchone()):
         hcols = _common_cols(c, 'tblHandouts', exclude=('handout_id',))
-        for row in c.execute(f"SELECT {', '.join(hcols)} FROM src.tblHandouts").fetchall():
+        handout_map = {}                  # src handout_id -> live handout_id
+        for src_id, *row in c.execute(f"SELECT handout_id, {', '.join(hcols)} FROM src.tblHandouts").fetchall():
             data = dict(zip(hcols, row))
             fname = (data.get('filename') or '').strip()
             if not fname:
                 continue
-            if c.execute("SELECT 1 FROM tblHandouts WHERE filename=?", (fname,)).fetchone():
+            hit = c.execute("SELECT handout_id FROM tblHandouts WHERE filename=?", (fname,)).fetchone()
+            if hit:
+                handout_map[src_id] = hit[0]
                 continue
-            _copy_row(c, 'tblHandouts', data)
+            handout_map[src_id] = _copy_row(c, 'tblHandouts', data)
             s['handouts'] = s.get('handouts', 0) + 1
+
+        # Reader bookmarks ride along with their handout (a pre-bookmark
+        # archive simply has no table). One marker per page: a page the
+        # local reader already bookmarked keeps its local label.
+        if (handout_map and _src_has(c, 'tblHandoutBookmarks')
+                and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND lower(name)='tblhandoutbookmarks'").fetchone()):
+            bcols = _common_cols(c, 'tblHandoutBookmarks', exclude=('bookmark_id',))
+            for row in c.execute(f"SELECT {', '.join(bcols)} FROM src.tblHandoutBookmarks").fetchall():
+                data = dict(zip(bcols, row))
+                live_id = handout_map.get(data.get('handout_id'))
+                page = data.get('page')
+                if not live_id or not page:
+                    continue
+                if c.execute("SELECT 1 FROM tblHandoutBookmarks WHERE handout_id=? AND page=?",
+                             (live_id, page)).fetchone():
+                    continue
+                data['handout_id'] = live_id
+                _copy_row(c, 'tblHandoutBookmarks', data)
+                s['handout_bookmarks'] = s.get('handout_bookmarks', 0) + 1
 
     return s
 

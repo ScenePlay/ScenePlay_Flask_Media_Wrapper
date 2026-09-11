@@ -14,6 +14,13 @@
   .sp-handouts .upload-row input[type=file] { max-width:360px; }
   .sp-handouts .title-cell { cursor:text; }
   .sp-handouts .title-cell:hover { text-decoration:underline dotted; }
+  .sp-handouts .marks { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+  .sp-handouts .marks a { font-size:.78em; padding:1px 7px; border-radius:10px; border:1px solid var(--sp-border);
+                          background:var(--sp-surface-2, transparent); text-decoration:none; color:inherit; white-space:nowrap;
+                          max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+  .sp-handouts .marks a::before { content:"\1F516"; margin-right:3px; opacity:.7; }
+  .sp-handouts .marks a:hover { border-color:var(--sp-accent, #b83a2c); }
+  .sp-handouts .marks .more { font-size:.78em; color:var(--sp-muted); align-self:center; }
 </style>
 <div class="sp-page sp-handouts">
   <div class="sp-page-head">
@@ -28,7 +35,8 @@
   <p class="muted" style="font-size:.85em;margin:4px 0 10px;">
     Upload any PDF — a rulebook, an adventure module, a player letter — and read it as a
     page-turning book. Nothing is converted: pages render in the browser as you turn them,
-    and each document remembers where you left off.
+    each document remembers where you left off, and you can bookmark pages (B in the reader)
+    to jump straight back to them.
   </p>
 
   <details class="sp-card" open>
@@ -51,7 +59,15 @@
       {% for h in handouts %}
       <tr class="{{ '' if h.on_disk else 'missing' }}" data-id="{{ h.id }}">
         <td><span class="title-cell" title="Click to rename" onclick="spHandoutRename({{ h.id }}, this)">{{ h.title }}</span>
-          {% if not h.on_disk %}<span class="muted" style="font-size:.8em;"> (file missing on disk)</span>{% endif %}</td>
+          {% if not h.on_disk %}<span class="muted" style="font-size:.8em;"> (file missing on disk)</span>{% endif %}
+          {% if h.bookmarks and h.on_disk %}
+          <div class="marks">
+            {% for b in h.bookmarks[:8] %}
+            <a href="{{ url_for('handouts_bp.read', handout_id=h.id, page=b.page) }}" title="Open at page {{ b.page }}">{{ b.label }} &middot; p.{{ b.page }}</a>
+            {% endfor %}
+            {% if h.bookmarks|length > 8 %}<span class="more">+{{ h.bookmarks|length - 8 }} more in the reader</span>{% endif %}
+          </div>
+          {% endif %}</td>
         <td>{{ h.page_count if h.page_count else '—' }}</td>
         <td>{% if h.page_count %}page {{ h.last_page }}{% else %}<span class="muted">not opened yet</span>{% endif %}</td>
         <td class="muted">{{ h.created_at[:10] }}</td>
